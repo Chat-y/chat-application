@@ -239,7 +239,11 @@ fun AuthPrimaryButton(
                 color = c(theme.onAccentColor),
             )
         } else {
-            Text(authCopy(text), fontSize = ChatyUiTokens.text16, fontWeight = FontWeight.Bold, letterSpacing = ChatyUiTokens.text0_2)
+            Box(Modifier.fillMaxWidth(), contentAlignment=Alignment.Center) {
+                Text(authCopy(text), fontSize = ChatyUiTokens.text16, fontWeight = FontWeight.Bold, letterSpacing = ChatyUiTokens.text0_2)
+                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.arrowRight,
+                    color=c(theme.onAccentColor),size=ChatyUiTokens.space24,modifier=Modifier.align(Alignment.CenterEnd))
+            }
         }
     }
 }

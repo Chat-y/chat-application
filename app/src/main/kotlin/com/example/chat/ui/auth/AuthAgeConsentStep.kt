@@ -12,11 +12,11 @@ import com.example.chat.ui.core.components.auth.ChatyUiTokens
 @Composable
 fun AuthAgeConsentStep(theme:ThemeConfig,confirmed:Boolean,onConfirmed:(Boolean)->Unit) {
     val authCopy=com.example.chat.core.i18n.rememberAuthCopy()
-    Text(authCopy("Age and consent - temporary settings"),color=authReadable(theme,theme.primaryTextColor))
-    Text(com.example.chat.core.i18n.authFormatted("Configured minimum age: %1\$d. This provisional setting is not a reviewed legal requirement.",AuthTemporaryPolicy.configuredMinimumAge),color=authReadable(theme,theme.secondaryTextColor))
-    Row(Modifier.fillMaxWidth().padding(vertical=ChatyUiTokens.touchGap / 2)) {
+    // Hidden by owner request: Text(authCopy("Age and consent - temporary settings"),color=authReadable(theme,theme.primaryTextColor))
+    // Hidden by owner request: Text(com.example.chat.core.i18n.authFormatted("Configured minimum age: %1\$d. This provisional setting is not a reviewed legal requirement.",AuthTemporaryPolicy.configuredMinimumAge),color=authReadable(theme,theme.secondaryTextColor))
+    Row(Modifier.fillMaxWidth().padding(vertical=ChatyUiTokens.touchGap / 2), verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
         Checkbox(checked=confirmed,onCheckedChange=onConfirmed)
         Text(com.example.chat.core.i18n.authFormatted("I confirm I am at least %1\$d years old.",AuthTemporaryPolicy.configuredMinimumAge),color=authReadable(theme,theme.primaryTextColor))
     }
-    if(!AuthTemporaryPolicy.ageRuleConfirmed) Text(authCopy("Preview only. Age threshold and any guardian consent rules need owner review before this step can block registration."),color=authReadable(theme,theme.secondaryTextColor))
+    // Hidden by owner request: if(!AuthTemporaryPolicy.ageRuleConfirmed) Text(authCopy("Preview only. Age threshold and any guardian consent rules need owner review before this step can block registration."),color=authReadable(theme,theme.secondaryTextColor))
 }

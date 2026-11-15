@@ -57,11 +57,12 @@ class CallContinuityWiringTest {
         assertTrue(api.contains("if (syncForeground || active) realtime.connect() else realtime.disconnect()"))
         assertTrue(text("kotlin/com/example/chat/ServiceLocator.kt").contains("svc.addStateListener { apiBackend.onCallSessionStateChanged() }"))
     }
-    @Test fun phonePickerIsReusableReadOnlyAndSmsUiIsHidden() {
+    @Test fun phonePickerUsesDetectedOrExplicitCountryAndSmsUiIsHidden() {
         val phone = text("kotlin/com/example/chat/ui/core/components/auth/PhoneNumberEntry.kt")
-        assertTrue(phone.contains("onValueChange = { }, readOnly = true"))
+        assertTrue(phone.contains("onValueChange = { emitNational(it) }, readOnly = false"))
         assertFalse(phone.contains("Enter it manually"))
-        assertFalse(phone.contains("Locale.getDefault"))
+        assertFalse(phone.contains("country=java.util.Locale.getDefault"))
+        assertTrue(phone.contains("precise.singleOrNull()"))
         assertTrue(phone.contains("simCountryIso")); assertTrue(phone.contains("networkCountryIso"))
         assertTrue(text("kotlin/com/example/chat/ui/auth/RegisterScreen.kt").contains("private const val SMS_VERIFICATION_VISIBLE = false"))
         assertTrue(text("kotlin/com/example/chat/ui/auth/AuthComponents.kt").contains("readOnly: Boolean = false"))

@@ -176,51 +176,25 @@ fun RegisterOrganizationScreen(
     }
 
     val guardedBack=com.example.chat.ui.core.components.auth.rememberAuthBackAction(active && (orgName.isNotBlank() || adminPassword.isNotBlank() || adminEmail.isNotBlank()),onBack)
-    Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = ChatyAdaptiveLogic.AUTH_COLUMN_MAX_DP.dp)
-                    .fillMaxWidth()
-                    .padding(horizontal = ChatyUiTokens.space24, vertical = ChatyUiTokens.space16),
-            ) {
+    com.example.chat.ui.core.components.auth.ChatyAuthScreen(theme) {
                 AuthBackButton(onClick = guardedBack)
                 Spacer(Modifier.height(ChatyUiTokens.space16))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .background(Color(argbWithAlpha(theme.accentColor, 0.12)), ChatyUiTokens.cardShape)
-                            .padding(ChatyUiTokens.space8),
-                    ) {
-                        Icon(Icons.Rounded.DomainAdd, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(26.dp))
-                    }
-                    Spacer(Modifier.width(ChatyUiTokens.space16))
-                    Column {
-                        Text(
-                            authCopy("Register Organization"),
-                            color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
-                            fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text24,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.4).sp,
-                        )
-                        Spacer(Modifier.height(ChatyUiTokens.space8))
-                        Text(
-                            authCopy("Create a dedicated workspace for your team"),
-                            color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
-                            fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text13_5,
-                        )
-                    }
+                Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
+                    com.example.chat.ui.core.components.auth.ChatyAppAuthIcon()
                 }
-                Spacer(Modifier.height(ChatyUiTokens.space32))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
+                com.example.chat.ui.core.components.auth.ChatyAuthReferenceHeading(
+                    authCopy("Register Organization"),authCopy("Organization"),
+                    authCopy("Create a dedicated workspace for your team"),theme)
+                Spacer(Modifier.height(ChatyUiTokens.space24))
 
                 SectionHeader(theme, authCopy("1. Organization Details")) {
                     Icon(Icons.Rounded.Apartment, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
+                    readOnly = false,
+                    capsule = true,
                     label = authCopy("Organization Name"),
                     hintText = authCopy("e.g. Acme Corporation"),
                     theme = theme,
@@ -231,6 +205,8 @@ fun RegisterOrganizationScreen(
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
+                    readOnly = false,
+                    capsule = true,
                     label = authCopy("Workspace / Tenant ID"),
                     hintText = authCopy("e.g. acme-corp"),
                     theme = theme,
@@ -252,6 +228,8 @@ fun RegisterOrganizationScreen(
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
+                    readOnly = false,
+                    capsule = true,
                     label = authCopy("Admin Full Name"),
                     hintText = authCopy("e.g. Alex Rivera"),
                     theme = theme,
@@ -262,6 +240,8 @@ fun RegisterOrganizationScreen(
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
+                    readOnly = false,
+                    capsule = true,
                     label = authCopy("Admin Username"),
                     hintText = authCopy("e.g. alex_admin"),
                     theme = theme,
@@ -272,6 +252,8 @@ fun RegisterOrganizationScreen(
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
+                    readOnly = false,
+                    capsule = true,
                     label = authCopy("Admin Email"),
                     hintText = authCopy("e.g. alex@acme.com"),
                     theme = theme,
@@ -283,6 +265,8 @@ fun RegisterOrganizationScreen(
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
+                    readOnly = false,
+                    capsule = true,
                     label = authCopy("Admin Password"),
                     hintText = authCopy("Minimum 6 characters"),
                     theme = theme,
@@ -340,7 +324,9 @@ fun RegisterOrganizationScreen(
                 }
 
                 AuthPrimaryButton(
+                    enabled = !isLoading,
                     text = authCopy("Create Organization"),
+                    capsule = true,
                     theme = theme,
                     onClick = { handleRegister() },
                     isLoading = isLoading,
@@ -367,8 +353,6 @@ fun RegisterOrganizationScreen(
                         )
                     }
                 }
-            }
-        }
     }
 }
 

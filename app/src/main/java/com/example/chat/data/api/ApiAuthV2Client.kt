@@ -62,7 +62,10 @@ class ApiAuthV2Client(
         }
         return Result(response.first, parsed.optJSONObject("data") ?: parsed)
     }
-    fun verifyInvite(inviteToken:String)=call("GET","auth/invites/${enc(inviteToken)}/verify")
+    fun verifyInvite(inviteToken:String): Result {
+        require(com.example.chat.data.auth.v2.AuthInvitationTokenPolicy.valid(inviteToken)) { "This invitation is invalid." }
+        return call("GET","auth/invites/${enc(inviteToken)}/verify")
+    }
     fun onboarding(workspace: String) = call("GET", "organization/onboarding/${enc(workspace)}")
     fun discover(query: String, limit: Int = 20) = call("GET", "organization/discover?query=${enc(query)}&limit=${limit.coerceIn(1,20)}")
     fun domainSuggestion(domain: String): Result {
@@ -91,7 +94,10 @@ class ApiAuthV2Client(
         requireNotNull(RegistrationPhonePolicy.normalize(phoneNumber)) { "Enter an international contact number." }
         val body = JSONObject().put("email",email).put("username",username).put("password",password)
             .put("phoneNumber",phoneNumber).put("remember_me",rememberMe)
-        inviteToken?.let {body.put("invite_token",it)}
+        inviteToken?.let {
+            require(com.example.chat.data.auth.v2.AuthInvitationTokenPolicy.valid(it)) { "This invitation is invalid." }
+            body.put("invite_token",it)
+        }
         termsVersion?.let { body.put("terms_version",it) }; fullName?.let { body.put("full_name",it) }
         return call("POST", "auth/register/v2", body, extraHeaders = mapOf("Idempotency-Key" to key.value))
     }

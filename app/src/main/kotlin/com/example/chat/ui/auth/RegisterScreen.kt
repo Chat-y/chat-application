@@ -278,10 +278,13 @@ fun RegisterScreen(
     fun handleRegister() {
         if(AuthTemporaryPolicy.ageRuleConfirmed && !ageConfirmed) {errorMessage=authCopy("Confirm the configured age requirement before continuing.");return}
         if (isLoading || retryWait > 0) return
+        if (!AuthFormPolicy.confirmationMatches(password, confirmPassword)) {
+            errorMessage = authCopy("Enter the same password in Confirm password."); return
+        }
         emailError = ChatyValidators.validateEmail(email.trim())
         usernameError = ChatyValidators.validateUsername(username.trim(), forRegistration = true)
         val requiredNumber = com.example.chat.data.api.RegistrationPhonePolicy.normalize(contactNumber)
-        contactNumberError = if (requiredNumber != null) null else authCopy("Select your contact number with Use device number.")
+        contactNumberError = if (requiredNumber != null) null else authCopy("Choose a country and enter a valid contact number.")
         passwordError = when {
             password.isEmpty() -> authCopy("Please enter a password")
             password.length < 6 -> authCopy("Password must be at least 6 characters")
@@ -377,20 +380,13 @@ fun RegisterScreen(
                 com.example.chat.ui.core.components.auth.AuthOfflineNotice(online, theme)
                 com.example.chat.ui.core.components.auth.AuthLookupProgress(active && useOrganization && isCheckingOrg, theme)
                 if(useOrganization) AuthWorkspaceSuggestions(workspace,theme) {workspace=it;workspaceError=null;errorMessage=null;checkOrg(it)}
-                    Text(
-                        authCopy("Everything You Need!"),
-                    modifier = Modifier.semantics { heading() },
-                        color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
-                        fontSize = ChatyUiTokens.text28,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.5).sp,
-                    )
-                    Spacer(Modifier.height(ChatyUiTokens.touchGap))
-                    Text(
-                        authCopy("Create your Chaty account with a unique public username."),
-                        color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
-                        fontSize = ChatyUiTokens.text14,
-                    )
+                    Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
+                        com.example.chat.ui.core.components.auth.ChatyAppAuthIcon()
+                    }
+                    Spacer(Modifier.height(ChatyUiTokens.space16))
+                    com.example.chat.ui.core.components.auth.ChatyAuthReferenceHeading(
+                        authCopy("Everything You Need!"), authCopy("Need!"),
+                        authCopy("Create your Chaty account with a unique public username."), theme)
                     Spacer(Modifier.height(ChatyUiTokens.space24))
 
                     WorkspaceModeSelector(
@@ -447,6 +443,7 @@ fun RegisterScreen(
                         value = email,
                         onValueChange = { email = it; emailError = null; errorMessage = null },
                         keyboardType = KeyboardType.Email,
+                        prefixIcon = { AuthRoleIcon("mail", theme) },
                         error = emailError,
                     )
                     Spacer(Modifier.height(ChatyUiTokens.space16))
@@ -469,12 +466,8 @@ fun RegisterScreen(
                         onValueChange = { onUsernameChanged(it) },
                         error = usernameError,
                         prefixIcon = {
-                            Icon(
-                                Icons.Rounded.AlternateEmail,
-                                contentDescription = null,
-                                tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.7)),
-                                modifier = Modifier.size(ChatyUiTokens.space20),
-                            )
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile,
+                                color=authReadable(theme,theme.secondaryTextColor),size=ChatyUiTokens.space20)
                         },
                     )
                     UsernameAvailabilityIndicator(
@@ -495,6 +488,8 @@ fun RegisterScreen(
                         autofillTypes = listOf("NewPassword"),
                         keyboardType = KeyboardType.Password,
                         label = authCopy("Password"),
+                        prefixIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock,
+                            color=authReadable(theme,theme.secondaryTextColor),size=ChatyUiTokens.space20) },
                         hintText = authCopy("At least 6 characters. No app-set maximum."),
                         capsule = true,
                         theme = theme,
@@ -514,7 +509,6 @@ fun RegisterScreen(
                         },
                     )
                     Spacer(Modifier.height(ChatyUiTokens.space16))
-                    Spacer(Modifier.height(ChatyUiTokens.space16))
 
                 com.example.chat.ui.core.components.auth.AuthValidationSummary(listOf(emailError, usernameError, passwordError, contactNumberError, workspaceError), theme)
                 com.example.chat.ui.core.components.auth.AuthRetryNotice(retryWait, theme)
@@ -522,7 +516,6 @@ fun RegisterScreen(
                 if(errorMessage?.contains("already registered",ignoreCase=true)==true || errorMessage?.contains("already exists",ignoreCase=true)==true)
                     com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Log In"),theme,guardedBack)
 
-                    AuthAgeConsentStep(theme,ageConfirmed,{ageConfirmed=it})
                 if (AuthTemporaryPolicy.acceptanceReady()) {
                         TermsAcceptanceRow(
                             theme = theme,
@@ -534,11 +527,13 @@ fun RegisterScreen(
                         )
                     }
 
-                    Text(if(useOrganization) authCopy("Username is checked in the selected workspace. Use letters, numbers, dots and underscores.") else authCopy("Choose a unique public username. Use letters, numbers, dots and underscores."),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
+                    // Hidden by owner request: Text(if(useOrganization) authCopy("Username is checked in the selected workspace. Use letters, numbers, dots and underscores.") else authCopy("Choose a unique public username. Use letters, numbers, dots and underscores."),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
                     Text(AuthFormPolicy.strengthLabel(password), color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
-                    Text(authCopy("Use a unique password. Chaty never asks you to share it."), color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
-                    AuthTextField(label = authCopy("Confirm password (optional)"), hintText = authCopy("Re-enter to check the match"), theme = theme,
+                    // Hidden by owner request: Text(authCopy("Use a unique password. Chaty never asks you to share it."), color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
+                    AuthTextField(label = authCopy("Confirm password"), hintText = authCopy("Re-enter to check the match"), theme = theme,
                         value = confirmPassword, onValueChange = { confirmPassword = it }, capsule = true,
+                        prefixIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock,
+                            color=authReadable(theme,theme.secondaryTextColor),size=ChatyUiTokens.space20) },
                         obscureText = confirmHidden, keyboardType = KeyboardType.Password,
                         imeAction = androidx.compose.ui.text.input.ImeAction.Done, onDone = { if (!isLoading) handleRegister() },
                         suffixIcon = { IconButton(modifier = Modifier.padding(ChatyUiTokens.touchGap / 2), onClick = { confirmHidden = !confirmHidden }) {
@@ -546,10 +541,11 @@ fun RegisterScreen(
                         } })
                     if (confirmPassword.isNotEmpty()) Text(if (confirmPassword == password) authCopy("Passwords match") else authCopy("Passwords do not match yet"),
                         color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                    // Advisory only: matching confirmation never changes existing validators or payloads.
+                    AuthAgeConsentStep(theme,ageConfirmed,{ageConfirmed=it})
+                    // Owner-required confirmation gates Create and IME; payload is unchanged.
                     val registrationBlocked by remember {androidx.compose.runtime.derivedStateOf {useOrganization && !allowUserRegistration}}
                     AuthPrimaryButton(
-                        enabled = !registrationBlocked && retryWait == 0,
+                        enabled = !registrationBlocked && retryWait == 0 && AuthFormPolicy.confirmationMatches(password, confirmPassword),
                         text = if (registrationBlocked) authCopy("Registration Disabled") else authCopy("Create account"),
                         theme = theme,
                         onClick = { if (!registrationBlocked) handleRegister() },
@@ -565,9 +561,10 @@ fun RegisterScreen(
                     legalDialogAsset?.let { (title, asset) ->
                         LegalTextDialog(theme = theme, title = title, assetPath = asset, onDismiss = { legalDialogAsset = null })
                     }
-                    androidx.compose.foundation.layout.FlowRow(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(authCopy("Already have an account? "), color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor), fontSize = ChatyUiTokens.text13_5)
                         com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Log In"), theme, guardedBack, !isLoading)

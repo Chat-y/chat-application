@@ -49,4 +49,10 @@ class AuthFormPolicyTest {
   assertFalse(can(user="u2"));assertFalse(can(authed=false))
   assertTrue(can(verify=false,authed=false,user=null)) // Reset OTP doesn't manufacture a signed-in session.
  }
+ @org.junit.Test fun confirmationMustBePresentAndMatch() {
+  org.junit.Assert.assertFalse(com.example.chat.ui.auth.AuthFormPolicy.confirmationMatches("secret123", ""))
+  org.junit.Assert.assertFalse(com.example.chat.ui.auth.AuthFormPolicy.confirmationMatches("", ""))
+  org.junit.Assert.assertFalse(com.example.chat.ui.auth.AuthFormPolicy.confirmationMatches("secret123", "other"))
+  org.junit.Assert.assertTrue(com.example.chat.ui.auth.AuthFormPolicy.confirmationMatches("secret123", "secret123"))
+ }
 }

@@ -12,4 +12,11 @@ class AuthLinkPolicyTest {
  @Test fun rejectsAmbiguousDuplicateAndEndpointInjection() {
   for(value in listOf("https://workspace?workspace=acme","chaty://evil@workspace?workspace=acme","chaty://workspace?workspace=a&workspace=b","chaty://workspace?workspace=https%3A%2F%2Fevil.invalid","chaty://workspace/path?workspace=a","chaty://invite?token=short","chaty://invite?token=abcdefghijklmnop%20qrst","chaty://verify-email?token=abcdefghijklmnop%0A","chaty://workspace?workspace=a#b")) assertNull(value,P.parse(value))
  }
+ @Test fun invitationUsesServerLengthAndUnpaddedUrlSafeAlphabetOnly() {
+  assertNotNull(P.parse("chaty://invite?token="+"a".repeat(512)))
+  for(token in listOf("a".repeat(513),"abcdefghijklmnop%2F","abcdefghijklmnop%2B","abcdefghijklmnop%3D"))
+   assertNull(token,P.parse("chaty://invite?token=$token"))
+  assertNotNull(P.parse("chaty://invite?token=Abcdefghijklmn-_09"))
+  assertNotNull(P.parse("chaty://verify-email?token="+"a".repeat(513)))
+ }
 }

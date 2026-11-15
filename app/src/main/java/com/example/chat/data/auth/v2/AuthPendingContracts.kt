@@ -43,3 +43,9 @@ object AuthConsentReadiness {
     fun mayCollectAcceptance(gateEnabled:Boolean,version:String?,publishedPolicyConfirmed:Boolean)=
         state(gateEnabled,version,publishedPolicyConfirmed)==State.Ready
 }
+
+/** Backend invitation contract: unpadded URL-safe base64, capped at 512 characters. */
+object AuthInvitationTokenPolicy {
+    const val MAX_LENGTH = 512
+    fun valid(token: String): Boolean = token.matches(Regex("[A-Za-z0-9_-]{16,$MAX_LENGTH}"))
+}

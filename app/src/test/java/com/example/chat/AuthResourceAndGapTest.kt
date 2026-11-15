@@ -4,7 +4,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.*
 import org.junit.Test
 class AuthResourceAndGapTest {
- private val root=File("app/src/main")
+ private val root get() = if(File("app/src/main").exists()) File("app/src/main") else File("src/main")
  private fun source(path:String)=File(root,"kotlin/com/example/chat/$path").readText()
  private fun names(locale:String):Set<String> {
   val document=DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File(root,"res/$locale/strings_auth.xml"))
@@ -27,10 +27,10 @@ class AuthResourceAndGapTest {
    assertTrue(file,source("ui/auth/$file").contains("padding(ChatyUiTokens.touchGap / 2)"))
   assertTrue(shared.contains("padding(horizontal=ChatyUiTokens.touchGap / 2).selectable"))
  }
- @Test fun deviceNumberIsReadOnlyAndCaptionDoesNotClaimSelectionBeforePick() {
+ @Test fun countryNumberIsEditableAndAlwaysUnverified() {
   val source=source("ui/core/components/auth/PhoneNumberEntry.kt")
-  assertTrue(source.contains("readOnly = true"))
-  assertTrue(source.contains("if(value.isNotBlank()) Text(authCopy(\"Number selected"))
+  assertTrue(source.contains("readOnly = false"))
+  assertTrue(source.contains("Stored as unverified."))
   assertTrue(source.contains("if(!mounted || !currentEnabled || hintBusy)"))
  }
  @Test fun otpUsesSharedShapeAndLayoutPaddingNeverUsesSevenDpAlias() {

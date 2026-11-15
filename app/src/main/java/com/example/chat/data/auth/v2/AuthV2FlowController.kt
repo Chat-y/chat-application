@@ -87,7 +87,7 @@ class AuthV2FlowController(
 
     /** Public verify is read-only. A valid result is only registration prefill, not a session. */
     suspend fun verifyInvitation(token:String,workspaceHint:String?):InvitationVerification = guard {
-        require(token.length in 16..4096 && token.none {it.isISOControl() || it.isWhitespace()}) { "This invitation is invalid." }
+        require(AuthInvitationTokenPolicy.valid(token)) { "This invitation is invalid." }
         val data=client.verifyInvite(token).data
         if(!data.optBoolean("valid",false)) return@guard when(data.optString("reason")) {
             "expired"->InvitationVerification.Expired

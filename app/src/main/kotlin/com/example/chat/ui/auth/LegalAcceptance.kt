@@ -119,10 +119,15 @@ fun AuthLocalLegalFooter(theme:ThemeConfig) {
     val authCopy=com.example.chat.core.i18n.rememberAuthCopy()
     var document by androidx.compose.runtime.remember {androidx.compose.runtime.mutableStateOf<Pair<String,String>?>(null)}
     Column(Modifier.fillMaxWidth().padding(top=ChatyUiTokens.space16)) {
-        Text(authCopy("Review drafts - version 0.3, 15 November 2026. Not legally reviewed or published."),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text12)
-        com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Terms of Use (draft)"),theme,{document=authCopy("Terms of Use - review draft") to "legal/terms_of_use.md"})
-        com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Privacy Policy (draft)"),theme,{document=authCopy("Privacy Policy - review draft") to "legal/privacy_policy.md"})
+        androidx.compose.material3.HorizontalDivider(color=Color(theme.secondaryTextColor).copy(alpha=0.2f))
+        // Hidden by owner reference-layout request: Text(authCopy("Review drafts - version 0.3, 15 November 2026. Not legally reviewed or published."),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text12)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Terms of Use (draft)"),theme,{document=authCopy("Terms of Use - review draft") to "legal/terms_of_use.md"})
+            Text("|", color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
+            com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Privacy Policy (draft)"),theme,{document=authCopy("Privacy Policy - review draft") to "legal/privacy_policy.md"})
+        }
     }
-    Text(authCopy("Temporary policy settings. Company and contact are placeholders; no final legal acceptance is collected."),color=com.example.chat.ui.auth.authReadable(theme,theme.secondaryTextColor),fontSize=ChatyUiTokens.text12)
+    // Hidden by owner request: Text(authCopy("Temporary policy settings. Company and contact are placeholders; no final legal acceptance is collected."),color=com.example.chat.ui.auth.authReadable(theme,theme.secondaryTextColor),fontSize=ChatyUiTokens.text12)
     document?.let {(title,path)->LegalTextDialog(theme,title,path,{document=null})}
 }

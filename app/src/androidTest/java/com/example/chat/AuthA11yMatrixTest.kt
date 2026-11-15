@@ -118,7 +118,7 @@ class AuthA11yMatrixTest {
                 LoginScreen(
                     onBack = {}, onLoggedIn = {}, onForgotPassword = {},
                     onRegister = {}, onRegisterOrganization = {},
-                    login = { _, _, _, _ -> throw Exception("connection refused") },
+                    login = { _, _, _, _ -> throw Exception("unable to connect") },
                     loadSavedTenant = { null to true },
                 )
             }

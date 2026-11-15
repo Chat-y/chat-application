@@ -2,6 +2,7 @@ package com.example.chat.ui.auth
 
 /** Advisory UI policy. Never changes account identifiers, server password rules or auth decisions. */
 object AuthFormPolicy {
+    fun confirmationMatches(password:String, confirmation:String):Boolean = password.isNotEmpty() && confirmation.isNotEmpty() && password == confirmation
     fun privateError(message: String, enteredIdentifier: String): String {
         val typed = enteredIdentifier.trim()
         if (!typed.contains('@') || typed.length < 3) return message

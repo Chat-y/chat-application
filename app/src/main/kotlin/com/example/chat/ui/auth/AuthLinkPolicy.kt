@@ -20,7 +20,7 @@ object AuthLinkPolicy {
         when(uri.host) {
             "workspace"->workspace?.let {Parameters("workspace",it,null)}
             "verify-email"->token?.let {Parameters("verify-email",null,it)}
-            "invite"->if(token!=null) Parameters("invite",workspace,token) else null
+            "invite"->if(token!=null && com.example.chat.data.auth.v2.AuthInvitationTokenPolicy.valid(token)) Parameters("invite",workspace,token) else null
             else->null
         }
     }.getOrNull()

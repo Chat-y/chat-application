@@ -232,4 +232,21 @@ class AuthV2FlowControllerTest {
         assertTrue(h.transport.calls.isEmpty())
     }
 
+    @Test fun invalidInvitationAlphabetAndOverLimitNeverReachTransport() = runBlocking {
+        val h=Harness()
+        for(token in listOf("a".repeat(513),"abcdefghijklmnop/","abcdefghijklmnop+","abcdefghijklmnop=")) {
+            try {h.controller.verifyInvitation(token,null);fail("Invalid token accepted")}
+            catch(_:IllegalArgumentException) { }
+        }
+        assertTrue(h.transport.calls.isEmpty())
+        h.transport.response="""{"data":{"valid":false,"status":"invalid","reason":"expired"}}"""
+        assertSame(InvitationVerification.Expired,h.controller.verifyInvitation("a".repeat(512),null))
+    }
+
+    @Test fun invalidInviteTokenNeverReachesRegistrationTransport() = runBlocking {
+        val h=Harness()
+        try {h.controller.startRegister("fixture@example.com","fixture","password9","+12025550123",inviteToken="bad/token");fail("Invalid invite token accepted")}
+        catch(_:IllegalArgumentException) { }
+        assertTrue(h.transport.calls.isEmpty())
+    }
 }

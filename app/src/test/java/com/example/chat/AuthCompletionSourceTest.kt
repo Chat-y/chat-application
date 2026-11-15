@@ -3,7 +3,7 @@ import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
 class AuthCompletionSourceTest {
- private val root=File("app/src/main")
+ private val root get() = if(File("app/src/main").exists()) File("app/src/main") else File("src/main")
  @Test fun allAuthVectorInputsResolveThroughChatyRoles() {
   val roles=File(root,"kotlin/com/example/chat/ui/icons/ChatyMaterialIconRoles.kt").readText()
   File(root,"kotlin/com/example/chat/ui/auth").walkTopDown().filter {it.extension=="kt"}.forEach {file->

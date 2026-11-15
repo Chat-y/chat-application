@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -104,6 +105,13 @@ fun ChatyAuthScreen(theme: ThemeConfig, content: @Composable ColumnScope.() -> U
     AuthInputPrivacy {
     Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
+            androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+                val accent = Color(theme.accentColor)
+                drawCircle(accent.copy(alpha=0.075f),size.width*0.23f,androidx.compose.ui.geometry.Offset(-size.width*0.1f,size.height*0.08f))
+                drawCircle(accent.copy(alpha=0.09f),size.width*0.27f,androidx.compose.ui.geometry.Offset(size.width*1.06f,size.height*0.01f))
+                drawRect(androidx.compose.ui.graphics.Brush.radialGradient(listOf(accent.copy(alpha=0.12f),Color.Transparent),
+                    center=androidx.compose.ui.geometry.Offset(size.width,size.height),radius=size.width*0.6f))
+            }
             val wide = com.example.chat.ui.auth.AuthPresentationPolicy.twoPane(maxWidth.value, maxHeight.value, density.fontScale)
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center) {
                 if (wide) Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())
@@ -203,4 +211,50 @@ fun ChatyInlineAction(text: String, theme: ThemeConfig, onClick: () -> Unit, ena
         contentPadding = PaddingValues(horizontal = ChatyUiTokens.space8), colors = ButtonDefaults.textButtonColors(contentColor = com.example.chat.ui.auth.authReadable(theme,theme.accentColor))) {
         FittedAuthText(authCopy(text), Color(theme.accentColor), ChatyUiTokens.inlineText, weight = FontWeight.SemiBold)
     }
+}
+
+/** Shared reference-layout heading, using the selected app theme. */
+@Composable
+fun ChatyAuthReferenceHeading(title: String, accentWord: String, subtitle: String, theme: ThemeConfig, logo: Boolean = false) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (logo) Alignment.CenterHorizontally else Alignment.Start) {
+        if (logo) {
+            ChatyAppAuthIcon()
+            Spacer(Modifier.height(ChatyUiTokens.space16))
+        }
+        val start = title.lastIndexOf(accentWord)
+        val label = androidx.compose.ui.text.buildAnnotatedString {
+            if (start < 0) append(title) else {
+                append(title.substring(0, start))
+                pushStyle(androidx.compose.ui.text.SpanStyle(color = Color(theme.accentColor)))
+                append(title.substring(start)); pop()
+            }
+        }
+        Text(label, Modifier.fillMaxWidth().semantics { heading() },
+            color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+            fontSize = if (logo) ChatyUiTokens.text30 else ChatyUiTokens.text24, fontWeight = FontWeight.ExtraBold,
+            textAlign = if (logo) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start)
+        Spacer(Modifier.height(ChatyUiTokens.touchGap))
+        Text(subtitle, Modifier.fillMaxWidth(), color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+            fontSize = ChatyUiTokens.text14,
+            textAlign = if (logo) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start)
+    }
+}
+
+/** A credential chooser action styled as the reference's hollow circle, not a persisted preference. */
+@Composable
+fun ChatySavedPasswordAction(theme:ThemeConfig,onClick:()->Unit,enabled:Boolean=true) {
+    val authCopy=com.example.chat.core.i18n.rememberAuthCopy()
+    TextButton(onClick=onClick,enabled=enabled,contentPadding=PaddingValues(ChatyUiTokens.space0),modifier=Modifier.heightIn(min=ChatyUiTokens.tapTarget)) {
+        ChatyIcon(ChatyIconId.radioOff,color=com.example.chat.ui.auth.authReadable(theme,theme.secondaryTextColor),size=ChatyUiTokens.space20)
+        Spacer(Modifier.width(ChatyUiTokens.space8))
+        Text(authCopy("Use a saved password"),color=com.example.chat.ui.auth.authReadable(theme,theme.secondaryTextColor),fontSize=ChatyUiTokens.text12)
+    }
+}
+
+/** The app's bundled launcher artwork, not a redrawn placeholder logo. */
+@Composable
+fun ChatyAppAuthIcon() {
+    androidx.compose.foundation.Image(
+        painter=androidx.compose.ui.res.painterResource(com.example.chat.R.drawable.ic_launcher),
+        contentDescription="Chaty",modifier=Modifier.size(ChatyUiTokens.space76).clip(ChatyUiTokens.cardShape))
 }

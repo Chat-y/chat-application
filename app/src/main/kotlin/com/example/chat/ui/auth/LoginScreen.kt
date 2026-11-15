@@ -216,20 +216,9 @@ fun LoginScreen(
                 com.example.chat.ui.core.components.auth.AuthLookupProgress(checkingWorkspace, theme)
                 workspaceName?.let { Text(authCopy(it), color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor), fontWeight = FontWeight.SemiBold) }
                 Spacer(Modifier.height(ChatyUiTokens.space24))
-                Text(
-                    authCopy("Welcome back"),
-                    modifier = Modifier.semantics { heading() },
-                    color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
-                    fontSize = ChatyUiTokens.text28,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.5).sp,
-                )
-                Spacer(Modifier.height(ChatyUiTokens.touchGap))
-                Text(
-                    authCopy("Sign in to Chaty."),
-                    color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
-                    fontSize = ChatyUiTokens.text14,
-                )
+                com.example.chat.ui.core.components.auth.ChatyAuthReferenceHeading(
+                    authCopy("Welcome back"), authCopy("back"),
+                    authCopy("Sign in to Chaty to continue your conversations"), theme, logo = true)
                 Spacer(Modifier.height(ChatyUiTokens.space24))
 
                 AuthCapsuleModeSelector(
@@ -292,9 +281,6 @@ fun LoginScreen(
                         }
                     },
                 )
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                    com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Forgot Password?"), theme, onForgotPassword)
-                }
                 Spacer(Modifier.height(ChatyUiTokens.space24))
 
                 com.example.chat.ui.core.components.auth.AuthValidationSummary(listOf(identifierError, passwordError, workspaceError), theme)
@@ -338,7 +324,10 @@ fun LoginScreen(
                     }
                 }
 
-                com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Use a saved password"),theme,{
+                Row(Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    com.example.chat.ui.core.components.auth.ChatySavedPasswordAction(theme,{
                     if(!isLoading) scope.launch {
                         when(val saved=credentialSupport.retrieve()) {
                             is com.example.chat.core.auth.PasswordCredentialStore.RetrieveOutcome.Found -> {
@@ -349,14 +338,21 @@ fun LoginScreen(
                         }
                     }
                 },enabled=!isLoading)
+                    com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Forgot Password?"), theme, onForgotPassword)
+                }
                 AuthPrimaryButton(enabled = retryWait == 0, text = authCopy("Log In"), theme = theme, onClick = { handleLogin() }, isLoading = isLoading, capsule = true)
                 if (requestEmailCode != null && verifyEmailCode != null) {
-                    com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Use email code instead"), theme, { useEmailCode = true }, !isLoading, Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.HorizontalDivider(Modifier.weight(1f), color = Color(argbWithAlpha(theme.secondaryTextColor, 0.2)))
+                        com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Use email code instead"), theme, { useEmailCode = true }, !isLoading)
+                        androidx.compose.material3.HorizontalDivider(Modifier.weight(1f), color = Color(argbWithAlpha(theme.secondaryTextColor, 0.2)))
+                    }
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space8))
-                androidx.compose.foundation.layout.FlowRow(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(ChatyUiTokens.space24, Alignment.CenterHorizontally),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         authCopy("New to Chaty? "),
@@ -367,23 +363,24 @@ fun LoginScreen(
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 androidx.compose.material3.HorizontalDivider(color = Color(argbWithAlpha(theme.secondaryTextColor, 0.2)))
-                AuthTextLink(authCopy("Register a New Organization"), theme, onRegisterOrganization)
-                if (demoLogin != null) {
-                    AuthTextLink(text = authCopy("Try demo"), theme = theme, enabled = !isLoading, onClick = {
-                        errorMessage = null
-                        storageFailure = null
-                        isLoading = true
-                        scope.launch {
-                            try {
-                                val userId = demoLogin()
-                                onLoggedIn(userId)
-                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                            catch (e: Exception) { errorMessage = e.message ?: authCopy("Demo login failed. Please try again.") }
-                            finally { isLoading = false }
-                        }
-                    })
-                    Spacer(Modifier.height(ChatyUiTokens.space8))
-                }
+                AuthSecondaryButton(authCopy("Register a New Organization"), theme, onRegisterOrganization)
+                // Hidden by owner request. Retain the demo UI source and callback, do not render it.
+                // if (demoLogin != null) {
+                //     AuthTextLink(text = authCopy("Try demo"), theme = theme, enabled = !isLoading, onClick = {
+                //         errorMessage = null
+                //         storageFailure = null
+                //         isLoading = true
+                //         scope.launch {
+                //             try {
+                //                 val userId = demoLogin()
+                //                 onLoggedIn(userId)
+                //             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                //             catch (e: Exception) { errorMessage = e.message ?: authCopy("Demo login failed. Please try again.") }
+                //             finally { isLoading = false }
+                //         }
+                //     })
+                //     Spacer(Modifier.height(ChatyUiTokens.space8))
+                // }
     }
 }
 

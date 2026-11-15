@@ -27,10 +27,10 @@ class AuthSharedUiWiringTest {
   assertTrue(c.contains("Caps Lock is on"));assertTrue(t("ui/core/components/auth/AuthFormSupport.kt").contains("LiveRegionMode.Polite"))
   assertTrue(c.contains("enabled = enabled && !isLoading"))
  }
- @Test fun deviceActionIsInlineAndDoesNotAddCountryUi() {
+ @Test fun deviceActionAndSearchableCountryUiShareComponent() {
   val p=t("ui/core/components/auth/PhoneNumberEntry.kt")
-  assertTrue(p.contains("suffixIcon ="));assertTrue(p.contains("ChatyInlineAction("))
-  assertTrue(p.contains("readOnly = true"));assertFalse(p.contains("Choose country"))
+  assertTrue(p.contains("prefixIcon ="));assertTrue(p.contains("ChatyInlineAction("))
+  assertTrue(p.contains("readOnly = false"));assertTrue(p.contains("Choose country"));assertTrue(p.contains("Search country or code"))
  }
  @Test fun emailOtpUsesExistingSixCellSanitizerAndResendTimerWithoutSms() {
   val otp=t("ui/auth/OtpVerificationScreen.kt")
