@@ -44,9 +44,13 @@ class OkHttpApiTransport(private val allowRedirects: Boolean = true) : ApiHeader
             "DELETE" -> if (body == null) builder.delete() else builder.delete(body.toRequestBody("application/json".toMediaType()))
             else -> throw IllegalArgumentException("unsupported method $method")
         }
-        client.newCall(builder.build()).execute().use { response ->
-            return ApiHeaderResponse(response.code, response.body?.string() ?: "", response.header("ETag"))
-        }
+        val call=client.newCall(builder.build())
+        val cancellation=AuthHttpCallContext.onCancellation {call.cancel()}
+        try {
+            call.execute().use {response->
+                return ApiHeaderResponse(response.code,response.body?.string() ?: "",response.header("ETag"),response.header("Retry-After"))
+            }
+        } finally {cancellation?.dispose()}
     }
 }
 

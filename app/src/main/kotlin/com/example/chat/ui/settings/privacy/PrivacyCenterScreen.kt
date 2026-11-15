@@ -316,6 +316,7 @@ fun PrivacyCenterScreen(
                 Spacer(Modifier.height(16.dp))
                 CardContainer {
                     SectionDivider("Privacy")
+                    OptionalCrashReportingChoice()
                     SwitchRow(Icons.Rounded.AcUnit, "Freeze Last Seen", "Please restart Chaty for changes to take effect.", p.freezeLastSeen) {
                         preferences.updatePrivacy(p.copy(freezeLastSeen = it), logTitle = "Freeze Last Seen")
                     }
@@ -714,4 +715,19 @@ private fun BlockedContactsDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
+}
+
+
+@Composable
+private fun OptionalCrashReportingChoice() {
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val prefs = remember(context) { context.getSharedPreferences("chaty_diagnostics", android.content.Context.MODE_PRIVATE) }
+    var allowed by remember { mutableStateOf(prefs.getBoolean("crash_reports_opt_in",false)) }
+    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Allow optional crash reports")
+            Text("Off by default. No crash reporter is installed in this version; this choice alone sends nothing.", fontSize = 12.sp)
+        }
+        Switch(checked = allowed, onCheckedChange = { allowed = it; prefs.edit().putBoolean("crash_reports_opt_in",it).apply() })
+    }
 }

@@ -962,7 +962,7 @@ class CallSignalingParityTest {
             signalSender = com.example.chat.data.services.CallSignalSender { _, data -> sent += data },
             mediaFactory = { FakeMediaController() }, beforeIncomingDisposition = { _, _ ->
                 dispositions++; entered.complete(Unit); release.await()
-            })
+            }, monotonicMillis = { 0L })
         service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "incoming", "sender_id" to "peer", "sdp" to "offer"))
         val first = kotlinx.coroutines.CoroutineScope(coroutineContext).async { service.acceptCall() }
         entered.await()
@@ -980,7 +980,7 @@ class CallSignalingParityTest {
         val media = FakeMediaController(); val sent = mutableListOf<Map<String, Any?>>()
         val service = CallSignalingService(scope = backgroundScope, currentUserId = { "me" },
             signalSender = com.example.chat.data.services.CallSignalSender { _, data -> sent += data },
-            mediaFactory = { media }, beforeIncomingDisposition = { _, _ -> throw java.io.IOException("save failed") })
+            mediaFactory = { media }, beforeIncomingDisposition = { _, _ -> throw java.io.IOException("save failed") }, monotonicMillis = { 0L })
         service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "incoming", "sender_id" to "peer", "sdp" to "offer"))
         try { service.acceptCall(); org.junit.Assert.fail("Must not answer") } catch (_: java.io.IOException) { }
         assertFalse(media.prepared)
@@ -991,7 +991,7 @@ class CallSignalingParityTest {
         val sent = mutableListOf<Map<String, Any?>>()
         val service = CallSignalingService(scope = backgroundScope, currentUserId = { "me" },
             signalSender = com.example.chat.data.services.CallSignalSender { _, data -> sent += data },
-            mediaFactory = { FakeMediaController() }, beforeIncomingDisposition = { _, _ -> throw java.io.IOException("save failed") })
+            mediaFactory = { FakeMediaController() }, beforeIncomingDisposition = { _, _ -> throw java.io.IOException("save failed") }, monotonicMillis = { 0L })
         service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "incoming", "sender_id" to "peer", "sdp" to "offer"))
         try { service.declineCall(); org.junit.Assert.fail("Must not decline") } catch (_: java.io.IOException) { }
         assertFalse(sent.any { it["signal_type"] == "decline" })

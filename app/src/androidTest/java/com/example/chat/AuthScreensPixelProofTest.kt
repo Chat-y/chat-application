@@ -102,7 +102,7 @@ class AuthScreensPixelProofTest {
         capture("01-welcome")
 
         clickText("Log In")
-        awaitText("Welcome Back!")
+        awaitText("Welcome back")
         capture("02-login")
 
         device.pressBack()
@@ -117,17 +117,17 @@ class AuthScreensPixelProofTest {
 
         // Login -> forgot password link.
         clickText("Log In")
-        awaitText("Welcome Back!")
+        awaitText("Welcome back")
         clickText("Forgot Password?")
         // Pre-send state of forgot_password_screen.dart (the "secure recovery link" copy only appears after a
         // real recovery email is sent, which this fixture run must not do).
-        awaitText("Send Recovery Email", 20000)
+        awaitText("Send Reset Code", 20000)
         capture("04-forgot-password")
         device.pressBack()
-        awaitText("Welcome Back!")
+        awaitText("Welcome back")
 
         // Login -> register organization entry.
-        clickText("Register an Organization")
+        clickText("Register a New Organization")
         awaitText("Register Organization")
         capture("05-register-organization")
     }

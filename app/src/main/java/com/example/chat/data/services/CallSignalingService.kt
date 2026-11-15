@@ -7,6 +7,8 @@ import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -235,6 +237,35 @@ class CallSignalingService(
     private var lastNetworkTransport: String? = null
     private var lastAppliedNetworkProfile: CallNetworkProfile? = null
     private var callAccountScope: Any? = null
+
+    private data class RingingIce(val owner: Any?, val callId: String, val started: Long, val result: Deferred<Result<List<Map<String, Any?>>>>)
+    private var ringingIce: RingingIce? = null
+
+    /** Fetch only TURN/STUN config while ringing. No peer, microphone or camera before Answer. */
+    private fun prefetchRingingIce(owner: Any?, callId: String) {
+        ringingIce?.result?.cancel()
+        ringingIce = RingingIce(owner, callId, monotonicMillis(), scope.async {
+            try {
+                requireCallIdentity(owner, callId)
+                val servers = iceServersProvider()
+                requireCallIdentity(owner, callId)
+                Result.success(servers)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { Result.failure(error) }
+        })
+    }
+
+    private suspend fun iceForCall(owner: Any?, callId: String): List<Map<String, Any?>> {
+        val cached = ringingIce
+        ringingIce = null
+        if (cached != null && cached.owner === owner && cached.callId == callId &&
+            monotonicMillis() - cached.started in 0L..30_000L) {
+            try { return cached.result.await().getOrThrow() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { requireCallIdentity(owner, callId) }
+        } else cached?.result?.cancel()
+        return iceServersProvider()
+    }
     private fun requireCallScope(expected: Any?) {
         if (!accountScopeValid(expected)) throw kotlinx.coroutines.CancellationException("Call account scope changed")
     }
@@ -434,6 +465,7 @@ class CallSignalingService(
         closeVideoUpgrade()
         val old = media
         media = null; currentSession = null; callAccountScope = next
+        ringingIce?.result?.cancel(); ringingIce = null
         acceptingCallId = null
         cachedRemoteOfferSdp = null; remoteDescriptionReady = false; queuedRemoteCandidates.clear()
         localDescriptionSignaled = false; pendingLocalCandidates.clear()
@@ -542,18 +574,39 @@ class CallSignalingService(
         }
         when (signalType) {
             "offer" -> {
+                var abandonedPeer: CallMediaController? = null
                 receiveGuard offerGuard@{
+                val offerSdp = CallSignalCodec.sdp(signal["sdp"] ?: signal["offer"])
+                if (offerSdp.isBlank()) return@offerGuard
                 val active = currentSession
+                if (active?.callId == callId && active.remoteUserId != senderId) return@offerGuard
                 if (signal["ice_restart"] == true && (active?.callId != callId || active.state.isTerminal)) return@offerGuard
                 if (active != null && active.callId != callId && !active.state.isTerminal) {
-                    signalSender.sendCallSignal(senderId, mapOf(
-                        "signal_type" to "busy",
-                        "call_id" to callId,
-                        "reason" to "already_in_call",
-                    ))
-                    onCallWaiting(remoteName(senderId, signal["caller_name"]?.toString()))
-                    callWaitingListeners.forEach { it() }
-                    return@offerGuard
+                    // Same-peer simultaneous calls converge on the smaller ID. Never
+                    // interrupt a connected call or replace it for a third caller.
+                    val incomingWinsGlare = active.isOutgoing && !active.isDemo &&
+                        active.remoteUserId == senderId &&
+                        (active.state == CallSessionState.initiating || active.state == CallSessionState.ringing) &&
+                        callId < active.callId
+                    if (incomingWinsGlare) {
+                        ringTimeoutJob?.cancel()
+                        connectionTimeoutJob?.cancel()
+                        stopDurationTimer()
+                        signalSender.sendCallSignal(active.remoteUserId, mapOf(
+                            "signal_type" to "hangup", "call_id" to active.callId, "reason" to "simultaneous_call",
+                        ))
+                        logCallRecordOnce(active, CallDirection.outgoing, callDurationSeconds)
+                        abandonedPeer = detachMediaTransport()
+                    } else {
+                        signalSender.sendCallSignal(senderId, mapOf(
+                            "signal_type" to "busy",
+                            "call_id" to callId,
+                            "reason" to "already_in_call",
+                        ))
+                        onCallWaiting(remoteName(senderId, signal["caller_name"]?.toString()))
+                        callWaitingListeners.forEach { it() }
+                        return@offerGuard
+                    }
                 }
 
                 // Dual-channel delivery can repeat an offer. Never reset an
@@ -587,8 +640,6 @@ class CallSignalingService(
                     }
                     return@offerGuard
                 }
-                val offerSdp = CallSignalCodec.sdp(signal["sdp"] ?: signal["offer"])
-                if (offerSdp.isBlank()) return@offerGuard
                 callAccountScope = captureAccountScope()
                 cachedRemoteOfferSdp = offerSdp
                 callDurationSeconds = 0
@@ -605,6 +656,7 @@ class CallSignalingService(
                     startedAt = now(),
                     audioRoute = if (isVideo) AudioRouteType.speaker else AudioRouteType.earpiece,
                 )
+                prefetchRingingIce(callAccountScope, callId)
                 notifyChanged()
 
                 ringTimeoutJob?.cancel()
@@ -616,6 +668,7 @@ class CallSignalingService(
                     }
                 }
                 }
+                abandonedPeer?.dispose()
             }
 
             "answer" -> {
@@ -633,11 +686,16 @@ class CallSignalingService(
                             if (currentSession?.callId == callId && media === peer) {
                                 remoteDescriptionReady = true
                                 iceRestartAttempts = 0
-                                currentSession = session.copy(
-                                    state = if (isRestartAnswer) CallSessionState.connected
-                                    else CallSessionState.connecting,
-                                )
-                                startConnectionTimeout(callId)
+                                val live = currentSession!!
+                                // setRemoteDescription can synchronously report connected.
+                                // Signaling must not regress that media-proven state, nor
+                                // claim an ICE restart succeeded from an SDP answer alone.
+                                currentSession = live.copy(state = when {
+                                    live.state == CallSessionState.connected -> CallSessionState.connected
+                                    isRestartAnswer -> CallSessionState.reconnecting
+                                    else -> CallSessionState.connecting
+                                })
+                                if (currentSession?.state != CallSessionState.connected) startConnectionTimeout(callId)
                                 notifyChanged()
                             }
                         }) return
@@ -842,7 +900,7 @@ class CallSignalingService(
                 callDurationSeconds = 0
                 currentSession = session.copy(
                     state = CallSessionState.connected,
-                    connectedAt = now(),
+                    connectedAt = session.connectedAt ?: now(),
                 )
                 startDurationTimer()
                 notifyChanged()
@@ -877,8 +935,10 @@ class CallSignalingService(
                 ))
 
                 flushLocalCandidates(session)
-                currentSession = session.copy(state = CallSessionState.connecting)
-                startConnectionTimeout(session.callId)
+                val live = currentSession!!
+                currentSession = live.copy(state = if (live.state == CallSessionState.connected)
+                    CallSessionState.connected else CallSessionState.connecting)
+                if (currentSession?.state != CallSessionState.connected) startConnectionTimeout(session.callId)
                 notifyChanged()
                 }) return
             } catch (error: Throwable) {
@@ -1211,6 +1271,8 @@ class CallSignalingService(
 
     private suspend fun createMediaTransport(isVideo: Boolean, expectedAccount: Any?, callId: String): CallMediaController {
         requireCallIdentity(expectedAccount, callId)
+        val iceServers = iceForCall(expectedAccount, callId)
+        requireCallIdentity(expectedAccount, callId)
         var previous: CallMediaController? = null
         if (!guardCall(expectedAccount, callId) {
             // Incoming trickle ICE can arrive while ringing, before media exists.
@@ -1220,8 +1282,6 @@ class CallSignalingService(
             queuedRemoteCandidates.addAll(pending)
         }) throw kotlinx.coroutines.CancellationException("Call changed")
         previous?.dispose()
-        requireCallIdentity(expectedAccount, callId)
-        val iceServers = iceServersProvider()
         requireCallIdentity(expectedAccount, callId)
         val peer = mediaFactory()
         lastAppliedNetworkProfile = null
@@ -1268,7 +1328,7 @@ class CallSignalingService(
                 iceRestartAttempts = 0
                 currentSession = session.copy(
                     state = CallSessionState.connected,
-                    connectedAt = now(),
+                    connectedAt = session.connectedAt ?: now(),
                 )
                 startDurationTimer()
                 notifyChanged()
@@ -1462,6 +1522,7 @@ class CallSignalingService(
 
     /** Called only while the caller owns the expected account guard. */
     private fun detachMediaTransport(): CallMediaController? {
+        ringingIce?.result?.cancel(); ringingIce = null
         closeVideoUpgrade()
         localDescriptionSignaled = false; pendingLocalCandidates.clear()
         remoteDescriptionReady = false
@@ -1479,6 +1540,7 @@ class CallSignalingService(
 
     /** Dart dispose(). */
     fun dispose() {
+        ringingIce?.result?.cancel(); ringingIce = null
         ringTimeoutJob?.cancel()
         connectionTimeoutJob?.cancel()
         stopDurationTimer()

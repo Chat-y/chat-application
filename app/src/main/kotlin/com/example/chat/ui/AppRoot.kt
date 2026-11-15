@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerInput
@@ -155,15 +156,57 @@ fun AppRoot() {
         var otpEmail by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
         var otpDeliveryMessage by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         var otpPurposeVerify by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
-        var otpOrigin by remember { mutableStateOf(AuthRoute.ForgotPassword) }
-        var resetCode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        var otpOrigin by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(AuthRoute.ForgotPassword) }
+        // Only nonsecret routing context is saved. A reset code is always requested again after death.
+        var otpResumePending by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        var otpResumeTenant by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        var otpResumeBase by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        var otpResumeUser by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        fun rememberOtpRoute() {
+            otpResumePending = otpEmail.isNotBlank()
+            otpResumeTenant = ServiceLocator.apiBackend.config.tenantId
+            otpResumeBase = ServiceLocator.apiBackend.config.restApiBaseUrl
+            otpResumeUser = if (otpPurposeVerify) ServiceLocator.apiBackend.currentUser?.id.orEmpty() else ""
+        }
+        // Reset OTP is memory-only. Never write it into Android saved-instance state.
+        var resetCode by remember { mutableStateOf("") }
         var pendingRegisterEmail by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        var emailCodeRoutePending by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(false)}
         var selectedConversation by remember { mutableStateOf<com.example.chat.domain.models.Conversation?>(null) }
         var selectedInitialMessageId by remember { mutableStateOf<String?>(null) }
+        var reauthRoute by remember {mutableStateOf<AuthRoute?>(null)}
+        var reauthRoom by remember {mutableStateOf<String?>(null)}
+        var reauthNotice by remember {mutableStateOf(false)}
+        fun afterAuthentication() {
+            val api=ServiceLocator.apiBackend
+            val origin=api.reauthenticationOrigin
+            val sameOwner=com.example.chat.ui.auth.AuthNavigationPolicy.mayResume(origin?.userId,origin?.tenantId,origin?.baseUrl,api.currentUser?.id,api.config.tenantId,api.config.restApiBaseUrl)
+            val destination=reauthRoute.takeIf {sameOwner}
+            route=destination?.takeUnless {it==AuthRoute.ChatDetail} ?: AuthRoute.Home
+            val room=reauthRoom.takeIf {sameOwner && destination==AuthRoute.ChatDetail}
+            reauthRoute=null;reauthRoom=null;api.clearReauthenticationOrigin()
+            if(room!=null) ServiceLocator.appScope.launch {
+                val owner=api.authSnapshot()
+                try {api.loadConversations()} catch(_:Exception) {}
+                if(api.authSnapshot()===owner) api.conversations.firstOrNull {it.id==room}?.let {
+                    selectedConversation=it;api.setActiveConversation(it.id);route=AuthRoute.ChatDetail
+                }
+            }
+        }
+        if(reauthNotice) androidx.compose.material3.AlertDialog(onDismissRequest={reauthNotice=false},
+            title={androidx.compose.material3.Text("Sign in again")},
+            text={androidx.compose.material3.Text(com.example.chat.data.auth.v2.AuthPendingContracts.revokedSessionNotice)},
+            confirmButton={androidx.compose.material3.TextButton(onClick={reauthNotice=false;route=AuthRoute.Login}) {androidx.compose.material3.Text("Sign in")}})
         var pendingSettingsDestination by androidx.compose.runtime.saveable.rememberSaveable {
             mutableStateOf<com.example.chat.ui.settings.SettingsDestination?>(null)
         }
         val lockRequired by ServiceLocator.appLock.lockRequired.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(route) {
+            val api=ServiceLocator.apiBackend
+            if(route in listOf(AuthRoute.Login,AuthRoute.Register,AuthRoute.Welcome) &&
+                com.example.chat.ui.auth.AuthNavigationPolicy.shouldLeaveAuth(api.isAuthenticated,
+                    pendingRegisterEmail.isNotBlank() && route==AuthRoute.Register, api.reauthenticationOrigin!=null)) route=AuthRoute.Home
+        }
         androidx.compose.runtime.LaunchedEffect(
             route,
             ServiceLocator.apiBackend.isAuthenticated,
@@ -293,8 +336,11 @@ fun AppRoot() {
                     ServiceLocator.appLock.onSignedOut()
                     ServiceLocator.lockBiometrics.stopAuthentication()
                     promptPending = false
+                    if(ServiceLocator.apiBackend.reauthenticationOrigin!=null) {
+                        reauthRoute=route;reauthRoom=selectedConversation?.id;reauthNotice=true
+                    } else {reauthRoute=null;reauthRoom=null}
                     selectedConversation = null
-                    route = AuthRoute.Welcome
+                    route = if(reauthNotice) AuthRoute.Login else AuthRoute.Welcome
                 }
             }
             ServiceLocator.apiBackend.addListener(signOutListener)
@@ -334,6 +380,8 @@ fun AppRoot() {
                 route == AuthRoute.ForgotPassword || route == AuthRoute.RegisterOrganization ||
                 route == AuthRoute.OtpVerification || route == AuthRoute.CreateNewPassword,
         ) {
+            if (route == AuthRoute.OtpVerification) { otpResumePending = false; resetCode = "" }
+            if (route == AuthRoute.CreateNewPassword) resetCode = ""
             route = when (route) {
                 AuthRoute.ForgotPassword -> AuthRoute.Login
                 AuthRoute.RegisterOrganization -> orgOrigin
@@ -357,9 +405,56 @@ fun AppRoot() {
             }
             navigation.goBack()
         }
+        var v2Workspace by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(ServiceLocator.apiBackend.config.tenantId)}
+        val v2Owner=ServiceLocator.apiBackend.authSnapshot()
+        val v2Flow = remember(v2Owner,v2Workspace) { if(com.example.chat.ReleaseFeatures.AUTH_V2_CONTRACTS) ServiceLocator.apiBackend.authV2Flow(v2Owner,v2Workspace) else null }
+        val authV2Link by com.example.chat.ui.auth.v2.AuthV2LinkRouter.links.collectAsState()
+        var authLinkNotice by remember { mutableStateOf<String?>(null) }
+        androidx.compose.runtime.LaunchedEffect(authV2Link, v2Flow, lockRequired) {
+            val link = authV2Link ?: return@LaunchedEffect
+            if (v2Flow == null || lockRequired) return@LaunchedEffect
+            try {
+                if(link.invite) {
+                    com.example.chat.ui.auth.v2.AuthV2LinkRouter.clearVerified()
+                    // The token must never go through the unrelated verification-link endpoint.
+                    when(val result=v2Flow.verifyInvitation(link.token.orEmpty(),link.workspace)) {
+                        is com.example.chat.data.auth.v2.InvitationVerification.Valid->{
+                            com.example.chat.ui.auth.v2.AuthV2LinkRouter.acceptVerified(link.token.orEmpty(),result)
+                            v2Workspace=result.workspace;route=AuthRoute.Register
+                            authLinkNotice="Invitation checked. Complete registration to join the workspace."
+                        }
+                        com.example.chat.data.auth.v2.InvitationVerification.Expired->authLinkNotice="This invitation has expired. Ask for a new one."
+                        com.example.chat.data.auth.v2.InvitationVerification.Redeemed->authLinkNotice="This invitation was already used. Ask for a new one."
+                        else->authLinkNotice="This invitation could not be verified. No account settings were changed."
+                    }
+                } else if (link.token != null) {
+                    authLinkNotice = if (v2Flow.confirmVerificationLink(link.token)) "Email verified." else "The link could not be verified."
+                } else if(link.workspace != null) {
+                    // Read-only server validation before any prefill; no credentials or account switch from a link.
+                    val validated = v2Flow.onboarding(link.workspace)
+                    v2Workspace=validated.tenantId
+                    authLinkNotice = "Workspace: ${validated.workspaceName}."
+                    route = AuthRoute.Login
+                }
+            } catch (cancelled:kotlinx.coroutines.CancellationException) {throw cancelled}
+            catch(_:Exception) {authLinkNotice="This link is unavailable or has expired."}
+            finally {com.example.chat.ui.auth.v2.AuthV2LinkRouter.consume(link)}
+        }
+        authLinkNotice?.let { message ->
+            androidx.compose.material3.AlertDialog(onDismissRequest={authLinkNotice=null},
+                title={androidx.compose.material3.Text("Chaty")},text={androidx.compose.material3.Text(message)},
+                confirmButton={androidx.compose.material3.TextButton(onClick={authLinkNotice=null}) {androidx.compose.material3.Text("OK")}})
+        }
         val loginScreen: @Composable () -> Unit = {
-            LoginScreen(
-                onBack = { route = AuthRoute.Welcome },
+            if (v2Flow != null) com.example.chat.ui.auth.v2.AuthV2Host(v2Flow,false,v2Workspace,
+                onBack={route=AuthRoute.Welcome},onSignedIn={ServiceLocator.appLock.onSignedIn();afterAuthentication()},onWorkspace={v2Workspace=it},active=route==AuthRoute.Login)
+            else LoginScreen(
+                active = route == AuthRoute.Login,
+                checkWorkspace = { workspace ->
+                    val data = ServiceLocator.apiBackend.checkOrganization(workspace)
+                    com.example.chat.data.api.ApiAuthClient.orgCheckToBanner(data, workspace).first
+                },
+                onBack = { emailCodeRoutePending=false;route = AuthRoute.Welcome },
                 onLoggedIn = { userId ->
                     ServiceLocator.appLock.onSignedIn()
                     promptPending = true
@@ -369,7 +464,7 @@ fun AppRoot() {
                     ServiceLocator.appScope.launch {
                         ServiceLocator.preferencesStorage.setStoredUserId(userId)
                     }
-                    route = AuthRoute.Home
+                    emailCodeRoutePending=false;afterAuthentication()
                 },
                 onForgotPassword = { route = AuthRoute.ForgotPassword },
                 onRegister = { registerOrigin = AuthRoute.Login; route = AuthRoute.Register },
@@ -381,6 +476,9 @@ fun AppRoot() {
                 requestEmailCode = { email, tenant, isDefaultTenant ->
                     com.example.chat.ServiceLocator.apiBackend.requestEmailLoginCode(email, tenant, isDefaultTenant)
                 },
+                onCodeResumeState={emailCodeRoutePending=it},
+                saveEmailAttempt={ServiceLocator.apiBackend.emailCodeResume(it)},
+                restoreEmailAttempt={ServiceLocator.apiBackend.restoreEmailCode(it)},
                 verifyEmailCode = { attempt, code ->
                     com.example.chat.ServiceLocator.apiBackend.verifyEmailLoginCode(attempt, code).id
                 },
@@ -394,7 +492,10 @@ fun AppRoot() {
             )
         }
         val registerScreen: @Composable () -> Unit = {
-            com.example.chat.ui.auth.RegisterScreen(
+            if (v2Flow != null) com.example.chat.ui.auth.v2.AuthV2Host(v2Flow,true,v2Workspace,
+                onBack={route=registerOrigin},onSignedIn={ServiceLocator.appLock.onSignedIn();afterAuthentication()},onWorkspace={v2Workspace=it},active=route==AuthRoute.Register)
+            else com.example.chat.ui.auth.RegisterScreen(
+                active = route == AuthRoute.Register,
                 onBack = { route = registerOrigin },
                 onRegistered = { userId, _ ->
                     ServiceLocator.appLock.onSignedIn()
@@ -409,6 +510,7 @@ fun AppRoot() {
                     otpEmail = pendingRegisterEmail
                     otpPurposeVerify = true
                     otpOrigin = AuthRoute.Register
+                    rememberOtpRoute()
                     route = if (pendingRegisterEmail.isBlank()) AuthRoute.Home else AuthRoute.OtpVerification
                 },
                 onRegisterOrganization = { orgOrigin = AuthRoute.Register; route = AuthRoute.RegisterOrganization },
@@ -460,6 +562,7 @@ fun AppRoot() {
                     otpEmail = email
                     otpPurposeVerify = false
                     otpOrigin = AuthRoute.ForgotPassword
+                    rememberOtpRoute()
                     route = AuthRoute.OtpVerification
                 },
             )
@@ -470,7 +573,7 @@ fun AppRoot() {
                 deliveryMessage = otpDeliveryMessage,
                 purpose = if (otpPurposeVerify) com.example.chat.ui.auth.OtpPurpose.VerifyEmail
                     else com.example.chat.ui.auth.OtpPurpose.ResetPassword,
-                onBack = { route = otpOrigin },
+                onBack = { otpResumePending = false; resetCode = ""; route = otpOrigin },
                 verify = { code ->
                     // VerifyEmail only: confirm marks the address verified
                     // server-side; mirror the flag locally so the home banner
@@ -484,20 +587,21 @@ fun AppRoot() {
                 },
                 onVerified = { code ->
                     if (otpPurposeVerify) {
+                        otpResumePending = false
                         route = AuthRoute.Home
                     } else {
                         resetCode = code
                         route = AuthRoute.CreateNewPassword
                     }
                 },
-                onSkip = if (otpPurposeVerify) ({ route = AuthRoute.Home }) else null,
+                onSkip = if (otpPurposeVerify) ({ pendingRegisterEmail="";otpResumePending = false; route = AuthRoute.Home }) else null,
             )
         }
         val createNewScreen: @Composable () -> Unit = {
             val resetCtx = androidx.compose.ui.platform.LocalContext.current
             com.example.chat.ui.auth.CreateNewPasswordScreen(
                 email = otpEmail,
-                onBack = { route = AuthRoute.OtpVerification },
+                onBack = { resetCode = ""; route = AuthRoute.OtpVerification },
                 submitNewPassword = { newPassword ->
                     ServiceLocator.apiBackend.resetPasswordWithCode(otpEmail, resetCode, newPassword)
                     // Research 4a.6: sign straight back in with the new password
@@ -516,11 +620,12 @@ fun AppRoot() {
                 showSuccess = { msg ->
                     android.widget.Toast.makeText(resetCtx, msg, android.widget.Toast.LENGTH_SHORT).show()
                 },
-                onPasswordUpdated = { route = AuthRoute.Home },
+                onPasswordUpdated = { resetCode = ""; otpResumePending = false; route = AuthRoute.Home },
             )
         }
         val orgScreen: @Composable () -> Unit = {
             com.example.chat.ui.auth.RegisterOrganizationScreen(
+                active=route==AuthRoute.RegisterOrganization,
                 onBack = { route = orgOrigin },
                 onRegistered = { userId, regOrgId, regOrgName ->
                     // Subscription step hidden until an order backend exists:
@@ -586,7 +691,14 @@ fun AppRoot() {
                 onRoute = { isAuthed ->
                     // Dart pushes MainNavigationShell when authenticated; the
                     // chats-home slice replaces the Home stub destination.
-                    route = if (isAuthed) AuthRoute.Home else AuthRoute.Welcome
+                    val api = ServiceLocator.apiBackend
+                    val resumeOtp = com.example.chat.ui.auth.AuthFormPolicy.canResumeOtp(
+                        otpResumePending, otpEmail, otpResumeTenant, api.config.tenantId,
+                        otpResumeBase, api.config.restApiBaseUrl, otpPurposeVerify, isAuthed,
+                        otpResumeUser, api.currentUser?.id)
+                    // Always return to empty-code OTP, never directly to a reset form with a saved code.
+                    route = if (resumeOtp) AuthRoute.OtpVerification else if (isAuthed) AuthRoute.Home else if(emailCodeRoutePending) AuthRoute.Login else AuthRoute.Welcome
+                    if (!resumeOtp) otpResumePending = false
                 },
             )
             AuthRoute.Welcome -> WelcomeScreen(
@@ -613,6 +725,10 @@ fun AppRoot() {
                 }
             }
             AuthRoute.Home -> homeStateHolder.SaveableStateProvider("home") { run {
+                if (!lockRequired) ServiceLocator.apiBackend.currentUser?.let { user ->
+                    com.example.chat.ui.core.components.auth.AuthWelcomeTour(
+                        ServiceLocator.apiBackend.config.tenantId + ":" + user.id, user.displayName)
+                }
                 // R7 (responsive plan): at expanded width Home is list pane + open
                 // chat pane; a row tap keeps the app on Home and fills the pane.
                 val windowMetrics = com.example.chat.ui.kit.LocalChatyWindowMetrics.current
@@ -2233,8 +2349,13 @@ private fun MessageManagementHost(onBack: () -> Unit) {
  *  visible layer blocks touches from reaching anything under it. */
 @Composable
 private fun PreAuthLayer(visible: Boolean, content: @Composable () -> Unit) {
+    val reduced = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    var shown by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(visible) { shown = visible }
+    val alpha by androidx.compose.animation.core.animateFloatAsState(
+        if (shown) 1f else 0f, androidx.compose.animation.core.tween(if(reduced) 0 else 120), label = "auth-route-entry")
     val mod = if (visible) {
-        Modifier.fillMaxSize().pointerInput(Unit) {}
+        Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }.pointerInput(Unit) {}
     } else {
         Modifier
             .layout { measurable, constraints ->

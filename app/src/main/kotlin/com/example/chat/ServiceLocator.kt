@@ -88,6 +88,14 @@ object ServiceLocator {
         // Always wire FcmRegistrarHolder + PushWakeHolder at process init so early
         // onNewToken / onMessageReceived callbacks never drop before UI launches.
         fcmRegistrar
+        // Restore signed-in push support before a cold-start framework service receives an intent.
+        // Fresh auth screens leave Firebase uninitialized.
+        if(apiBackend.isAuthenticated && !com.example.chat.data.demo.DemoMode.active) {
+            runCatching {
+                if(com.google.firebase.FirebaseApp.getApps(requireContext()).isEmpty())
+                    com.google.firebase.FirebaseApp.initializeApp(requireContext())
+            }.onFailure { android.util.Log.w("ChatyPush", "Messaging initialization unavailable") }
+        }
     }
 
     /** Defensive bootstrap invoked by background FCM entry points before accessing holders. */
@@ -300,7 +308,14 @@ object ServiceLocator {
             // not initialised (no google-services.json), which the registrar logs.
             tokenFetcher = { onToken, onError ->
                 try {
-                    com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+                    check(apiBackend.isAuthenticated) { "Messaging initialization waits for sign-in." }
+                    if(com.google.firebase.FirebaseApp.getApps(requireContext()).isEmpty()) {
+                        checkNotNull(com.google.firebase.FirebaseApp.initializeApp(requireContext())) { "Messaging is not configured." }
+                    }
+                    com.google.firebase.messaging.FirebaseMessaging.getInstance().apply {
+                        // Explicit authenticated token fetch owns messaging setup, not pre-auth screens.
+                        isAutoInitEnabled = apiBackend.isAuthenticated
+                    }.token
                         .addOnSuccessListener { token -> onToken(token) }
                         .addOnFailureListener { error -> onError(error) }
                 } catch (error: Throwable) {
@@ -1065,6 +1080,7 @@ object ServiceLocator {
         ).also { svc ->
             // Token refresh waits while a call is active (a refresh is an account-scope transition).
             apiBackend.isCallActive = { svc.hasActiveSession }
+            svc.addStateListener { apiBackend.onCallSessionStateChanged() }
             apiBackend.addAuthScopeListener { next ->
                 // Callback only detaches state under auth lock; disposal owns
                 // the captured old peer and runs outside that lock.

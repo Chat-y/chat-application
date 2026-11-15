@@ -1,5 +1,7 @@
 package com.example.chat.ui.auth
 
+import com.example.chat.ui.core.components.auth.ChatyUiTokens
+
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -31,12 +33,13 @@ import com.example.chat.ui.theme.LocalThemeConfig
  *  the backend/session seams. */
 @Composable
 fun SplashScreen(routeToHome: suspend () -> Boolean, onRoute: (Boolean) -> Unit) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
     var started by remember { mutableStateOf(false) }
     val fade by animateFloatAsState(
         targetValue = if (started) 1.0f else 0.8f,
         animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
-        label = "splashFade",
+        label = authCopy("splashFade"),
     )
 
     LaunchedEffect(Unit) {
@@ -53,7 +56,7 @@ fun SplashScreen(routeToHome: suspend () -> Boolean, onRoute: (Boolean) -> Unit)
                 modifier = Modifier
                     .alpha(fade)
                     .size(80.dp)
-                    .clip(RoundedCornerShape(26.dp)),
+                    .clip(ChatyUiTokens.cardShape),
                 contentAlignment = Alignment.Center,
             ) {
                 // ChatyBrandIcon placeholder: the brand-asset slice swaps in the

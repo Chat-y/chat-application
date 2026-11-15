@@ -1,3 +1,7 @@
+# Legal publication checks
+
+15 November 2026: bundled text is version0.3-draft, rewritten for local in-app review. No external legal URLs, no activated acceptance gate and no claim the old business-practice statements were confirmed. The prior review table below remains an inventory of questions, not a declaration that the revised draft asserts every claim. Legal entity, contact, legal basis/rights, age, retention, processor/transfer, moderation and encryption statements still need verification before publication.
+
 # OWNER-TO-CONFIRM checklist - Chaty legal/Data Safety claims
 2026-11-04, publisher review of writer-F delta 7/8. Every row is an unverified
 claim currently present in the bundled legal drafts or Data Safety draft.

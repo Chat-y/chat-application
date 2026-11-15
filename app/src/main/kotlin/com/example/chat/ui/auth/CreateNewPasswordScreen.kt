@@ -1,5 +1,7 @@
 package com.example.chat.ui.auth
 
+import com.example.chat.ui.core.components.auth.ChatyUiTokens
+
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,13 +58,18 @@ fun CreateNewPasswordScreen(
     showSuccess: (message: String) -> Unit,
     onPasswordUpdated: () -> Unit,
 ) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
+    val online=com.example.chat.ui.core.components.auth.rememberAuthOnline()
     val scope = rememberCoroutineScope()
 
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var obscurePassword by remember { mutableStateOf(true) }
     var obscureConfirm by remember { mutableStateOf(true) }
+    // Auth screenshot blocking is off by default. Preserve the opt-in hook, do not apply globally.
+    // com.example.chat.ui.kit.ProtectSensitiveWindow()
+    com.example.chat.ui.core.components.auth.RemaskPasswordOnBackground { obscurePassword = true; obscureConfirm = true }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var passwordError by remember { mutableStateOf<String?>(null) }
@@ -83,18 +90,20 @@ fun CreateNewPasswordScreen(
 
         isLoading = true
         errorMessage = null
+        val submittedPassword = password
         scope.launch {
             try {
-                submitNewPassword(password)
+                authRequest { submitNewPassword(submittedPassword) }
                 showSuccess(CreateNewPasswordLogic.SUCCESS_MESSAGE)
                 onPasswordUpdated()
-            } catch (e: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 errorMessage = CreateNewPasswordLogic.displayError(e)
-                isLoading = false
-            }
+            } finally { isLoading = false }
         }
     }
 
+    val guardedBack = com.example.chat.ui.core.components.auth.rememberAuthBackAction(password.isNotEmpty() || confirmPassword.isNotEmpty(), onBack)
     Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
         Box(
             modifier = Modifier
@@ -102,81 +111,87 @@ fun CreateNewPasswordScreen(
                 .padding(padding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = ChatyUiTokens.space24, vertical = ChatyUiTokens.space16),
             contentAlignment = Alignment.Center,
         ) {
             Column(modifier = Modifier.widthIn(max = ChatyAdaptiveLogic.AUTH_COLUMN_MAX_DP.dp).fillMaxWidth()) {
-                AuthBackButton(onClick = onBack)
-                Spacer(Modifier.height(28.dp))
-                Text(
-                    "Create New Password",
-                    color = Color(theme.primaryTextColor),
-                    fontSize = 26.sp,
+                AuthBackButton(onClick = guardedBack)
+                Spacer(Modifier.height(ChatyUiTokens.space32))
+                com.example.chat.ui.core.components.auth.AuthOfflineNotice(online,theme)
+        Text(
+                    authCopy("Create New Password"),
+                    color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+                    fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text26,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.5).sp,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space8))
                 Text(
-                    "Use at least 12 characters with uppercase, lowercase, a number, and a symbol.",
-                    color = Color(theme.secondaryTextColor),
-                    fontSize = 14.sp,
+                    authCopy("Use 12 to 128 characters with uppercase, lowercase, a number, and a symbol."),
+                    color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+                    fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text14,
                 )
-                Spacer(Modifier.height(36.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space32))
                 AuthTextField(
-                    label = "Password",
-                    hintText = "Enter a strong password",
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                    autofillTypes = listOf("NewPassword"),
+                    label = authCopy("Password"),
+                    hintText = authCopy("Enter a strong password"),
                     capsule = true,
                     theme = theme,
                     value = password,
-                    onValueChange = { password = it },
+                    onValueChange = { password = it; passwordError = null; errorMessage = null },
                     obscureText = obscurePassword,
                     error = passwordError,
                     suffixIcon = {
-                        IconButton(onClick = { obscurePassword = !obscurePassword }) {
+                        IconButton(modifier = Modifier.padding(ChatyUiTokens.touchGap / 2), onClick = { obscurePassword = !obscurePassword }) {
                             Icon(
                                 // Dart: visibility_off_outlined while obscured,
                                 // visibility_outlined while visible.
                                 if (obscurePassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                contentDescription = if (obscurePassword) "Show password" else "Hide password",
+                                contentDescription = if (obscurePassword) authCopy("Show password") else authCopy("Hide password"),
                                 tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.6)),
                                 modifier = Modifier.size(20.dp),
                             )
                         }
                     },
                 )
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
-                    label = "Confirm Password",
-                    hintText = "Confirm password",
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                    onDone = { if (!isLoading) handleResetPassword() },
+                    label = authCopy("Confirm Password"),
+                    hintText = authCopy("Confirm password"),
                     capsule = true,
                     theme = theme,
                     value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
+                    onValueChange = { confirmPassword = it; confirmError = null; errorMessage = null },
                     obscureText = obscureConfirm,
                     error = confirmError,
                     suffixIcon = {
-                        IconButton(onClick = { obscureConfirm = !obscureConfirm }) {
+                        IconButton(modifier = Modifier.padding(ChatyUiTokens.touchGap / 2), onClick = { obscureConfirm = !obscureConfirm }) {
                             Icon(
                                 if (obscureConfirm) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                contentDescription = if (obscureConfirm) "Show password" else "Hide password",
+                                contentDescription = if (obscureConfirm) authCopy("Show password") else authCopy("Hide password"),
                                 tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.6)),
                                 modifier = Modifier.size(20.dp),
                             )
                         }
                     },
                 )
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space24))
                 errorMessage?.let {
                     Text(
                         it,
-                        color = Color(theme.dangerColor),
-                        fontSize = 13.5.sp,
+                        color = com.example.chat.ui.auth.authReadable(theme, theme.dangerColor),
+                        fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text13_5,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(bottom = 16.dp),
+                        modifier = Modifier.padding(bottom = ChatyUiTokens.space16),
                     )
                 }
                 AuthPrimaryButton(
-                    text = "Reset Password",
+                    text = authCopy("Reset Password"),
                     theme = theme,
                     onClick = { handleResetPassword() },
                     isLoading = isLoading,

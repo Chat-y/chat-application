@@ -315,6 +315,7 @@ class ApiAuthClient(
         val response: Pair<Int, String> = try {
             postWithFallback("auth/forgot-password", body, tenant = cleanTenant)
         } catch (e: Exception) {
+            if (e is AuthRateLimitException) throw e
             throw Exception("Unable to reach server. Please check your internet connection.")
         }
         if (response.first == 200) {
@@ -355,6 +356,7 @@ class ApiAuthClient(
         var response = try {
             transport.execute("GET", "$base/profile/username-availability?u=$encoded", headers, null)
         } catch (e: Exception) {
+            if (e is AuthRateLimitException) throw e
             throw Exception("Unable to reach server. Please check your internet connection.")
         }
         if (response.first == 404) {
@@ -402,6 +404,7 @@ class ApiAuthClient(
         var response = try {
             transport.execute("GET", "$base/profile/$encoded", headers, null)
         } catch (e: Exception) {
+            if (e is AuthRateLimitException) throw e
             throw Exception("Unable to reach server. Please check your internet connection.")
         }
         if (response.first == 404) {
@@ -460,6 +463,7 @@ class ApiAuthClient(
         val response: Pair<Int, String> = try {
             postWithFallback(path, body, tenant = tenantId().trim())
         } catch (e: Exception) {
+            if (e is AuthRateLimitException) throw e
             throw Exception("Unable to reach server. Please check your internet connection.")
         }
         if (response.first == 200) {
@@ -542,6 +546,7 @@ class ApiAuthClient(
     /** Transport failure text: name the actual cause class so a server outage is not
      *  misreported as the user's internet. The configured endpoint is not changed here. */
     private fun serverUnreachable(e: Exception): Exception {
+        if (e is AuthRateLimitException) return e
         val cause = when (e) {
             is java.net.SocketTimeoutException -> "server did not answer in time"
             is java.net.ConnectException -> "connection refused by the server"

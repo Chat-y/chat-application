@@ -11,6 +11,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
+    id("androidx.baselineprofile")
 }
 
 // google-services.json is per-environment and not committed; without it the
@@ -121,6 +122,11 @@ android {
         }
     }
 
+    testOptions {
+        // Emulator UI tests: system animations off to cut flake in the shard runs.
+        animationsDisabled = true
+    }
+
     packaging {
         jniLibs {
             // Compress native .so libraries inside the APK so split APKs stay under Telegram's 50 MB limit.
@@ -165,6 +171,8 @@ android {
 dependencies {
     // Optional SIM-number chooser; no phone/SMS permission and no ownership assertion.
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
     // Local bundled GeoLibre map: origin-scoped WebMessageListener and assets loader.
     implementation("androidx.webkit:webkit:1.18.0")
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
@@ -240,6 +248,9 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     // org.json so unit tests exercise the same JSON helpers as the device.
     testImplementation("org.json:json:20241224")
+
+    // Baseline Profile generator module (final-list item 23).
+    "baselineProfile"(project(":baselineprofile"))
 }
 
 // ── MLS native binding (mls-native UniFFI shim over the repo-owned OpenMLS

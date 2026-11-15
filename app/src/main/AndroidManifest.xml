@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -47,11 +47,28 @@
         android:label="Chaty"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
+        android:enableOnBackInvokedCallback="true"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:supportsRtl="true"
         android:theme="@style/Theme.Chaty"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Firebase's eager provider is replaced by explicit authenticated initialization below. -->
+        <provider android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider" tools:node="remove" />
+        <!-- Auth is analytics-free; messaging token registration is explicitly enabled after sign-in. -->
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
+
+
+        <activity
+            android:name=".CallPipActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}.call"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/Theme.Chaty.CallPip"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode" />
 
         <activity
             android:name=".MainActivity"
@@ -75,6 +92,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="chaty" android:host="reset-password" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="chaty" android:host="verify-email" />
+                <data android:scheme="chaty" android:host="workspace" />
+                <data android:scheme="chaty" android:host="invite" />
             </intent-filter>
             <!-- Static launcher shortcuts (res/xml/shortcuts.xml). MainActivity forwards
                  EXTRA_SHORTCUT_ACTION to LauncherShortcutRouter; AppRoot consumes it only
@@ -220,7 +245,7 @@
         <service
             android:name="com.example.chat.data.services.CallForegroundService"
             android:foregroundServiceType="microphone|camera|mediaProjection"
-            android:stopWithTask="true" />
+            android:stopWithTask="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -238,6 +263,10 @@
             android:grantUriPermissions="true" />
         <receiver
             android:name="com.example.chat.notifications.CallActionReceiver"
+            android:exported="false" />
+        <!-- Explicit coordinator actions, including inline notification Reply. -->
+        <receiver
+            android:name="com.example.chat.notifications.ChatyNotificationActionReceiver"
             android:exported="false" />
         <service
             android:name="com.example.chat.notifications.ChatyRealtimeForegroundService"

@@ -333,11 +333,12 @@ private fun ReferenceHorizontalPuck(twoWay: Boolean, background: Color, accept: 
                     onDragEnd = { if (!settling) {
                         settling = true
                         val direction = when { offset >= range * 0.7f -> 1; twoWay && offset <= -range * 0.7f -> -1; else -> 0 }
+                        // Dispatch on release; the exit animation is visual only.
+                        if (direction == 1) acceptNow() else if (direction == -1) declineNow()
                         scope.launch {
                             val start = offset
                             androidx.compose.animation.core.animate(start, direction * range, animationSpec = tween(if (reduced) 0 else 180)) { value, _ -> offset = value }
                             offset = 0f; settling = false
-                            if (direction == 1) acceptNow() else if (direction == -1) declineNow()
                         }
                     } },
                 )
@@ -1118,6 +1119,7 @@ private fun DragOutOfCircleControl(
                                 val startY = dy
                                 val distance = kotlin.math.hypot(startX, startY)
                                 val accepted = distance >= thresholdPx
+                                if (accepted) onTrigger()
                                 coroutineScope.launch {
                                     try {
                                         val scale = if (accepted) thresholdPx * 1.8f / distance else 0f
@@ -1128,7 +1130,6 @@ private fun DragOutOfCircleControl(
                                             dx = startX * (1f + (scale - 1f) * fraction)
                                             dy = startY * (1f + (scale - 1f) * fraction)
                                         }
-                                        if (accepted) onTrigger()
                                     } finally {
                                         // A mounted control can be reused after either result.
                                         // Never let its previous exit offset count as a new drag.
@@ -1243,6 +1244,10 @@ private fun VerticalDragPuck(
                                 start >= thresholdPx -> 1
                                 else -> 0
                             }
+                            when {
+                                direction < 0 -> currentUp()
+                                direction > 0 -> currentDown()
+                            }
                             coroutineScope.launch {
                                 try {
                                     val target = direction * thresholdPx * 1.4f
@@ -1252,10 +1257,6 @@ private fun VerticalDragPuck(
                                             animationSpec = tween(if (direction != 0) 120 else 220),
                                         ) { value, _ -> dy = value }
                                     } else dy = target
-                                    when {
-                                        direction < 0 -> currentUp()
-                                        direction > 0 -> currentDown()
-                                    }
                                 } finally {
                                     // The parent may leave this control mounted after a callback.
                                     // An exit offset never belongs to the next gesture.

@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "chat-application"
 include(":app")
+include(":baselineprofile")

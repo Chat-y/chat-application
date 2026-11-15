@@ -90,7 +90,9 @@ class ChatyNotificationCoordinator(
                 if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_STOP) refreshCallState()
             })
         }
-        api.onIncomingMessage = { message, convoTitle, convoMuted -> scope.launch { onMessage(message, convoTitle, convoMuted) } }
+        api.onScopedIncomingMessage = { owner, message, convoTitle, convoMuted ->
+            scope.launch { onMessage(owner, message, convoTitle, convoMuted) }
+        }
         lane.reconcileOnStart()
     }
 
@@ -142,8 +144,10 @@ class ChatyNotificationCoordinator(
 
     private fun foreground() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
-    private fun onMessage(message: ChatMessage, convoTitle: String?, convoMuted: Boolean) {
-        val account = api.authSnapshot()
+    private fun onMessage(owner: ApiAccountScope, message: ChatMessage, convoTitle: String?, convoMuted: Boolean) {
+        // The source owner survives dispatch; the lane checks it again at OS execution.
+        if (api.authSnapshot() !== owner) return
+        val account = owner
         val me = account.userId
         val signedIn = !me.isNullOrBlank() && !account.token.isNullOrBlank()
         val gate = ChatyNotificationPolicy.MessageGate(
@@ -237,7 +241,7 @@ class ChatyNotificationCoordinator(
                 val chatLocked = isChatVaultLocked(id) || prefs.security.lockedConversationIds.contains(id)
                 if (!ChatyNotificationPolicy.mayReply(appLock.lockRequired.value, prefs.security.isAppLockEnabled, chatLocked)) return
                 // Scope-bound send: token/base URL come from the ORIGINAL scope, request cancelled on any auth transition.
-                if (api.sendMessageForScope(account, id, text)) cancelFor(id)
+                if (api.sendMessageForScope(account, id, text)) lane.cancelMessageFor(account, id)
             }
             ChatyNotificationPolicy.ACTION_DISMISS -> e.conversationId?.let { cancelFor(it) } // local only: no read state is sent to the server
             ChatyNotificationPolicy.ACTION_MUTE -> {

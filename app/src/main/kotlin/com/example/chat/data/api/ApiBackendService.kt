@@ -47,15 +47,46 @@ class ApiBackendService(
     private val auth = ApiAuthClient(
         baseUrl = { config.restApiBaseUrl },
         tenantId = { config.tenantId },
-        transport = OkHttpApiTransport(allowRedirects = false),
+        transport = AuthRateLimitTransport(OkHttpApiTransport(allowRedirects = false)),
         token = { session.token },
+    )
+
+    /** Local-only additive contract adapter. Never adopts a session or changes legacy routes. */
+    fun authV2Contracts(expected: ApiAccountScope = authSnapshot()) = ApiAuthV2Client(
+        baseUrl = expected.baseUrl, tenantId = expected.tenantId, token = expected.token,
+        transport = AuthRateLimitTransport(OkHttpApiTransport(allowRedirects = false)), isCurrent = { authSnapshot() === expected },
+    )
+
+    fun authV2Flow(expected: ApiAccountScope = authSnapshot(), targetWorkspace: String = expected.tenantId) = com.example.chat.data.auth.v2.AuthV2FlowController(
+        client = ApiAuthV2Client(baseUrl=expected.baseUrl, tenantId=targetWorkspace.trim(),
+            token=expected.token.takeIf {targetWorkspace.trim()==expected.tenantId},
+            transport=AuthRateLimitTransport(OkHttpApiTransport(allowRedirects=false)),isCurrent={authSnapshot()===expected}),
+        deviceProof = { requireNotNull(deviceIdentity) { "Installation identity is not ready." }
+            .challengeHeaders(expected.baseUrl, targetWorkspace.trim(), OkHttpApiTransport(allowRedirects = false)) { authSnapshot() === expected } },
+        adoptionSink = com.example.chat.data.auth.v2.AuthV2AdoptionSink { result ->
+            accountSwitchMutex.withLock {
+                check(com.example.chat.ReleaseFeatures.AUTH_V2_CONTRACTS) { "New sign-in is not enabled." }
+                if (authSnapshot() !== expected) throw ApiScopeChangedException()
+                check(!isCallActive()) { "Finish the current call before changing accounts." }
+                val routing = config.snapshot()
+                adoptCodeOrAddedAccount(result, targetWorkspace.trim(), expected.baseUrl,
+                    routing.webSocketTemplate, routing.generation, targetWorkspace.trim().equals(config.defaultTenantId,true))
+            }
+        },
+        isCurrent = { authSnapshot() === expected },
+        workspaceAdoption = {result,workspace -> accountSwitchMutex.withLock {
+            if(authSnapshot()!==expected) throw ApiScopeChangedException()
+            check(com.example.chat.ReleaseFeatures.AUTH_V2_CONTRACTS && !isCallActive()) {"Finish the current call before switching workspace."}
+            val routing=config.snapshot()
+            adoptCodeOrAddedAccount(result,workspace,expected.baseUrl,routing.webSocketTemplate,routing.generation,false)
+        }},
     )
 
     /** Scoped auth requests for a registered account without mutating global routing. */
     private fun scopedAuthClient(baseUrl: String, tenantId: String): ApiAuthClient = ApiAuthClient(
         baseUrl = { baseUrl },
         tenantId = { tenantId },
-        transport = OkHttpApiTransport(allowRedirects = false),
+        transport = AuthRateLimitTransport(OkHttpApiTransport(allowRedirects = false)),
         token = { session.token },
     )
 
@@ -224,7 +255,7 @@ class ApiBackendService(
             "x-tenant-id" to expected.tenantId,
             "Accept" to "application/json",
         )
-        val transport = OkHttpApiTransport()
+        val transport = ScopedCallHttpTransport(expected, ::withAuthScope, callRequests)
         val primary = transport.execute("GET", "$base/chat/call/ice-servers", headers, null)
         val response = if (primary.first == 404) {
             transport.execute("GET", "$base/api/v1/chat/call/ice-servers", headers, null)
@@ -283,15 +314,21 @@ class ApiBackendService(
      *  socket is down (app may be backgrounded). */
     @Volatile private var callProtocolOwner: ApiAccountScope? = null
     @Volatile private var durableCallInbox = false
+    @Volatile private var lastCapabilityProbeMs = 0L
     private val callProtocolMutex = kotlinx.coroutines.sync.Mutex()
     private var lastInboxWakeMs = 0L
+    private var lastInboxWakeOwner: ApiAccountScope? = null
     @Volatile var onDurableCallInboxWake: (suspend (ApiAccountScope) -> Unit)? = null
     suspend fun usesDurableCallInbox(expected: ApiAccountScope): Boolean = callProtocolMutex.withLock {
         if (authSnapshot() !== expected) return@withLock false
-        if (callProtocolOwner !== expected) {
-            val supported = withContext(Dispatchers.IO) { ApiServerCapabilities.supports(expected, OkHttpApiTransport(allowRedirects = false), "call_signal_inbox_v1") }
+        val probeDue = !durableCallInbox && android.os.SystemClock.elapsedRealtime() - lastCapabilityProbeMs >= 5 * 60_000L
+        if (callProtocolOwner !== expected || probeDue) {
+            val supported = withContext(Dispatchers.IO) { ApiServerCapabilities.supports(expected, ScopedCallHttpTransport(expected, ::withAuthScope, callRequests), "call_signal_inbox_v1") }
             if (authSnapshot() !== expected) return@withLock false
+            // Negative probes may be transient. A verified durable inbox must never
+            // downgrade to destructive legacy polling on a failed later probe.
             durableCallInbox = supported; callProtocolOwner = expected
+            lastCapabilityProbeMs = android.os.SystemClock.elapsedRealtime()
             realtime.connect() // URL changes only after authenticated capability verification.
         }
         durableCallInbox
@@ -299,7 +336,8 @@ class ApiBackendService(
     private fun wakeCallInbox(expected: ApiAccountScope) {
         val now = android.os.SystemClock.elapsedRealtime()
         synchronized(callProtocolMutex) {
-            if (now - lastInboxWakeMs < 1_000) return
+            if (lastInboxWakeOwner === expected && now - lastInboxWakeMs < 1_000) return
+            lastInboxWakeOwner = expected
             lastInboxWakeMs = now
         }
         chatScope.launch { pollCallSignalsAndAwait(expected) }
@@ -343,11 +381,11 @@ class ApiBackendService(
                 }
                 if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
                     syncForeground = false
-                    realtime.disconnect()
+                    if (!isCallActive()) realtime.disconnect()
                     activeSyncJob?.cancel()
                     activeSyncJob = null
                     syncRunning = false
-                    callCoordinator.foreground(false)
+                    callCoordinator.foreground(isCallActive())
                 }
             })
         }
@@ -400,7 +438,9 @@ class ApiBackendService(
             if (wasDown) {
                 conversationsDirty = true
                 chatScope.launch {
-                    loadConversationsIfNeeded(force = false)
+                    // Reconnect may have missed messages in rooms that are not open.
+                    // Use the same incoming-admission path as push before loading active rooms.
+                    syncFromPushNudge(connectedOwner)
                     val activeTargets = buildSet {
                         activeConversationId?.takeIf { it.isNotEmpty() }?.let { add(it) }
                         addAll(activeConversationIds)
@@ -559,7 +599,7 @@ class ApiBackendService(
             schedulePersistRoomMessages(roomId, expected)
             schedulePersistConversations(expected)
             notifyChatListeners()
-            if (isNewToList && notifiedPushMessageIds.add(normalized.id)) runCatching { onIncomingMessage?.invoke(normalized, convoTitle, convoMuted) }
+            if (isNewToList) emitIncomingMessage(expected, normalized, convoTitle, convoMuted)
         }
 
         override fun onMessageEdited(roomId: String, messageId: String, newContent: String, editedAt: Instant) {
@@ -991,6 +1031,13 @@ class ApiBackendService(
     /** Hook set by the locator: true while a call is in progress (token refresh waits until it ends). */
     @Volatile var isCallActive: () -> Boolean = { false }
 
+    /** Only a user-started/accepted live call may retain signaling while backgrounded. */
+    fun onCallSessionStateChanged() {
+        val active = isCallActive()
+        callCoordinator.foreground(syncForeground || active)
+        if (syncForeground || active) realtime.connect() else realtime.disconnect()
+    }
+
     /** Reachability probe for the connection banner: GET <base>/health. Throws on failure. */
     suspend fun pingBackend() = withContext(Dispatchers.IO) {
         val base = config.restApiBaseUrl.trimEnd('/').replace(Regex("/api/v[0-9]+$"), "")
@@ -1003,7 +1050,7 @@ class ApiBackendService(
         webSocketUrl = { resolveWebSocketUrl() },
         // Every connect/reconnect and heartbeat re-checks this gate, including
         // auth/network/push callbacks. Background nudges use bounded REST only.
-        token = { if (syncForeground) session.token else null },
+        token = { if (syncForeground || isCallActive()) session.token else null },
         // Reconnect-storm-safe full jitter (500ms base, 30s cap): every retry is
         // uniformly spread, so a server restart never sees a thundering herd.
         backoff = com.example.chat.data.network.BackoffPolicy(
@@ -1026,20 +1073,30 @@ class ApiBackendService(
 
     suspend fun syncFromPushNudge(expected: ApiAccountScope = authSnapshot()) {
         if (session.token == null || DemoMode.active || authSnapshot() !== expected) return
+        var completedOwner: ApiAccountScope? = null
         pushSyncMutex.withLock {
             if (expected.token == null || DemoMode.active || authSnapshot() !== expected) return@withLock
+            // Follow only the owner snapshot returned by our own guarded token refresh.
+            // A concurrent account/config transition must never redirect this push.
+            val owner = ensureFreshToken(expected) ?: return@withLock
+            if (owner !== expected && (owner.userId != expected.userId || owner.tenantId != expected.tenantId || owner.baseUrl != expected.baseUrl)) return@withLock
             if (synchronized(chatLock) { _conversations.isEmpty() }) {
-                hydrateLocalStateForScope(expected)
+                hydrateLocalStateForScope(owner)
             }
             val (conversationsBefore, cachedBeforeByRoom) = synchronized(chatLock) {
                 _conversations.toList() to _messages.mapValues { (_, list) -> list.toList() }
             }
-            ensureFreshToken()
-            ensureOutboxLoaded(expected)
-            flushOutbox()
+            // A pending upload/send can take longer than the entire FCM wake budget.
+            // Receiving and posting notifications must not wait for the outgoing queue.
             conversationsDirty = true
-            loadConversationsIfNeeded(force = true)
-            if (authSnapshot() !== expected) return@withLock
+            val incoming = ApiChatClient(
+                baseUrl = { owner.baseUrl }, tenantId = { owner.tenantId }, token = { owner.token },
+                transport = ScopedCallHttpTransport(owner, ::withAuthScope, sendRequests),
+            )
+            conversationsSyncMutex.withLock {
+                if (authSnapshot() === owner) loadConversationsForScope(owner, incoming)
+            }
+            if (authSnapshot() !== owner) return@withLock
             val (conversationsAfter, dirtySnapshot, syncedSnapshot) = synchronized(chatLock) {
                 Triple(_conversations.toList(), dirtyRooms.toSet(), syncedRooms.keys.toSet())
             }
@@ -1050,27 +1107,23 @@ class ApiBackendService(
                 syncedRoomIds = syncedSnapshot,
                 cachedMessagesByRoom = cachedBeforeByRoom,
             )
-            val myUserId = expected.userId
+            val myUserId = owner.userId
             for (conv in targetRooms) {
-                if (authSnapshot() !== expected) return@withLock
+                if (authSnapshot() !== owner) return@withLock
                 hydrateRoomMessagesFromCacheIfNeeded(conv.id)
-                val msgsBefore = synchronized(chatLock) { _messages[conv.id]?.toList().orEmpty() }
+                val msgsBefore = cachedBeforeByRoom[conv.id].orEmpty()
+                val fetched = withContext(Dispatchers.IO) { incoming.listMessages(conv.id) }
+                if (authSnapshot() !== owner) return@withLock
+                if (fetched == null || !applyLoadedMessages(conv.id, fetched, owner)) continue
                 if (com.example.chat.ReleaseFeatures.SCOPED_DELIVERY_RECEIPTS && conv.isDirect) {
-                    val scopedChat = ApiChatClient(
-                        baseUrl = { expected.baseUrl }, tenantId = { expected.tenantId }, token = { expected.token },
-                        transport = ScopedCallHttpTransport(expected, ::withAuthScope, sendRequests),
-                    )
-                    val fetched = withContext(Dispatchers.IO) { scopedChat.listMessages(conv.id) }
-                    if (authSnapshot() !== expected) return@withLock
-                    if (fetched == null || !applyLoadedMessages(conv.id, fetched, expected)) continue
                     val incomingIds = fetched.filter {
                         it.senderId != myUserId && !it.isDeletedForEveryone && !it.isDeletedForMe && !it.isRevokedBySender
                     }.map { it.id }.distinct().take(100)
                     if (incomingIds.isNotEmpty()) withContext(Dispatchers.IO) {
-                        scopedChat.markFetchedMessagesDelivered(conv.id, incomingIds)
+                        incoming.markFetchedMessagesDelivered(conv.id, incomingIds)
                     }
-                } else loadMessages(conv.id)
-                if (authSnapshot() !== expected) return@withLock
+                }
+                if (authSnapshot() !== owner) return@withLock
                 val msgsAfter = synchronized(chatLock) { _messages[conv.id]?.toList().orEmpty() }
                 val freshIncoming = ApiPushSyncHelper.findNewIncomingMessagesForPush(
                     myUserId = myUserId,
@@ -1080,11 +1133,13 @@ class ApiBackendService(
                     alreadyNotifiedIds = notifiedPushMessageIds,
                 )
                 for (msg in freshIncoming) {
-                    if (notifiedPushMessageIds.add(msg.id)) {
-                        runCatching { onIncomingMessage?.invoke(msg, conv.title, conv.isMuted) }
-                    }
+                    emitIncomingMessage(owner, msg, conv.title, conv.isMuted)
                 }
             }
+            completedOwner = owner
+        }
+        completedOwner?.let { owner ->
+            if (authSnapshot() === owner) chatScope.launch { flushOutbox() }
         }
     }
 
@@ -1352,6 +1407,24 @@ class ApiBackendService(
     }
     /** Incoming (not own) realtime message: (message, conversation title, muted). Invoked outside chatLock. */
     @Volatile var onIncomingMessage: ((ChatMessage, String?, Boolean) -> Unit)? = null
+    /** Captured owner travels with deferred notification work; never infer it after dispatch. */
+    @Volatile var onScopedIncomingMessage: ((ApiAccountScope, ChatMessage, String?, Boolean) -> Unit)? = null
+
+    private fun emitIncomingMessage(owner: ApiAccountScope, message: ChatMessage, title: String?, muted: Boolean) {
+        if (authSnapshot() !== owner || message.senderId.isBlank() || message.senderId == owner.userId ||
+            message.type == MessageType.system || message.isDeletedForEveryone || message.isDeletedForMe || message.isRevokedBySender) return
+        val scoped = onScopedIncomingMessage
+        val legacy = onIncomingMessage
+        if (scoped == null && legacy == null) return
+        val locallyMuted = isConversationMuted(message.conversationId)
+        var admitted = false
+        withAuthScope(owner) { admitted = notifiedPushMessageIds.add(message.id) }
+        if (!admitted) return
+        runCatching {
+            if (scoped != null) scoped(owner, message, title, muted || locallyMuted)
+            else legacy?.invoke(message, title, muted || locallyMuted)
+        }
+    }
     // Process lifecycle owns this UI catch-up loop, never the sticky socket service.
     @Volatile private var syncForeground = false
     @Volatile private var syncRunning = false
@@ -1583,11 +1656,12 @@ class ApiBackendService(
         if (applied && changed) notifyChatListeners()
     }
 
-    suspend fun loadConversations() {
-        val expected = authSnapshot()
+    suspend fun loadConversations() = loadConversationsForScope(authSnapshot(), chat)
+
+    private suspend fun loadConversationsForScope(expected: ApiAccountScope, reader: ApiChatClient) {
         var changed = false
         val applied = com.example.chat.data.api.publishScopedApiResult(expected, ::withAuthScope,
-            fetch = { withContext(Dispatchers.IO) { chat.listRooms() } },
+            fetch = { withContext(Dispatchers.IO) { reader.listRooms() } },
             publish = { result ->
                 when (result) {
                     is ApiChatClient.RoomsResult.Ok -> {
@@ -1673,15 +1747,21 @@ class ApiBackendService(
 
     private fun applyLoadedMessages(chatId: String, remote: List<ChatMessage>, expected: ApiAccountScope): Boolean {
         var gone: List<com.example.chat.data.local.AttachmentRef> = emptyList()
+        var before: List<ChatMessage> = emptyList()
+        var after: List<ChatMessage> = emptyList()
+        var conversation: Conversation? = null
         val applied = withAuthScope(expected) {
             synchronized(chatLock) {
                 val current = _messages[chatId] ?: mutableListOf()
+                before = current.toList()
+                conversation = _conversations.firstOrNull { it.id == chatId }
                 val merged = ApiMessageDeliveryMerge.mergeRemoteMessages(current, remote) { m ->
                     (m.deliveryState == DeliveryState.sending || m.id.startsWith("temp_")) &&
                         (isQueued(m.id) || remote.none { it.text == m.text })
                 }.toMutableList()
                 gone = com.example.chat.data.media.AttachmentRefs.refsGone(chatId, current.toList(), merged)
                 _messages[chatId] = merged
+                after = merged.toList()
             }
             syncedRooms[chatId] = System.currentTimeMillis()
             dirtyRooms.remove(chatId)
@@ -1691,6 +1771,12 @@ class ApiBackendService(
         schedulePersistRoomMessages(chatId, expected)
         notifyGone(gone)
         notifyChatListeners()
+        // REST catch-up can win the race with the push or socket event. Admit the
+        // newly fetched incoming messages here too, through the same atomic dedup.
+        conversation?.let { conv ->
+            ApiPushSyncHelper.findNewIncomingMessagesForPush(expected.userId, conv, before, after, notifiedPushMessageIds)
+                .forEach { emitIncomingMessage(expected, it, conv.title, conv.isMuted) }
+        }
         return true
     }
 
@@ -2030,6 +2116,7 @@ class ApiBackendService(
         job = scope.launch {
             try {
                 var ticks = 0
+                var incomingCatchUp: kotlinx.coroutines.Job? = null
                 while (true) {
                     delay(4000)
                     if (!syncForeground || session.token == null || DemoMode.active) break
@@ -2038,8 +2125,18 @@ class ApiBackendService(
                         if (session.token == null) break
                         ticks++
                         callCoordinator.tick()
+                        val callOwner = authSnapshot()
+                        if (callProtocolOwner !== callOwner || (!durableCallInbox &&
+                            android.os.SystemClock.elapsedRealtime() - lastCapabilityProbeMs >= 5 * 60_000L)) {
+                            launch { usesDurableCallInbox(callOwner) }
+                        }
                         if (!realtime.isConnected) realtime.connect()
-                        flushOutbox() // messages typed while offline
+                        // Catch up every room through notification admission while the socket is down.
+                        // Outgoing work is independent so it cannot stall incoming messages or call ticks.
+                        if (!realtime.isConnected && incomingCatchUp?.isActive != true) {
+                            incomingCatchUp = launch { syncFromPushNudge() }
+                        }
+                        launch { flushOutbox() }
                         val targets = buildSet {
                             activeConversationId?.takeIf { it.isNotEmpty() }?.let { add(it) }
                             addAll(activeConversationIds)
@@ -2174,33 +2271,19 @@ class ApiBackendService(
         }
     }
 
-    /**
-     * Notification Reply seam. Sends [text] as the account captured in [expected] and nothing else: base URL, tenant
-     * and token come from that scope object (never re-read from the current session), the HTTP call is registered
-     * under the auth guard before it starts and cancelled on any auth transition, and no redirect/retry happens.
-     * Returns true only when the server confirmed the message AND [expected] is still the live scope. No temp message
-     * is created; the confirmed message is merged into the local list only if the scope still matches.
-     */
+    /** Notification replies enter the same encrypted durable outbox as in-app sends.
+     * True means server-confirmed OR safely queued for this exact owner, never device delivery.
+     * The normal hold/dispatch guards remain in sendMessage and flushOutbox. */
     suspend fun sendMessageForScope(expected: ApiAccountScope, conversationId: String, text: String): Boolean {
-        // Quarantined conversation: the notification quick-reply path sends
-        // directly (no outbox), so it needs its own refusal AND the dispatch
-        // lock - without the lock it could race the toggle mid-send.
-        // Strict, owner-scoped outbox load FIRST: a quick reply right after
-        // login must not beat the persisted holds loading (a load failure
-        // throws = the reply is rejected, fail closed).
-        ensureOutboxLoaded(expected)
+        if (authSnapshot() !== expected || conversationId.isBlank() || text.isBlank()) return false
+        var queuedId: String? = null
+        val confirmed = sendMessage(conversationId, text, expectedScope = expected, onDurablyQueued = { queuedId = it })
         if (authSnapshot() !== expected) return false
-        if (isHeld(conversationId)) return false
-        val dispatchLocks = conversationDispatchLocks
-        if (dispatchLocks != null) {
-            val accountKey = com.example.chat.data.messaging.ConversationDispatchLocks.accountKey(
-                expected.userId, expected.tenantId, expected.baseUrl)
-            return dispatchLocks.withLock(accountKey, conversationId) {
-                if (isHeld(conversationId)) return@withLock false
-                sendMessageForScopeLocked(expected, conversationId, text)
-            }
+        if (confirmed != null) return true
+        return synchronized(outboxLock) {
+            queuedId != null && outbox.any { it.tempId == queuedId && it.conversationId == conversationId &&
+                it.message.senderId == expected.userId && !it.held && !it.failed && !it.requiresReconciliation }
         }
-        return sendMessageForScopeLocked(expected, conversationId, text)
     }
 
     private suspend fun sendMessageForScopeLocked(expected: ApiAccountScope, conversationId: String, text: String): Boolean {
@@ -2245,6 +2328,8 @@ class ApiBackendService(
         extraMetadata: Map<String, Any?>? = null,
         /** Scope the user action started under (picker/review flows pass theirs). Default: captured now. */
         expectedScope: ApiAccountScope? = null,
+        /** Exact local identity for action callers that need a durable-queue receipt. */
+        onDurablyQueued: ((String) -> Unit)? = null,
     ): ChatMessage? {
         val expected = expectedScope ?: authSnapshot()
         if (expected.userId.isNullOrBlank() || expected.token.isNullOrBlank() || authSnapshot() !== expected) {
@@ -2353,10 +2438,11 @@ class ApiBackendService(
         }
         notifyChatListeners()
 
-        scheduleOutboxRecovery(expected)
-        // Sends the queue in order (older offline messages first). If it is still queued afterwards
-        // there is no internet: it keeps the clock and goes out automatically when back online.
-        flushOutbox()
+        onDurablyQueued?.invoke(tempId)
+        chatScope.launch { scheduleOutboxRecovery(expected) }
+        // Preserve order in THIS conversation without waiting for unrelated room backlogs.
+        // Offline messages remain durable and the existing worker retries them.
+        flushConversationOutbox(expected, conversationId)
         synchronized(outboxLock) { rejectedSends.remove(tempId) }?.let { detail ->
             throw IllegalStateException(detail)
         }
@@ -2394,6 +2480,9 @@ class ApiBackendService(
         synchronized(outboxLock) { heldConversations.contains(conversationId) }
     @Volatile private var outboxLoadedFor: String? = null
     private val flushMutex = kotlinx.coroutines.sync.Mutex()
+    private val conversationFlushLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
+    private val outboxSendPermits = kotlinx.coroutines.sync.Semaphore(4)
+    private val messageCapabilities = ScopeCapabilityCache({ android.os.SystemClock.elapsedRealtime() })
     // Outcome hand-off from the flush loop back to the sendMessage call that queued the message.
     private val confirmedSends = HashMap<String, ChatMessage>()
     private val rejectedSends = HashMap<String, String>()
@@ -2766,8 +2855,10 @@ class ApiBackendService(
     ): ApiChatClient.SendResult {
         if (authSnapshot() !== expectedScope) return ApiChatClient.SendResult.Offline
         if (entry.requiresReconciliation) return ApiChatClient.SendResult.Offline
-        val supported = withContext(Dispatchers.IO) {
-            ApiServerCapabilities.supports(expectedScope, ScopedCallHttpTransport(expectedScope, ::withAuthScope, sendRequests), "message_send_idempotency_v1")
+        val supported = messageCapabilities.supports(expectedScope, "message_send_idempotency_v1", ::authSnapshot) {
+            withContext(Dispatchers.IO) {
+                ApiServerCapabilities.supports(expectedScope, ScopedCallHttpTransport(expectedScope, ::withAuthScope, sendRequests), "message_send_idempotency_v1")
+            }
         }
         // Legacy deployments retain their existing best-effort dedup behavior. Same persisted key always.
         if (authSnapshot() !== expectedScope) return ApiChatClient.SendResult.Offline
@@ -2897,44 +2988,48 @@ class ApiBackendService(
         catch (_: Exception) { /* Existing foreground reconnect/switch paths still retry the saved queue. */ }
     }
 
-    /** Sends everything queued for the captured scope, oldest first. */
+    /** Drain different conversations independently, FIFO within each one. */
     suspend fun flushOutbox() {
-        val expectedScope = authSnapshot()
-        if (expectedScope.token.isNullOrBlank()) return
-        ensureOutboxLoaded(expectedScope)
-        if (authSnapshot() !== expectedScope) return
-        if (!flushMutex.tryLock()) return
+        val expected = authSnapshot()
+        if (expected.token.isNullOrBlank()) return
+        ensureOutboxLoaded(expected)
+        if (authSnapshot() !== expected || !flushMutex.tryLock()) return
         try {
-            while (authSnapshot() === expectedScope && session.token != null) {
-                // Held (quarantined) entries are preserved but never flushed:
-                // their conversation moved to the encrypted plane.
-                val next = synchronized(outboxLock) { nextOutboxEntryLocked() } ?: break
-                // Per-entry cross-plane lock (flushMutex is already held and
-                // stays outermost): a toggle for this conversation waits for
-                // an in-flight delivery instead of racing it.
-                val dispatchLocks = conversationDispatchLocks
-                val r = if (dispatchLocks != null) {
-                    val accountKey = com.example.chat.data.messaging.ConversationDispatchLocks.accountKey(
-                        expectedScope.userId, expectedScope.tenantId, expectedScope.baseUrl)
-                    dispatchLocks.withLock(accountKey, next.conversationId) {
-                        // The entry was selected under outboxLock but a hold
-                        // for its conversation may have landed before this
-                        // lock was acquired: re-check INSIDE the dispatch
-                        // lock (holds run under the same lock), or this
-                        // entry would deliver plaintext after the toggle.
-                        val heldNow = synchronized(outboxLock) {
-                            outbox.any { it.tempId == next.tempId && it.held }
-                        }
-                        if (heldNow) null else sendOutboxEntry(next, expectedScope)
-                    }
-                } else {
-                    sendOutboxEntry(next, expectedScope)
-                }
-                if (r == null) continue
-                if (r == ApiChatClient.SendResult.Offline) break
+            val rooms = synchronized(outboxLock) { outbox.map { it.conversationId }.distinct() }
+            kotlinx.coroutines.coroutineScope {
+                rooms.forEach { room -> launch { flushConversationOutbox(expected, room) } }
             }
-        } finally {
-            flushMutex.unlock()
+        } finally { flushMutex.unlock() }
+    }
+
+    private suspend fun flushConversationOutbox(expected: ApiAccountScope, conversationId: String) {
+        if (authSnapshot() !== expected) return
+        val lock = conversationFlushLocks.getOrPut("${expected.generation}:$conversationId") { kotlinx.coroutines.sync.Mutex() }
+        lock.withLock {
+            while (authSnapshot() === expected) {
+                val next = synchronized(outboxLock) {
+                    // A failed/held/conflicted head blocks only its own conversation.
+                    outbox.firstOrNull { it.conversationId == conversationId }
+                        ?.takeIf { !it.held && !it.requiresReconciliation && !it.failed }
+                } ?: break
+                outboxSendPermits.acquire()
+                val result = try {
+                    val dispatchLocks = conversationDispatchLocks
+                    if (dispatchLocks != null) {
+                        val key = com.example.chat.data.messaging.ConversationDispatchLocks.accountKey(expected.userId, expected.tenantId, expected.baseUrl)
+                        dispatchLocks.withLock(key, conversationId) {
+                            val held = synchronized(outboxLock) {
+                                outbox.none { it.tempId == next.tempId && !it.held && !it.failed && !it.requiresReconciliation } ||
+                                    heldConversations.contains(conversationId)
+                            }
+                            if (held) null else sendOutboxEntry(next, expected)
+                        }
+                    } else {
+                        if (isHeld(conversationId)) null else sendOutboxEntry(next, expected)
+                    }
+                } finally { outboxSendPermits.release() }
+                if (result == null || result == ApiChatClient.SendResult.Offline) break
+            }
         }
     }
 
@@ -3231,6 +3326,19 @@ class ApiBackendService(
         internal val isDefaultTenant: Boolean,
     )
 
+    fun emailCodeResume(attempt:EmailCodeAttempt)=EmailCodeResume(attempt.challenge.id,attempt.challenge.email,
+        attempt.targetTenant,attempt.baseUrl,attempt.expectedScope.userId,attempt.isDefaultTenant,
+        System.currentTimeMillis()+attempt.challenge.expiresInSeconds*1000L,attempt.challenge.resendAfterSeconds,attempt.expectedScope.tenantId)
+
+    fun restoreEmailCode(resume:EmailCodeResume):EmailCodeAttempt? {
+        val owner=authSnapshot();val routing=config.snapshot()
+        if(resume.expiresAtEpochMs<=System.currentTimeMillis() || resume.challengeId.isBlank() || resume.email.isBlank() ||
+            resume.baseUrl!=owner.baseUrl || resume.userId!=owner.userId || resume.ownerTenant!=owner.tenantId || resume.tenant.isBlank()) return null
+        val remaining=((resume.expiresAtEpochMs-System.currentTimeMillis())/1000L).coerceIn(0,Int.MAX_VALUE.toLong()).toInt()
+        return EmailCodeAttempt(ApiEmailCodeClient.Challenge(resume.challengeId,resume.email,0,remaining),owner,
+            resume.tenant,owner.baseUrl,routing.webSocketTemplate,routing.generation,resume.defaultTenant)
+    }
+
     suspend fun requestEmailLoginCode(email: String, tenant: String?, isDefaultTenant: Boolean): EmailCodeAttempt =
         withContext(Dispatchers.IO) {
             val expected = authSnapshot()
@@ -3311,6 +3419,7 @@ class ApiBackendService(
             val proof = requireNotNull(deviceIdentity) { "Installation identity is not ready." }.challengeHeaders(
                 routingAtStart.baseUrl, routingAtStart.tenantId, OkHttpApiTransport(allowRedirects = false)) { authSnapshot() === owner }
             val result = scopedAuthClient(routingAtStart.baseUrl, routingAtStart.tenantId).register(email, username, password, phoneNumber, extraHeaders = proof, phoneProof = phoneProof)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (authSnapshot() !== owner) throw ApiScopeChangedException()
             registrationVerificationMessage = result.verificationMessage
             val routing = config.snapshot()
@@ -3544,7 +3653,12 @@ class ApiBackendService(
         runCatching { com.example.chat.notifications.ChatyNotifications.cancelRemovedAccountAlerts(appContext, hash) }
     }
 
-    fun signOut() {
+    data class ReauthenticationOrigin(val userId: String, val tenantId: String, val baseUrl: String)
+    var reauthenticationOrigin: ReauthenticationOrigin? = null
+        private set
+    fun clearReauthenticationOrigin() {reauthenticationOrigin=null}
+    fun signOut(forExpiredSession: Boolean = false) {
+        if(!forExpiredSession) reauthenticationOrigin=null
         resetSyncTracking()
         val activeKey = currentAccountKey()
         val oldHash = currentAccountHash()
@@ -3786,6 +3900,7 @@ class ApiBackendService(
         result: ApiAuthResult, targetTenant: String, baseUrl: String,
         webSocketTemplate: String, routingGeneration: Long, isDefaultTenant: Boolean,
     ): ApiRegisteredAccountMeta {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         val oldHash = currentAccountHash()
         persistAccountConversationSnapshot()
         val routingSnapshot = ApiRoutingSnapshot(
@@ -3922,15 +4037,15 @@ class ApiBackendService(
     /** Renews the access token when it expires within [REFRESH_MARGIN_SECONDS]. Waits while a
      *  call is active (a new token is a new account scope, which would end the call). Signs the
      *  user out when the token is already expired and cannot be renewed. */
-    suspend fun ensureFreshToken() {
-        val current = session.token ?: return
-        // Give newly adopted sessions at least a 60-second stabilization window before attempting
-        // proactive background refresh to prevent initial sync race conditions / false clock skew.
-        if (System.currentTimeMillis() - lastAdoptEpochMs < 60_000L) return
-        val remaining = auth.secondsUntilExpiry(current) ?: return
-        if (remaining > REFRESH_MARGIN_SECONDS) return
-        if (remaining > 0 && isCallActive()) return
-        performRefresh(force = false)
+    suspend fun ensureFreshToken(expected: ApiAccountScope = authSnapshot()): ApiAccountScope? {
+        if (authSnapshot() !== expected) return null
+        val current = expected.token ?: return null
+        if (System.currentTimeMillis() - lastAdoptEpochMs < 60_000L) return expected.takeIf { authSnapshot() === it }
+        val remaining = auth.secondsUntilExpiry(current) ?: return expected.takeIf { authSnapshot() === it }
+        if (remaining > REFRESH_MARGIN_SECONDS || (remaining > 0 && isCallActive())) return expected.takeIf { authSnapshot() === it }
+        var refreshedOwner: ApiAccountScope? = null
+        performRefresh(force = false, expected = expected, onRefreshed = { refreshedOwner = it })
+        return refreshedOwner?.takeIf { authSnapshot() === it } ?: expected.takeIf { authSnapshot() === it }
     }
 
     /** Outcome of a refresh attempt, for the background worker's retry policy. */
@@ -3948,24 +4063,41 @@ class ApiBackendService(
         return performRefresh(force = true)
     }
 
-    private suspend fun performRefresh(force: Boolean): SessionRefreshOutcome {
-        val current = session.token ?: return SessionRefreshOutcome.NO_SESSION
+    private suspend fun performRefresh(
+        force: Boolean,
+        expected: ApiAccountScope = authSnapshot(),
+        onRefreshed: ((ApiAccountScope) -> Unit)? = null,
+    ): SessionRefreshOutcome {
+        val current = expected.token ?: return SessionRefreshOutcome.NO_SESSION
         refreshMutex.lock()
         try {
+            if (authSnapshot() !== expected) return SessionRefreshOutcome.UNAVAILABLE
             if (session.token != current) return SessionRefreshOutcome.REFRESHED // someone else refreshed meanwhile
             val user = session.currentUser ?: return SessionRefreshOutcome.NO_SESSION
             val refreshToken = loadRefreshToken() ?: return SessionRefreshOutcome.NO_SESSION
             val proofHeaders = deviceIdentity?.proofHeaders(refreshToken) ?: emptyMap()
-            val result = withContext(Dispatchers.IO) { auth.refresh(refreshToken, extraHeaders = proofHeaders) }
+            val refresher = ApiAuthClient(
+                baseUrl = { expected.baseUrl }, tenantId = { expected.tenantId }, token = { expected.token },
+                transport = ScopedCallHttpTransport(expected, ::withAuthScope, sendRequests),
+            )
+            val result = withContext(Dispatchers.IO) { refresher.refresh(refreshToken, extraHeaders = proofHeaders) }
+            if (authSnapshot() !== expected) return SessionRefreshOutcome.UNAVAILABLE
             return when (result) {
                 is ApiAuthClient.RefreshResult.Ok -> {
                     val rotated = result.refreshToken ?: refreshToken
-                    saveRefreshToken(rotated) // rotation: the old token is dead from here on
                     val nextAuth = ApiAuthResult(token = result.accessToken, user = user, refreshToken = rotated)
-                    session.adopt(nextAuth)
-                    runCatching {
-                        multiAccount.registerAuthenticatedAccount(nextAuth, config.snapshot(), config.isUsingDefaultTenant)
+                    val adopted = synchronized(authScopeLock) {
+                        if (authSnapshot() !== expected) false else {
+                            saveRefreshToken(rotated) // rotation belongs only to the requesting owner
+                            session.adopt(nextAuth)
+                            runCatching {
+                                multiAccount.registerAuthenticatedAccount(nextAuth, config.snapshot(), config.isUsingDefaultTenant)
+                            }
+                            onRefreshed?.invoke(authSnapshot())
+                            true
+                        }
                     }
+                    if (!adopted) return SessionRefreshOutcome.UNAVAILABLE
                     realtime.connect()
                     SessionRefreshOutcome.REFRESHED
                 }
@@ -3978,7 +4110,10 @@ class ApiBackendService(
                         notifyChatListeners()
                         SessionRefreshOutcome.NO_SESSION
                     } else {
-                        withContext(Dispatchers.Main) { signOut() }
+                        withContext(Dispatchers.Main) {
+                            reauthenticationOrigin=ReauthenticationOrigin(user.id,expected.tenantId,expected.baseUrl)
+                            signOut(forExpiredSession=true)
+                        }
                         SessionRefreshOutcome.NO_SESSION
                     }
                 }

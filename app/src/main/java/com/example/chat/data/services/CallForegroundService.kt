@@ -21,12 +21,12 @@ import kotlinx.coroutines.withTimeout
  * Started only after local media has been opened: outgoing calls reach
  * `ringing` after capture succeeds; incoming calls reach `connecting` after
  * the user accepts and capture succeeds. That ordering is required by
- * Android 14+ while-in-use camera/microphone rules. stopWithTask equivalent:
- * [stopSelf] runs on task removal via [onTaskRemoved].
+ * Android 14+ while-in-use camera/microphone rules. Removing the task does
+ * not end an already authorized live call; explicit hangup/terminal state does.
  *
  * Manifest (integration owner):
  *   <service android:name=".data.services.CallForegroundService"
- *       android:foregroundServiceType="microphone|camera|mediaProjection" android:stopWithTask="true"/>
+ *       android:foregroundServiceType="microphone|camera|mediaProjection" android:stopWithTask="false"/>
  */
 class CallForegroundService : Service() {
 
@@ -113,9 +113,10 @@ class CallForegroundService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // stopWithTask=true parity: task removal cannot masquerade as a
-        // surviving call.
-        stopSelf()
+        // Swiping away the UI must not remove foreground execution from a live call.
+        // Never recreate a lost call: a missing/terminal in-memory session stops us.
+        val session = runCatching { com.example.chat.ServiceLocator.callSignaling.currentSession }.getOrNull()
+        if (!CallForegroundPolicy.shouldRunFor(session)) stopSelf()
         super.onTaskRemoved(rootIntent)
     }
 
@@ -135,16 +136,14 @@ class CallForegroundService : Service() {
     }
 
     private fun buildNotification(title: String, text: String, callId: String): Notification {
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
+        val bridge = com.example.chat.notifications.ChatyNotificationBridgeHolder.bridge
+        val style = bridge?.currentStyle() ?: com.example.chat.notifications.ChatyNotificationStyle()
+        val builder = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+            .setColor(style.accentArgb)
         // Dart notificationInitialRoute '/': tapping the notification brings the app to its launch screen.
-        val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
+        // Ongoing calls route to the opaque call-only task. Message/incoming-call
+        // intents keep their existing MainActivity auth/lock/answer routes.
+        val launch = com.example.chat.CallPipActivity.intentFor(this)
         if (launch != null) {
             builder.setContentIntent(
                 android.app.PendingIntent.getActivity(
@@ -156,10 +155,12 @@ class CallForegroundService : Service() {
         builder
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.sym_call_incoming)
+            .setSmallIcon(com.example.chat.notifications.ChatyNotificationPoster.smallIcon(style, call = true))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-        if (callId.isNotBlank()) {
+        if (bridge != null) {
+            com.example.chat.notifications.ChatyNotificationPoster.addOngoingCallActions(this, builder, bridge)
+        } else if (callId.isNotBlank()) {
             val hangUp = Intent(this, com.example.chat.notifications.CallActionReceiver::class.java).apply {
                 action = com.example.chat.notifications.ChatyNotifications.ACTION_END_CALL
                 data = android.net.Uri.Builder().scheme("chaty-call").authority("hangup").appendPath(callId).build()
@@ -171,13 +172,7 @@ class CallForegroundService : Service() {
                 hangUp,
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
             )
-            builder.addAction(
-                android.app.Notification.Action.Builder(
-                    android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    "Hang up",
-                    hangUpPendingIntent,
-                ).build(),
-            )
+            builder.addAction(com.example.chat.R.drawable.ic_notif_hangup, "Hang up", hangUpPendingIntent)
         }
         return builder.build()
     }

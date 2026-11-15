@@ -1,5 +1,7 @@
 package com.example.chat.ui.calls
 
+import com.example.chat.ui.core.components.calls.CallControlButton
+
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -506,33 +508,6 @@ fun formatCallDuration(totalSeconds: Int): String {
     val m = (totalSeconds / 60).toString().padStart(2, '0')
     val s = (totalSeconds % 60).toString().padStart(2, '0')
     return "$m:$s"
-}
-
-@Composable
-private fun CallControlButton(
-    label: String,
-    active: Boolean,
-    activeColor: Color,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    inactiveBackground: Color = callSurface(),
-    icon: @Composable (tint: Color) -> Unit,
-) {
-    val tint = if (active) com.example.chat.ui.theme.LocalAppColors.current.onAccent else callForeground()
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(54.dp)
-            .clip(CircleShape)
-            .semantics { contentDescription = label }
-            .background(
-                if (active) activeColor.copy(alpha = 0.28f) else inactiveBackground,
-                CircleShape,
-            )
-            .clickable(enabled = enabled) { onClick() },
-    ) {
-        icon(tint)
-    }
 }
 
 @Composable

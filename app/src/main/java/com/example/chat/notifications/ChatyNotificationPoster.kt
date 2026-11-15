@@ -53,8 +53,11 @@ object ChatyNotificationPoster {
     private fun broadcast(context: Context, action: String, nonce: String, mutable: Boolean = false): PendingIntent {
         val i = Intent(action).setClass(context, ChatyNotificationActionReceiver::class.java)
             .putExtra(ChatyNotificationPolicy.EXTRA_NONCE, nonce)
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-            (if (mutable && Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or when {
+            !mutable -> PendingIntent.FLAG_IMMUTABLE
+            Build.VERSION.SDK_INT >= 31 -> PendingIntent.FLAG_MUTABLE
+            else -> 0 // Before Android12, omitting IMMUTABLE allows RemoteInput fill-in.
+        }
         return PendingIntent.getBroadcast(context, nonce.hashCode(), i, flags)
     }
 

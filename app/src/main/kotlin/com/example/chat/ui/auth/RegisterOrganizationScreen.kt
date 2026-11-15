@@ -1,5 +1,7 @@
 package com.example.chat.ui.auth
 
+import com.example.chat.ui.core.components.auth.ChatyUiTokens
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.imePadding
@@ -69,6 +71,7 @@ import com.example.chat.ui.kit.ChatyAdaptiveLogic
 fun RegisterOrganizationScreen(
     onBack: () -> Unit,
     onRegistered: (userId: String, organizationId: String, organizationName: String) -> Unit,
+    active:Boolean=true,
     registerOrganization: suspend (
         tenantId: String,
         organizationName: String,
@@ -79,22 +82,26 @@ fun RegisterOrganizationScreen(
         allowUserRegistration: Boolean,
     ) -> Triple<String, String, String>,
 ) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
-    val scope = rememberCoroutineScope()
+    val scope = com.example.chat.ui.core.components.auth.rememberAuthRequestScope(active)
 
-    var orgName by remember { mutableStateOf("") }
-    var tenantId by remember { mutableStateOf("") }
-    var adminFullName by remember { mutableStateOf("") }
-    var adminUsername by remember { mutableStateOf("") }
-    var adminEmail by remember { mutableStateOf("") }
+    var orgName by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var tenantId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var adminFullName by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var adminUsername by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var adminEmail by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var adminPassword by remember { mutableStateOf("") }
     var obscurePassword by remember { mutableStateOf(true) }
+    com.example.chat.ui.core.components.auth.RemaskPasswordOnBackground {obscurePassword=true}
+    val credentialSupport=rememberAuthCredentials()
     var isLoading by remember { mutableStateOf(false) }
     var hasManuallyEditedSlug by remember { mutableStateOf(false) }
     var allowUserRegistration by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     // Play UGC policy (P-06): account creation is gated on explicit acceptance.
     var acceptedTerms by remember { mutableStateOf(false) }
+    var ageConfirmed by remember {mutableStateOf(false)}
     var legalDialogAsset by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     var orgNameError by remember { mutableStateOf<String?>(null) }
@@ -115,33 +122,34 @@ fun RegisterOrganizationScreen(
 
     fun validateTenantId(raw: String): String? {
         val clean = raw.trim().lowercase()
-        if (clean.isEmpty()) return "Workspace ID is required"
-        if (clean.length < 3) return "Workspace ID must be at least 3 characters"
-        if (!Regex("^[a-z0-9_-]+$").matches(clean)) return "Use lowercase letters, numbers, and hyphens only"
+        if (clean.isEmpty()) return authCopy("Workspace ID is required")
+        if (clean.length < 3) return authCopy("Workspace ID must be at least 3 characters")
+        if (!Regex("^[a-z0-9_-]+$").matches(clean)) return authCopy("Use lowercase letters, numbers, and hyphens only")
         return null
     }
 
     fun handleRegister() {
+        if(AuthTemporaryPolicy.ageRuleConfirmed && !ageConfirmed) {errorMessage=authCopy("Confirm the configured age requirement before continuing.");return}
         orgNameError = when {
-            orgName.trim().isEmpty() -> "Please enter your organization name"
-            orgName.trim().length < 2 -> "Name must be at least 2 characters"
+            orgName.trim().isEmpty() -> authCopy("Please enter your organization name")
+            orgName.trim().length < 2 -> authCopy("Name must be at least 2 characters")
             else -> null
         }
         tenantIdError = validateTenantId(tenantId)
-        fullNameError = if (adminFullName.trim().isEmpty()) "Please enter administrator full name" else null
+        fullNameError = if (adminFullName.trim().isEmpty()) authCopy("Please enter administrator full name") else null
         usernameError = ChatyValidators.validateUsername(adminUsername.trim(), forRegistration = true)
         emailError = ChatyValidators.validateEmail(adminEmail.trim())
         passwordError = when {
-            adminPassword.isEmpty() -> "Please enter a password"
-            adminPassword.length < 6 -> "Password must be at least 6 characters"
+            adminPassword.isEmpty() -> authCopy("Please enter a password")
+            adminPassword.length < 6 -> authCopy("Password must be at least 6 characters")
             else -> null
         }
         if (listOf(orgNameError, tenantIdError, fullNameError, usernameError, emailError, passwordError)
                 .any { it != null } || isLoading
         ) return
 
-        if (com.example.chat.ReleaseFeatures.LEGAL_ACCEPTANCE_GATE && !acceptedTerms) {
-            errorMessage = "Please accept the Terms of Use and Privacy Policy to create your organization."
+        if (AuthTemporaryPolicy.acceptanceReady() && !acceptedTerms) {
+            errorMessage = authCopy("Please accept the Terms of Use and Privacy Policy to create your organization.")
             return
         }
 
@@ -149,7 +157,7 @@ fun RegisterOrganizationScreen(
         errorMessage = null
         scope.launch {
             try {
-                val (userId, orgId, resolvedName) = registerOrganization(
+                val (userId, orgId, resolvedName) = authRequest {registerOrganization(
                     tenantId.trim().lowercase(),
                     orgName.trim(),
                     adminUsername.trim(),
@@ -157,15 +165,17 @@ fun RegisterOrganizationScreen(
                     adminPassword,
                     adminFullName.trim(),
                     allowUserRegistration,
-                )
+                )}
+                credentialSupport.save(adminEmail.trim(),adminPassword)
                 onRegistered(userId, orgId, resolvedName)
-            } catch (e: Exception) {
-                errorMessage = friendlyOrgRegisterError(e)
-                isLoading = false
-            }
+            } catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+            catch (e: Exception) {
+                errorMessage = AuthFormPolicy.privateError(friendlyOrgRegisterError(e),adminEmail)
+            } finally {isLoading=false}
         }
     }
 
+    val guardedBack=com.example.chat.ui.core.components.auth.rememberAuthBackAction(active && (orgName.isNotBlank() || adminPassword.isNotBlank() || adminEmail.isNotBlank()),onBack)
     Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
         Box(
             modifier = Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()),
@@ -175,54 +185,54 @@ fun RegisterOrganizationScreen(
                 modifier = Modifier
                     .widthIn(max = ChatyAdaptiveLogic.AUTH_COLUMN_MAX_DP.dp)
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                    .padding(horizontal = ChatyUiTokens.space24, vertical = ChatyUiTokens.space16),
             ) {
-                AuthBackButton(onClick = onBack)
-                Spacer(Modifier.height(20.dp))
+                AuthBackButton(onClick = guardedBack)
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .background(Color(argbWithAlpha(theme.accentColor, 0.12)), RoundedCornerShape(14.dp))
-                            .padding(10.dp),
+                            .background(Color(argbWithAlpha(theme.accentColor, 0.12)), ChatyUiTokens.cardShape)
+                            .padding(ChatyUiTokens.space8),
                     ) {
                         Icon(Icons.Rounded.DomainAdd, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(26.dp))
                     }
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(ChatyUiTokens.space16))
                     Column {
                         Text(
-                            "Register Organization",
-                            color = Color(theme.primaryTextColor),
-                            fontSize = 24.sp,
+                            authCopy("Register Organization"),
+                            color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+                            fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text24,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = (-0.4).sp,
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(ChatyUiTokens.space8))
                         Text(
-                            "Create a dedicated workspace for your team",
-                            color = Color(theme.secondaryTextColor),
-                            fontSize = 13.5.sp,
+                            authCopy("Create a dedicated workspace for your team"),
+                            color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+                            fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text13_5,
                         )
                     }
                 }
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space32))
 
-                SectionHeader(theme, "1. Organization Details") {
+                SectionHeader(theme, authCopy("1. Organization Details")) {
                     Icon(Icons.Rounded.Apartment, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
-                    label = "Organization Name",
-                    hintText = "e.g. Acme Corporation",
+                    label = authCopy("Organization Name"),
+                    hintText = authCopy("e.g. Acme Corporation"),
                     theme = theme,
                     value = orgName,
                     onValueChange = { onOrgNameChanged(it) },
                     error = orgNameError,
                     prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Business, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
-                    label = "Workspace / Tenant ID",
-                    hintText = "e.g. acme-corp",
+                    label = authCopy("Workspace / Tenant ID"),
+                    hintText = authCopy("e.g. acme-corp"),
                     theme = theme,
                     value = tenantId,
                     onValueChange = { tenantId = it; hasManuallyEditedSlug = true },
@@ -230,106 +240,107 @@ fun RegisterOrganizationScreen(
                     prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Link, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
                 Text(
-                    "Your team members will use this Workspace ID to sign into your organization.",
+                    authCopy("Your team members will use this Workspace ID to sign into your organization."),
                     color = Color(argbWithAlpha(theme.secondaryTextColor, 0.8)),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                    fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text12,
+                    modifier = Modifier.padding(top = ChatyUiTokens.space8, start = ChatyUiTokens.space8),
                 )
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space32))
 
-                SectionHeader(theme, "2. Admin Account") {
+                SectionHeader(theme, authCopy("2. Admin Account")) {
                     Icon(Icons.Rounded.AdminPanelSettings, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
-                    label = "Admin Full Name",
-                    hintText = "e.g. Alex Rivera",
+                    label = authCopy("Admin Full Name"),
+                    hintText = authCopy("e.g. Alex Rivera"),
                     theme = theme,
                     value = adminFullName,
-                    onValueChange = { adminFullName = it },
+                    onValueChange = { adminFullName = it;fullNameError=null;errorMessage=null },
                     error = fullNameError,
                     prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Badge, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
-                    label = "Admin Username",
-                    hintText = "e.g. alex_admin",
+                    label = authCopy("Admin Username"),
+                    hintText = authCopy("e.g. alex_admin"),
                     theme = theme,
                     value = adminUsername,
-                    onValueChange = { adminUsername = it },
+                    onValueChange = { adminUsername = it;usernameError=null;errorMessage=null },
                     error = usernameError,
                     prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.AlternateEmail, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
-                    label = "Admin Email",
-                    hintText = "e.g. alex@acme.com",
+                    label = authCopy("Admin Email"),
+                    hintText = authCopy("e.g. alex@acme.com"),
                     theme = theme,
                     value = adminEmail,
-                    onValueChange = { adminEmail = it },
+                    onValueChange = { adminEmail = it;emailError=null;errorMessage=null },
                     keyboardType = KeyboardType.Email,
                     error = emailError,
                     prefixIcon = { PrefixIcon(theme) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.mail, semanticLabel = null, color = it, modifier = Modifier.size(20.dp)) } },
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
-                    label = "Admin Password",
-                    hintText = "Minimum 6 characters",
+                    label = authCopy("Admin Password"),
+                    hintText = authCopy("Minimum 6 characters"),
                     theme = theme,
                     value = adminPassword,
-                    onValueChange = { adminPassword = it },
+                    onValueChange = { adminPassword = it;passwordError=null;errorMessage=null },
                     obscureText = obscurePassword,
                     error = passwordError,
                     prefixIcon = { PrefixIcon(theme) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock, semanticLabel = null, color = it, modifier = Modifier.size(20.dp)) } },
                     suffixIcon = {
-                        IconButton(onClick = { obscurePassword = !obscurePassword }) {
+                        IconButton(modifier = Modifier.padding(ChatyUiTokens.touchGap / 2), onClick = { obscurePassword = !obscurePassword }) {
                             Icon(
                                 if (obscurePassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                if (obscurePassword) "Show password" else "Hide password",
+                                if (obscurePassword) authCopy("Show password") else authCopy("Hide password"),
                                 tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.6)),
                                 modifier = Modifier.size(20.dp),
                             )
                         }
                     },
                 )
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
 
                 AllowRegistrationCard(
                     theme = theme,
                     allow = allowUserRegistration,
                     onChange = { allowUserRegistration = it },
                 )
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space24))
 
                 errorMessage?.let { msg ->
                     Row(
                         modifier = Modifier
-                            .padding(bottom = 18.dp)
+                            .padding(bottom = ChatyUiTokens.space16)
                             .fillMaxWidth()
-                            .background(Color(argbWithAlpha(theme.dangerColor, 0.12)), RoundedCornerShape(12.dp))
-                            .border(1.dp, Color(argbWithAlpha(theme.dangerColor, 0.4)), RoundedCornerShape(12.dp))
-                            .padding(12.dp),
+                            .background(Color(argbWithAlpha(theme.dangerColor, 0.12)), ChatyUiTokens.cardShape)
+                            .border(1.dp, Color(argbWithAlpha(theme.dangerColor, 0.4)), ChatyUiTokens.cardShape)
+                            .padding(ChatyUiTokens.space16),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.errorOutline, semanticLabel = null, color = Color(theme.dangerColor), modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text(msg, color = Color(theme.dangerColor), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.errorOutline, semanticLabel = null, color = com.example.chat.ui.auth.authReadable(theme, theme.dangerColor), modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(ChatyUiTokens.space8))
+                        Text(msg, color = com.example.chat.ui.auth.authReadable(theme, theme.dangerColor), fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text13, fontWeight = FontWeight.Medium)
                     }
                 }
 
-                if (com.example.chat.ReleaseFeatures.LEGAL_ACCEPTANCE_GATE) {
+                AuthAgeConsentStep(theme,ageConfirmed,{ageConfirmed=it})
+                if (AuthTemporaryPolicy.acceptanceReady()) {
                     TermsAcceptanceRow(
                         theme = theme,
                         checked = acceptedTerms,
                         onCheckedChange = { acceptedTerms = it; if (it) errorMessage = null },
-                        onOpenTerms = { legalDialogAsset = "Terms of Use" to "legal/terms_of_use.md" },
-                        onOpenPrivacy = { legalDialogAsset = "Privacy Policy" to "legal/privacy_policy.md" },
-                        modifier = Modifier.padding(bottom = 12.dp),
+                        onOpenTerms = { legalDialogAsset = authCopy("Terms of Use") to "legal/terms_of_use.md" },
+                        onOpenPrivacy = { legalDialogAsset = authCopy("Privacy Policy") to "legal/privacy_policy.md" },
+                        modifier = Modifier.padding(bottom = ChatyUiTokens.space16),
                     )
                 }
 
                 AuthPrimaryButton(
-                    text = "Create Organization",
+                    text = authCopy("Create Organization"),
                     theme = theme,
                     onClick = { handleRegister() },
                     isLoading = isLoading,
@@ -338,20 +349,20 @@ fun RegisterOrganizationScreen(
                 legalDialogAsset?.let { (title, asset) ->
                     LegalTextDialog(theme = theme, title = title, assetPath = asset, onDismiss = { legalDialogAsset = null })
                 }
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space16))
 
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TextButton(onClick = onBack) {
+                    TextButton(modifier = Modifier.padding(ChatyUiTokens.touchGap / 2), onClick = guardedBack) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
                             semanticLabel = null,
-                            color = Color(theme.secondaryTextColor),
+                            color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
                             modifier = Modifier.size(16.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(ChatyUiTokens.space8))
                         Text(
-                            "Already have an organization? Log in",
-                            color = Color(theme.secondaryTextColor),
-                            fontSize = 13.5.sp,
+                            authCopy("Already have an organization? Log in"),
+                            color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+                            fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text13_5,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
@@ -363,18 +374,20 @@ fun RegisterOrganizationScreen(
 
 @Composable
 private fun PrefixIcon(theme: ThemeConfig, icon: @Composable (Color) -> Unit) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     icon(Color(argbWithAlpha(theme.secondaryTextColor, 0.7)))
 }
 
 @Composable
 private fun SectionHeader(theme: ThemeConfig, title: String, icon: @Composable () -> Unit) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     Row(verticalAlignment = Alignment.CenterVertically) {
         icon()
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(ChatyUiTokens.space8))
         Text(
             title,
-            color = Color(theme.primaryTextColor),
-            fontSize = 15.sp,
+            color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+            fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text15,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.1.sp,
         )
@@ -383,39 +396,40 @@ private fun SectionHeader(theme: ThemeConfig, title: String, icon: @Composable (
 
 @Composable
 private fun AllowRegistrationCard(theme: ThemeConfig, allow: Boolean, onChange: (Boolean) -> Unit) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(argbWithAlpha(theme.surfaceColor, 0.6)), RoundedCornerShape(16.dp))
-            .border(1.dp, Color(argbWithAlpha(theme.secondaryTextColor, 0.25)), RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .background(Color(argbWithAlpha(theme.surfaceColor, 0.6)), ChatyUiTokens.cardShape)
+            .border(1.dp, Color(argbWithAlpha(theme.secondaryTextColor, 0.25)), ChatyUiTokens.cardShape)
+            .padding(horizontal = ChatyUiTokens.space16, vertical = ChatyUiTokens.space16),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val activeColor = if (allow) theme.accentColor else theme.secondaryTextColor
         Box(
             modifier = Modifier
-                .background(Color(argbWithAlpha(activeColor, 0.12)), RoundedCornerShape(10.dp))
-                .padding(8.dp),
+                .background(Color(argbWithAlpha(activeColor, 0.12)), ChatyUiTokens.cardShape)
+                .padding(ChatyUiTokens.space8),
         ) {
             Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = Color(activeColor), modifier = Modifier.size(20.dp))
         }
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(ChatyUiTokens.space16))
         Column(Modifier.weight(1f)) {
             Text(
-                "Allow Member Self-Registration",
-                color = Color(theme.primaryTextColor),
-                fontSize = 13.5.sp,
+                authCopy("Allow Member Self-Registration"),
+                color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+                fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text13_5,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(ChatyUiTokens.space8))
             Text(
-                if (allow) "Team members can join this workspace with the Workspace ID."
-                else "Self-registration disabled (only admins can invite members).",
+                if (allow) authCopy("Team members can join this workspace with the Workspace ID.")
+                else authCopy("Self-registration disabled (only admins can invite members)."),
                 color = Color(argbWithAlpha(theme.secondaryTextColor, 0.8)),
-                fontSize = 11.5.sp,
+                fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text11_5,
             )
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(ChatyUiTokens.space8))
         Switch(
             checked = allow,
             onCheckedChange = onChange,

@@ -100,6 +100,138 @@ private class LatestFakeMedia : CallMediaController {
 /** Records outbound call_signal payloads (target + data). */
 
 class LatestApiCallParityTest {
+    @Test fun ringingIcePrefetchDoesNotOpenMediaAndIsReusedOnAnswer() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            var requests = 0; var peers = 0
+            val media = LatestFakeMedia()
+            val ice = listOf(mapOf<String,Any?>("urls" to listOf("turn:example.test")))
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> },
+                mediaFactory = { peers++; media }, iceServersProvider = { requests++; ice }, monotonicMillis = { 0L })
+            service.handleRemoteSignal(mapOf("signal_type" to "offer", "sender_id" to "peer", "call_id" to "incoming", "sdp" to "offer"))
+            yield()
+            assertEquals(1, requests); assertEquals(0, peers); assertFalse(media.prepared)
+            service.acceptCall()
+            assertEquals(1, requests); assertEquals(1, peers); assertEquals(ice, media.iceServersSeen)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun failedIcePrefetchDoesNotCancelCallScopeAndAnswerRetries() = runBlocking {
+        val scope = CoroutineScope(Job() + Dispatchers.Unconfined)
+        try {
+            var requests = 0
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> },
+                mediaFactory = { LatestFakeMedia() }, iceServersProvider = {
+                    requests++; if (requests == 1) throw java.io.IOException("offline")
+                    CallSignalingService.defaultIceServers()
+                }, monotonicMillis = { 0L })
+            service.handleRemoteSignal(mapOf("signal_type" to "offer", "sender_id" to "peer", "call_id" to "incoming", "sdp" to "offer"))
+            yield(); assertTrue(scope.isActive)
+            service.acceptCall()
+            assertEquals(2, requests); assertEquals(CallSessionState.connecting, service.currentSession!!.state)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun expiredRingingIceIsNotReused() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            var tick = 0L; var requests = 0
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> },
+                mediaFactory = { LatestFakeMedia() }, iceServersProvider = { requests++; CallSignalingService.defaultIceServers() },
+                monotonicMillis = { tick })
+            service.handleRemoteSignal(mapOf("signal_type" to "offer", "sender_id" to "peer", "call_id" to "incoming", "sdp" to "offer"))
+            yield(); tick = 30_001
+            service.acceptCall(); assertEquals(2, requests)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun connectedDuringRemoteDescriptionIsNotRegressedByAnswerHandling() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val media = LatestFakeMedia()
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { media }, monotonicMillis = { 0L })
+            service.initiateCall("peer", "Peer", isVideo = false)
+            val id = service.currentSession!!.callId
+            media.duringRemoteDescription = { media.onConnectionState!!.invoke(CallTransportState.connected) }
+            service.handleRemoteSignal(mapOf("signal_type" to "answer", "sender_id" to "peer", "call_id" to id, "sdp" to "answer"))
+            assertEquals(CallSessionState.connected, service.currentSession!!.state)
+            assertNotNull(service.currentSession!!.connectedAt)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun anotherSenderCannotRenegotiateAnExistingCallId() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val media = LatestFakeMedia()
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { media }, monotonicMillis = { 0L })
+            service.initiateCall("peer", "Peer", isVideo = false)
+            media.onConnectionState!!.invoke(CallTransportState.connected)
+            service.handleRemoteSignal(mapOf("signal_type" to "offer", "sender_id" to "other", "call_id" to service.currentSession!!.callId, "sdp" to "foreign", "ice_restart" to true))
+            yield()
+            assertTrue(media.remoteDescriptions.isEmpty())
+            assertEquals("peer", service.currentSession!!.remoteUserId)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun simultaneousSamePeerOffersConvergeRegardlessOfDeliveryOrder() = runBlocking {
+        for (reverse in listOf(false, true)) {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            try {
+                val aMedia = LatestFakeMedia(); val bMedia = LatestFakeMedia()
+                val toA = ArrayDeque<Map<String, Any?>>()
+                val toB = ArrayDeque<Map<String, Any?>>()
+                val a = CallSignalingService(scope, { "alice" }, signalSender = CallSignalSender { _, data -> toB.addLast(data + ("sender_id" to "alice")) }, mediaFactory = { aMedia }, monotonicMillis = { 0L })
+                val b = CallSignalingService(scope, { "bob" }, signalSender = CallSignalSender { _, data -> toA.addLast(data + ("sender_id" to "bob")) }, mediaFactory = { bMedia }, monotonicMillis = { 0L })
+                a.initiateCall("bob", "Bob", isVideo = false)
+                b.initiateCall("alice", "Alice", isVideo = false)
+                val winningId = minOf(a.currentSession!!.callId, b.currentSession!!.callId)
+                repeat(8) {
+                    if (reverse) {
+                        while (toA.isNotEmpty()) a.handleRemoteSignal(toA.removeFirst())
+                        while (toB.isNotEmpty()) b.handleRemoteSignal(toB.removeFirst())
+                    } else {
+                        while (toB.isNotEmpty()) b.handleRemoteSignal(toB.removeFirst())
+                        while (toA.isNotEmpty()) a.handleRemoteSignal(toA.removeFirst())
+                    }
+                }
+                assertEquals(winningId, a.currentSession!!.callId)
+                assertEquals(winningId, b.currentSession!!.callId)
+                assertEquals(setOf(CallSessionState.ringing, CallSessionState.incoming), setOf(a.currentSession!!.state, b.currentSession!!.state))
+                assertTrue(aMedia.disposed xor bMedia.disposed)
+            } finally { scope.cancel() }
+        }
+    }
+
+    @Test fun malformedSmallerSamePeerOfferCannotAbandonOutgoingCall() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val peer = LatestFakeMedia()
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { peer }, monotonicMillis = { 0L })
+            service.initiateCall("peer", "Peer", isVideo = false)
+            val id = service.currentSession!!.callId
+            service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "00000000-0000-0000-0000-000000000000", "sender_id" to "peer", "sdp" to ""))
+            assertEquals(id, service.currentSession!!.callId)
+            assertEquals(CallSessionState.ringing, service.currentSession!!.state)
+            assertFalse(peer.disposed)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun connectedCallCannotBeReplacedBySmallerSamePeerOffer() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val peer = LatestFakeMedia(); val sent = mutableListOf<Map<String, Any?>>()
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { peer }, monotonicMillis = { 0L })
+            service.initiateCall("peer", "Peer", isVideo = true)
+            val id = service.currentSession!!.callId
+            peer.onConnectionState!!.invoke(CallTransportState.connected)
+            service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "00000000-0000-0000-0000-000000000000", "sender_id" to "peer", "sdp" to "offer"))
+            assertEquals(id, service.currentSession!!.callId)
+            assertEquals(CallSessionState.connected, service.currentSession!!.state)
+            assertFalse(peer.disposed)
+            assertEquals("busy", sent.last()["signal_type"])
+        } finally { scope.cancel() }
+    }
+
     @Test fun twoSyntheticPeersExchangeSdpAndIceAndWaitForMediaConnectedCallback() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
@@ -108,10 +240,10 @@ class LatestApiCallParityTest {
             val toB = ArrayDeque<Map<String, Any?>>()
             val a = CallSignalingService(scope, { "synthetic-a" }, signalSender = CallSignalSender { target, data ->
                 assertEquals("synthetic-b", target); toB.addLast(data + ("sender_id" to "synthetic-a"))
-            }, mediaFactory = { aMedia })
+            }, mediaFactory = { aMedia }, monotonicMillis = { 0L })
             val b = CallSignalingService(scope, { "synthetic-b" }, signalSender = CallSignalSender { target, data ->
                 assertEquals("synthetic-a", target); toA.addLast(data + ("sender_id" to "synthetic-b"))
-            }, mediaFactory = { bMedia })
+            }, mediaFactory = { bMedia }, monotonicMillis = { 0L })
             aMedia.duringOffer = { aMedia.onLocalIceCandidate!!.invoke("candidate:a", "audio", 0) }
             bMedia.duringAnswer = { bMedia.onLocalIceCandidate!!.invoke("candidate:b", "audio", 0) }
             a.initiateCall("synthetic-b", "Synthetic B", isVideo = false)
@@ -144,7 +276,7 @@ class LatestApiCallParityTest {
                 repeat(200) { peer.onLocalIceCandidate!!.invoke("candidate:$it", "audio", 0) }
                 peer.onLocalIceCandidate!!.invoke("candidate:0", "audio", 0)
             }
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { peer })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { peer }, monotonicMillis = { 0L })
             service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "in", "sender_id" to "peer", "sdp" to "offer"))
             service.acceptCall()
             assertEquals("answer", sent.first()["signal_type"])
@@ -161,7 +293,7 @@ class LatestApiCallParityTest {
         try {
             var account: Any = Any(); val peer = LatestFakeMedia(); val sent = mutableListOf<Map<String, Any?>>()
             val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { peer },
-                captureAccountScope = { account }, accountScopeValid = { it === account }, accountScopeGuard = { a, b -> if (a === account) { b(); true } else false })
+                captureAccountScope = { account }, accountScopeValid = { it === account }, accountScopeGuard = { a, b -> if (a === account) { b(); true } else false }, monotonicMillis = { 0L })
             peer.duringOffer = {
                 peer.onLocalIceCandidate!!.invoke("candidate:old", "audio", 0)
                 account = Any(); service.detachForAccountTransition(account)
@@ -176,7 +308,7 @@ class LatestApiCallParityTest {
             val peer = LatestFakeMedia()
             val sent = mutableListOf<Map<String, Any?>>()
             peer.duringOffer = { peer.onLocalIceCandidate!!.invoke("candidate:early", "audio", 0) }
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { peer })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { peer }, monotonicMillis = { 0L })
             service.initiateCall("peer", "Peer", isVideo = false)
             assertEquals(listOf("offer", "candidate"), sent.map { it["signal_type"] })
         } finally { scope.cancel() }
@@ -188,7 +320,7 @@ class LatestApiCallParityTest {
             val oldPeer = LatestFakeMedia().apply { awaitPrepare = { started.complete(Unit); gate.await() } }
             val newPeer = LatestFakeMedia(); var count = 0
             val sent = mutableListOf<Map<String, Any?>>()
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { if (count++ == 0) oldPeer else newPeer })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { if (count++ == 0) oldPeer else newPeer }, monotonicMillis = { 0L })
             val old = async { runCatching { service.initiateCall("old", "Old", isVideo = true) } }
             started.await()
             service.endCall(); yield()
@@ -207,7 +339,7 @@ class LatestApiCallParityTest {
             val gate = CompletableDeferred<Unit>(); val started = CompletableDeferred<Unit>()
             val oldPeer = LatestFakeMedia().apply { awaitRemote = { started.complete(Unit); gate.await() } }
             val newPeer = LatestFakeMedia(); var count = 0; val sent = mutableListOf<Map<String, Any?>>()
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { if(count++ == 0) oldPeer else newPeer })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { if(count++ == 0) oldPeer else newPeer }, monotonicMillis = { 0L })
             service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "incoming-old", "sender_id" to "old", "sdp" to "offer"))
             val accepting = async { runCatching { service.acceptCall() } }; started.await()
             service.declineCall()
@@ -223,7 +355,7 @@ class LatestApiCallParityTest {
         try {
             val gate = CompletableDeferred<Unit>(); val started = CompletableDeferred<Unit>()
             val peer = LatestFakeMedia().apply { awaitSwitch = { started.complete(Unit); gate.await() } }
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { peer })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { peer }, monotonicMillis = { 0L })
             service.initiateCall("old", "Old", isVideo = true)
             val switching = async { service.switchCamera() }; started.await()
             service.endCall(); yield()
@@ -235,7 +367,7 @@ class LatestApiCallParityTest {
     @Test fun deferredFailureCleanupOwnsOldPeerBeforeNewAccountStarts() = kotlinx.coroutines.test.runTest {
         var current: Any = Any(); val old = LatestFakeMedia(); val new = LatestFakeMedia(); var count = 0
         val service = CallSignalingService(this, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { if (count++ == 0) old else new },
-            captureAccountScope = { current }, accountScopeValid = { it === current }, accountScopeGuard = { e, b -> if (e === current) { b(); true } else false })
+            captureAccountScope = { current }, accountScopeValid = { it === current }, accountScopeGuard = { e, b -> if (e === current) { b(); true } else false }, monotonicMillis = { 0L })
         service.initiateCall("old", "Old", isVideo = false)
         old.onIceFailed!!.invoke() // Cleanup is queued on the test scheduler.
         current = Any(); val transitionCleanup = service.detachForAccountTransition(current)
@@ -251,7 +383,7 @@ class LatestApiCallParityTest {
         try {
             val gate = CompletableDeferred<Unit>(); val started = CompletableDeferred<Unit>()
             val peer = LatestFakeMedia().apply { awaitRemote = { started.complete(Unit); gate.await() } }
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { peer })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { peer }, monotonicMillis = { 0L })
             service.initiateCall("old", "Old", isVideo = false)
             val callId = service.currentSession!!.callId
             val answering = async { service.handleRemoteSignal(mapOf("signal_type" to "answer", "call_id" to callId, "sender_id" to "old", "sdp" to "answer")) }
@@ -264,7 +396,7 @@ class LatestApiCallParityTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
             val peer = LatestFakeMedia()
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { peer })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { peer }, monotonicMillis = { 0L })
             service.initiateCall("old", "Old", isVideo = false)
             peer.onIceFailed!!.invoke()
             peer.onConnectionState!!.invoke(CallTransportState.connected)
@@ -276,7 +408,7 @@ class LatestApiCallParityTest {
         try {
             val sent = mutableListOf<Map<String, Any?>>()
             val media = LatestFakeMedia()
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { media })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, data -> sent.add(data) }, mediaFactory = { media }, monotonicMillis = { 0L })
             service.initiateCall("peer", "Peer", isVideo = false)
             val call = service.currentSession!!
             assertTrue(service.hasActiveSession)
@@ -298,7 +430,7 @@ class LatestApiCallParityTest {
             val expected=Any(); var current:Any=expected;val media=LatestFakeMedia();val sent=mutableListOf<Map<String,Any?>>()
             media.duringPrepare={current=Any()}
             val service=CallSignalingService(scope,{"me"},signalSender=CallSignalSender{_,data->sent.add(data)},mediaFactory={media},
-                captureAccountScope={current},accountScopeValid={it === current},accountScopeGuard={e,b->if(e === current){b();true}else false})
+                captureAccountScope={current},accountScopeValid={it === current},accountScopeGuard={e,b->if(e === current){b();true}else false}, monotonicMillis = { 0L })
             try { service.initiateCall("peer","Peer",isVideo=false);fail("Stale prepare must cancel") } catch (_:CancellationException) {}
             assertTrue(sent.isEmpty());assertTrue(media.disposed)
             assertNotEquals(CallSessionState.failed,service.currentSession?.state)
@@ -309,7 +441,7 @@ class LatestApiCallParityTest {
         try {
             var current:Any=Any();val media=LatestFakeMedia();val sent=mutableListOf<Map<String,Any?>>()
             val service=CallSignalingService(scope,{"me"},signalSender=CallSignalSender{_,data->sent.add(data)},mediaFactory={media},
-                captureAccountScope={current},accountScopeValid={it === current},accountScopeGuard={e,b->if(e === current){b();true}else false})
+                captureAccountScope={current},accountScopeValid={it === current},accountScopeGuard={e,b->if(e === current){b();true}else false}, monotonicMillis = { 0L })
             service.handleRemoteSignal(mapOf("signal_type" to "offer","call_id" to "c","sender_id" to "peer","sdp" to "offer"))
             media.duringRemoteDescription={current=Any()}
             try {service.acceptCall();fail("Old accept must cancel")}catch(_:CancellationException){}
@@ -320,7 +452,7 @@ class LatestApiCallParityTest {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
         try {
             var valid=true;val media=LatestFakeMedia()
-            val service=CallSignalingService(scope,{"me"},signalSender=CallSignalSender{_,_->},mediaFactory={media})
+            val service=CallSignalingService(scope,{"me"},signalSender=CallSignalSender{_,_->},mediaFactory={media}, monotonicMillis = { 0L })
             service.initiateCall("peer","Peer",isVideo=false);val id=service.currentSession!!.callId
             media.duringRemoteDescription={valid=false}
             service.handleRemoteSignal(mapOf("signal_type" to "answer","call_id" to id,"sender_id" to "peer","sdp" to "answer"),
@@ -333,7 +465,7 @@ class LatestApiCallParityTest {
         try {
             var current:Any=Any();val oldMedia=LatestFakeMedia();val newMedia=LatestFakeMedia();var calls=0
             val service=CallSignalingService(scope,{"me"},signalSender=CallSignalSender{_,_->},mediaFactory={if(calls++==0)oldMedia else newMedia},
-                captureAccountScope={current},accountScopeValid={it === current},accountScopeGuard={e,b->if(e === current){b();true}else false})
+                captureAccountScope={current},accountScopeValid={it === current},accountScopeGuard={e,b->if(e === current){b();true}else false}, monotonicMillis = { 0L })
             service.initiateCall("peer","Peer",isVideo=false)
             current=Any();val cleanup=service.detachForAccountTransition(current)!!
             assertNull(service.currentSession)
@@ -346,7 +478,7 @@ class LatestApiCallParityTest {
     @Test fun queuedOldScopeOfferCannotCreateIncoming() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { LatestFakeMedia() })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { LatestFakeMedia() }, monotonicMillis = { 0L })
             service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "old", "sender_id" to "peer", "sdp" to "valid"),
                 validScope = { false }, guardScope = { false })
             assertNull(service.currentSession)
@@ -355,7 +487,7 @@ class LatestApiCallParityTest {
     @Test fun malformedOfferNeverCreatesIncomingSession() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { LatestFakeMedia() })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { LatestFakeMedia() }, monotonicMillis = { 0L })
             for (sdp in listOf(null, "", " ", mapOf("x" to "bad"))) {
                 service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "c", "sender_id" to "peer", "sdp" to sdp))
                 assertNull(service.currentSession)
@@ -366,7 +498,7 @@ class LatestApiCallParityTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
             val media = LatestFakeMedia()
-            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { media })
+            val service = CallSignalingService(scope, { "me" }, signalSender = CallSignalSender { _, _ -> }, mediaFactory = { media }, monotonicMillis = { 0L })
             val offer = mapOf("signal_type" to "offer", "call_id" to "call", "sender_id" to "peer", "offer" to mapOf("sdp" to "nested-offer"), "call_type" to "video")
             service.handleRemoteSignal(offer)
             val original = service.currentSession

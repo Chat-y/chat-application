@@ -1,0 +1,8 @@
+# Hand-authored auth startup/post-startup rules, not a measured speedup claim.
+# Wildcard syntax follows Android's documented HRF superset.
+# Replace/refine with the instrumented generator once device execution is approved.
+HSPLcom/example/chat/ui/auth/**->**(**)**
+HSPLcom/example/chat/ui/core/components/auth/**->**(**)**
+Lcom/example/chat/ui/auth/AuthFormPolicy;
+Lcom/example/chat/ui/auth/OtpVerificationLogic;
+Lcom/example/chat/ui/auth/AuthPresentationPolicy;

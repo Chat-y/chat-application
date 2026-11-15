@@ -135,6 +135,11 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
         }
     }
     val session = service.currentSession ?: return
+    fun minimizeCall() {
+        if (!com.example.chat.CallPipActivity.launch(hostContext)) presentation.minimizeToPipOrIsland()
+    }
+    // A separate call-only task floats; this app's navigation composition remains mounted.
+    androidx.activity.compose.BackHandler(enabled = session.isActive && presentation.isFullScreen) { minimizeCall() }
     val prefs = prefsStore.value
     val bundlePresentation = remember(prefs.callExperienceBundleId, session.state) {
         com.example.chat.ui.calls.bundles.resolveCallBundlePresentation(prefs.callExperienceBundleId, session.state)
@@ -212,7 +217,7 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
             template = bundlePresentation.template,
             bundleId = activeBundle,
             pictureInPictureEnabled = prefs.pictureInPictureEnabled,
-            onBack = { presentation.minimizeToPipOrIsland() },
+            onBack = { minimizeCall() },
             onSessionGone = {
                 if (terminalNotice) dismissedNotice = true
                 else presentation.minimizeToPipOrIsland()
@@ -238,10 +243,7 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
                 if (!prefs.pictureInPictureEnabled) {
                     android.widget.Toast.makeText(hostContext, "Picture-in-picture is disabled in Call settings.", android.widget.Toast.LENGTH_SHORT).show()
                 } else {
-                    // Whole-Activity PiP is not safe until the captured-account/call
-                    // privacy surface is installed and its lifecycle proof passes.
-                    // Keep the existing in-app call view rather than exposing routes.
-                    presentation.minimizeToPipOrIsland()
+                    minimizeCall()
                 }
             },
         )

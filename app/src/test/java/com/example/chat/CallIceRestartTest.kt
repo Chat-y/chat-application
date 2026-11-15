@@ -57,8 +57,7 @@ class CallIceRestartTest {
         scope = scope,
         currentUserId = { "me" },
         signalSender = sender.fn,
-        mediaFactory = { media },
-    )
+        mediaFactory = { media }, monotonicMillis = { 0L })
 
     private suspend fun connectOutgoingCall(
         service: CallSignalingService,
@@ -100,12 +99,14 @@ class CallIceRestartTest {
         assertEquals("peer", restartOffers.single().first)
         assertEquals(CallSessionState.reconnecting, service.currentSession!!.state)
 
-        // The restart answer restores the connected state and resets retries.
+        // SDP alone is not proof that media has reconnected.
         service.handleRemoteSignal(mapOf(
             "signal_type" to "answer", "call_id" to callId,
             "sender_id" to "peer", "ice_restart" to true, "sdp" to "restart-answer",
         ))
         advanceUntilIdle()
+        assertEquals(CallSessionState.reconnecting, service.currentSession!!.state)
+        media.onConnectionState?.invoke(CallTransportState.connected)
         assertEquals(CallSessionState.connected, service.currentSession!!.state)
         assertTrue(media.remoteDescriptions.contains("restart-answer" to "answer"))
     }

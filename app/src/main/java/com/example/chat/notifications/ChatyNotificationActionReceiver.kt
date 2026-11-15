@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 /** Not exported. Carries only an opaque nonce; all identity checks are in the bridge. Unknown/stale = no-op. */
 class ChatyNotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        com.example.chat.ServiceLocator.ensurePushReady(context.applicationContext)
         val bridge = ChatyNotificationBridgeHolder.bridge ?: return
         val action = intent.action ?: return
         val nonce = intent.getStringExtra(ChatyNotificationPolicy.EXTRA_NONCE)

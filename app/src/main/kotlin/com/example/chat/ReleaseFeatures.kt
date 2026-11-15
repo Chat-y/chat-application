@@ -8,6 +8,8 @@ package com.example.chat
  * paths are deployed and covered by integration tests.
  */
 object ReleaseFeatures {
+    /** Additive auth contracts are local only, not deployed or end-to-end verified. Legacy remains default. */
+    const val AUTH_V2_CONTRACTS = false
     /** Device heuristics are advisory. No app lockout until reviewed and device-tested. */
     const val ENFORCE_TAMPER_GUARD = false
     /** Experimental routing only. No verified MLS setup, encrypted media or cross-device proof yet. */

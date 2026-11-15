@@ -25,6 +25,13 @@ object OtpVerificationLogic {
      *  string still lands as a usable code. */
     fun sanitizeCode(raw: String): String = raw.filter { it.isDigit() }.take(CODE_LENGTH)
 
+    /** Monotonic deadline, not a tick counter: background/scheduler delays cannot extend cooldown. */
+    fun cooldownDeadline(nowElapsedMs: Long, seconds: Int): Long =
+        nowElapsedMs + seconds.coerceIn(1, 3600).toLong() * 1000L
+
+    fun cooldownSeconds(deadlineElapsedMs: Long, nowElapsedMs: Long): Int =
+        ((deadlineElapsedMs - nowElapsedMs).coerceAtLeast(0L).coerceAtMost(3_600_000L) + 999L).div(1000L).toInt()
+
     fun isComplete(code: String): Boolean =
         code.length == CODE_LENGTH && code.all { it.isDigit() }
 

@@ -21,6 +21,14 @@ private const val TAG = "ChatyMain"
  * ThemeController; see docs/kotlin-parity.md for the tracking matrix.
  */
 class MainActivity : FragmentActivity() {
+    override fun onUserLeaveHint() {
+        val presentation = ServiceLocator.callPresentationController
+        if (presentation.isFullScreen && ServiceLocator.callSignaling.currentSession?.isActive == true) {
+            CallPipActivity.launch(this)
+        }
+        super.onUserLeaveHint()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -113,6 +121,7 @@ class MainActivity : FragmentActivity() {
     private fun handleDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
         if (data.scheme?.lowercase() != "chaty") return
+        if (com.example.chat.ui.auth.v2.AuthV2LinkRouter.receive(data)) return
         when (val host = data.host?.lowercase()) {
             "login-callback", "reset-password" -> {
                 val state = data.getQueryParameter("state")
@@ -157,9 +166,10 @@ class MainActivity : FragmentActivity() {
         lockScreenListener?.let { ServiceLocator.callSignaling.removeStateListener(it) }
         lockScreenListener = null
         com.example.chat.platform.LockPromptHost.detach(this)
-        // Dart AppLifecycleState.detached equivalent: the activity is going away for good (not a
-        // rotation/config change), so persist a terminal call state instead of a stranded row.
-        if (isFinishing && !isChangingConfigurations) {
+        // Finishing the UI is not a hangup. The foreground service owns any live
+        // authorized media session; only clean up detached idle/terminal state.
+        val liveCall = runCatching { ServiceLocator.callSignaling.currentSession?.state?.isTerminal == false }.getOrDefault(false)
+        if (isFinishing && !isChangingConfigurations && !liveCall) {
             try { ServiceLocator.callLifecycle.onAppDetached() } catch (e: Exception) { android.util.Log.w("MainActivity", "call detach cleanup failed: $e") }
         }
         super.onDestroy()

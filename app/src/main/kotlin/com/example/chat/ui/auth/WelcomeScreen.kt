@@ -1,5 +1,7 @@
 package com.example.chat.ui.auth
 
+import com.example.chat.ui.core.components.auth.ChatyUiTokens
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,13 +26,14 @@ import com.example.chat.ui.theme.LocalThemeConfig
 /** Port of lib/features/auth/welcome_screen.dart. */
 @Composable
 fun WelcomeScreen(onLogin: () -> Unit, onRegister: () -> Unit) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
     Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = ChatyUiTokens.space24, vertical = ChatyUiTokens.space16),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // R3: auth content caps at 460dp, centered (responsive plan).
@@ -40,36 +43,36 @@ fun WelcomeScreen(onLogin: () -> Unit, onRegister: () -> Unit) {
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(ChatyUiTokens.space24))
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Spacer(Modifier.weight(1f))
                 AuthIllustration(type = "welcome", theme = theme, height = 220)
-                Spacer(Modifier.height(22.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space24))
                 Text(
-                    "Welcome to Chaty",
+                    authCopy("Welcome to Chaty"),
                     textAlign = TextAlign.Center,
-                    color = Color(theme.primaryTextColor),
-                    fontSize = 30.sp,
+                    color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+                    fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text30,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.5).sp,
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(ChatyUiTokens.space8))
                 Text(
-                    "Private, customizable, and lightning-fast messaging.",
+                    authCopy("Private, customizable, and lightning-fast messaging."),
                     textAlign = TextAlign.Center,
-                    color = Color(theme.secondaryTextColor),
-                    fontSize = 15.sp,
+                    color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+                    fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text15,
                     lineHeight = 21.sp,
                 )
                 Spacer(Modifier.weight(1f))
             }
-            AuthPrimaryButton(text = "Log In", theme = theme, onClick = onLogin)
-            Spacer(Modifier.height(14.dp))
+            AuthPrimaryButton(text = authCopy("Log In"), theme = theme, onClick = onLogin)
+            Spacer(Modifier.height(ChatyUiTokens.space16))
             AuthSecondaryButton(text = "Register", theme = theme, onClick = onRegister)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(ChatyUiTokens.space24))
             }
         }
     }

@@ -1,5 +1,13 @@
 package com.example.chat.ui.auth
 
+import com.example.chat.ui.core.components.auth.ChatyUiTokens
+
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import kotlinx.coroutines.launch
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,15 +49,19 @@ import androidx.compose.material.icons.rounded.LockReset
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -67,19 +79,12 @@ private fun c(argb: Long): Color = Color(argb)
 /**48dp clickable accessibility target around a24dp decorative chevron. */
 @Composable
 fun AuthBackButton(onClick: () -> Unit) {
-    val colors = LocalAppColors.current
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-        IconButton(onClick = onClick, modifier = Modifier.size(48.dp).testTag("auth-back").semantics { contentDescription = "Back" }) {
-            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
-                semanticLabel = null,
-                color = colors.foreground,
-                modifier = Modifier.size(24.dp),
-            )
-        }
-    }
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+    com.example.chat.ui.core.components.auth.ChatyBackButton(onClick, com.example.chat.ui.theme.LocalThemeConfig.current)
 }
 
 /** Rounded text input field with label and placeholder (AuthTextField). */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun AuthTextField(
     label: String,
@@ -95,8 +100,27 @@ fun AuthTextField(
     suffixIcon: (@Composable () -> Unit)? = null,
     capsule: Boolean = false,
     microMotion: Boolean = capsule,
+    readOnly: Boolean = false,
+    imeAction: ImeAction = ImeAction.Next,
+    onDone: (() -> Unit)? = null,
+    autofillTypes: List<String> = emptyList(),
 ) {
+    com.example.chat.ui.core.components.auth.AuthInputPrivacy {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val colors = LocalAppColors.current
+    val autofill = androidx.compose.ui.platform.LocalAutofill.current
+    val autofillTree = androidx.compose.ui.platform.LocalAutofillTree.current
+    val currentChange by androidx.compose.runtime.rememberUpdatedState(onValueChange)
+    val node = remember(autofillTypes) { androidx.compose.ui.autofill.AutofillNode(autofillTypes = autofillTypes.mapNotNull { value ->
+        androidx.compose.ui.autofill.AutofillType.entries.firstOrNull { it.name == value }
+    }, onFill = { currentChange(it) }) }
+    androidx.compose.runtime.DisposableEffect(node, autofillTree) {
+        if (autofillTypes.isNotEmpty() && !readOnly) autofillTree += node
+        onDispose { autofillTree.children.remove(node.id) }
+    }
+    var capsLockOn by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val bringIntoView = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+    val focusScope = androidx.compose.runtime.rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -104,51 +128,66 @@ fun AuthTextField(
     val focusTint by androidx.compose.animation.animateColorAsState(
         targetValue = if (focused) c(theme.accentColor) else colors.border,
         animationSpec = androidx.compose.animation.core.tween(if (reduced) 0 else com.example.chat.ui.kit.ChatyMotion.fastMs),
-        label = "auth-focus-outline",
+        label = authCopy("auth-focus-outline"),
     )
     val floatingLabel: (@Composable () -> Unit)? = if (capsule) null else ({ Text(label) })
-    Column(modifier = modifier) {
+    Column(modifier = modifier.padding(vertical=ChatyUiTokens.touchGap / 2)) {
         Text(
             label,
-            color = c(theme.primaryTextColor),
-            fontSize = 14.sp,
+            color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+            fontSize = ChatyUiTokens.text14,
             fontWeight = FontWeight.Bold,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(ChatyUiTokens.space8))
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth().heightIn(min = if (capsule) AuthCapsuleTokens.controlHeight else 0.dp).testTag("auth-field-" + label.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-'))
+            readOnly = readOnly,
+            modifier = Modifier.fillMaxWidth()
+                .onPreviewKeyEvent { capsLockOn = it.nativeKeyEvent.isCapsLockOn; false }
+                .onGloballyPositioned { node.boundingBox = it.boundsInWindow() }
+                .bringIntoViewRequester(bringIntoView)
+                .onFocusChanged { state ->
+                    if (state.isFocused) focusScope.launch { bringIntoView.bringIntoView() }
+                    else if(!readOnly && keyboardType in listOf(KeyboardType.Email,KeyboardType.Ascii,KeyboardType.Uri) && value != value.trim()) currentChange(value.trim())
+                    if (autofillTypes.isNotEmpty() && !readOnly) {
+                        if (state.isFocused) autofill?.requestAutofillForNode(node) else autofill?.cancelAutofillForNode(node)
+                    }
+                }.heightIn(min = if (capsule) AuthCapsuleTokens.controlHeight else ChatyUiTokens.space0).testTag("auth-field-" + label.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-'))
                 .semantics { contentDescription = label },
             label = floatingLabel,
             placeholder = {
                 Text(
                     hintText,
-                    color = c(argbWithAlpha(theme.secondaryTextColor, 0.5)),
-                    fontSize = 14.sp,
+                    color = Color(AuthPresentationPolicy.readableText(theme.secondaryTextColor.toInt(), colors.inputFill.toArgb())),
+                    fontSize = ChatyUiTokens.text14,
                 )
             },
             visualTransformation = if (obscureText) PasswordVisualTransformation() else VisualTransformation.None,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Next),
-            keyboardActions = KeyboardActions(onNext = { if (!focus.moveFocus(FocusDirection.Next)) focus.clearFocus() }),
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction, autoCorrect = keyboardType != KeyboardType.Password),
+            keyboardActions = KeyboardActions(
+                onNext = { if (!focus.moveFocus(FocusDirection.Next)) focus.clearFocus() },
+                onDone = { focus.clearFocus(); onDone?.invoke() }),
             isError = error != null,
-            supportingText = error?.let { message -> {
-                Row(verticalAlignment = Alignment.Top, modifier = if (capsule) Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite } else Modifier) {
+            supportingText = (error ?: if (capsLockOn && keyboardType == KeyboardType.Password) authCopy("Caps Lock is on") else null)?.let { message -> {
+                Row(verticalAlignment = Alignment.Top) {
                     if (capsule) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.errorOutline, size = 18.dp, color = c(theme.dangerColor))
-                        Spacer(Modifier.width(6.dp))
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.errorOutline, size = ChatyUiTokens.space16, color = com.example.chat.ui.auth.authReadable(theme, theme.dangerColor))
+                        Spacer(Modifier.width(ChatyUiTokens.touchGap))
                     }
-                    Text(message, color = c(theme.dangerColor), fontSize = 12.sp)
+                    Text(authCopy(message), color = com.example.chat.ui.auth.authReadable(theme, theme.dangerColor), fontSize = ChatyUiTokens.text12)
                 }
             } },
             leadingIcon = prefixIcon,
-            trailingIcon = suffixIcon,
+            trailingIcon = suffixIcon ?: if(value.contains('@') && keyboardType==KeyboardType.Email && error==null && com.example.chat.core.validators.ChatyValidators.validateEmail(value)==null) ({
+                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle,size=ChatyUiTokens.space20,color=com.example.chat.ui.auth.authReadable(theme, theme.accentColor),semanticLabel=authCopy("Valid email format"))
+            }) else null,
             singleLine = true,
             interactionSource = interaction,
-            shape = if (capsule) AuthCapsuleTokens.shape else RoundedCornerShape(16.dp),
+            shape = if (capsule) AuthCapsuleTokens.shape else ChatyUiTokens.cardShape,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = c(theme.primaryTextColor),
-                unfocusedTextColor = c(theme.primaryTextColor),
+                focusedTextColor = Color(AuthPresentationPolicy.readableText(theme.primaryTextColor.toInt(),colors.inputFill.toArgb())),
+                unfocusedTextColor = Color(AuthPresentationPolicy.readableText(theme.primaryTextColor.toInt(),colors.inputFill.toArgb())),
                 focusedContainerColor = colors.inputFill,
                 unfocusedContainerColor = colors.inputFill,
                 errorContainerColor = colors.inputFill,
@@ -158,6 +197,7 @@ fun AuthTextField(
                 cursorColor = c(theme.accentColor),
             ),
         )
+    }
     }
 }
 
@@ -169,28 +209,37 @@ fun AuthPrimaryButton(
     onClick: () -> Unit,
     isLoading: Boolean = false,
     capsule: Boolean = false,
+    enabled: Boolean = true,
 ) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val reduced = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        if (pressed && !reduced) .98f else 1f,
+        androidx.compose.animation.core.tween(if(reduced) 0 else 90), label = authCopy("auth-press"))
     Button(
         onClick = onClick,
-        enabled = !isLoading,
-        modifier = Modifier.fillMaxWidth().heightIn(min = if (capsule) AuthCapsuleTokens.controlHeight else 52.dp),
-        shape = if (capsule) AuthCapsuleTokens.shape else RoundedCornerShape(16.dp),
+        interactionSource = interaction,
+        enabled = enabled && !isLoading,
+        modifier = Modifier.fillMaxWidth().padding(vertical=ChatyUiTokens.touchGap / 2).graphicsLayer { scaleX = scale; scaleY = scale }.heightIn(min = if (capsule) AuthCapsuleTokens.controlHeight else ChatyUiTokens.space52),
+        shape = if (capsule) AuthCapsuleTokens.shape else ChatyUiTokens.cardShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = c(theme.accentColor),
-            contentColor = c(theme.onAccentColor),
+            contentColor = c(AuthPresentationPolicy.readableText(theme.onAccentColor.toInt(), theme.accentColor.toInt()).toLong() and 0xffffffffL),
             disabledContainerColor = c(argbWithAlpha(theme.accentColor, 0.6)),
             disabledContentColor = c(theme.onAccentColor),
         ),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = ChatyUiTokens.controlElevation),
     ) {
         if (isLoading) {
             CircularProgressIndicator(
-                modifier = Modifier.size(22.dp),
-                strokeWidth = 2.2.dp,
+                modifier = Modifier.size(ChatyUiTokens.space22),
+                strokeWidth = ChatyUiTokens.space2_2,
                 color = c(theme.onAccentColor),
             )
         } else {
-            Text(text, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
+            Text(authCopy(text), fontSize = ChatyUiTokens.text16, fontWeight = FontWeight.Bold, letterSpacing = ChatyUiTokens.text0_2)
         }
     }
 }
@@ -198,35 +247,37 @@ fun AuthPrimaryButton(
 /** Outlined button for secondary actions (AuthSecondaryButton). */
 @Composable
 fun AuthSecondaryButton(text: String, theme: ThemeConfig, onClick: () -> Unit) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val colors = LocalAppColors.current
     OutlinedButton(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical=ChatyUiTokens.touchGap / 2).heightIn(min = ChatyUiTokens.space52),
+        shape = ChatyUiTokens.cardShape,
         border = androidx.compose.foundation.BorderStroke(
-            1.5.dp,
+            ChatyUiTokens.space1_5,
             c(argbWithAlpha(theme.secondaryTextColor, 0.65)),
         ),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = c(theme.primaryTextColor)),
     ) {
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
+        Text(authCopy(text), fontSize = ChatyUiTokens.text16, fontWeight = FontWeight.Bold, letterSpacing = ChatyUiTokens.text0_2)
     }
 }
 
 /** Divider with centered 'Or' (AuthOrDivider). */
 @Composable
 fun AuthOrDivider(theme: ThemeConfig) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val colors = LocalAppColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        HorizontalDivider(modifier = Modifier.weight(1f), thickness = 1.dp, color = colors.divider)
+        HorizontalDivider(modifier = Modifier.weight(1f), thickness = ChatyUiTokens.space1, color = colors.divider)
         Text(
             "Or",
-            color = c(theme.secondaryTextColor),
-            fontSize = 13.sp,
+            color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+            fontSize = ChatyUiTokens.text13,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.padding(horizontal = ChatyUiTokens.space16),
         )
-        HorizontalDivider(modifier = Modifier.weight(1f), thickness = 1.dp, color = colors.divider)
+        HorizontalDivider(modifier = Modifier.weight(1f), thickness = ChatyUiTokens.space1, color = colors.divider)
     }
 }
 
@@ -234,44 +285,48 @@ fun AuthOrDivider(theme: ThemeConfig) {
  *  type: 'welcome', 'forgot_password', 'otp'. */
 @Composable
 fun AuthIllustration(type: String, theme: ThemeConfig, height: Int = 180) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val colors = LocalAppColors.current
-    val (mainIcon: ImageVector, badgeText: String) = when (type) {
-        "forgot_password" -> Icons.Rounded.LockReset to "Reset Access"
-        "otp" -> Icons.Rounded.VerifiedUser to "Secure OTP"
-        else -> Icons.Rounded.Forum to "Fast & Private"
-    }
+    val (mainIcon: ImageVector, badgeText: String) = remember(type,authCopy) { when (type) {
+        "forgot_password" -> Icons.Rounded.LockReset to authCopy("Reset Access")
+        "otp" -> Icons.Rounded.VerifiedUser to authCopy("Email verification")
+        "login" -> Icons.Rounded.Forum to authCopy("Welcome back")
+        "register" -> Icons.Rounded.VerifiedUser to authCopy("Your new account")
+        "success" -> Icons.Rounded.VerifiedUser to authCopy("You're ready")
+        else -> Icons.Rounded.Forum to authCopy("Fast & Private")
+    }}
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(height.dp)
-            .padding(vertical = 12.dp)
+            .heightIn(min = height.dp)
+            .padding(vertical = ChatyUiTokens.space16)
             .border(
-                1.5.dp,
+                ChatyUiTokens.space1_5,
                 c(argbWithAlpha(theme.accentColor, 0.15)),
-                RoundedCornerShape(24.dp),
+                ChatyUiTokens.cardShape,
             )
             .background(
                 c(argbWithAlpha(theme.cardColor, 0.6)),
-                RoundedCornerShape(24.dp),
+                ChatyUiTokens.cardShape,
             ),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 modifier = Modifier
-                    .size(76.dp)
+                    .size(ChatyUiTokens.space76)
                     .background(c(argbWithAlpha(theme.accentColor, 0.15)), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(mainIcon, contentDescription = null, tint = c(theme.accentColor), modifier = Modifier.size(40.dp))
+                Icon(mainIcon, contentDescription = null, tint = c(theme.accentColor), modifier = Modifier.size(ChatyUiTokens.space40))
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(ChatyUiTokens.touchGap))
             Box(
                 modifier = Modifier
-                    .background(c(argbWithAlpha(theme.accentColor, 0.12)), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                    .background(c(argbWithAlpha(theme.accentColor, 0.12)), ChatyUiTokens.cardShape)
+                    .padding(horizontal = ChatyUiTokens.space16, vertical = ChatyUiTokens.space8),
             ) {
-                Text(badgeText, color = c(theme.accentColor), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(badgeText, color = com.example.chat.ui.auth.authReadable(theme, theme.accentColor), fontSize = ChatyUiTokens.text12, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -283,73 +338,15 @@ fun WorkspaceModeSelector(
     useOrganization: Boolean,
     onSelect: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                Color(argbWithAlpha(theme.surfaceColor, 0.6)),
-                RoundedCornerShape(14.dp),
-            )
-            .border(
-                1.dp,
-                // Dart: dividerColor (secondaryText at 0.2) then withValues(alpha: 0.25) replaces the alpha
-                Color(argbWithAlpha(theme.secondaryTextColor, 0.25)),
-                RoundedCornerShape(14.dp),
-            )
-            .padding(4.dp),
-    ) {
-        ModeTab(
-            theme = theme,
-            label = "Normal / Default",
-            selected = !useOrganization,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelect(false) },
-        )
-        ModeTab(
-            theme = theme,
-            label = "Organization",
-            selected = useOrganization,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelect(true) },
-        )
-    }
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+    com.example.chat.ui.core.components.auth.ChatyModeToggle(theme, useOrganization, onSelect)
 }
-
-@Composable
-private fun ModeTab(
-    theme: ThemeConfig,
-    label: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val contentColor = if (selected) Color(theme.onAccentColor) else Color(theme.secondaryTextColor)
-    Box(
-        modifier = modifier
-            .background(
-                if (selected) Color(theme.accentColor) else Color.Transparent,
-                RoundedCornerShape(10.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 9.dp, horizontal = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            color = contentColor,
-            fontSize = 12.5.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-        )
-    }
-}
-
 
 /** Approved capsule login tokens, opt-in until each later screen is approved. */
 internal object AuthCapsuleTokens {
-    val tapTarget = 48.dp
+    val tapTarget = ChatyUiTokens.space48
     const val checkboxMs = 180
-    val controlHeight = 56.dp
+    val controlHeight = ChatyUiTokens.space56
     val shape = CircleShape
 }
 
@@ -360,12 +357,8 @@ internal fun AuthTextLink(
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {
-    androidx.compose.material3.TextButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = AuthCapsuleTokens.tapTarget),
-        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = c(theme.accentColor)),
-    ) { Text(text, fontSize = 13.5.sp) }
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+    com.example.chat.ui.core.components.auth.ChatyAuthLink(text, theme, onClick, enabled, Modifier.fillMaxWidth())
 }
 
 /** No destination, persistence or authentication changes: caller owns mode state. */
@@ -375,82 +368,14 @@ internal fun AuthCapsuleModeSelector(
     useOrganization: Boolean,
     onSelect: (Boolean) -> Unit,
 ) {
-    val labelStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val widestLabel = with(density) {
-        listOf("Normal", "Organization").maxOf {
-            textMeasurer.measure(androidx.compose.ui.text.AnnotatedString(it), style = labelStyle,
-                softWrap = false).size.width
-        }.toDp()
-    }
-    androidx.compose.foundation.layout.BoxWithConstraints(
-        Modifier.fillMaxWidth().semantics { isTraversalGroup = true }
-            .background(c(argbWithAlpha(theme.secondaryTextColor, 0.06)), AuthCapsuleTokens.shape)
-            .border(1.dp, c(argbWithAlpha(theme.secondaryTextColor, 0.2)), AuthCapsuleTokens.shape)
-            .padding(3.dp).selectableGroup(),
-    ) {
-        // Measure with the actual device font scale. Keep whole labels and48dp targets,
-        // stack instead of shrinking text or splitting Organization mid-word.
-        val sideBySide = maxWidth >= (widestLabel + 20.dp + 8.dp + 20.dp) * 2
-        if (sideBySide) {
-            Row(Modifier.fillMaxWidth()) {
-                listOf(false to "Normal", true to "Organization").forEach { (organization, label) ->
-                    AuthCapsuleModeOption(theme, organization, label, useOrganization, onSelect,
-                        Modifier.weight(1f), labelStyle)
-                }
-            }
-        } else {
-            Column(Modifier.fillMaxWidth()) {
-                listOf(false to "Normal", true to "Organization").forEach { (organization, label) ->
-                    AuthCapsuleModeOption(theme, organization, label, useOrganization, onSelect,
-                        Modifier.fillMaxWidth(), labelStyle)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AuthCapsuleModeOption(
-    theme: ThemeConfig,
-    organization: Boolean,
-    label: String,
-    useOrganization: Boolean,
-    onSelect: (Boolean) -> Unit,
-    modifier: Modifier,
-    labelStyle: androidx.compose.ui.text.TextStyle,
-) {
-    val selected = organization == useOrganization
-    val reduced = com.example.chat.ui.kit.rememberChatyReduceMotion()
-    val fill by androidx.compose.animation.animateColorAsState(
-        targetValue = if (selected) c(theme.accentColor) else Color.Transparent,
-        animationSpec = androidx.compose.animation.core.tween(
-            durationMillis = if (reduced) 0 else com.example.chat.ui.kit.ChatyMotion.fastMs,
-            easing = com.example.chat.ui.kit.ChatyMotion.standard,
-        ), label = "auth-mode-fill",
-    )
-    val foreground = if (selected) c(theme.onAccentColor) else c(theme.secondaryTextColor)
-    Row(
-        modifier.heightIn(min = AuthCapsuleTokens.tapTarget)
-            .background(fill, AuthCapsuleTokens.shape)
-            .selectable(selected, role = androidx.compose.ui.semantics.Role.Tab, onClick = { onSelect(organization) })
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-    ) {
-        if (organization) AuthRoleIcon("workspace", theme, color = foreground)
-        else com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, size = 20.dp, color = foreground)
-        Spacer(Modifier.width(8.dp))
-        Text(label, color = foreground, style = labelStyle,
-            softWrap = false, maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-    }
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+    com.example.chat.ui.core.components.auth.ChatyModeToggle(theme, useOrganization, onSelect)
 }
 
 /** Resolve through the persisted selected pack, including per-icon variants. */
 @Composable
 internal fun AuthRoleIcon(role: String, theme: ThemeConfig, label: String? = null, color: Color = c(theme.secondaryTextColor)) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val id = when (role) {
         "workspace" -> com.example.chat.ui.icons.ChatyIconId.workspace
         "eye" -> com.example.chat.ui.icons.ChatyIconId.eye
@@ -459,5 +384,5 @@ internal fun AuthRoleIcon(role: String, theme: ThemeConfig, label: String? = nul
         "phone" -> com.example.chat.ui.icons.ChatyIconId.phone
         else -> com.example.chat.ui.icons.ChatyIconId.mail
     }
-    com.example.chat.ui.icons.ChatyIcon(id, size = 20.dp, color = color, semanticLabel = label)
+    com.example.chat.ui.icons.ChatyIcon(id, size = ChatyUiTokens.space20, color = color, semanticLabel = label)
 }

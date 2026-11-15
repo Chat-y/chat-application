@@ -1,5 +1,8 @@
 package com.example.chat.ui.auth
 
+import com.example.chat.ui.core.components.auth.OtpCodeCells
+import com.example.chat.ui.core.components.auth.ChatyUiTokens
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -43,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -79,6 +83,7 @@ import com.example.chat.ui.kit.ChatyAdaptiveLogic
  *  Debug builds only: the approved offline-demo code (000000) short-circuits
  *  to onVerified through DebugOtpGate before any backend call - no request,
  *  no token. Release builds never contain the gate. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun OtpVerificationScreen(
     email: String,
@@ -95,24 +100,38 @@ fun OtpVerificationScreen(
     deliveryMessage: String? = null,
     initialResendSeconds: Int = OtpVerificationLogic.RESEND_COUNTDOWN_SECONDS,
 ) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+    val authFormat=com.example.chat.core.i18n.rememberAuthFormat()
     val theme = LocalThemeConfig.current
+    val online=com.example.chat.ui.core.components.auth.rememberAuthOnline()
     val scope = rememberCoroutineScope()
+    // Auth screenshot blocking is off by default. Preserve the opt-in hook, do not apply globally.
+    // com.example.chat.ui.kit.ProtectSensitiveWindow()
+    val clipboardForCode = androidx.compose.ui.platform.LocalClipboardManager.current
+    val feedbackView = androidx.compose.ui.platform.LocalView.current
+    var submittedCode by remember { mutableStateOf<String?>(null) }
+    var explicitlyPastedText by remember { mutableStateOf<String?>(null) }
+
 
     var code by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    val completeCode by remember {androidx.compose.runtime.derivedStateOf {OtpVerificationLogic.isComplete(code)}}
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var resendMessage by remember(email, deliveryMessage) { mutableStateOf(deliveryMessage) }
-    var resendIn by remember { mutableIntStateOf(initialResendSeconds.coerceIn(1, 3600)) }
+    var resendDeadline by remember { androidx.compose.runtime.mutableLongStateOf(
+        OtpVerificationLogic.cooldownDeadline(android.os.SystemClock.elapsedRealtime(), initialResendSeconds)) }
+    var resendIn by remember { mutableIntStateOf(OtpVerificationLogic.cooldownSeconds(resendDeadline, android.os.SystemClock.elapsedRealtime())) }
 
-    LaunchedEffect(resendIn) {
-        if (resendIn > 0) {
-            delay(1000)
-            resendIn -= 1
+    LaunchedEffect(resendDeadline) {
+        while (true) {
+            resendIn = OtpVerificationLogic.cooldownSeconds(resendDeadline, android.os.SystemClock.elapsedRealtime())
+            if (resendIn <= 0) break
+            delay(250)
         }
     }
 
     fun handleContinue() {
-        if (isLoading || !OtpVerificationLogic.isComplete(code)) return
+        if (isLoading || !completeCode) return
         if (purpose == OtpPurpose.ResetPassword) {
             onVerified(code)
             return
@@ -126,17 +145,29 @@ fun OtpVerificationScreen(
             onVerified(code)
             return
         }
+        val submitted = code
+        val pasted = explicitlyPastedText
         isLoading = true
         errorMessage = null
         scope.launch {
             try {
-                verify(code)
+                authRequest { verify(submitted) }
                 isLoading = false
-                onVerified(code)
-            } catch (e: Exception) {
+                if (AuthFormPolicy.shouldClearCodeClipboard(clipboardForCode.getText()?.text, submitted, pasted)) clipboardForCode.setText(androidx.compose.ui.text.AnnotatedString(""))
+                com.example.chat.ui.kit.ChatyHapticsPort.success(feedbackView)
+                onVerified(submitted)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 isLoading = false
-                errorMessage = OtpVerificationLogic.displayError(e)
-            }
+                errorMessage = AuthFormPolicy.privateError(OtpVerificationLogic.displayError(e), email)
+            } finally { isLoading = false }
+        }
+    }
+
+    LaunchedEffect(code, isLoading) {
+        if (!isLoading && completeCode && submittedCode != code) {
+            submittedCode = code
+            handleContinue()
         }
     }
 
@@ -147,135 +178,135 @@ fun OtpVerificationScreen(
         resendMessage = null
         scope.launch {
             try {
-                resendMessage = resend()
-                code = ""
-                resendIn = OtpVerificationLogic.RESEND_COUNTDOWN_SECONDS
+                resendMessage = authRequest {resend()}
+                code = ""; submittedCode = null
+                resendDeadline = OtpVerificationLogic.cooldownDeadline(android.os.SystemClock.elapsedRealtime(), OtpVerificationLogic.RESEND_COUNTDOWN_SECONDS)
+                resendIn = OtpVerificationLogic.cooldownSeconds(resendDeadline, android.os.SystemClock.elapsedRealtime())
                 isLoading = false
-            } catch (e: Exception) {
-                isLoading = false
-                errorMessage = OtpVerificationLogic.displayError(e)
-            }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
+                errorMessage = AuthFormPolicy.privateError(OtpVerificationLogic.displayError(e), email)
+            } finally { isLoading = false }
         }
     }
 
-    Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).imePadding()) {
-            Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)) {
-                AuthBackButton(onClick = onBack)
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(modifier = Modifier.widthIn(max = ChatyAdaptiveLogic.AUTH_COLUMN_MAX_DP.dp).fillMaxWidth()) {
+    val guardedBack = com.example.chat.ui.core.components.auth.rememberAuthBackAction(code.isNotEmpty(), onBack)
+    com.example.chat.ui.core.components.auth.ChatyAuthScreen(theme) {
+        com.example.chat.ui.core.components.auth.AuthOfflineNotice(online,theme)
+                    AuthBackButton(onClick = guardedBack)
                     AuthIllustration(type = "otp", theme = theme, height = 190)
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(ChatyUiTokens.space16))
                     Text(
-                        when (purpose) { OtpPurpose.VerifyEmail -> "Verify Your Email"; OtpPurpose.SignIn -> "Sign in with email code"; OtpPurpose.ResetPassword -> "Enter Reset Code" },
-                        color = Color(theme.primaryTextColor),
-                        fontSize = 26.sp,
+                        when (purpose) { OtpPurpose.VerifyEmail -> authCopy("Verify Your Email"); OtpPurpose.SignIn -> authCopy("Sign in with email code"); OtpPurpose.ResetPassword -> authCopy("Enter Reset Code") },
+                        modifier = Modifier.semantics { heading() },
+                        color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+                        fontSize = ChatyUiTokens.text26,
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = (-0.5).sp,
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(ChatyUiTokens.space8))
                     Text(
-                        "Code sent to ${OtpVerificationLogic.maskEmail(email)}.",
-                        color = Color(theme.secondaryTextColor),
-                        fontSize = 14.sp,
-                        lineHeight = 19.6.sp,
+                        authFormat("Code sent to %1\$s.",OtpVerificationLogic.maskEmail(email)),
+                        color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+                        fontSize = ChatyUiTokens.text14,
+                        lineHeight = ChatyUiTokens.text19_6,
                     )
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(ChatyUiTokens.space24))
+                    com.example.chat.ui.core.components.auth.CheckEmailActions(theme, guardedBack, !isLoading)
                     OtpCodeCells(
                         code = code,
                         onCodeChange = {
-                            code = OtpVerificationLogic.sanitizeCode(it)
+                            val next = OtpVerificationLogic.sanitizeCode(it)
+                            if (next.length == code.length + 1) com.example.chat.ui.kit.ChatyHapticsPort.selection(feedbackView)
+                            code = next
                             errorMessage = null
                         },
                         theme = theme,
                     )
+                    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                    com.example.chat.ui.core.components.auth.ChatyInlineAction(authCopy("Paste email code"), theme, {
+                        clipboard.getText()?.text?.let {
+                            explicitlyPastedText = it
+                            code = OtpVerificationLogic.sanitizeCode(it)
+                            errorMessage = null
+                        }
+                    }, enabled = !isLoading)
                     errorMessage?.let {
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(ChatyUiTokens.touchGap))
                         Text(
                             it,
-                            color = Color(theme.dangerColor),
-                            fontSize = 13.5.sp,
+                            color = com.example.chat.ui.auth.authReadable(theme, theme.dangerColor),
+                            fontSize = ChatyUiTokens.text13_5,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         )
                     }
                     resendMessage?.let {
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(ChatyUiTokens.touchGap))
                         Text(
                             it,
-                            color = Color(theme.secondaryTextColor),
-                            fontSize = 13.5.sp,
+                            color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+                            fontSize = ChatyUiTokens.text13_5,
                             fontWeight = FontWeight.Medium,
                         )
                     }
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(ChatyUiTokens.space24))
                     AuthPrimaryButton(
-                        text = when (purpose) { OtpPurpose.VerifyEmail -> "Verify and continue"; OtpPurpose.SignIn -> "Verify and sign in"; OtpPurpose.ResetPassword -> "Continue" },
+                        text = when (purpose) { OtpPurpose.VerifyEmail -> authCopy("Verify and continue"); OtpPurpose.SignIn -> authCopy("Verify and sign in"); OtpPurpose.ResetPassword -> authCopy("Continue") },
                         theme = theme,
                         onClick = { handleContinue() },
                         isLoading = isLoading,
                         capsule = true,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
+                    Spacer(Modifier.height(ChatyUiTokens.space8))
+                    androidx.compose.foundation.layout.FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         TextButton(
                             onClick = { handleResend() },
                             enabled = !isLoading && resendIn <= 0,
-                            modifier = Modifier.heightIn(min = AuthCapsuleTokens.tapTarget),
+                            modifier = Modifier.padding(ChatyUiTokens.touchGap / 2).heightIn(min = AuthCapsuleTokens.tapTarget),
                         ) {
                             Text(
-                                if (resendIn > 0) "Resend code in ${resendIn}s" else "Resend code",
+                                if (resendIn > 0) authFormat("Resend code in %1\$ds",resendIn) else authCopy("Resend code"),
                                 color = Color(
                                     if (resendIn > 0) theme.secondaryTextColor else theme.accentColor,
                                 ),
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.5.sp,
+                                fontSize = ChatyUiTokens.text13_5,
                             )
                         }
                         Text(
                             "•",
                             color = Color(argbWithAlpha(theme.secondaryTextColor, 0.6)),
-                            fontSize = 13.5.sp,
+                            fontSize = ChatyUiTokens.text13_5,
                         )
                         TextButton(
-                            onClick = onBack,
+                            onClick = guardedBack,
                             enabled = !isLoading,
-                            modifier = Modifier.heightIn(min = AuthCapsuleTokens.tapTarget),
+                            modifier = Modifier.padding(ChatyUiTokens.touchGap / 2).heightIn(min = AuthCapsuleTokens.tapTarget),
                         ) {
                             Text(
-                                "Change email",
-                                color = Color(theme.accentColor),
+                                authCopy("Change email"),
+                                color = com.example.chat.ui.auth.authReadable(theme, theme.accentColor),
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.5.sp,
+                                fontSize = ChatyUiTokens.text13_5,
                             )
                         }
                     }
                     if (onSkip != null && purpose == OtpPurpose.VerifyEmail) {
                         TextButton(
                             onClick = onSkip,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = AuthCapsuleTokens.tapTarget),
+                            modifier = Modifier.padding(ChatyUiTokens.touchGap / 2).fillMaxWidth().heightIn(min = AuthCapsuleTokens.tapTarget),
                         ) {
                             Text(
-                                "Skip for now",
-                                color = Color(theme.secondaryTextColor),
-                                fontSize = 13.5.sp,
+                                authCopy("Skip for now"),
+                                color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor),
+                                fontSize = ChatyUiTokens.text13_5,
                             )
                         }
                     }
-                }
-            }
-        }
     }
 }
 
@@ -285,74 +316,3 @@ fun OtpVerificationScreen(
  *  the per-digit readout. Cells are decorative for accessibility; the hidden
  *  field carries the label and the entered-count state. Cell tint animation
  *  honors reduced motion. */
-@Composable
-private fun OtpCodeCells(
-    code: String,
-    onCodeChange: (String) -> Unit,
-    theme: ThemeConfig,
-) {
-    val colors = LocalAppColors.current
-    val reduced = com.example.chat.ui.kit.rememberChatyReduceMotion()
-    val focusRequester = remember { FocusRequester() }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { focusRequester.requestFocus() },
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clearAndSetSemantics { },
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            repeat(OtpVerificationLogic.CODE_LENGTH) { index ->
-                val digit = code.getOrNull(index)
-                val cellTint by animateColorAsState(
-                    targetValue = if (digit != null || index == code.length) {
-                        Color(theme.accentColor)
-                    } else {
-                        colors.border
-                    },
-                    animationSpec = tween(
-                        durationMillis = if (reduced) 0 else com.example.chat.ui.kit.ChatyMotion.fastMs,
-                    ),
-                    label = "otp-cell-tint-$index",
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 56.dp)
-                        .background(colors.inputFill, RoundedCornerShape(12.dp))
-                        .border(1.dp, cellTint, RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        digit?.toString() ?: "-",
-                        color = if (digit != null) {
-                            Color(theme.primaryTextColor)
-                        } else {
-                            Color(argbWithAlpha(theme.secondaryTextColor, 0.5))
-                        },
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-        }
-        BasicTextField(
-            value = code,
-            onValueChange = onCodeChange,
-            modifier = Modifier
-                .matchParentSize()
-                .alpha(0f)
-                .focusRequester(focusRequester)
-                .semantics {
-                    contentDescription = "One-time code, ${OtpVerificationLogic.CODE_LENGTH} digits"
-                    stateDescription = "${code.length} of ${OtpVerificationLogic.CODE_LENGTH} digits entered"
-                },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            singleLine = true,
-        )
-    }
-}
