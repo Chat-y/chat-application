@@ -1,76 +1,69 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-__pycache__/
+# Operating system
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+Thumbs.db
+desktop.ini
+.env
 
-# IntelliJ related
+# IDEs / editors
+.idea/
+.vscode/
 *.iml
 *.ipr
 *.iws
-.idea/
+.atom/
+.swiftpm/
+.history
+.svn/
+*.swp
+*.swo
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# Build / compile outputs
+**/build/
+**/out/
+**/target/
+*.class
+*.pyc
+__pycache__/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+build-artifacts/
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Android
+/android/app/debug
+/android/app/profile
+/android/app/release
+/local.properties
+app.*.symbols
+app.*.map.json
+
+# Gradle
+.gradle/
+
+# Rust / mls-native
+mls-native/Cargo.lock
+third_party/**/target/
+third_party/**/target_android/
+
+# Dart / Flutter
 .dart_tool/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
-/coverage/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+**/coverage/
 
-# Local runtime state and Gradle cache
-.chaty_data/
-.gradle/
-**/build/
-build-artifacts/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# Rust build artifacts and third-party compiled targets
-**/target/
-**/target_android/
-third_party/**/target/
-third_party/**/target_android/
-mls-native/Cargo.lock
-
-# Docs and specifications
-specs/
-.claude/
-*.log
-
-# QA automation outputs and dependencies
+# Node / web
 node_modules/
 **/node_modules/
-artifacts/
-qa/playwright/reports/
-*.md 
-*.csv
-# Environment and sensitive secrets
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment & secrets
 .env
 .env.*
 .env.local
@@ -86,3 +79,27 @@ qa/playwright/reports/
 credentials.json
 google-services.json
 GoogleService-Info.plist
+
+# Logs / data exports
+*.log
+*.csv
+
+# Unrelated project artifacts (not app working code)
+*.b64
+brag-output-*/
+mdfiles/
+research/
+scripts/
+tools/
+ci/
+screenshot.png
+
+# Agent / tooling metadata (unrelated to app build)
+.agent/
+.agents/
+.chaty_data
+.chaty_data/
+.chaty
+.gemini/
+.gsd/
+migrate_working_dir/
