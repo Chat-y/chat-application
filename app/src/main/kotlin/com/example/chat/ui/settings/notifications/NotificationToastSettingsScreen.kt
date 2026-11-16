@@ -4,7 +4,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Switch
-import androidx.compose.material.icons.automirrored.rounded.ChevronRight
+// ChevronRight has no AutoMirrored variant in the pinned icon library.
+// Previous import: androidx.compose.material.icons.automirrored.rounded.ChevronRight
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.ScrollState
@@ -286,7 +288,8 @@ private fun ToastSettingRow(
             // The full row is the touch target. Swatch adds no duplicate small click target.
             Box(Modifier.size(28.dp).background(Color(colorValue), CircleShape).border(1.dp, colors.borderSubtle, CircleShape))
         } else if (hasSubScreen) {
-            Icon(Icons.AutoMirrored.Rounded.ChevronRight, null, tint = colors.foregroundSecondary.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
+            // Previous unavailable icon: Icons.AutoMirrored.Rounded.ChevronRight
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = colors.foregroundSecondary.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
         }
     }
 }

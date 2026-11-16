@@ -5,5 +5,6 @@ package com.example.chat.ui.settings.universal
 internal fun includeConversationAppearanceBackup(includeAppearance: Boolean, sectionName: String): Boolean =
     includeAppearance || sectionName !in setOf("preferences", "wallpapers", "customization")
 
-internal fun conversationBackupPreferenceSnapshot(values: Map<String, Any?>, includeAppearance: Boolean): Map<String, Any?> =
+// Previous signature widened the nested preferences map to Map<String, Any?>.
+internal fun <T> conversationBackupPreferenceSnapshot(values: Map<String, T>, includeAppearance: Boolean): Map<String, T> =
     if (includeAppearance) values else emptyMap()

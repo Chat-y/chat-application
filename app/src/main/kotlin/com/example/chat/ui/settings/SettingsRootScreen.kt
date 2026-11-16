@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.NotificationsNone

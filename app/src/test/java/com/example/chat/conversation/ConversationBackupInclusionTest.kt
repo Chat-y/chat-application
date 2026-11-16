@@ -9,6 +9,16 @@ class ConversationBackupInclusionTest {
         val values = mapOf<String,Any?>("conversation" to mapOf("hideContactName" to true),"universal" to emptyMap<String,Any?>())
         assertEquals(values,conversationBackupPreferenceSnapshot(values,true))
     }
+    @Test fun nestedPreferencesTypeIsPreservedForBackupRestoreLogic() {
+        val values: Map<String, Map<String, Any?>> = mapOf(
+            "conversation" to mapOf("hideContactName" to true),
+            "universal" to emptyMap(),
+        )
+        val included: Map<String, Map<String, Any?>> = conversationBackupPreferenceSnapshot(values, true)
+        val omitted: Map<String, Map<String, Any?>> = conversationBackupPreferenceSnapshot(values, false)
+        assertSame(values, included)
+        assertTrue(omitted.isEmpty())
+    }
     @Test fun uncheckedOmitsCompleteSettingsNotJustOneTypedGroup() {
         assertTrue(conversationBackupPreferenceSnapshot(mapOf("conversation" to true,"gbFeatures" to true),false).isEmpty())
     }

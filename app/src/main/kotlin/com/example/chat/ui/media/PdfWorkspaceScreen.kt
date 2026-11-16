@@ -101,7 +101,8 @@ fun PdfWorkspaceScreen(
     val view = LocalView.current
     val snackbar = remember { SnackbarHostState() }
     val colors = com.example.chat.ui.theme.LocalAppColors.current
-    val isDark = colors.isDark
+    // Previous private property access: val isDark = colors.isDark
+    val isDark = com.example.chat.ui.theme.LocalThemeConfig.current.isDark
 
     var tick by remember { mutableIntStateOf(0) }
     DisposableEffect(library) {

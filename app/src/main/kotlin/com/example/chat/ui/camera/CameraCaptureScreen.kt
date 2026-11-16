@@ -14,6 +14,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
@@ -57,6 +58,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.core.content.ContextCompat
 import androidx.camera.core.CameraState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -1465,6 +1467,8 @@ fun ChatyCameraCaptureScreen(
             )
         } else if (capturedPath == null) {
             androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+            // Capture before nested layout receivers hide BoxWithConstraintsScope.
+            val cameraPaneHeight = maxHeight
             CameraCaptureViewfinder(
                 videoLensRecorded = videoLensEffectActive,
                 phase = phase,
@@ -1697,7 +1701,8 @@ fun ChatyCameraCaptureScreen(
                 )
             }
             CameraCaptureBottomControls(
-                paneHeight = maxHeight,
+                // Previous implicit receiver: paneHeight = maxHeight,
+                paneHeight = cameraPaneHeight,
                 // CAM-R1-037: UI label only; selector/camera-switch behavior unchanged.
                 frontCamera = session.lensFacing == CameraSelector.LENS_FACING_FRONT,
                 phase = phase,

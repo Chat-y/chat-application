@@ -106,7 +106,8 @@ fun MediaWorkspaceScreen(
     LaunchedEffect(library) { library.refreshLibrary() }
 
     val colors = com.example.chat.ui.theme.LocalAppColors.current
-    val isDark = colors.isDark
+    // Previous private property access: val isDark = colors.isDark
+    val isDark = com.example.chat.ui.theme.LocalThemeConfig.current.isDark
     var cleanupConfirm by remember { mutableStateOf(false) }
     var cleanupEstimate by remember { mutableStateOf<Long?>(null) }
     var refreshing by remember { mutableStateOf(false) }

@@ -110,6 +110,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.chat.core.theme.ThemeConfig
 import com.example.chat.ui.theme.ChatyAsyncImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -978,7 +979,8 @@ fun MediaViewerScreen(
                                         detectTapGestures(
                                             onTap = { toggleVideo() },
                                             onDoubleTap = { tap ->
-                                                val direction = viewerVideoTapDirection(tap.x, size.width.toFloat())
+                                                // Previous shadowed size: viewerVideoTapDirection(tap.x, size.width.toFloat())
+                                                val direction = viewerVideoTapDirection(tap.x, this.size.width.toFloat())
                                                 val reader = videoView
                                                 if (direction == 0) toggleVideo()
                                                 else if (!restrictedViewOnce && videoReady && !videoFailed && durationMs > 0 && reader != null &&
@@ -1036,7 +1038,8 @@ fun MediaViewerScreen(
                                     Box(Modifier.align(badgeAlignment).size(128.dp), contentAlignment = Alignment.Center) {
                                         if (!reduceMotion) Canvas(Modifier.fillMaxSize()) {
                                             drawCircle(primary.copy(alpha = (1f - seekRipple.value).coerceIn(0f, 1f) * 0.25f),
-                                                radius = size.minDimension * 0.5f * seekRipple.value)
+                                                // Previous shadowed size: radius = size.minDimension * 0.5f * seekRipple.value
+                                                radius = this.size.minDimension * 0.5f * seekRipple.value)
                                         }
                                         Surface(shape = CircleShape, color = androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer) {
                                             Text(if (seekGestureDirection < 0) "Back 10s" else "Forward 10s",
@@ -1287,6 +1290,9 @@ private fun ImageViewerContent(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewportW = constraints.maxWidth.toFloat()
         val viewportH = constraints.maxHeight.toFloat()
+        // Capture decode bounds before entering the nested BoxScope.
+        val decodeWidth = viewerDecodeExtent(constraints.maxWidth)
+        val decodeHeight = viewerDecodeExtent(constraints.maxHeight)
         DisposableEffect(model, viewportW, viewportH, reduceMotion) {
             onDispose { zoomAnimation?.cancel() }
         }
@@ -1400,7 +1406,8 @@ private fun ImageViewerContent(
             model = coil.request.ImageRequest.Builder(LocalContext.current).data(model)
                 // MV-R2-025 previous unbounded request:
                 // .memoryCachePolicy(coil.request.CachePolicy.DISABLED).diskCachePolicy(coil.request.CachePolicy.DISABLED).build(),
-                .size(viewerDecodeExtent(constraints.maxWidth), viewerDecodeExtent(constraints.maxHeight))
+                // Previous implicit receiver: .size(viewerDecodeExtent(constraints.maxWidth), viewerDecodeExtent(constraints.maxHeight))
+                .size(decodeWidth, decodeHeight)
                 .memoryCachePolicy(coil.request.CachePolicy.DISABLED).diskCachePolicy(coil.request.CachePolicy.DISABLED).build(),
             contentDescription = title,
             onSuccess = { onReady() },
