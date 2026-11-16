@@ -3,6 +3,8 @@ package com.example.chat.ui.vault
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -389,15 +391,22 @@ private fun NumericPad(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 row.forEach { cell ->
+                    val keyInteractions = remember(cell) { MutableInteractionSource() }
+                    val pressed by keyInteractions.collectIsPressedAsState()
+                    val focused by keyInteractions.collectIsFocusedAsState()
+                    // Static state colors give feedback without adding motion at any animation scale.
+                    val highlighted = enabled && (pressed || focused)
                     when (cell) {
                         "bio" -> Box(
                             modifier = Modifier
                                 .size(72.dp)
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
-                                .background(primary.copy(alpha = 0.12f))
+                                // .background(primary.copy(alpha = 0.12f))
+                                .background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else primary.copy(alpha = 0.12f))
                                 .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
+                                    // interactionSource = remember { MutableInteractionSource() },
+                                    interactionSource = keyInteractions,
                                     indication = null,
                                     enabled = enabled,
                                     role = Role.Button,
@@ -409,7 +418,8 @@ private fun NumericPad(
                                 Icons.Rounded.Fingerprint,
                                 contentDescription = "Unlock with biometrics",
                                 modifier = Modifier.size(32.dp),
-                                tint = primary,
+                                // tint = primary,
+                                tint = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer else primary,
                             )
                         }
                         "back" -> Box(
@@ -418,10 +428,12 @@ private fun NumericPad(
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
                                 .background(
-                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    // MaterialTheme.colorScheme.surfaceVariant,
+                                    if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                 )
                                 .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
+                                    // interactionSource = remember { MutableInteractionSource() },
+                                    interactionSource = keyInteractions,
                                     indication = null,
                                     enabled = enabled,
                                     role = Role.Button,
@@ -433,7 +445,8 @@ private fun NumericPad(
                                 Icons.AutoMirrored.Rounded.Backspace,
                                 contentDescription = "Backspace",
                                 modifier = Modifier.size(22.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                // tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         else -> Box(
@@ -442,7 +455,8 @@ private fun NumericPad(
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
                                 .background(
-                                    MaterialTheme.colorScheme.surface,
+                                    // MaterialTheme.colorScheme.surface,
+                                    if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                                 )
                                 .border(
                                     1.dp,
@@ -450,7 +464,8 @@ private fun NumericPad(
                                     CircleShape,
                                 )
                                 .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
+                                    // interactionSource = remember { MutableInteractionSource() },
+                                    interactionSource = keyInteractions,
                                     indication = null,
                                     enabled = enabled,
                                     role = Role.Button,
@@ -462,7 +477,8 @@ private fun NumericPad(
                                 cell,
                                 fontSize = 26.sp,
                                 fontWeight = FontWeight.W600,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                // color = MaterialTheme.colorScheme.onSurface,
+                                color = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }

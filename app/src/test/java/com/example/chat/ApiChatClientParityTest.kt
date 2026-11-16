@@ -40,6 +40,16 @@ class ApiChatClientParityTest {
     }
 
     @Test
+    fun accountBoundSendRejectsUnsafeConversationBeforeTransport() {
+        val t = FakeTransport { throw AssertionError("unsafe identifier reached transport") }
+        val scope = com.example.chat.data.api.ApiAccountScope("user", "tok", "tenant", "https://example.test", "", 1L)
+        for (id in listOf("../admin", "room?other=1", "room/other", "room#fragment")) {
+            assertNull(client(t).sendMessage(scope, { true }, id, "hello"))
+        }
+        assertTrue(t.calls.isEmpty())
+    }
+
+    @Test
     fun getChatSettingsExtrasParsesBlobAndUpdatedAt() {
         val t = FakeTransport { call ->
             assertEquals("GET", call.method)

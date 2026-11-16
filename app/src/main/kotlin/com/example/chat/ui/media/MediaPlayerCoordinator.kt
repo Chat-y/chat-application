@@ -62,6 +62,9 @@ class MediaPlayerCoordinator(
     private val policyCoordinator: AudioPolicyGate? = null,
     private val islandController: DynamicIslandController? = null,
     private val islandControllerProvider: () -> DynamicIslandController? = { null },
+    private val communicationArbiter: com.example.chat.core.audio.CommunicationMediaArbiter =
+        com.example.chat.ServiceLocator.communicationMediaArbiter,
+    private val accountGeneration: () -> Long = { com.example.chat.ServiceLocator.apiBackend.authSnapshot().generation },
 ) {
     private val playbackMutex = Mutex()
     private var disposed = false
@@ -81,7 +84,49 @@ class MediaPlayerCoordinator(
     private var durJob: Job? = null
     private var stateJob: Job? = null
     private var bufJob: Job? = null
-    private var shouldResumeAfterInterruption = false
+    // Previous: private var shouldResumeAfterInterruption = false
+    private var playbackInterrupted = false
+    private var nativeDisposed = false
+    private var boundAccountGeneration: Long? = null
+    private var nativeItemReady = false
+    private var playbackRevision = 0L
+    private var mediaReservation: com.example.chat.core.audio.CommunicationMediaReservation? = null
+
+    /** Caller holds playbackMutex. Call suspension uses the same local mutex. */
+    private suspend fun guardedPlayback(
+        expectedGeneration: Long? = boundAccountGeneration,
+        operation: suspend () -> Unit,
+    ) {
+        val reservation = mediaReservation ?: communicationArbiter.acquirePlayback(
+            com.example.chat.core.audio.CommunicationMediaOwner(),
+            suspendForCall = {
+                playbackMutex.withLock {
+                    playbackInterrupted = true
+                    if (!nativeDisposed) {
+                        check(!disposed) { "Audio cleanup is incomplete." }
+                        audioPlayer.pause() // Receipt only after native pause returns successfully.
+                    }
+                    _state = _state.copy(status = PlaybackStatus.paused)
+                    syncIslandPayload()
+                    notifyListeners()
+                }
+            },
+        )?.also { mediaReservation = it }
+        check(reservation != null) { "Cannot play audio while a call owns audio." }
+        check(reservation.runNative {
+            check(expectedGeneration != null && accountGeneration() == expectedGeneration) { "Playback account changed." }
+            val policy = policyCoordinator
+            check(policy == null || policy.startMediaSession()) { "Call owns the audio session." }
+            operation()
+            if (accountGeneration() != expectedGeneration) {
+                nativeItemReady = false
+                audioPlayer.pause()
+                error("Playback account changed during native start.")
+            }
+            boundAccountGeneration = expectedGeneration
+            playbackInterrupted = false
+        }) { "Cannot resume audio while a call owns audio." }
+    }
     private var lastSyncedSec = -1
 
     private val onPolicyCoordinatorChanged: () -> Unit = {
@@ -130,7 +175,7 @@ class MediaPlayerCoordinator(
                     ps.processingState == MediaProcessingState.buffering
                 ) {
                     status = PlaybackStatus.loading
-                } else if (ps.playing) {
+                } else if (ps.playing && !playbackInterrupted) {
                     status = PlaybackStatus.playing
                 } else if (ps.processingState == MediaProcessingState.completed) {
                     status = PlaybackStatus.stopped
@@ -145,6 +190,7 @@ class MediaPlayerCoordinator(
         }
     }
 
+    /* Previous interruption handler retained for source history:
     private fun handlePolicyChanged() {
         val coordinator = policyCoordinator ?: return
 
@@ -163,6 +209,18 @@ class MediaPlayerCoordinator(
                 scope.launch { resume() }
             }
         }
+    }
+
+    */
+    private fun handlePolicyChanged() {
+        val coordinator = policyCoordinator ?: return
+        if (coordinator.state == AudioSessionState.interrupted ||
+            coordinator.activeOwner == AudioUseCase.communication
+        ) {
+            playbackInterrupted = true
+            scope.launch { pause() }
+        }
+        // No automatic resume on recovery or call release. User must press Play.
     }
 
     private fun resolveIslandController(): DynamicIslandController? =
@@ -208,9 +266,21 @@ class MediaPlayerCoordinator(
         }
     }
 
-    suspend fun playTrack(item: MediaFileDescriptor, queue: List<MediaFileDescriptor>? = null) = playbackMutex.withLock {
+    suspend fun playTrack(item: MediaFileDescriptor, queue: List<MediaFileDescriptor>? = null) =
+        playTrackForGeneration(item, queue, accountGeneration())
+
+    private suspend fun playTrackForGeneration(
+        item: MediaFileDescriptor,
+        queue: List<MediaFileDescriptor>?,
+        requestedGeneration: Long,
+        expectedRevision: Long? = null,
+    ) = playbackMutex.withLock {
         if (disposed) return@withLock
+        if (expectedRevision != null && (playbackInterrupted || playbackRevision != expectedRevision ||
+            boundAccountGeneration != requestedGeneration || accountGeneration() != requestedGeneration)) return@withLock
+        playbackRevision++
         try {
+            /* Previous preflight-only check, retained:
             // 1. Check with policy coordinator before playing
             val coordinator = policyCoordinator
             if (coordinator != null) {
@@ -225,6 +295,9 @@ class MediaPlayerCoordinator(
                 }
             }
 
+            */
+            // requestedGeneration is the explicit selection's generation OR original automatic receipt.
+            guardedPlayback(expectedGeneration = requestedGeneration) {
             val newQueue = (queue ?: listOf(item)).toList()
             val newLease = MediaPlaybackFileLeases.acquire(newQueue.map { it.path } + item.path)
             val previousLeases = playbackLeases.toList()
@@ -240,6 +313,7 @@ class MediaPlayerCoordinator(
             )
             notifyListeners()
 
+            nativeItemReady = false // Failed source switches cannot resume an older native item.
             audioPlayer.stop()
             check(!disposed) { "Player was disposed." }
             // Previous native use ended successfully; the new queue is already pinned.
@@ -248,7 +322,10 @@ class MediaPlayerCoordinator(
             check(!disposed) { "Player was disposed." }
             audioPlayer.setSpeed(_state.speed)
             check(!disposed) { "Player was disposed." }
+            check(accountGeneration() == requestedGeneration) { "Playback account changed." }
             audioPlayer.play()
+            nativeItemReady = true
+            }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             // Native stop/start cancellation may be ambiguous. Retain protection until dispose/rebind.
             throw cancelled
@@ -280,19 +357,41 @@ class MediaPlayerCoordinator(
     suspend fun resume() = playbackMutex.withLock {
         if (disposed) return@withLock
         if (_state.activeItem != null) {
-            audioPlayer.play()
-            _state = _state.copy(status = PlaybackStatus.playing)
+            if (!nativeItemReady) {
+                _state = _state.copy(status = PlaybackStatus.paused,
+                    errorMessage = "Choose the audio again before resuming.")
+                notifyListeners()
+                return@withLock
+            }
+            // Previous unguarded native play retained: audioPlayer.play()
+            try {
+                guardedPlayback { audioPlayer.play() }
+                _state = _state.copy(status = PlaybackStatus.playing)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _state = _state.copy(status = PlaybackStatus.paused,
+                    errorMessage = "Audio cannot resume right now. Finish the call and press Play again.")
+            }
             notifyListeners()
         }
     }
 
-    suspend fun seek(position: Duration) {
-        audioPlayer.seek(position)
+    suspend fun seek(position: Duration) = playbackMutex.withLock {
+        if (!disposed) audioPlayer.seek(position)
     }
 
-    suspend fun setSpeed(speed: Double) {
+    suspend fun setSpeed(speed: Double) = playbackMutex.withLock {
+        if (disposed) return@withLock
         _state = _state.copy(speed = speed)
-        audioPlayer.setSpeed(speed)
+        // A speed setter can start some native adapters. While paused only save the preference.
+        if (_state.status == PlaybackStatus.playing) {
+            try { guardedPlayback { audioPlayer.setSpeed(speed) } }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                _state = _state.copy(errorMessage = "Playback speed cannot change during a call.")
+            }
+        }
         notifyListeners()
     }
 
@@ -338,27 +437,36 @@ class MediaPlayerCoordinator(
     }
 
     private fun onTrackCompleted() {
-        if (_state.repeatMode == ChatyRepeatMode.one && _state.activeItem != null) {
-            scope.launch { playTrack(_state.activeItem!!, queue = _state.queue) }
-        } else if (_state.hasNext) {
-            scope.launch { skipNext() }
-        } else if (_state.repeatMode == ChatyRepeatMode.all && _state.queue.isNotEmpty()) {
-            scope.launch { playTrack(_state.queue.first(), queue = _state.queue) }
-        }
+        if (playbackInterrupted || disposed) return
+        val generation = boundAccountGeneration ?: return
+        if (accountGeneration() != generation) return
+        val revision = playbackRevision
+        val queue = _state.queue.toList()
+        val next = when {
+            _state.repeatMode == ChatyRepeatMode.one -> _state.activeItem
+            _state.hasNext -> queue.getOrNull(_state.queueIndex + 1)
+            _state.repeatMode == ChatyRepeatMode.all -> queue.firstOrNull()
+            else -> null
+        } ?: return
+        scope.launch { playTrackForGeneration(next, queue, generation, revision) }
     }
 
     suspend fun stop() = playbackMutex.withLock {
         if (disposed) return@withLock
+        playbackRevision++ // Invalidates already queued automatic continuations.
         audioPlayer.stop()
         _state = _state.copy(
             status = PlaybackStatus.stopped,
             position = Duration.ZERO,
         )
         syncIslandPayload()
+        mediaReservation?.release()
+        mediaReservation = null
         policyCoordinator?.stopMediaSession()
         notifyListeners()
     }
 
+    /* Previous synchronous teardown retained for source history:
     fun dispose() {
         if (disposed) return
         disposed = true
@@ -370,8 +478,58 @@ class MediaPlayerCoordinator(
         bufJob?.cancel()
         // If native disposal fails, keep pins rather than permit cleanup under uncertain playback.
         audioPlayer.dispose()
+        nativeDisposed = true
+        val ended = mediaReservation
+        mediaReservation = null
+        scope.launch(kotlinx.coroutines.NonCancellable) { ended?.release() }
         playbackLeases.toList().forEach { it.close() }
         playbackLeases.clear()
     }
+    */
+    /** Awaitable, serialized and retryable. Failure keeps both the reservation and file pins.
+     * A second dispose retries native cleanup even though new playback is already disabled. */
+    suspend fun dispose() = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+        playbackMutex.withLock {
+        // Native success and all-clean success are separate. Retry retained bookkeeping too.
+        if (nativeDisposed && mediaReservation == null && playbackLeases.isEmpty()) return@withLock
+        if (!disposed) {
+            disposed = true
+            policyCoordinator?.removeListener(onPolicyCoordinatorChanged)
+            resolveIslandController()?.removePayload("media_active")
+            posJob?.cancel(); durJob?.cancel(); stateJob?.cancel(); bufJob?.cancel()
+        }
+        if (!nativeDisposed) {
+            audioPlayer.dispose() // If this throws, nativeDisposed stays false and retry is possible.
+            nativeDisposed = true
+        }
+        mediaReservation?.release() // NonCancellable: native success cannot strand the reservation.
+        mediaReservation = null
+        playbackLeases.toList().forEach { it.close(); playbackLeases.remove(it) }
+        }
+    }
 }
 
+/* Previous implementation fragments retained (net213):
+                } else if (ps.playing) {
+    suspend fun seek(position: Duration) {
+        audioPlayer.seek(position)
+    suspend fun setSpeed(speed: Double) {
+        audioPlayer.setSpeed(speed)
+*/
+
+/* Previous implementation fragments retained (net214):
+    private suspend fun guardedPlayback(operation: suspend () -> Unit) {
+            guardedPlayback {
+*/
+
+/* Previous implementation fragments retained (net215):
+    suspend fun playTrack(item: MediaFileDescriptor, queue: List<MediaFileDescriptor>? = null) = playbackMutex.withLock {
+            val requestedGeneration = accountGeneration()
+        if (_state.repeatMode == ChatyRepeatMode.one && _state.activeItem != null) {
+            scope.launch { if (!playbackInterrupted && !disposed) playTrack(_state.activeItem!!, queue = _state.queue) }
+        } else if (_state.hasNext) {
+            scope.launch { if (!playbackInterrupted && !disposed) skipNext() }
+        } else if (_state.repeatMode == ChatyRepeatMode.all && _state.queue.isNotEmpty()) {
+            scope.launch { if (!playbackInterrupted && !disposed) playTrack(_state.queue.first(), queue = _state.queue) }
+        }
+*/

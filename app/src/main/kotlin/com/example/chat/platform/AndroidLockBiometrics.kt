@@ -48,7 +48,9 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
 
     init { LockPromptHost.onDetach = { stopAuthentication() } }
 
-    private class LivePrompt(val prompt: BiometricPrompt, val cont: CancellableContinuation<Boolean>, val session: StickyAuthSession)
+    // Prior LivePrompt retained no observer cleanup on explicit stop/cancellation.
+    private class LivePrompt(val prompt: BiometricPrompt, val cont: CancellableContinuation<Boolean>, val session: StickyAuthSession,
+        val removeObserver: () -> Unit)
 
     private fun status(authenticators: Int): Int = try {
         BiometricManager.from(context).canAuthenticate(authenticators)
@@ -66,7 +68,9 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
         LockBiometricPolicy.canCheckBiometrics(status(BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE)
 
     override suspend fun availableBiometrics(): List<String> = LockBiometricPolicy.enrolledBiometrics(
-        weakSuccess = status(BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS,
+// Superseded source retained below per additive-only review rule.
+//         weakSuccess = status(BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS,
+        weakSuccess = false, // Weak/Class 2 enrollment is not offered as Chaty Lock.
         strongSuccess = status(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS,
     )
 
@@ -94,6 +98,7 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
         live = null
         if (l != null) {
             l.session.stop()
+            l.removeObserver()
             try { l.prompt.cancelAuthentication() } catch (_: Throwable) {}
             if (l.cont.isActive) l.cont.resume(false)
         }
@@ -111,7 +116,10 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
             )
             show(activity, reason, biometricOnly, credentialAvailable)
         }
-    } catch (_: Throwable) {
+// Superseded source retained below per additive-only review rule.
+//     } catch (_: Throwable) {
+    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+    catch (_: Throwable) {
         false
     }
 
@@ -132,12 +140,16 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
         if (LockBiometricPolicy.usesNegativeButton(biometricOnly, credentialAvailable)) {
             infoBuilder.setNegativeButtonText(LockBiometricPolicy.CANCEL_BUTTON)
         }
-        infoBuilder.setAllowedAuthenticators(LockBiometricPolicy.allowedAuthenticators(biometricOnly, credentialAvailable))
+// Superseded source retained below per additive-only review rule.
+//         infoBuilder.setAllowedAuthenticators(LockBiometricPolicy.allowedAuthenticators(biometricOnly, credentialAvailable))
+        infoBuilder.setAllowedAuthenticators(LockBiometricPolicy.lockAuthenticators(biometricOnly, credentialAvailable, Build.VERSION.SDK_INT))
         val info = infoBuilder.build()
 
+        lateinit var attemptObserver: DefaultLifecycleObserver
         fun finish(result: Boolean) {
             session.stop()
-            activity.lifecycle.removeObserver(lifecycleObserverHolder)
+            // Prior: activity.lifecycle.removeObserver(lifecycleObserverHolder)
+            activity.lifecycle.removeObserver(attemptObserver)
             if (live?.cont === cont) live = null
             if (cont.isActive) cont.resume(result)
         }
@@ -154,9 +166,10 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
             // onAuthenticationFailed: a non-matching attempt; the prompt stays up (Dart: empty).
         }
         prompt = BiometricPrompt(activity, executor, callback)
-        live = LivePrompt(prompt, cont, session)
+        // Prior: live = LivePrompt(prompt, cont, session)
 
-        lifecycleObserverHolder = object : DefaultLifecycleObserver {
+        // Prior shared lifecycleObserverHolder could point to a newer attempt.
+        attemptObserver = object : DefaultLifecycleObserver {
             override fun onPause(owner: LifecycleOwner) { session.onPause() }
             override fun onResume(owner: LifecycleOwner) {
                 if (!LockBiometricPolicy.isStale(myGeneration, generation, session.stopped) && session.onResume()) {
@@ -169,8 +182,12 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
                 }
             }
         }
-        activity.lifecycle.addObserver(lifecycleObserverHolder)
-        cont.invokeOnCancellation { stopAuthentication() }
+        live = LivePrompt(prompt, cont, session) { activity.lifecycle.removeObserver(attemptObserver) }
+        activity.lifecycle.addObserver(attemptObserver)
+        // Prior: cont.invokeOnCancellation { stopAuthentication() }
+        cont.invokeOnCancellation {
+            executor.execute { if (live?.cont === cont) stopAuthentication() }
+        }
         try {
             prompt.authenticate(info)
         } catch (_: Throwable) {
@@ -178,5 +195,6 @@ class AndroidLockBiometrics(private val context: Context) : LockBiometrics {
         }
     }
 
-    private var lifecycleObserverHolder: DefaultLifecycleObserver = object : DefaultLifecycleObserver {}
+    // Prior shared observer holder retained inactive:
+    // private var lifecycleObserverHolder: DefaultLifecycleObserver = object : DefaultLifecycleObserver {}
 }

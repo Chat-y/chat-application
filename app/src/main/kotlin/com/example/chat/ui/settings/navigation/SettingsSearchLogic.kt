@@ -17,10 +17,11 @@ object SettingsSearchLogic {
         val clean = query.trim().lowercase()
         if (clean.isEmpty()) return all
         return all.filter { item ->
-            title(item).lowercase().contains(clean) ||
-                category(item).lowercase().contains(clean) ||
-                description(item).lowercase().contains(clean) ||
-                keywords(item).any { it.lowercase().contains(clean) }
+            // SET-R1-031: ignoreCase avoids allocating a lowercase copy of every field per keystroke
+            title(item).contains(clean, ignoreCase = true) ||
+                category(item).contains(clean, ignoreCase = true) ||
+                description(item).contains(clean, ignoreCase = true) ||
+                keywords(item).any { it.contains(clean, ignoreCase = true) }
         }
     }
 }

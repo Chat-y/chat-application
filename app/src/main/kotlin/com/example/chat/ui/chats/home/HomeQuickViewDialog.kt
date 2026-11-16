@@ -19,22 +19,23 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun HomeQuickViewDialog(view:HomeQuickView,order:HomeLocalOrder,summary:HomeSnapshotSummary,
     onView:(HomeQuickView)->Unit,onOrder:(HomeLocalOrder)->Unit,onReset:()->Unit,onDismiss:()->Unit) {
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Home view options")},text={
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text("This account's loaded, visible chats only. Hidden chats are excluded. These choices last for this Home session.")
-            Text("${summary.chats} chats · ${summary.pinned} pinned · ${summary.muted} muted · ${summary.drafts} unlocked drafts")
+    AlertDialog(onDismissRequest=onDismiss,title={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_home_view_options))},text={  // was: "Home view options"
+        // Preserve reviewed outer-dialog scroll ownership.
+        Column {
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_this_account_s_loaded_visible_chats_only_hidden_ch))  // was: "This account's loaded, visible chats only. Hidden chats are excluded. These choices last for this Home session."
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_quick_summary, summary.chats, summary.pinned, summary.muted, summary.drafts))  // was: Text("${summary.chats} chats · ${summary.pinned} pinned · ${summary.muted} muted · ${summary.drafts} unlocked drafts")
             HorizontalDivider(Modifier.padding(vertical=12.dp))
-            Text("Quick view",Modifier.semantics {heading()})
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_quick_view),Modifier.semantics {heading()})  // was: "Quick view"
             HomeQuickView.entries.forEach {option ->
                 TextButton(onClick={onView(option)},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp).semantics(mergeDescendants=true) {selected=(view==option)},
                     label=(if(view==option) "Selected: " else "")+option.label)
             }
-            Text("Order within pinned and recent sections",Modifier.semantics {heading()})
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_order_within_pinned_and_recent_sections),Modifier.semantics {heading()})  // was: "Order within pinned and recent sections"
             HomeLocalOrder.entries.forEach {option ->
                 TextButton(onClick={onOrder(option)},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp).semantics(mergeDescendants=true) {selected=(order==option)},
                     label=(if(order==option) "Selected: " else "")+option.label)
             }
-            Text("Activity is based on each chat's last loaded message timestamp, not complete remote history.")
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_activity_is_based_on_each_chat_s_last_loaded_messa))  // was: "Activity is based on each chat's last loaded message timestamp, not complete remote history."
         }
     },confirmButton={TextButton(onClick=onDismiss,label="Done")},
       dismissButton={TextButton(onClick=onReset,label="Reset view")})
@@ -47,18 +48,19 @@ fun HomeQuickViewDialog(view:HomeQuickView,order:HomeLocalOrder,summary:HomeSnap
 fun HomeSavedViewsDialog(saved:List<HomeSavedView>,
     onSave:(String)->Unit,onPreview:(HomeSavedView)->Unit,onDelete:(String)->Unit,onDismiss:()->Unit) {
     val nameState=remember {mutableStateOf("")}
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Saved Home views")},text={
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text("Named combinations of filter, folder and order for this account's Home session. They are cleared when you switch accounts and never store search text or chat content.")
+    AlertDialog(onDismissRequest=onDismiss,title={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_saved_home_views))},text={  // was: "Saved Home views"
+        // Preserve reviewed outer-dialog scroll ownership.
+        Column {
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_named_combinations_of_filter_folder_and_order_for_))  // was: "Named combinations of filter, folder and order for this account's Home session. They are cleared when you switch accounts and never store search text or chat content."
             HorizontalDivider(Modifier.padding(vertical=12.dp))
             OutlinedTextField(value=nameState.value,onValueChange={nameState.value=it},
-                label={Text("Name this view")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                label={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_name_this_view))},singleLine=true,modifier=Modifier.fillMaxWidth())  // was: "Name this view"
             if(HomeQuickViewPolicy.savedViewNameExists(saved,nameState.value))
-                Text("A saved view with this name already exists; saving replaces it.")
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_a_saved_view_with_this_name_already_exists_saving_))  // was: "A saved view with this name already exists; saving replaces it."
             TextButton(onClick={onSave(nameState.value);nameState.value=""},enabled=nameState.value.isNotBlank(),
                 modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),label="Save current view")
             HorizontalDivider(Modifier.padding(vertical=12.dp))
-            if(saved.isEmpty()) Text("No saved views yet.")
+            if(saved.isEmpty()) Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_no_saved_views_yet))  // was: "No saved views yet."
             saved.forEach {config ->
                 Text(config.name)
                 Row(Modifier.fillMaxWidth()) {
@@ -66,7 +68,7 @@ fun HomeSavedViewsDialog(saved:List<HomeSavedView>,
                     TextButton(onClick={onDelete(config.name)},modifier=Modifier.weight(1f).heightIn(min=48.dp),label="Delete")
                 }
             }
-            Text("Applying a saved view always goes through the preview first.")
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_applying_a_saved_view_always_goes_through_the_prev))  // was: "Applying a saved view always goes through the preview first."
         }
     },confirmButton={TextButton(onClick=onDismiss,label="Done")})
 }
@@ -76,15 +78,16 @@ fun HomeSavedViewsDialog(saved:List<HomeSavedView>,
 @Composable
 fun HomeViewPreviewDialog(config:HomeSavedView,preview:HomeViewPreview,onApply:()->Unit,onDismiss:()->Unit,
     confirmLabel:String="Apply view") {
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Preview: "+config.name)},text={
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+    AlertDialog(onDismissRequest=onDismiss,title={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_preview_title, config.name))},text={  // was: title={Text("Preview: "+config.name)}
+        // Preserve reviewed outer-dialog scroll ownership.
+        Column {
             Text(HomeQuickViewPolicy.describe(HomeViewState(config.filter,config.folderId,config.view,config.order,config.groupingKey)))
-            Text("${preview.matched} unlocked chats in this safe preview. Locked and hidden chats are left out, so this is not the exact total the applied view will show.")
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_preview_matched, preview.matched))  // was: Text("${preview.matched} unlocked chats in this safe preview. Locked and hidden chats are left out, so this is not the exact total the applied view will show.")
             if(preview.sampleTitles.isNotEmpty()) {
-                Text("Sample of unlocked chats:")
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_sample_of_unlocked_chats))  // was: "Sample of unlocked chats:"
                 preview.sampleTitles.forEach {Text("· "+it)}
             }
-            Text("Applying only changes how this Home list looks for this session. No chats, folders or messages change.")
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_applying_only_changes_how_this_home_list_looks_for))  // was: "Applying only changes how this Home list looks for this session. No chats, folders or messages change."
         }
     },confirmButton={TextButton(onClick=onApply,label=confirmLabel)},
       dismissButton={TextButton(onClick=onDismiss,label="Back")})
@@ -95,9 +98,10 @@ fun HomeViewPreviewDialog(config:HomeSavedView,preview:HomeViewPreview,onApply:(
 @Composable
 fun HomeViewHistoryDialog(history:List<HomeViewState>,describe:(HomeViewState)->String,
     onRestore:(HomeViewState)->Unit,onDismiss:()->Unit) {
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Recent Home views")},text={
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            if(history.isEmpty()) Text("No earlier views yet. Filter, folder and order changes appear here for this session.")
+    AlertDialog(onDismissRequest=onDismiss,title={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_recent_home_views))},text={  // was: "Recent Home views"
+        // Preserve reviewed outer-dialog scroll ownership.
+        Column {
+            if(history.isEmpty()) Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_no_earlier_views_yet_filter_folder_and_order_chang))  // was: "No earlier views yet. Filter, folder and order changes appear here for this session."
             history.asReversed().forEach {state ->
                 TextButton(onClick={onRestore(state)},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),
                     label=describe(state))

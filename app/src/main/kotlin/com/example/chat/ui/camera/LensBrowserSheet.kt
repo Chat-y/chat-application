@@ -1,5 +1,8 @@
 package com.example.chat.ui.camera
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -75,13 +78,15 @@ import com.example.chat.ui.theme.LocalAppColors
  *  Contracts honored:
  *  - Tier gating uses the real [LensDefinition.supportedForDevice] contract.
  *    Unsupported lenses stay visible but dimmed, locked and non-selectable
- *    ("Not supported here"), so the user can see what exists without hitting
+ // CAM-R4-004 prior: *    ("Not supported here"), so the user can see what exists without hitting
+ *    (stringResource(com.example.chat.R.string.camera_lens_unsupported)), so the user can see what exists without hitting
  *    repeat-failure buttons. The carousel's hide-unsupported behavior is
  *    untouched.
  *  - "none" is selectable (clears the lens) but offers no favorite
  *    affordance, mirroring LensManager's own recents handling.
  *  - Runtime state comes from the manager: the selected tile shows the
- *    applying spinner and an honest "Couldn't load - tap to retry" caption on
+ // CAM-R4-004 prior: *    applying spinner and an honest "Couldn't load - tap to retry" caption on
+ *    applying spinner and an honest stringResource(com.example.chat.R.string.camera_lens_load_retry) caption on
  *    failure.
  *  - All tile artwork is the existing in-code glyph painter (drawLensGlyph)
  *    over the lens's accent color - original Chaty artwork only.
@@ -163,24 +168,29 @@ fun LensBrowserSheet(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Lenses",
+                // CAM-R4-004 prior: "Lenses",
+                stringResource(com.example.chat.R.string.camera_lens_browser_title),
                 color = colors.foreground,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.W700,
             )
             Spacer(Modifier.size(8.dp))
             Text(
-                "$supportedCount available",
+                // CAM-R4-004 prior: "$supportedCount available",
+                stringResource(com.example.chat.R.string.camera_lens_available_count, supportedCount),
                 color = colors.foregroundSecondary,
-                fontSize = 11.sp,
+                // CAM-R4-028 prior small text: fontSize = 11.sp,
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                 maxLines = 1,
             )
             Spacer(Modifier.weight(1f))
             if (!manager.selected.isNoLens) {
                 Text(
-                    "Using: ${manager.selected.name}",
+                    // CAM-R4-004 prior: "Using: ${manager.selected.name}",
+                    stringResource(com.example.chat.R.string.camera_lens_using, manager.selected.name),
                     color = colors.primary,
-                    fontSize = 11.sp,
+                    // CAM-R4-028 prior small text: fontSize = 11.sp,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.W600,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -188,11 +198,14 @@ fun LensBrowserSheet(
             }
         }
         Text(
-            "Tap to apply - hold a lens to favorite",
+            // CAM-R4-004 prior: "Tap to apply - hold a lens to favorite",
+            stringResource(com.example.chat.R.string.camera_lens_apply_hint),
             color = colors.foregroundTertiary,
-            fontSize = 11.sp,
+            // CAM-R4-028 prior small text: fontSize = 11.sp,
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
             maxLines = 1,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp),
+            // CAM-R4-030 previous spacing: modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
         )
         Spacer(Modifier.height(4.dp))
 
@@ -205,9 +218,12 @@ fun LensBrowserSheet(
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LensFilterChip("All", filter == "all") { filter = "all" }
-            LensFilterChip("Recent", filter == "recents") { filter = "recents" }
-            LensFilterChip("Favorites", filter == "favorites") { filter = "favorites" }
+            // CAM-R4-004 prior: LensFilterChip("All", filter == "all") { filter = "all" }
+            LensFilterChip(stringResource(com.example.chat.R.string.camera_lens_all), filter == "all") { filter = "all" }
+            // CAM-R4-004 prior: LensFilterChip("Recent", filter == "recents") { filter = "recents" }
+            LensFilterChip(stringResource(com.example.chat.R.string.camera_lens_recent), filter == "recents") { filter = "recents" }
+            // CAM-R4-004 prior: LensFilterChip("Favorites", filter == "favorites") { filter = "favorites" }
+            LensFilterChip(stringResource(com.example.chat.R.string.camera_lens_favorites), filter == "favorites") { filter = "favorites" }
             categories.forEach { category ->
                 LensFilterChip(
                     label = effectCategoryLabel(category),
@@ -215,7 +231,8 @@ fun LensBrowserSheet(
                 ) { filter = "category:${category.name}" }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        // CAM-R4-030 previous spacing: Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
 
         if (lenses.isEmpty()) {
             Box(
@@ -224,9 +241,12 @@ fun LensBrowserSheet(
             ) {
                 Text(
                     when (filter) {
-                        "recents" -> "No recently used lenses yet"
-                        "favorites" -> "No favorites yet - hold a lens to favorite it"
-                        else -> "No lenses here yet"
+                        // CAM-R4-004 prior: "recents" -> "No recently used lenses yet"
+                        "recents" -> stringResource(com.example.chat.R.string.camera_lens_recent_empty)
+                        // CAM-R4-004 prior: "favorites" -> "No favorites yet - hold a lens to favorite it"
+                        "favorites" -> stringResource(com.example.chat.R.string.camera_lens_favorites_empty)
+                        // CAM-R4-004 prior: else -> "No lenses here yet"
+                        else -> stringResource(com.example.chat.R.string.camera_lens_empty)
                     },
                     color = colors.foregroundSecondary,
                     fontSize = 12.sp,
@@ -238,8 +258,10 @@ fun LensBrowserSheet(
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = if (tight) 92.dp else 104.dp),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                // CAM-R4-030 previous spacing: verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                // CAM-R4-030 previous spacing: horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f),
             ) {
                 items(lenses.size) { index ->
@@ -297,17 +319,20 @@ private fun LensFilterChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val filterDescription = stringResource(com.example.chat.R.string.camera_lens_filter_description, label)
     val colors = LocalAppColors.current
     val view = LocalView.current
     Box(
         modifier = Modifier
             .heightIn(min = 48.dp) // 48dp touch semantics
-            .clickable {
+            // CAM-R4-034 previous: .clickable {
+            .cameraActionFocusRing().clickable {
                 ChatyHapticsPort.selection(view)
                 onClick()
             }
             .semantics(mergeDescendants = true) {
-                contentDescription = "$label lens filter"
+                // CAM-R4-004 prior: contentDescription = "$label lens filter"
+                contentDescription = filterDescription
                 this.selected = selected
             },
         contentAlignment = Alignment.Center,
@@ -321,7 +346,8 @@ private fun LensFilterChip(
                     color = if (selected) colors.primary else colors.inputBorder,
                     shape = RoundedCornerShape(999.dp),
                 )
-                .padding(horizontal = 14.dp, vertical = 7.dp),
+                // CAM-R4-030 previous spacing: .padding(horizontal = 14.dp, vertical = 7.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Text(
                 label,
@@ -334,6 +360,7 @@ private fun LensFilterChip(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LensBrowserTile(
     lens: LensDefinition,
@@ -346,6 +373,11 @@ private fun LensBrowserTile(
 ) {
     val colors = LocalAppColors.current
     val view = LocalView.current
+    val unsupportedDescription = stringResource(com.example.chat.R.string.camera_lens_unsupported_description, lens.name)
+    val selectedDescription = stringResource(com.example.chat.R.string.camera_lens_selected_description, lens.name)
+    val lensDescription = stringResource(com.example.chat.R.string.camera_lens_description, lens.name)
+    val glyphColor = com.example.chat.ui.kit.chatyReadableOn(lens.accentColor, colors.onPrimary, colors.foreground)
+    val scrim = androidx.compose.material3.MaterialTheme.colorScheme.scrim
     val medallion = 64.dp
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -358,27 +390,36 @@ private fun LensBrowserTile(
                 color = if (selected) colors.primary else colors.borderSubtle,
                 shape = RoundedCornerShape(16.dp),
             )
-            .pointerInput(lens.id, supported) {
-                detectTapGestures(
-                    onTap = {
-                        if (supported) {
-                            ChatyHapticsPort.selection(view)
-                            onSelect()
-                        }
-                    },
-                    onLongPress = {
-                        if (supported && !lens.isNoLens) {
-                            ChatyHapticsPort.threshold(view)
-                            onToggleFavorite()
-                        }
-                    },
-                )
-            }
+//             .pointerInput(lens.id, supported) {
+//                 detectTapGestures(
+//                     onTap = {
+//                         if (supported) {
+//                             ChatyHapticsPort.selection(view)
+//                             onSelect()
+//                         }
+//                     },
+//                     onLongPress = {
+//                         if (supported && !lens.isNoLens) {
+//                             ChatyHapticsPort.threshold(view)
+//                             onToggleFavorite()
+//                         }
+//                     },
+//                 )
+//             }
+            .cameraActionFocusRing().combinedClickable(
+                enabled = supported,
+                role = androidx.compose.ui.semantics.Role.Button,
+                onClick = { ChatyHapticsPort.selection(view); onSelect() },
+                onLongClick = if (lens.isNoLens) null else ({ ChatyHapticsPort.threshold(view); onToggleFavorite() }),
+            )
             .semantics(mergeDescendants = true) {
                 contentDescription = when {
-                    !supported -> "${lens.name} lens, not supported on this device"
-                    selected -> "${lens.name} lens, in use"
-                    else -> "${lens.name} lens"
+                    // CAM-R4-004 prior: !supported -> "${lens.name} lens, not supported on this device"
+                    !supported -> unsupportedDescription
+                    // CAM-R4-004 prior: selected -> "${lens.name} lens, in use"
+                    selected -> selectedDescription
+                    // CAM-R4-004 prior: else -> "${lens.name} lens"
+                    else -> lensDescription
                 }
                 if (!supported) disabled() else this.selected = selected
             }
@@ -405,13 +446,13 @@ private fun LensBrowserTile(
                     )
                     .border(
                         width = if (selected) 2.5.dp else 1.dp,
-                        color = if (selected) colors.primary else Color(0x3DFFFFFF),
+                        color = if (selected) colors.primary else colors.borderSubtle,
                         shape = CircleShape,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
                 Canvas(modifier = Modifier.size(medallion * 0.5f)) {
-                    drawLensGlyph(lens.id, Color.White, size.width, size.height)
+                    drawLensGlyph(lens.id, glyphColor, size.width, size.height)
                 }
             }
             if (!supported) {
@@ -419,19 +460,19 @@ private fun LensBrowserTile(
                     modifier = Modifier
                         .size(medallion)
                         .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.35f)),
+                        .background(scrim.copy(alpha = 0.35f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock,
                         semanticLabel = null,
-                        color = Color.White,
+                        color = colors.foreground,
                         modifier = Modifier.size(20.dp),
                     )
                 }
             }
             if (selected && supported && runtimeState == LensRuntimeState.applying) {
                 CircularProgressIndicator(
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = glyphColor.copy(alpha = 0.85f),
                     strokeWidth = 2.dp,
                     modifier = Modifier.size(medallion + 6.dp),
                 )
@@ -443,7 +484,8 @@ private fun LensBrowserTile(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .size(48.dp)
-                        .clickable {
+                        // CAM-R4-034 previous: .clickable {
+                        .cameraActionFocusRing().clickable {
                             ChatyHapticsPort.selection(view)
                             onToggleFavorite()
                         },
@@ -460,9 +502,11 @@ private fun LensBrowserTile(
                         Icon(
                             if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                             contentDescription = if (favorite) {
-                                "Remove ${lens.name} from favorites"
+                                // CAM-R4-004 prior: "Remove ${lens.name} from favorites"
+                                stringResource(com.example.chat.R.string.camera_lens_remove_favorite, lens.name)
                             } else {
-                                "Add ${lens.name} to favorites"
+                                // CAM-R4-004 prior: "Add ${lens.name} to favorites"
+                                stringResource(com.example.chat.R.string.camera_lens_add_favorite, lens.name)
                             },
                             tint = if (favorite) colors.primary else colors.foregroundSecondary,
                             modifier = Modifier.size(15.dp),
@@ -471,7 +515,8 @@ private fun LensBrowserTile(
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        // CAM-R4-030 previous spacing: Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             lens.name,
             color = when {
@@ -479,17 +524,21 @@ private fun LensBrowserTile(
                 selected -> colors.primary
                 else -> colors.foreground
             },
-            fontSize = 11.sp,
+            // CAM-R4-028 prior small text: fontSize = 11.sp,
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.W500,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 6.dp),
+            // CAM-R4-030 previous spacing: modifier = Modifier.padding(horizontal = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp),
         )
         Text(
             when {
-                !supported -> "Not supported here"
-                selected && runtimeState == LensRuntimeState.failed -> "Couldn't load - tap to retry"
+                // CAM-R4-004 prior: !supported -> "Not supported here"
+                !supported -> stringResource(com.example.chat.R.string.camera_lens_unsupported)
+                // CAM-R4-004 prior: selected && runtimeState == LensRuntimeState.failed -> "Couldn't load - tap to retry"
+                selected && runtimeState == LensRuntimeState.failed -> stringResource(com.example.chat.R.string.camera_lens_load_retry)
                 else -> effectCategoryLabel(lens.category)
             },
             color = if (selected && runtimeState == LensRuntimeState.failed) {
@@ -497,11 +546,36 @@ private fun LensBrowserTile(
             } else {
                 colors.foregroundTertiary
             },
-            fontSize = 9.sp,
+            // CAM-R4-028 prior small text: fontSize = 9.sp,
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 6.dp),
+            // CAM-R4-030 previous spacing: modifier = Modifier.padding(horizontal = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
 }
+
+// Superseded source retained inactive:
+//             .pointerInput(lens.id, supported) {
+//                 detectTapGestures(
+//                     onTap = {
+//                         if (supported) {
+//                             ChatyHapticsPort.selection(view)
+//                             onSelect()
+//                         }
+//                     },
+//                     onLongPress = {
+//                         if (supported && !lens.isNoLens) {
+//                             ChatyHapticsPort.threshold(view)
+//                             onToggleFavorite()
+//                         }
+//                     },
+//                 )
+//             }
+//                         color = if (selected) colors.primary else Color(0x3DFFFFFF),
+//                     drawLensGlyph(lens.id, Color.White, size.width, size.height)
+//                         .background(Color.Black.copy(alpha = 0.35f)),
+//                         color = Color.White,
+//                     color = Color.White.copy(alpha = 0.85f),

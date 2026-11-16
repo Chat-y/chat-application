@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_media_photos_effect">Maintain a private photo-folder marker; exports stay visible</string>
+    <string name="privacy_media_videos_effect">Maintain a private video-folder marker; exports stay visible</string>
+    <string name="privacy_media_gifs_effect">Maintain a private GIF-folder marker; exports stay visible</string>
+    <string name="privacy_media_banner_effect">Maintains private chat-folder markers for the types you choose; exported copies stay visible.</string>
+    <string name="privacy_media_cloud_backup_limit">Hiding does not stop gallery or cloud backup of exported copies. Manage those copies in your gallery or backup service.</string>
+</resources>

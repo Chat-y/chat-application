@@ -179,8 +179,12 @@ class EncryptedMultiAccountRegistryTest {
         val multi = FakeMultiAccountStore()
         val coordinator = MultiAccountRegistryCoordinator(multi)
         val routing = ApiRoutingSnapshot("t1", "https://api.example.com", "", 0L)
-        val pastJwt = jwtWithExp((System.currentTimeMillis() / 1000L) - 60L)
-        val validJwt = jwtWithExp((System.currentTimeMillis() / 1000L) + 3600L)
+        // Capture once: a second-boundary rollover must not change the expected expiry.
+        // val pastJwt = jwtWithExp((System.currentTimeMillis() / 1000L) - 60L)
+        // val validJwt = jwtWithExp((System.currentTimeMillis() / 1000L) + 3600L)
+        val nowSeconds = System.currentTimeMillis() / 1000L
+        val pastJwt = jwtWithExp(nowSeconds - 60L)
+        val validJwt = jwtWithExp(nowSeconds + 3600L)
         val metaA = coordinator.registerAuthenticatedAccount(
             ApiAuthResult(validJwt, user("a"), refreshToken = "ref-a"), routing, true,
         )!!
@@ -188,7 +192,9 @@ class EncryptedMultiAccountRegistryTest {
             ApiAuthResult(pastJwt, user("b"), refreshToken = "ref-b"), routing, true,
         )!!
 
-        assertEquals(((System.currentTimeMillis() / 1000L) + 3600L) * 1000L, JwtExpiryDecoder.decodeExpiryEpochMs(validJwt))
+        // Previous assertion re-read the clock and could fail after a second rollover.
+        // assertEquals(((System.currentTimeMillis() / 1000L) + 3600L) * 1000L, JwtExpiryDecoder.decodeExpiryEpochMs(validJwt))
+        assertEquals((nowSeconds + 3600L) * 1000L, JwtExpiryDecoder.decodeExpiryEpochMs(validJwt))
 
         val refreshed = coordinator.refreshAccountIfNeeded(metaB.accountKey) { _, _, _ ->
             ApiAuthClient.RefreshResult.Rejected
@@ -247,4 +253,39 @@ class EncryptedMultiAccountRegistryTest {
         assertEquals("unread", c2.navContextFor(a.accountKey))
         assertEquals("groups", c2.navContextFor(b.accountKey))
     }
+    @Test
+    fun removedAccountIsNotRevivedByLateRefresh() = runBlocking {
+        val multi = FakeMultiAccountStore()
+        val coordinator = MultiAccountRegistryCoordinator(multi)
+        val routing = ApiRoutingSnapshot("t1", "https://api.example.com", "", 0L)
+        val meta = coordinator.registerAuthenticatedAccount(
+            ApiAuthResult("old", user("a"), refreshToken = "old-refresh"), routing, true,
+        )!!
+        val refreshed = coordinator.refreshAccountIfNeeded(meta.accountKey, force = true) { _, _, _ ->
+            coordinator.removeAccount(meta.accountKey)
+            ApiAuthClient.RefreshResult.Ok("late-access", "late-refresh")
+        }
+        assertFalse(refreshed)
+        assertNull(multi.loadCredentials(meta.accountHash))
+        assertTrue(multi.loadRegistry().isEmpty())
+    }
+
+    @Test
+    fun lateRejectionDoesNotExpireNewerLogin() = runBlocking {
+        val multi = FakeMultiAccountStore()
+        val coordinator = MultiAccountRegistryCoordinator(multi)
+        val routing = ApiRoutingSnapshot("t1", "https://api.example.com", "", 0L)
+        val meta = coordinator.registerAuthenticatedAccount(
+            ApiAuthResult("old", user("a"), refreshToken = "old-refresh"), routing, true,
+        )!!
+        coordinator.refreshAccountIfNeeded(meta.accountKey, force = true) { _, _, _ ->
+            coordinator.registerAuthenticatedAccount(
+                ApiAuthResult("new", user("a"), refreshToken = "new-refresh"), routing, true,
+            )
+            ApiAuthClient.RefreshResult.Rejected
+        }
+        assertFalse(multi.loadRegistry().single().sessionExpired)
+        assertEquals("new", multi.loadCredentials(meta.accountHash)?.accessToken)
+    }
+
 }

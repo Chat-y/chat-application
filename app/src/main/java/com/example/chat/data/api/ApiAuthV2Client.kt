@@ -90,7 +90,9 @@ class ApiAuthV2Client(
         JSONObject().put("username",username).put("password",password).put("remember_me",rememberMe), extraHeaders = proof(deviceProof))
     fun registerStart(email: String, username: String, password: String, phoneNumber: String,
         key: RegistrationKey, rememberMe: Boolean = false, termsVersion: String? = null, fullName: String? = null, inviteToken:String?=null): Result {
-        require(password.length >= 8 && password.toByteArray(StandardCharsets.UTF_8).size <= 72) { "Use at least 8 characters and at most 72 UTF-8 bytes." }
+        // Previous V2-only 8-character / 72-byte ceiling retained inactive:
+        // require(password.length >= 8 && password.toByteArray(StandardCharsets.UTF_8).size <= 72) { "Use at least 8 characters and at most 72 UTF-8 bytes." }
+        com.example.chat.ui.auth.registrationPasswordError(password)?.let { throw IllegalArgumentException(it) }
         requireNotNull(RegistrationPhonePolicy.normalize(phoneNumber)) { "Enter an international contact number." }
         val body = JSONObject().put("email",email).put("username",username).put("password",password)
             .put("phoneNumber",phoneNumber).put("remember_me",rememberMe)

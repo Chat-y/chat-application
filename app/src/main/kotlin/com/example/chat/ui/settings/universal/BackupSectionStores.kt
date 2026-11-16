@@ -5,6 +5,7 @@ import com.example.chat.core.preferences.LocalPreferencesStorage
 import com.example.chat.ui.settings.universal.BackupArchiveLogic.Section
 import com.example.chat.ui.settings.universal.BackupPortableLogic.SectionStore
 import java.io.File
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -263,8 +264,11 @@ class BackupSectionCollector(
         }
     }
 
-    suspend fun collectSections(): List<Section> {
+    suspend fun collectSections(includeAppearanceSettings: Boolean = true): List<Section> {
         val sections = mutableListOf<Section>()
+        // Default includes all original sections. Explicit omission skips whole sections so no
+        // conversation flags leak through legacy aliases, wallpaper or customization snapshots.
+        if (includeConversationAppearanceBackup(includeAppearanceSettings,"preferences")) {
         sections += Section(
             "preferences",
             JSONObject(storage.loadPreferences(userId)).toString().toByteArray(Charsets.UTF_8),
@@ -281,6 +285,7 @@ class BackupSectionCollector(
                 destinationDescription = "", allowedKeys = setOf("chaty.customization.snapshot_v1"))
                 .snapshot() ?: "{}".toByteArray(),
         )
+        }
         sections += mediaExporter() ?: emptyList()
         return sections
     }
@@ -304,12 +309,23 @@ suspend fun exportMediaSections(
 ): MediaExportResult = withContext(Dispatchers.IO) {
     val files = mutableListOf<Pair<String, ByteArray>>()
     var index = 0
+    var retainedMediaBytes = 0L
+    var earlyQuotaSkips = 0
+    val exportOwner = api.authSnapshot()
     for (conv in api.conversations) {
         for (message in api.getMessages(conv.id)) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            check(api.authSnapshot() === exportOwner) { "Account changed during media export." }
             val attachment = message.attachment ?: continue
             val ref = com.example.chat.data.media.AttachmentRefs.refOf(conv.id, message) ?: continue
             val read = cache.readVerified(ref, BackupArchiveLogic.MAX_MEDIA_FILE_BYTES.toInt())
             if (read !is com.example.chat.data.local.StoreRead.Hit) continue
+            check(api.authSnapshot() === exportOwner) { "Account changed during media export." }
+            if (read.value.size.toLong() > BackupArchiveLogic.MAX_MEDIA_TOTAL_BYTES - retainedMediaBytes) {
+                earlyQuotaSkips++
+                continue
+            }
+            retainedMediaBytes += read.value.size
             val base = attachment.name.ifEmpty { ref.attachmentId }
                 .replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { "file" }
             files += "${index}_$base" to read.value
@@ -321,6 +337,9 @@ suspend fun exportMediaSections(
         sections = chunked.sections,
         includedFiles = chunked.includedFiles,
         skippedOversizeFiles = chunked.skippedOversizeFiles,
-        skippedOverQuotaFiles = chunked.skippedOverQuotaFiles,
+        skippedOverQuotaFiles = chunked.skippedOverQuotaFiles + earlyQuotaSkips,
     )
 }
+
+// Superseded backup wiring retained inactive:
+//         skippedOverQuotaFiles = chunked.skippedOverQuotaFiles,

@@ -69,7 +69,8 @@ fun ChatyMiniPlayer(
         return
     }
 
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    // Prior: val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
     val track = state.activeItem ?: return
 
     Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
@@ -80,17 +81,17 @@ fun ChatyMiniPlayer(
                     .shadow(
                         elevation = 16.dp,
                         shape = RoundedCornerShape(18.dp),
-                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.35f else 0.08f),
-                        spotColor = Color.Black.copy(alpha = if (isDark) 0.35f else 0.08f),
+                        ambientColor = colors.foreground.copy(alpha = 0.12f) /* Prior system-dark fixed black shadow */,
+                        spotColor = colors.foreground.copy(alpha = 0.12f) /* Prior system-dark fixed black shadow */,
                     )
                     .clip(RoundedCornerShape(18.dp))
                     .background(
-                        if (isDark) Color(0xFF1B2232).copy(alpha = 0.92f)
-                        else Color.White.copy(alpha = 0.94f)
+                        // Prior system-dark colors: 0xFF1B2232/White, independent of chosen theme.
+                        colors.surface.copy(alpha = 0.94f)
                     )
                     .border(
                         width = 1.dp,
-                        color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f),
+                        color = colors.borderSubtle /* Prior system-dark fixed white/black */,
                         shape = RoundedCornerShape(18.dp),
                     ),
             ) {
@@ -114,6 +115,7 @@ fun ChatyMiniPlayer(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             track.name,
+                            color = colors.foreground,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             fontWeight = FontWeight.W700,
@@ -123,7 +125,7 @@ fun ChatyMiniPlayer(
                         Text(
                             "${formatDuration(state.position)} / ${formatDuration(state.duration)}",
                             fontSize = 11.sp,
-                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.54f),
+                            color = colors.foregroundSecondary /* Prior system-dark fixed white/black */,
                         )
                     }
                     IconButton(onClick = { scope.launch { coordinator.togglePlayPause() } }) {
@@ -141,17 +143,20 @@ fun ChatyMiniPlayer(
                     progress = { state.progress.toFloat() },
                     modifier = Modifier.fillMaxWidth().height(2.5.dp),
                     color = MaterialTheme.colorScheme.primary,
-                    trackColor = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.12f),
+                    trackColor = colors.borderSubtle /* Prior system-dark fixed white/black */,
                 )
             }
         }
     }
 }
 
-/** Dart _formatDuration: m:ss with 2-digit padding, minutes mod 60. */
-internal fun formatDuration(d: Duration): String {
-    if (d.isNegative()) return "00:00"
-    val m = (d.inWholeMinutes % 60).toString().padStart(2, '0')
-    val s = (d.inWholeSeconds % 60).toString().padStart(2, '0')
-    return "$m:$s"
-}
+// MV-R3-047 prior independent formatter (retained, inactive):
+// /** Dart _formatDuration: m:ss with 2-digit padding, minutes mod 60. */
+// internal fun formatDuration(d: Duration): String {
+//     if (d.isNegative()) return "00:00"
+//     val m = (d.inWholeMinutes % 60).toString().padStart(2, '0')
+//     val s = (d.inWholeSeconds % 60).toString().padStart(2, '0')
+//     return "$m:$s"
+// }
+/** Shared with viewer, full player and embedded video; MV-R1-005 hour rule. */
+internal fun formatDuration(d: Duration): String = TimeFormatters.playbackSeconds(d.inWholeSeconds)

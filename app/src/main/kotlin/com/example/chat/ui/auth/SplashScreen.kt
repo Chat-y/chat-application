@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Forum
@@ -36,23 +37,29 @@ fun SplashScreen(routeToHome: suspend () -> Boolean, onRoute: (Boolean) -> Unit)
     val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
     var started by remember { mutableStateOf(false) }
+    var retryAttempt by remember { mutableStateOf(0) }
+    var storageError by remember { mutableStateOf(false) }
     val fade by animateFloatAsState(
         targetValue = if (started) 1.0f else 0.8f,
         animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
         label = authCopy("splashFade"),
     )
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(retryAttempt) {
         started = true
-        // A1-03: never hang on the splash; a failure or a 20 s timeout falls back to the signed-out route (false).
+        storageError = false
+        // Previously a failure/timeout routed signed out. Preserve the stores
+        // and let the owner retry; never turn a storage failure into logout.
+        // val route = try { withTimeoutOrNull(20_000L) { routeToHome() } ?: false }
         val route = try {
-            kotlinx.coroutines.withTimeoutOrNull(20_000L) { routeToHome() } ?: false
+            kotlinx.coroutines.withTimeoutOrNull(20_000L) { routeToHome() }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            false
+            // false // Failure is not evidence of a signed-out session.
+            null
         }
-        onRoute(route)
+        if (route == null) storageError = true else onRoute(route)
     }
 
     Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
@@ -60,7 +67,21 @@ fun SplashScreen(routeToHome: suspend () -> Boolean, onRoute: (Boolean) -> Unit)
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            Box(
+            if (storageError) {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp),
+                ) {
+                    androidx.compose.material3.Text(
+                        text = androidx.compose.ui.res.stringResource(com.example.chat.R.string.startup_secure_storage_error),
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onBackground,
+                    )
+                    androidx.compose.material3.Button(onClick = { storageError = false; retryAttempt++ }) {
+                        androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.startup_retry))
+                    }
+                }
+            } else Box(
                 modifier = Modifier
                     .alpha(fade)
                     .size(80.dp)

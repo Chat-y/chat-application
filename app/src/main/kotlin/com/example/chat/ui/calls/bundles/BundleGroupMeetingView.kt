@@ -1,5 +1,8 @@
 package com.example.chat.ui.calls.bundles
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -51,7 +54,11 @@ fun BundleGroupMeetingView(
     onInviteClicked: () -> Unit,
     onLeaveMeeting: () -> Unit,
 ) {
-    val tokens = remember(bundleId) { CallBundleRegistry.getTokens(bundleId) }
+// Previous implementation retained:     val tokens = remember(bundleId) { CallBundleRegistry.getTokens(bundleId) }
+    // CALL-R1-47: merge user theme colors over bundle geometry (parity with incoming/ongoing views);
+    // raw registry tokens carried hard-coded secondaryText (#94A3B8) that fails dark-theme contrast.
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    val tokens = remember(bundleId, colors) { com.example.chat.ui.calls.themedCallBundleTokens(bundleId, colors) }
 
     Box(
         modifier = Modifier
@@ -75,7 +82,7 @@ fun BundleGroupMeetingView(
                 IconButton(onClick = onToggleSpeakerFocus) {
                     Icon(
                         imageVector = if (isSpeakerFocused) Icons.Rounded.GridView else Icons.Rounded.Person,
-                        contentDescription = "Toggle Grid/Speaker",
+                        contentDescription = if (isSpeakerFocused) "Switch to grid view" else "Switch to speaker view",
                         tint = Color.White,
                     )
                 }
@@ -203,10 +210,14 @@ fun BundleGroupMeetingView(
                 ) {
                     // CALL-R1-54: inert concept controls are dimmed so they read as disabled,
                     // not as live buttons that ignore taps.
-                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Mic, false, tokens.primaryAccent, {}) }
-                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Videocam, false, tokens.primaryAccent, {}) }
-                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.VolumeUp, true, tokens.primaryAccent, {}) }
-                    ControlIconButton(Icons.Rounded.CallEnd, true, tokens.declineColor, onLeaveMeeting)
+// Previous implementation retained:                     androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Mic, false, tokens.primaryAccent, {}) }
+// Previous implementation retained:                     androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Videocam, false, tokens.primaryAccent, {}) }
+// Previous implementation retained:                     androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.VolumeUp, true, tokens.primaryAccent, {}) }
+// Previous implementation retained:                     ControlIconButton(Icons.Rounded.CallEnd, true, tokens.declineColor, onLeaveMeeting)
+                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Mic, false, tokens.primaryAccent, {}, contentDescription = "Mute (preview)") }
+                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Videocam, false, tokens.primaryAccent, {}, contentDescription = "Camera (preview)") }
+                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.VolumeUp, true, tokens.primaryAccent, {}, contentDescription = "Speaker (preview)") }
+                    ControlIconButton(Icons.Rounded.CallEnd, true, tokens.declineColor, onLeaveMeeting, contentDescription = "Leave meeting")
                 }
             }
         }
@@ -224,7 +235,11 @@ fun BundleParticipantInviteSheet(
     onToggleInvite: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    val tokens = remember(bundleId) { CallBundleRegistry.getTokens(bundleId) }
+// Previous implementation retained:     val tokens = remember(bundleId) { CallBundleRegistry.getTokens(bundleId) }
+    // CALL-R1-47: merge user theme colors over bundle geometry (parity with incoming/ongoing views);
+    // raw registry tokens carried hard-coded secondaryText (#94A3B8) that fails dark-theme contrast.
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    val tokens = remember(bundleId, colors) { com.example.chat.ui.calls.themedCallBundleTokens(bundleId, colors) }
     var searchQuery by remember { mutableStateOf("") }
 
     val filteredContacts = remember(searchQuery, contacts) {
@@ -316,6 +331,9 @@ fun BundleParticipantInviteSheet(
 
                         Button(
                             onClick = { onToggleInvite(contact.id) },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .semantics { contentDescription = if (isRinging) "Cancel ringing ${contact.displayName}" else "Ring ${contact.displayName}" },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isRinging) tokens.declineColor else tokens.primaryAccent
                             ),

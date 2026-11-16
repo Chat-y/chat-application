@@ -27,12 +27,20 @@ class SessionRefreshWorker(
 
     override suspend fun doWork(): Result {
         val backend = ServiceLocator.apiBackend
+        // Cold process: restore the session before refreshing registered
+        // accounts; an uninitialized backend would read as having no session.
+        // Prior: runCatching { backend.initialize() }
+        runCatching { backend.initialize() }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+        }
         return try {
             when (backend.refreshAllRegisteredAccountsInBackground()) {
                 ApiBackendService.SessionRefreshOutcome.UNAVAILABLE ->
                     if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.success()
                 else -> Result.success()
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.success()
         }

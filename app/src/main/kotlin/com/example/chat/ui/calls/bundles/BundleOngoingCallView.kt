@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -49,18 +51,30 @@ fun BundleOngoingCallView(
     onInviteParticipant: () -> Unit,
     onMinimize: () -> Unit,
 ) {
-    val tokens = remember(bundleId) { CallBundleRegistry.getTokens(bundleId) }
+// Previous implementation retained:     val tokens = remember(bundleId) { CallBundleRegistry.getTokens(bundleId) }
+    // CALL-R1-09/33: legacy API stays compatible; session owns state, registry owns geometry.
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    val tokens = remember(bundleId, colors) { com.example.chat.ui.calls.themedCallBundleTokens(bundleId, colors) }
 
     when (bundleId) {
-        CallBundleId.APPLE_IOS -> AppleIosOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.SAMSUNG_ONE_UI -> SamsungOneUiOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.GOOGLE_PHONE_LATEST -> GoogleLatestOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.GOOGLE_PHONE_CLASSIC -> GoogleClassicOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.VIVO_IQOO -> VivoIqooOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.CHATY_DEFAULT -> ChatyDefaultOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.AZURE_RING_VERTICAL -> AzureRingVerticalOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.MONO_CHEVRON_DARK -> MonoChevronDarkOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
-        CallBundleId.NEXTCLOUD_TALK -> NextcloudTalkOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.APPLE_IOS -> AppleIosOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.APPLE_IOS -> AppleIosOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.SAMSUNG_ONE_UI -> SamsungOneUiOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.SAMSUNG_ONE_UI -> SamsungOneUiOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.GOOGLE_PHONE_LATEST -> GoogleLatestOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.GOOGLE_PHONE_LATEST -> GoogleLatestOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.GOOGLE_PHONE_CLASSIC -> GoogleClassicOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.GOOGLE_PHONE_CLASSIC -> GoogleClassicOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.VIVO_IQOO -> VivoIqooOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.VIVO_IQOO -> VivoIqooOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.CHATY_DEFAULT -> ChatyDefaultOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.CHATY_DEFAULT -> ChatyDefaultOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.AZURE_RING_VERTICAL -> AzureRingVerticalOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.AZURE_RING_VERTICAL -> AzureRingVerticalOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.MONO_CHEVRON_DARK -> MonoChevronDarkOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.MONO_CHEVRON_DARK -> MonoChevronDarkOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+// Previous implementation retained:         CallBundleId.NEXTCLOUD_TALK -> NextcloudTalkOngoingCall(tokens, session, callDurationSeconds, isMuted, isSpeaker, isCameraOn, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
+        CallBundleId.NEXTCLOUD_TALK -> NextcloudTalkOngoingCall(tokens, session, callDurationSeconds, session.isMuted, session.audioRoute == com.example.chat.data.services.AudioRouteType.speaker, !session.isCameraOff, onToggleMute, onToggleSpeaker, onToggleCamera, onSwitchCamera, onEndCall, onInviteParticipant, onMinimize)
     }
 }
 
@@ -118,7 +132,8 @@ private fun ChatyDefaultOngoingCall(
                     Text(
                         text = formatDuration(duration),
                         color = tokens.primaryAccent,
-                        fontSize = 14.sp,
+// Previous implementation retained:                         fontSize = 14.sp,
+                        style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     )
@@ -147,13 +162,15 @@ private fun ChatyDefaultOngoingCall(
                 Spacer(Modifier.height(16.dp))
                 Text(
                     text = session.remoteDisplayName,
-                    fontSize = 24.sp,
+// Previous implementation retained:                     fontSize = 24.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.Bold,
                     color = tokens.primaryText,
                 )
                 Text(
                     text = if (isMuted) "Microphone Muted" else "Connected",
-                    fontSize = 14.sp,
+// Previous implementation retained:                     fontSize = 14.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                     color = if (isMuted) tokens.declineColor else tokens.secondaryText,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -249,14 +266,16 @@ private fun AppleIosOngoingCall(
             ) {
                 Text(
                     text = session.remoteDisplayName,
-                    fontSize = 28.sp,
+// Previous implementation retained:                     fontSize = 28.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = formatDuration(duration),
-                    fontSize = 16.sp,
+// Previous implementation retained:                     fontSize = 16.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                     color = Color(0xFF8E8E93),
                 )
             }
@@ -327,7 +346,8 @@ private fun IosGridCallButton(
         Spacer(Modifier.height(6.dp))
         Text(
             text = label,
-            fontSize = 12.sp,
+// Previous implementation retained:             fontSize = 12.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
             color = Color.White,
         )
     }
@@ -367,9 +387,11 @@ private fun SamsungOneUiOngoingCall(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 36.dp),
             ) {
-                Text(session.remoteDisplayName, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+// Previous implementation retained:                 Text(session.remoteDisplayName, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(session.remoteDisplayName, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller, fontWeight = FontWeight.Bold, color = Color.White)
                 Spacer(Modifier.height(6.dp))
-                Text(formatDuration(duration), fontSize = 15.sp, color = tokens.secondaryText)
+// Previous implementation retained:                 Text(formatDuration(duration), fontSize = 15.sp, color = tokens.secondaryText)
+                Text(formatDuration(duration), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, color = tokens.secondaryText)
             }
 
             Surface(
@@ -449,8 +471,10 @@ private fun GoogleLatestOngoingCall(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 48.dp),
             ) {
-                Text(session.remoteDisplayName, fontSize = 26.sp, fontWeight = FontWeight.Medium, color = tokens.primaryText)
-                Text(formatDuration(duration), fontSize = 15.sp, color = tokens.secondaryText, modifier = Modifier.padding(top = 4.dp))
+// Previous implementation retained:                 Text(session.remoteDisplayName, fontSize = 26.sp, fontWeight = FontWeight.Medium, color = tokens.primaryText)
+// Previous implementation retained:                 Text(formatDuration(duration), fontSize = 15.sp, color = tokens.secondaryText, modifier = Modifier.padding(top = 4.dp))
+                Text(session.remoteDisplayName, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller, fontWeight = FontWeight.Medium, color = tokens.primaryText)
+                Text(formatDuration(duration), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, color = tokens.secondaryText, modifier = Modifier.padding(top = 4.dp))
             }
 
             Surface(
@@ -525,8 +549,10 @@ private fun GoogleClassicOngoingCall(
                     .background(Color(0xFF00695C))
                     .padding(vertical = 36.dp),
             ) {
-                Text(session.remoteDisplayName, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Text(formatDuration(duration), fontSize = 14.sp, color = Color(0xFFB2DFDB))
+// Previous implementation retained:                 Text(session.remoteDisplayName, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+// Previous implementation retained:                 Text(formatDuration(duration), fontSize = 14.sp, color = Color(0xFFB2DFDB))
+                Text(session.remoteDisplayName, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(formatDuration(duration), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, color = Color(0xFFB2DFDB))
             }
 
             Column(
@@ -592,9 +618,11 @@ private fun VivoIqooOngoingCall(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 36.dp),
             ) {
-                Text(session.remoteDisplayName, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
+// Previous implementation retained:                 Text(session.remoteDisplayName, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(session.remoteDisplayName, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller, fontWeight = FontWeight.Bold, color = Color.White)
                 Spacer(Modifier.height(4.dp))
-                Text(formatDuration(duration), fontSize = 14.sp, color = tokens.primaryAccent)
+// Previous implementation retained:                 Text(formatDuration(duration), fontSize = 14.sp, color = tokens.primaryAccent)
+                Text(formatDuration(duration), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, color = tokens.primaryAccent)
             }
 
             Surface(
@@ -676,7 +704,8 @@ private fun AzureRingVerticalOngoingCall(
             ) {
                 Text(
                     session.remoteDisplayName,
-                    fontSize = 34.sp,
+// Previous implementation retained:                     fontSize = 34.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.Light,
                     color = Color.White,
                 )
@@ -687,7 +716,8 @@ private fun AzureRingVerticalOngoingCall(
                 ) {
                     Text(
                         text = (if (session.isVideo) "HD Video  " else "HD Voice  ") + formatDuration(duration),
-                        fontSize = 13.sp,
+// Previous implementation retained:                         fontSize = 13.sp,
+                        style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     )
@@ -752,7 +782,8 @@ private fun AzureGridButton(
         Text(
             text = label,
             color = if (isActive) Color(0xFF9FD8FF) else Color.White.copy(alpha = 0.85f),
-            fontSize = 12.sp,
+// Previous implementation retained:             fontSize = 12.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
         )
     }
 }
@@ -791,9 +822,11 @@ private fun MonoChevronDarkOngoingCall(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 52.dp),
             ) {
-                Text(session.remoteDisplayName, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = tokens.primaryText)
+// Previous implementation retained:                 Text(session.remoteDisplayName, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = tokens.primaryText)
+                Text(session.remoteDisplayName, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller, fontWeight = FontWeight.Bold, color = tokens.primaryText)
                 Spacer(Modifier.height(6.dp))
-                Text(formatDuration(duration), fontSize = 15.sp, color = tokens.secondaryText)
+// Previous implementation retained:                 Text(formatDuration(duration), fontSize = 15.sp, color = tokens.secondaryText)
+                Text(formatDuration(duration), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, color = tokens.secondaryText)
             }
             Column(
                 modifier = Modifier
@@ -856,9 +889,11 @@ private fun NextcloudTalkOngoingCall(
                 .padding(top = 44.dp, bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(session.remoteDisplayName, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+// Previous implementation retained:             Text(session.remoteDisplayName, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(session.remoteDisplayName, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(Modifier.height(2.dp))
-            Text(formatDuration(duration), fontSize = 14.sp, color = Color.White.copy(alpha = 0.85f))
+// Previous implementation retained:             Text(formatDuration(duration), fontSize = 14.sp, color = Color.White.copy(alpha = 0.85f))
+            Text(formatDuration(duration), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, color = Color.White.copy(alpha = 0.85f))
         }
         Box(
             modifier = Modifier
@@ -939,7 +974,9 @@ fun ControlIconButton(
     isActive: Boolean,
     activeColor: Color,
     onClick: () -> Unit,
+    contentDescription: String? = null,   // CALL-R1-40: screen-reader label for the control
 ) {
+    val labelText = contentDescription
     Box(
         modifier = Modifier
             .size(52.dp)
@@ -947,7 +984,10 @@ fun ControlIconButton(
                 if (isActive) activeColor else Color.White.copy(alpha = 0.12f),
                 CircleShape,
             )
-            .clickable { onClick() },
+// Previous implementation retained:             .clickable { onClick() },
+            .clickable { onClick() }
+            // receiver shadowing: capture the param first so the label is actually applied
+            .then(if (labelText != null) Modifier.semantics { this.contentDescription = labelText } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

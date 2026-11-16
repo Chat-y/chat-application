@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="camera_recording_with_remaining">Recording, %1$d seconds elapsed, %2$d seconds remaining</string>
+    <string name="camera_recording_time_remaining">%1$s · %2$s left</string>
+</resources>

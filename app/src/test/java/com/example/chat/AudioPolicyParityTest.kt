@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -17,9 +18,16 @@ class AudioPolicyParityTest {
 
     private class FakePlatform : ChatyAudioPlatform {
         val routeCalls = mutableListOf<Pair<AudioUseCase, AudioOutputRoute>>()
+        var communicationBegins = 0
+        var failCommunicationBegin = false
+        override suspend fun beginCommunicationSession() {
+            communicationBegins++
+            if (failCommunicationBegin) throw IllegalStateException("native mode unavailable")
+        }
         val releases = mutableListOf<AudioUseCase>()
         var failNextSetRoute: Boolean = false
         var failOnRoute: AudioOutputRoute? = null
+        var forcedReturnedRoute: AudioOutputRoute? = null
         var setRouteGate: CompletableDeferred<Unit>? = null
         var concurrentCalls = 0
         var maxConcurrentCalls = 0
@@ -43,7 +51,8 @@ class AudioPolicyParityTest {
                     failNextSetRoute = false
                     throw RuntimeException("platform route failure")
                 }
-                return nextCaps.copy(activeRoute = route)
+// Previous implementation retained:                 return nextCaps.copy(activeRoute = route)
+                return nextCaps.copy(activeRoute = forcedReturnedRoute ?: route)
             } finally {
                 concurrentCalls--
             }
@@ -56,8 +65,11 @@ class AudioPolicyParityTest {
 
     private class Fixture(scope: kotlinx.coroutines.CoroutineScope) {
         val platform = FakePlatform()
-        val capabilities = AudioCapabilityService(platform, scope)
-        val coordinator = AudioPolicyCoordinator(capabilities)
+// Previous implementation retained:         val capabilities = AudioCapabilityService(platform, scope)
+        val capabilities = AudioCapabilityService(platform, scope,
+            routeDispatcher = scope.coroutineContext[kotlin.coroutines.ContinuationInterceptor] as kotlinx.coroutines.CoroutineDispatcher)
+// Previous implementation retained:         val coordinator = AudioPolicyCoordinator(capabilities)
+        val coordinator = AudioPolicyCoordinator(capabilities, diagnosticsEnabled = true)
     }
 
     private fun fixture(scope: kotlinx.coroutines.CoroutineScope) = Fixture(scope)
@@ -104,16 +116,22 @@ class AudioPolicyParityTest {
         assertEquals(AudioSessionState.speakerphoneCall, f.coordinator.state)
     }
 
-    @Test fun `setCallRoute failure falls back to speaker and returns false`() = runTest {
+// Previous implementation retained:     @Test fun `setCallRoute failure falls back to speaker and returns false`() = runTest {
+    @Test fun `setCallRoute failure never requests louder fallback`() = runTest {
         val f = fixture(backgroundScope)
         f.coordinator.startCallSession()
+        f.platform.routeCalls.clear()
         f.platform.failOnRoute = AudioOutputRoute.bluetooth
-        val ok = f.coordinator.setCallRoute(AudioOutputRoute.bluetooth)
-        assertFalse(ok)
-        // Fallback request issued
-        assertEquals(AudioOutputRoute.speaker, f.platform.routeCalls.last().second)
-        assertEquals(AudioOutputRoute.speaker, f.coordinator.activeRoute)
-        assertEquals(AudioSessionState.speakerphoneCall, f.coordinator.state)
+// Previous implementation retained:         val ok = f.coordinator.setCallRoute(AudioOutputRoute.bluetooth)
+// Previous implementation retained:         assertFalse(ok)
+// Previous implementation retained:         // Fallback request issued
+// Previous implementation retained:         assertEquals(AudioOutputRoute.speaker, f.platform.routeCalls.last().second)
+// Previous implementation retained:         assertEquals(AudioOutputRoute.speaker, f.coordinator.activeRoute)
+// Previous implementation retained:         assertEquals(AudioSessionState.speakerphoneCall, f.coordinator.state)
+        assertFalse(f.coordinator.setCallRoute(AudioOutputRoute.bluetooth))
+        assertEquals(listOf(AudioUseCase.communication to AudioOutputRoute.bluetooth), f.platform.routeCalls)
+        assertEquals(AudioOutputRoute.receiver, f.coordinator.activeRoute)
+        assertEquals(AudioSessionState.receiverCall, f.coordinator.state)
     }
 
     @Test fun `media cannot override active call`() = runTest {
@@ -200,11 +218,13 @@ class AudioPolicyParityTest {
         assertEquals(AudioSessionState.idle, g.coordinator.state)
     }
 
-    @Test fun `diagnostics capped at 100`() = runTest {
+// Previous implementation retained:     @Test fun `diagnostics capped at 100`() = runTest {
+    @Test fun `diagnostics capped at 200`() = runTest {
         val f = fixture(backgroundScope)
         f.coordinator.startCallSession()
         repeat(150) { f.coordinator.setCallRoute(AudioOutputRoute.speaker) }
-        assertEquals(100, f.coordinator.diagnostics.size)
+// Previous implementation retained:         assertEquals(100, f.coordinator.diagnostics.size)
+        assertEquals(200, f.coordinator.diagnostics.size)
     }
 
     @Test fun `stateForRoute mapping matches Dart`() {
@@ -229,7 +249,8 @@ class AudioPolicyParityTest {
         f.platform.setRouteGate = CompletableDeferred()
         val a = async { f.coordinator.startCallSession() }
         val b = async { f.coordinator.startCallSession() }
-        advanceUntilIdle()
+// Previous implementation retained:         advanceUntilIdle()
+        runCurrent() // start the blocked requests without advancing through their timeout
         f.platform.setRouteGate!!.complete(Unit)
         a.await(); b.await()
         assertEquals(1, f.platform.maxConcurrentCalls)
@@ -241,8 +262,13 @@ class AudioPolicyParityTest {
         assertEquals(AudioOutputRoute.receiver, first.activeRoute)
         advanceTimeBy(1) // let backgroundScope collectors start before emitting (replay=0 drops early emissions)
         // Stream event replaces cached communication capabilities
-        f.platform.capsFlow.emit(first.copy(activeRoute = AudioOutputRoute.bluetooth, dualOutputStatus = DualOutputStatus.active))
-        advanceTimeBy(1) // backgroundScope collectors advance on virtual time only
+// Previous implementation retained:         f.platform.capsFlow.emit(first.copy(activeRoute = AudioOutputRoute.bluetooth, dualOutputStatus = DualOutputStatus.active))
+// Previous implementation retained:         advanceTimeBy(1) // backgroundScope collectors advance on virtual time only
+        f.platform.nextCaps = first.copy(activeRoute = AudioOutputRoute.bluetooth, dualOutputStatus = DualOutputStatus.active)
+        f.platform.capsFlow.emit(f.platform.nextCaps)
+        advanceTimeBy(499)
+        assertEquals(AudioOutputRoute.receiver, f.capabilities.activeCommunicationRoute)
+        advanceTimeBy(2) //500ms availability debounce plus scheduler turn
         assertEquals(AudioOutputRoute.bluetooth, f.capabilities.activeCommunicationRoute)
         assertTrue(f.capabilities.isDualOutputActive)
         // Route stream patches activeRoute only
@@ -295,4 +321,102 @@ class AudioPolicyParityTest {
         media.abandonMediaFocus()
         assertEquals(AudioSessionState.idle, f.coordinator.state)
     }
+
+    @Test fun `media route failure never requests speaker fallback`() = runTest {
+        val f = fixture(backgroundScope)
+        f.coordinator.startCallSession()
+        f.platform.routeCalls.clear()
+        f.platform.failOnRoute = AudioOutputRoute.receiver
+        assertFalse(f.coordinator.setCallRouteWithoutFallback(AudioOutputRoute.receiver))
+        assertEquals(listOf(AudioUseCase.communication to AudioOutputRoute.receiver), f.platform.routeCalls)
+    }
+
+    @Test fun `settings route rejects call ownership and live ringing state`() = runTest {
+        val f = fixture(backgroundScope)
+        assertNull(f.coordinator.setSettingsRoute(AudioOutputRoute.speaker) { true })
+        assertTrue(f.platform.routeCalls.isEmpty())
+        f.coordinator.startCallSession()
+        f.platform.routeCalls.clear()
+        assertNull(f.coordinator.setSettingsRoute(AudioOutputRoute.speaker))
+        assertTrue(f.platform.routeCalls.isEmpty())
+        f.coordinator.endCallSession()
+        assertEquals(AudioOutputRoute.speaker,
+            f.coordinator.setSettingsRoute(AudioOutputRoute.speaker)?.activeRoute)
+    }
+
+
+    @Test fun `no-fallback route refuses a released audio owner`() = runTest {
+        val f = fixture(backgroundScope)
+        f.coordinator.startCallSession()
+        // FakePlatform normally returns the requested route, so use an unavailable ownership case
+        // to prove no native write occurs after teardown. Device mismatch is covered by the driver fixture.
+        f.coordinator.endCallSession()
+        f.platform.routeCalls.clear()
+        assertFalse(f.coordinator.setCallRouteWithoutFallback(AudioOutputRoute.speaker))
+        assertTrue(f.platform.routeCalls.isEmpty())
+    }
+
+
+    @Test fun `media mismatch records observed route and does not send fallback request`() = runTest {
+        val f = fixture(backgroundScope)
+        f.coordinator.startCallSession()
+        f.platform.routeCalls.clear()
+        f.platform.forcedReturnedRoute = AudioOutputRoute.receiver
+        assertFalse(f.coordinator.setCallRouteWithoutFallback(AudioOutputRoute.speaker))
+        assertEquals(AudioOutputRoute.receiver, f.coordinator.activeRoute)
+        assertEquals(listOf(AudioUseCase.communication to AudioOutputRoute.speaker), f.platform.routeCalls)
+    }
+
+
+    @Test fun `manual call route is released and next voice call starts with receiver default`() = runTest {
+        val f = fixture(backgroundScope)
+        val controller = CallAudioController(f.coordinator, f.capabilities)
+        val sessions = OwnedCallAudioSessions(controller)
+        val first = sessions.newOwner()
+        assertTrue(sessions.start(first, false))
+        assertTrue(sessions.switchRoute(first, AudioOutputRoute.speaker))
+        assertEquals(AudioOutputRoute.speaker, f.coordinator.activeRoute)
+        sessions.end(first)
+        assertEquals(AudioOutputRoute.systemDefault, f.coordinator.activeRoute)
+        assertEquals(AudioSessionState.idle, f.coordinator.state)
+        assertEquals(listOf(AudioUseCase.communication), f.platform.releases)
+        val next = sessions.newOwner()
+        assertTrue(sessions.start(next, false))
+        assertEquals(AudioOutputRoute.receiver, f.coordinator.activeRoute)
+        assertEquals(AudioUseCase.communication to AudioOutputRoute.receiver, f.platform.routeCalls.last())
+        sessions.end(next)
+    }
+
+
+    @Test fun `idle settings route does not acquire native communication mode`() = runTest {
+        val f = fixture(backgroundScope)
+        f.coordinator.setSettingsRoute(AudioOutputRoute.speaker)
+        assertEquals(0, f.platform.communicationBegins)
+        assertNull(f.coordinator.activeOwner)
+        val controller = CallAudioController(f.coordinator, f.capabilities)
+        val sessions = OwnedCallAudioSessions(controller)
+        val owner = sessions.newOwner()
+        assertTrue(sessions.start(owner, false))
+        assertEquals(1, f.platform.communicationBegins)
+        assertTrue(sessions.switchRoute(owner, AudioOutputRoute.speaker))
+        assertEquals(1, f.platform.communicationBegins)
+        sessions.end(owner)
+        assertEquals(listOf(AudioUseCase.communication), f.platform.releases)
+        f.coordinator.setSettingsRoute(AudioOutputRoute.receiver)
+        assertEquals(1, f.platform.communicationBegins)
+    }
+
+
+    @Test fun `failed native mode acquisition releases provisional call owner`() = runTest {
+        val f = fixture(backgroundScope)
+        f.platform.failCommunicationBegin = true
+        val sessions = OwnedCallAudioSessions(CallAudioController(f.coordinator, f.capabilities))
+        assertFalse(sessions.start(sessions.newOwner(), false))
+        assertEquals(1, f.platform.communicationBegins)
+        assertTrue(f.platform.routeCalls.isEmpty())
+        assertEquals(listOf(AudioUseCase.communication), f.platform.releases)
+        assertEquals(AudioSessionState.idle, f.coordinator.state)
+        assertNull(f.coordinator.activeOwner)
+    }
+
 }

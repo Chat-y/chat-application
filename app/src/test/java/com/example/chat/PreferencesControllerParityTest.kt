@@ -306,4 +306,27 @@ class PreferencesControllerParityTest {
             assertTrue("missing $k", s.containsKey(k))
         }
     }
+
+    /** 51+ events must keep accepting the newest while evicting only the oldest. Unrun. */
+    @Test fun historyRetainsNewestFiftyAfterSeventyFiveEvents() {
+        val c = fixture(withRemote = false).controller
+        for (index in 1..75) {
+            nowValue = 1_700_000_000_000L + index
+            c.updateConversation(c.conversation,logTitle = "event-$index",prevVal = index - 1,newVal = index)
+            if (index >= 50) {
+                val current = c.history()
+                assertEquals(50,current.size)
+                assertEquals("event-$index",current.first().title)
+                assertEquals("event-${index - 49}",current.last().title)
+            }
+        }
+        val events = c.history()
+        assertEquals((75 downTo 26).map { "event-$it" },events.map { it.title })
+        assertTrue(events.zipWithNext().all { (newer,older) -> newer.timestampEpochMs > older.timestampEpochMs })
+        c.clearPreferenceHistory()
+        assertTrue(c.history().isEmpty())
+        c.updateConversation(c.conversation,logTitle = "after-clear")
+        assertEquals(listOf("after-clear"),c.history().map { it.title })
+        c.dispose()
+    }
 }

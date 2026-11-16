@@ -83,9 +83,11 @@ private suspend fun readPicked(context: Context, uri: Uri): PickedStatusMedia = 
     coroutineContext.ensureActive()
     if (size > MAX_PICK_BYTES) throw IllegalStateException("Selected media exceeds the ${com.example.chat.data.services.StatusService.STORAGE_LIMIT_MB} MB storage limit.")
     val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-        // This seam still materializes bytes; peak-memory/stream-upload design remains separate work.
+        // Known size: allocate only the final payload and reject metadata/content mismatches.
+        // Unknown size retains the bounded chunk fallback; the upload contract still requires bytes.
         coroutineContext.ensureActive()
-        StatusMediaReadRules.read(input, MAX_PICK_BYTES) { coroutineContext.ensureActive() }
+        if (size >= 0) StatusMediaReadRules.readKnownSize(input, size, MAX_PICK_BYTES) { coroutineContext.ensureActive() }
+        else StatusMediaReadRules.read(input, MAX_PICK_BYTES) { coroutineContext.ensureActive() }
     } ?: throw IllegalStateException("The selected file is not accessible on this device.")
     coroutineContext.ensureActive()
     val mimeType = context.contentResolver.getType(uri)

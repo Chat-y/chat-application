@@ -130,7 +130,9 @@ fun AccountSwitcherOverlay(
     var activeTab by remember { mutableStateOf(AccountSwitcherTab.Accounts) }
     var signOutTarget by remember { mutableStateOf<ApiRegisteredAccountMeta?>(null) }
 
-    BackHandler(enabled = !isSwitching) { onDismiss() }
+    // Previous handler let Back fall through to underlying navigation during a switch.
+    // BackHandler(enabled = !isSwitching) { onDismiss() }
+    BackHandler { if (!isSwitching) onDismiss() }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -442,7 +444,7 @@ fun AccountSwitcherOverlay(
         }
     }
 
-    signOutTarget?.let { target ->
+    signOutTarget?.takeIf { target -> accounts.any { it.accountKey == target.accountKey } }?.let { target ->
         ChatyConfirmationDialog(
             onDismissRequest = { signOutTarget = null },
             title = { Text("Sign out ${target.displayName}?") },
@@ -463,7 +465,7 @@ fun AccountSwitcherOverlay(
                     onClick = {
                         val confirmed = target
                         signOutTarget = null
-                        onSignOutAccount(confirmed)
+                        if (!isSwitching && accounts.any { it.accountKey == confirmed.accountKey }) onSignOutAccount(confirmed)
                     },
                 ) {
                     Text("Sign out", color = Color(theme.dangerColor), fontWeight = FontWeight.Bold)
@@ -663,7 +665,8 @@ private fun AccountCard(
                         enabled = !busy,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(theme.dangerColor),
-                            contentColor = Color.White,
+                            // Previous fixed foreground: contentColor = Color.White,
+                            contentColor = colors.onError,
                         ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -709,7 +712,7 @@ private fun AddAccountCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(48.dp) // AC5-01: was 44.dp
                     .background(Color(argbWithAlpha(theme.accentColor, 0.15)), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {

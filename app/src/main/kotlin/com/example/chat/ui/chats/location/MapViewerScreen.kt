@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.chat.ui.kit.ChatyDropdownMenu
@@ -102,6 +103,8 @@ fun MapViewerScreen(
     var styleChosenByUser by remember { mutableStateOf(false) }
     LaunchedEffect(systemDark) {
         if (!styleChosenByUser) selectedStyle = if (systemDark) "dark" else "positron"
+        // MAP-R1-004: 3D buildings reset to off on every theme/style change by design, so the toggle
+        // state always matches the freshly loaded style. Documented, not a bug.
         buildingsEnabled = false
         mapView?.setTheme(systemDark)
         mapView?.selectStyle(selectedStyle)
@@ -128,6 +131,8 @@ fun MapViewerScreen(
                 check(LocationManagerCompat.isLocationEnabled(manager)) { "Location services are off." }
                 val provider = when {
                     !precise && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                    // MAP-R2-073: coarse-only never falls through to GPS (previous fallthrough kept below for precise).
+                    !precise -> error("Approximate location is unavailable on this device.")
                     manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
                     manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
                     else -> error("No location provider is available.")
@@ -136,7 +141,8 @@ fun MapViewerScreen(
                     ?: error("No current location was found. Choose a pin or try again.")
                 val ageMs = (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000
                 check(ageMs in 0..15_000) { "Location is too old. Choose a pin or try again." }
-                check(fix.hasAccuracy()) { "Location accuracy is unavailable." }
+                // Prior: check(fix.hasAccuracy()) { "Location accuracy is unavailable." }
+                check(fix.hasAccuracy() && fix.accuracy.isFinite() && fix.accuracy >= 0f) { "Location accuracy is unavailable." } // MAP-R2-077
                 val value = LocationDraft(LocationCoordinate(fix.latitude, fix.longitude), LocationSource.currentFix,
                     fix.accuracy.toDouble(), if (precise) LocationPrecision.precise else LocationPrecision.approximate)
                 check(liveScope() == capturedScope) { "Account or conversation changed." }
@@ -175,12 +181,15 @@ fun MapViewerScreen(
             LocateAction.requestForeground -> requestPermission()
             LocateAction.explainRationale -> rationale = true
             LocateAction.offerAppSettings -> {
+                // Prior: context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
                 status = "Permission is unavailable. You can allow location in app settings, or choose a pin."
-                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+                // MAP-R2-070: guarded so a missing settings handler cannot crash.
+                runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))) }
             }
+                // Prior: context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
             LocateAction.offerLocationSettings -> {
                 status = "Location services are off. Turn them on, then tap Current location again, or choose a pin."
-                context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                runCatching { context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } // MAP-R2-070
             }
         }
     }
@@ -205,7 +214,8 @@ fun MapViewerScreen(
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 IconButton(onClick = { stopLocate(); gate.cancel(); onDismiss() }, modifier = Modifier.size(48.dp).semantics { contentDescription = "Back" }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = null) }
-                Text("Map", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.titleMedium)
+                // MAP-R1-044: bounded flexible title so both actions stay reachable at large font scale.
+                Text("Map", modifier = Modifier.weight(1f, fill = false).padding(12.dp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                 IconButton(onClick = { friendsMapOpen = true }, modifier = Modifier.size(48.dp).semantics { contentDescription = "Friends map" }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.groups, semanticLabel = null) }
             }
             Box(Modifier.fillMaxWidth().weight(1f).semantics { paneTitle = "Map" }) { // MAP-R4-168
@@ -214,7 +224,7 @@ fun MapViewerScreen(
                     factory = { viewContext -> GeoLibreLocationMapView(viewContext,
                         onPinSelected = { point -> stopLocate(); select(LocationDraft(point, LocationSource.manualPin)); status = "Pin selected locally. Nothing is sent." },
                         onUnavailable = { status = it }, onAttributionLink = onAttributionLink,
-                        onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); status = ""; onMapReady() }, nativeLayers = true,
+                        onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); if (status == "Loading map...") status = ""; onMapReady() }, nativeLayers = true,
                         systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true }, onViewChanged = { buildingsEnabled = it },
                     ).also { mapView = it; draft?.let { selected -> it.showPin(selected.coordinate) } } },
                     modifier = Modifier.fillMaxSize(),
@@ -248,10 +258,12 @@ fun MapViewerScreen(
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = mapColors.primary, contentColor = mapColors.onPrimary, disabledContainerColor = mapColors.surfaceVariant, disabledContentColor = mapColors.onSurfaceVariant),
             ) {
                 if (locating) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = mapColors.onPrimary)
+            // Prior: if (status.isNotBlank()) Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
                 else Icon(Icons.Rounded.MyLocation, contentDescription = null)
             }
             }
-            if (status.isNotBlank()) Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
+            // MAP-R1-034: polite live region
+            if (status.isNotBlank()) Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall)
         }
     }
     }

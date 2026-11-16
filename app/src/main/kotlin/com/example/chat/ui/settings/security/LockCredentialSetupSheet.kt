@@ -313,6 +313,7 @@ fun LockCredentialSetupContent(
                 }
             }
             else -> {
+                com.example.chat.ui.core.components.auth.AuthInputPrivacy {
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -331,7 +332,9 @@ fun LockCredentialSetupContent(
                             },
                         )
                     },
-                    placeholder = { Text("At least 6 characters") },
+// Superseded source retained below per additive-only review rule.
+//                     placeholder = { Text("At least 6 characters") },
+                    placeholder = { Text("At least 8 characters") },
                     shape = RoundedCornerShape(18.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = cs.surfaceContainerHighest.copy(alpha = 0.58f),
@@ -347,6 +350,7 @@ fun LockCredentialSetupContent(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                }
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = { doContinue() }, enabled = flow.initialized && !flow.busy, modifier = Modifier.fillMaxWidth()) {
                     if (flow.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -356,7 +360,9 @@ fun LockCredentialSetupContent(
         }
         Spacer(Modifier.height(14.dp))
         Text(
-            "Credentials are encrypted with salted PBKDF2 hashes in hardware-backed secure storage.",
+// Superseded source retained below per additive-only review rule.
+//             "Credentials are encrypted with salted PBKDF2 hashes in hardware-backed secure storage.",
+            "Credentials use salted PBKDF2 verifiers in encrypted device storage. This is not a hardware-bound credential verifier.",
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.bodySmall.copy(color = cs.onSurfaceVariant, fontSize = 11.5.sp),

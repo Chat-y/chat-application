@@ -104,7 +104,8 @@ fun AuthV2WorkspaceGate(
             color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor), fontSize = ChatyUiTokens.text14)
         Spacer(Modifier.height(ChatyUiTokens.space24))
         AuthTextField(
-            label = authCopy("Workspace"), hintText = "your-team", theme = theme,
+            // Prior: label = authCopy("Workspace"), hintText = "your-team", theme = theme,
+            label = authCopy("Workspace"), hintText = authCopy("your-team"), theme = theme,
             value = workspace, onValueChange = onWorkspaceChange,
             keyboardType = KeyboardType.Text, capsule = true,
             imeAction = androidx.compose.ui.text.input.ImeAction.Done, onDone = onContinue,

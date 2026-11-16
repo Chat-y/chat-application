@@ -22,6 +22,14 @@ object LockBiometricPolicy {
         return a
     }
 
+    /** Chaty lock gates require Class 3 biometrics; weak face unlock is not a lock factor.
+     * Legacy compatibility helper above remains for historical policy tests only. */
+    fun lockAuthenticators(biometricOnly: Boolean, deviceCredentialAvailable: Boolean, sdkInt: Int = 30): Int =
+        // AndroidX rejects STRONG | DEVICE_CREDENTIAL on API 28-29. Keep the old
+        // explicit device-credential flow there; biometric-only gates always require STRONG.
+        if (!biometricOnly && deviceCredentialAvailable && sdkInt < 30) allowedAuthenticators(false, true)
+        else BIOMETRIC_STRONG or (if (allowCredentials(biometricOnly, deviceCredentialAvailable)) DEVICE_CREDENTIAL else 0)
+
     /** LocalAuthPlugin.authenticate: allowCredentials = !biometricOnly && canAuthenticateWithDeviceCredential(). */
     fun allowCredentials(biometricOnly: Boolean, deviceCredentialAvailable: Boolean): Boolean =
         !biometricOnly && deviceCredentialAvailable

@@ -16,7 +16,7 @@ class RoomCreationScopeSourceContractTest {
     @Test fun bothCreationMethodsCaptureAndPinRequestScope() {
         for (name in listOf("createOrGetDirectConversation", "createGroupRoom")) {
             val body = method(name)
-            assertTrue(name, body.contains("val expected = authSnapshot()"))
+            assertTrue(name, body.contains("val expected = expectedScope ?: authSnapshot()"))
             assertTrue(name, body.contains("baseUrl = { expected.baseUrl }"))
             assertTrue(name, body.contains("tenantId = { expected.tenantId }"))
             assertTrue(name, body.contains("token = { expected.token }"))
@@ -41,4 +41,26 @@ class RoomCreationScopeSourceContractTest {
         assertTrue(branch.contains("if (!withAuthScope(expected) {"))
         assertTrue(branch.contains("}) throw ApiScopeChangedException()"))
     }
+    @Test fun scopedDirectoryReadPinsExpectedOwnerAndHasNoMergedCacheFallback() {
+        val path = "app/src/main/kotlin/com/example/chat/data/api/ApiBackendService.kt"
+        val source = listOf(File(path), File("../$path")).first { it.exists() }.readText()
+        val signature = "suspend fun searchUsers(query: String, expected: ApiAccountScope, includeSelf: Boolean = false)"
+        val body = source.substringAfter(signature).substringBefore("private val reactionLocks")
+        assertTrue(source.contains(signature))
+        assertTrue(body.contains("baseUrl = { expected.baseUrl }"))
+        assertTrue(body.contains("tenantId = { expected.tenantId }"))
+        assertTrue(body.contains("token = { expected.token }"))
+        assertTrue(body.contains("ScopedCallHttpTransport(expected, ::withAuthScope, sendRequests)"))
+        assertTrue(body.contains("reader.listUsers(q)"))
+        assertTrue(body.contains("filterUsers(fresh, q, expected.userId, includeSelf)"))
+        assertTrue(body.contains("checkNotNull(fresh)"))
+        assertFalse(body.contains("loadUsers(q)"))
+        assertFalse(body.contains("session.currentUser"))
+    }
+    @Test fun oldDirectoryOverloadRemainsAvailable() {
+        val path = "app/src/main/kotlin/com/example/chat/data/api/ApiBackendService.kt"
+        val source = listOf(File(path), File("../$path")).first { it.exists() }.readText()
+        assertTrue(source.contains("suspend fun searchUsers(query: String, includeSelf: Boolean = false)"))
+    }
+
 }

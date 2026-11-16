@@ -1,5 +1,6 @@
 package com.example.chat.ui.calls
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -46,6 +47,7 @@ fun ChatyCallIsland(
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
     val reduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
     val wave = if (reduceMotion) .25f else {
         val animated by rememberInfiniteTransition(label = "islandWave").animateFloat(
@@ -64,18 +66,19 @@ fun ChatyCallIsland(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .height(38.dp)
-            .background(Color(0xFF0F0F11), RoundedCornerShape(19.dp))
-            .clickable { onTap() }
+            // Prior: .background(Color(0xFF0F0F11), RoundedCornerShape(19.dp))
+            .background(colors.surface, RoundedCornerShape(19.dp))
+            .clickable(onClickLabel = "Open call", role = Role.Button) { onTap() }
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(22.dp).background(Color(0xFF22C55E), CircleShape),
+            modifier = Modifier.size(22.dp).background(colors.accent, CircleShape) // Prior fixed green,
         ) {
             Icon(
                 if (session.isVideo) Icons.Rounded.Videocam else Icons.Rounded.Call,
                 contentDescription = null,
-                tint = Color.Black,
+                tint = androidx.compose.ui.graphics.Color(com.example.chat.ui.theme.LocalThemeConfig.current.onAccentColor), // Prior fixed black
                 modifier = Modifier.size(13.dp),
             )
         }
@@ -86,7 +89,7 @@ fun ChatyCallIsland(
                 CallSessionState.reconnecting -> "Reconnecting"
                 else -> "Calling…"
             },
-            color = Color.White,
+            color = colors.foreground, // Prior fixed white
             fontSize = 12.5.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.2.sp,
@@ -101,7 +104,7 @@ fun ChatyCallIsland(
                         .padding(horizontal = 1.2.dp)
                         .width(2.5.dp)
                         .height(barHeight.dp)
-                        .background(Color(0xFF22C55E), RoundedCornerShape(1.5.dp)),
+                        .background(colors.accent, RoundedCornerShape(1.5.dp)) // Prior fixed green,
                 )
             }
         }

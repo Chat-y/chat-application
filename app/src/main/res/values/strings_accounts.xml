@@ -1,0 +1,26 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="accounts_delete_title">Delete Account?</string>
+    <!-- Previous copy: This will permanently delete your user profile, message history, and remove you from all workspaces. This action is irreversible. -->
+    <string name="accounts_delete_body">This requests deletion of your account and clears this account\'s local data after the request succeeds. The app cannot confirm server retention or removal from every workspace or device. A successful deletion cannot be undone here.</string>
+    <string name="accounts_delete_confirm">Delete Permanently</string>
+    <string name="accounts_logout_title">Log out of Chaty?</string>
+    <!-- Previous copy: Your account will be signed out on this device. Your chats and account data remain on the server. -->
+    <string name="accounts_logout_body">This signs out your account on this device. It does not request account deletion. The app cannot confirm how long the server keeps your chats or account data.</string>
+    <string name="accounts_logout_confirm">Log out</string>
+    <string name="accounts_cancel">Cancel</string>
+    <string name="accounts_settings_title">Account &amp; Profile</string>
+    <string name="accounts_settings_subtitle">Profile photo, display name, username &amp; bio</string>
+    <string name="accounts_section_profile">Profile Information</string>
+    <string name="accounts_section_actions">Account Actions</string>
+    <string name="accounts_tile_logout">Log Out</string>
+    <string name="accounts_tile_logout_sub">Sign out of your current session on this device</string>
+    <string name="accounts_tile_delete">Delete Account</string>
+    <string name="accounts_tile_delete_sub">Permanently delete your profile and account data</string>
+    <string name="accounts_tile_about">About / Bio</string>
+    <string name="accounts_edit_profile">Edit Profile</string>
+    <string name="accounts_change_photo">Change Profile Photo</string>
+    <string name="accounts_label_display_name">Display Name</string>
+    <string name="accounts_label_about">About / Bio</string>
+    <string name="accounts_save_profile">Save Profile</string>
+</resources>

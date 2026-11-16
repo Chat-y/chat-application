@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -86,12 +87,22 @@ fun HomeScreenSettingsPage(
     val view = LocalView.current
     var version by remember { mutableIntStateOf(0) }
     DisposableEffect(preferences) {
-        val l: () -> Unit = { version += 1 }
+        // Prior listener directly incremented Compose state on the notifying thread.
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        var attached = true
+        val l: () -> Unit = {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                if (attached) version += 1
+            } else main.post { if (attached) version += 1 }
+        }
         preferences.addListener(l)
-        onDispose { preferences.removeListener(l) }
+        onDispose { attached = false; preferences.removeListener(l) }
     }
     @Suppress("UNUSED_VARIABLE") val v = version
     val home = preferences.home
+    val dateGroupScope = preferences.scopeGeneration
+    val dateGroupingEnabled = com.example.chat.ui.chats.home.homeDateGroupingEnabled(preferences.gbFeatures)
+
     val accent = Color(config.accentColor)
     val primaryText = Color(config.primaryTextColor)
     val secondaryText = Color(config.secondaryTextColor)
@@ -105,7 +116,7 @@ fun HomeScreenSettingsPage(
             Modifier.fillMaxWidth()
                 .shadow(5.dp, shape, ambientColor = colors.shadow.copy(alpha = if (isDark) 0.25f else 0.04f), spotColor = colors.shadow.copy(alpha = if (isDark) 0.25f else 0.04f))
                 .clip(shape)
-                .background(if (isDark) Color(0xFF1E2124) else colors.surface)
+                .background(colors.surface) // Prior fixed dark fill: if (isDark) Color(0xFF1E2124) else colors.surface
                 .border(0.9.dp, colors.borderSubtle, shape),
         ) { content() }
     }
@@ -155,7 +166,10 @@ fun HomeScreenSettingsPage(
             Spacer(Modifier.width(8.dp))
             Switch(
                 checked = value,
-                onCheckedChange = { ChatyHapticsPort.selection(view); onChanged(it) },
+                // Prior callback did not reject a retired account composition.
+                onCheckedChange = { if (preferences.scopeGeneration == dateGroupScope) {
+                    ChatyHapticsPort.selection(view); onChanged(it)
+                } },
                 colors = com.example.chat.ui.kit.chatySwitchColors(checkedThumbColor = accent, checkedTrackColor = accent.copy(alpha = 0.5f)),
             )
         }
@@ -163,7 +177,7 @@ fun HomeScreenSettingsPage(
 
     Column(Modifier.fillMaxSize().background(Color(config.backgroundColor))) {
         Row(
-            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).height(56.dp),
+            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).heightIn(min = 56.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.padding(8.dp)) { ChatyBackButton(onPressed = onBack) }
@@ -178,6 +192,15 @@ fun HomeScreenSettingsPage(
                 subpageRow(Icons.Outlined.AddCircleOutline, "Floating Action Button", onOpenFab)
                 divider()
                 subpageRow(Icons.Outlined.AccountCircle, "Status", onOpenStatus)
+            }
+            Spacer(Modifier.height(16.dp))
+            card {
+                sectionDivider("Chat list")
+                switchRow(Icons.Outlined.ViewAgenda, "Group chats by date",
+                    "Show Today, Yesterday and Earlier headings. Off keeps the normal list.",dateGroupingEnabled) { enabled ->
+                    if (preferences.scopeGeneration == dateGroupScope) preferences.updateGbFeature(
+                        com.example.chat.ui.chats.home.HOME_GROUP_CHATS_BY_DATE,enabled)
+                }
             }
             Spacer(Modifier.height(16.dp))
             card {

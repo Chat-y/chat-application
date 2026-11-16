@@ -6,6 +6,11 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -115,6 +120,7 @@ fun rememberChatVoice(conversationId: String, afterSend: () -> Unit, clearTyping
     val note = remember(conversationId) {
         VoiceNoteController(
             conversationId = conversationId,
+            communicationArbiter = ServiceLocator.communicationMediaArbiter,
             joinSegments = { parts, out -> withContext(Dispatchers.IO) { com.example.chat.ui.chats.detail.AndroidAacJoin.join(parts, out) } },
             validateSession = {
                 // Turning encryption on mid-recording invalidates the session:
@@ -253,7 +259,23 @@ fun rememberChatVoice(conversationId: String, afterSend: () -> Unit, clearTyping
             onState = { ui = it },
         )
     }
-    DisposableEffect(session) { onDispose { session.dispose() } }
+    DisposableEffect(session) {
+        onDispose {
+            session.dispose() // Synchronously invalidates start/resume/send, independent of scope cancellation.
+            ServiceLocator.appScope.launch(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                // The leaving composition's scope cannot own microphone teardown.
+                runCatching { session.disposeAndAwait() }
+                    .onFailure {
+                        withContext(Dispatchers.Main.immediate) {
+                            Toast.makeText(context.applicationContext,
+                                "Recording cleanup is incomplete. Audio remains blocked until cleanup can be retried.",
+                                Toast.LENGTH_LONG).show()
+                        }
+                    }
+                // A retained failed owner can retry full teardown via the arbiter's call recovery.
+            }
+        }
+    }
     // Synchronous account-transition guard: the voice controller stops accepting upload/send.
     DisposableEffect(note) {
         val l: (com.example.chat.data.api.ApiAccountScope) -> Unit = { next ->
@@ -294,6 +316,7 @@ fun rememberChatVoice(conversationId: String, afterSend: () -> Unit, clearTyping
                 ) {
                     VoiceReviewCard(
                         clip = ui.review!!,
+                        recordingAccountGeneration = recordScope.get()?.generation,
                         busy = ui.busy,
                         viewOnce = voiceViewOnce,
                         onToggleViewOnce = { voiceViewOnce = !voiceViewOnce },
@@ -319,7 +342,8 @@ fun rememberChatVoice(conversationId: String, afterSend: () -> Unit, clearTyping
                             session.cancelVoice()
                         },
                         // Pause pill opens the review step: stop, keep the file, Listen / Send.
-                        onPause = session::beginReview,
+                        // Call interruption retains the live paused draft, including <1s.
+                        onPause = { if (ui.interruptedForCall) session.togglePause() else session.beginReview() },
                         onSend = session::finishVoice,
                         viewOnce = voiceViewOnce,
                         onToggleViewOnce = { voiceViewOnce = !voiceViewOnce },
@@ -333,6 +357,7 @@ fun rememberChatVoice(conversationId: String, afterSend: () -> Unit, clearTyping
 
 /** Restored recording card (the pre-pill UI): real sampled levels and elapsed
  *  time, delete/pause/send controls when locked. No decorative waveform. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun VoiceRecordingCard(
     state: VoiceUiState,
@@ -348,18 +373,20 @@ private fun VoiceRecordingCard(
     val foreground = Color(theme.primaryTextColor)
     val context = LocalContext.current
     val reduced = ChatyMotion.durationMs(context, ChatyMotion.instantMs) == 0
-    Column(Modifier.fillMaxWidth().background(Color(theme.surfaceColor), RoundedCornerShape(28.dp)).padding(12.dp),
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).background(Color(theme.surfaceColor), RoundedCornerShape(28.dp)).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.locked) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text((if (state.paused) "Paused · " else "Recording · ") + "%d:%02d".format(state.seconds / 60, state.seconds % 60), color = foreground)
-                VoiceLevelMeterBar(levels, accent, Modifier.weight(1f))
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text((if (state.interruptedForCall) "Paused for call · " else if (state.paused) "Paused · " else "Recording · ") + "%d:%02d".format(state.seconds / 60, state.seconds % 60), color = foreground)
+                VoiceLevelMeterBar(levels, accent, Modifier.fillMaxWidth())
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(onClick = onDelete, enabled = !state.busy, modifier = Modifier.size(52.dp).background(Color(theme.cardColor), CircleShape)) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.delete, semanticLabel = "Delete recording", color = foreground)
                 }
-                Button(onClick = onPause, enabled = !state.busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = RoundedCornerShape(26.dp)) {
+                Button(onClick = onPause, enabled = !state.busy, modifier = Modifier.widthIn(min = 112.dp).heightIn(min = 52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color(theme.onAccentColor)),
+                    shape = RoundedCornerShape(26.dp)) {
                     Icon(if (state.paused) Icons.Default.PlayArrow else Icons.Default.Pause, if (state.paused) "Resume recording" else "Pause recording")
                     Text(if (state.paused) "Resume" else "Pause")
                 }
@@ -378,21 +405,21 @@ private fun VoiceRecordingCard(
                         tint = if (viewOnce) Color(theme.onAccentColor) else foreground,
                     )
                 }
-                IconButton(onClick = onSend, enabled = !state.busy, modifier = Modifier.size(52.dp).background(accent, CircleShape)) {
+                IconButton(onClick = onSend, enabled = !state.busy && !state.interruptedForCall, modifier = Modifier.size(52.dp).background(accent, CircleShape)) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = "Send recording", color = Color(theme.onAccentColor))
                 }
             }
         } else {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("●", color = Color(0xFFE65B64))
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("●", color = Color(theme.dangerColor))
                 Text("%d:%02d".format(state.seconds / 60, state.seconds % 60), color = foreground)
-                Text("‹ Slide to cancel", color = foreground, modifier = Modifier.weight(1f))
+                Text("‹ Slide to cancel", color = foreground, modifier = Modifier.widthIn(min = 112.dp))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock, semanticLabel = "Slide up to lock recording", color = foreground)
                     // The scale follows real microphone samples; reduced motion removes scaling.
                     val scale = if (reduced) 1f else 1.08f + (levels.lastOrNull() ?: 0.0).toFloat() * .14f
                     Box(Modifier.size(58.dp).graphicsLayer { scaleX = scale; scaleY = scale }.background(accent, CircleShape), contentAlignment = Alignment.Center) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = "Recording audio", color = foreground)
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = "Recording audio", color = Color(theme.onAccentColor))
                     }
                 }
             }
@@ -403,9 +430,11 @@ private fun VoiceRecordingCard(
 
 /** After-recording review: same sheet and Delete / pill / Send row as the recording card.
  *  Chaty icons and theme colors only. Reduced motion removes the scrub and press animation. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun VoiceReviewCard(
     clip: VoiceNoteController.Clip,
+    recordingAccountGeneration: Long?,
     busy: Boolean,
     viewOnce: Boolean,
     onToggleViewOnce: () -> Unit,
@@ -423,7 +452,8 @@ private fun VoiceReviewCard(
     val fadeMs = if (reduced) 0 else 150
     val enter = remember(clip.path) { androidx.compose.animation.core.Animatable(if (reduced) 1f else 0f) }
     LaunchedEffect(clip.path) { enter.animateTo(1f, androidx.compose.animation.core.tween(fadeMs)) }
-    val player = remember(clip.path) { android.media.MediaPlayer() }
+    val playbackScope = rememberCoroutineScope()
+    val player = remember(clip.path, recordingAccountGeneration) { android.media.MediaPlayer() }
     var ready by remember(clip.path) { mutableStateOf(false) }
     var playing by remember(clip.path) { mutableStateOf(false) }
     var positionMs by remember(clip.path) { mutableStateOf(0) }
@@ -436,7 +466,7 @@ private fun VoiceReviewCard(
     }
     // Audio focus: take it for playback, give it back on pause, end and dispose.
     val audioManager = remember { context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager }
-    val focusRequest = remember {
+    val focusRequest = remember(player) {
         android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
@@ -448,44 +478,80 @@ private fun VoiceReviewCard(
                 }
             }.build()
     }
-    DisposableEffect(clip.path) {
+    val playbackGuard = remember(clip.path, recordingAccountGeneration) {
+        com.example.chat.core.audio.CommunicationPlaybackGuard(
+            arbiter = ServiceLocator.communicationMediaArbiter,
+            pauseNative = {
+                withContext(Dispatchers.Main.immediate) {
+                    if (ready && player.isPlaying) player.pause()
+                    playing = false
+                    audioManager.abandonAudioFocusRequest(focusRequest)
+                }
+            },
+            disposeNative = {
+                withContext(Dispatchers.Main.immediate) {
+                    audioManager.abandonAudioFocusRequest(focusRequest)
+                    player.release()
+                    playing = false
+                }
+            },
+            isOwnerCurrent = { recordingAccountGeneration != null &&
+                ServiceLocator.apiBackend.authSnapshot().generation == recordingAccountGeneration },
+            onCallSuspended = {
+                withContext(Dispatchers.Main.immediate) {
+                    error = "Playback paused for a call. Press Listen after the call."
+                }
+            },
+        )
+    }
+    DisposableEffect(playbackGuard) {
         onDispose {
-            runCatching { audioManager.abandonAudioFocusRequest(focusRequest) }
-            runCatching { player.release() }
+            playbackGuard.markClosing()
+            playbackScope.launch(kotlinx.coroutines.NonCancellable) {
+                runCatching { playbackGuard.dispose() }
+                // Retained arbiter reservation fails closed if native teardown remains uncertain.
+            }
         }
     }
     LaunchedEffect(playing) {
         while (playing) { positionMs = runCatching { player.currentPosition }.getOrDefault(positionMs); delay(100L) }
     }
     fun togglePlay() {
-        error = null
-        try {
-            if (!ready) {
-                player.setDataSource(clip.path); player.prepare(); ready = true
-                totalMs = player.duration.coerceAtLeast(1)
-                player.setOnCompletionListener {
-                    playing = false; positionMs = 0
-                    runCatching { audioManager.abandonAudioFocusRequest(focusRequest) }
+        playbackScope.launch {
+            error = null
+            try {
+                if (playing) { playbackGuard.pause(); return@launch }
+                val allowed = playbackGuard.runNative {
+                    if (!ready) {
+                        player.setDataSource(clip.path); player.prepare(); ready = true
+                        totalMs = player.duration.coerceAtLeast(1)
+                        player.setOnCompletionListener {
+                            playing = false; positionMs = 0
+                            audioManager.abandonAudioFocusRequest(focusRequest)
+                        }
+                    }
+                    check(audioManager.requestAudioFocus(focusRequest) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+                    if (positionMs >= totalMs - 50) { player.seekTo(0); positionMs = 0 }
+                    runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
+                    player.start(); playing = true
                 }
+                if (!allowed) error = "Playback cannot start during a call or after the account changed."
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+            } catch (_: Exception) {
+                error = "Audio is unavailable. Try Listen again."
             }
-            if (player.isPlaying) {
-                player.pause(); playing = false
-                audioManager.abandonAudioFocusRequest(focusRequest)
-            } else {
-                if (audioManager.requestAudioFocus(focusRequest) != android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                    error = "Audio is in use by another app."; return
-                }
-                if (positionMs >= totalMs - 50) { player.seekTo(0); positionMs = 0 }
-                runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
-                player.start(); playing = true
-            }
-        } catch (e: Exception) {
-            playing = false; error = e.message ?: "Audio unavailable"
         }
     }
     fun cycleSpeed() {
         speed = when (speed) { 1f -> 1.5f; 1.5f -> 2f; else -> 1f }
-        if (playing) runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
+        if (playing) playbackScope.launch {
+            // MediaPlayer playbackParams may start playback; it needs the same atomic guard.
+            runCatching {
+                if (!playbackGuard.runNative { player.playbackParams = player.playbackParams.setSpeed(speed) }) {
+                    error = "Finish the call before changing playback."
+                }
+            }.onFailure { error = "Playback speed could not change." }
+        }
     }
     fun seekTo(fraction: Float) {
         val target = (fraction.coerceIn(0f, 1f) * totalMs).toInt()
@@ -495,13 +561,13 @@ private fun VoiceReviewCard(
     fun fmt(ms: Int) = "%d:%02d".format(ms / 60000, (ms / 1000) % 60)
     val bars = peaks ?: List(VoiceLevelMeter.BAR_COUNT * 2) { 0.35f }
     val progress = if (totalMs > 0) positionMs.toFloat() / totalMs else 0f
-    Column(Modifier.fillMaxWidth().graphicsLayer { alpha = enter.value }.background(Color(theme.surfaceColor), RoundedCornerShape(28.dp)).padding(12.dp),
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).graphicsLayer { alpha = enter.value }.background(Color(theme.surfaceColor), RoundedCornerShape(28.dp)).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(fmt(positionMs), color = foreground)
             // Scrub waveform: tap or drag to seek. Played part uses the foreground color.
             androidx.compose.foundation.Canvas(
-                Modifier.weight(1f).heightIn(min = 48.dp).fillMaxWidth()
+                Modifier.fillMaxWidth().heightIn(min = 48.dp)
                     .pointerInput(clip.path) {
                         detectTapGestures { o -> seekTo(o.x / size.width) }
                     }
@@ -531,19 +597,25 @@ private fun VoiceReviewCard(
             }
         }
         error?.let { Text(it, color = foreground, fontSize = 12.sp) }
-        if (clip.joinFailed) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Parts could not be joined. Send is off until they are.", color = foreground, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        if (clip.joinFailed) FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Parts could not be joined. Send is off until they are.", color = foreground, fontSize = 12.sp, modifier = Modifier.fillMaxWidth())
             TextButton(onClick = onRetryJoin, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.refresh, semanticLabel = "Retry joining recording parts", color = foreground)
                 Text("Retry", color = foreground)
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onDelete, enabled = !busy, modifier = Modifier.size(52.dp).background(Color(theme.cardColor), CircleShape)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(onClick = {
+                playbackScope.launch {
+                    runCatching { playbackGuard.dispose(); onDelete() }
+                        .onFailure { error = "Playback cleanup failed. Tap Delete to retry." }
+                }
+            }, enabled = !busy, modifier = Modifier.size(52.dp).background(Color(theme.cardColor), CircleShape)) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.delete, semanticLabel = "Delete recording", color = foreground)
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = ::togglePlay, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = RoundedCornerShape(26.dp)) {
+                Button(onClick = ::togglePlay, enabled = !busy, modifier = Modifier.widthIn(min = 112.dp).heightIn(min = 52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = onAccent),
+                    shape = RoundedCornerShape(26.dp)) {
                     androidx.compose.animation.Crossfade(targetState = playing, animationSpec = androidx.compose.animation.core.tween(fadeMs), label = "voice-play-pause") { isPlaying ->
                         com.example.chat.ui.icons.ChatyIcon(
                             if (isPlaying) com.example.chat.ui.icons.ChatyIconId.pause else com.example.chat.ui.icons.ChatyIconId.playArrow,
@@ -553,14 +625,16 @@ private fun VoiceReviewCard(
                     Text(if (playing) "Pause" else "Listen")
                 }
                 Button(onClick = {
-                    runCatching { if (player.isPlaying) player.pause() }; playing = false
-                    runCatching { audioManager.abandonAudioFocusRequest(focusRequest) }
-                    onResume()
-                }, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = RoundedCornerShape(26.dp)) {
+                    playbackScope.launch {
+                        runCatching { playbackGuard.pause(); onResume() }
+                            .onFailure { error = "Playback could not stop. Try again before recording." }
+                    }
+                }, enabled = !busy, modifier = Modifier.widthIn(min = 112.dp).heightIn(min = 52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = onAccent),
+                    shape = RoundedCornerShape(26.dp)) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = "Resume recording", color = onAccent)
                     Text("Resume")
                 }
-            }
             IconButton(
                 onClick = onToggleViewOnce, enabled = !busy,
                 modifier = Modifier.size(52.dp).background(if (viewOnce) accent else Color(theme.cardColor), CircleShape),
@@ -571,9 +645,84 @@ private fun VoiceReviewCard(
                     color = if (viewOnce) onAccent else foreground,
                 )
             }
-            IconButton(onClick = onSend, enabled = !busy && !clip.joinFailed, modifier = Modifier.size(52.dp).background(accent.copy(alpha = if (clip.joinFailed) 0.4f else 1f), CircleShape)) {
+            IconButton(onClick = {
+                playbackScope.launch {
+                    runCatching { playbackGuard.pause(); onSend() }
+                        .onFailure { error = "Playback could not stop. Try Send again." }
+                }
+            }, enabled = !busy && !clip.joinFailed, modifier = Modifier.size(52.dp).background(accent.copy(alpha = if (clip.joinFailed) 0.4f else 1f), CircleShape)) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = "Send recording", color = onAccent)
             }
         }
     }
 }
+
+/* Previous implementation fragments retained (net212):
+                        onPause = session::beginReview,
+                Text((if (state.paused) "Paused · " else "Recording · ") + "%d:%02d".format(state.seconds / 60, state.seconds % 60), color = foreground)
+                IconButton(onClick = onSend, enabled = !state.busy, modifier = Modifier.size(52.dp).background(accent, CircleShape)) {
+*/
+
+/* Previous implementation fragments retained (net213):
+    val player = remember(clip.path) { android.media.MediaPlayer() }
+    val focusRequest = remember {
+    DisposableEffect(clip.path) {
+            runCatching { audioManager.abandonAudioFocusRequest(focusRequest) }
+            runCatching { player.release() }
+        error = null
+        try {
+            if (!ready) {
+                player.setDataSource(clip.path); player.prepare(); ready = true
+                totalMs = player.duration.coerceAtLeast(1)
+                player.setOnCompletionListener {
+                    playing = false; positionMs = 0
+                    runCatching { audioManager.abandonAudioFocusRequest(focusRequest) }
+                }
+            }
+            if (player.isPlaying) {
+                player.pause(); playing = false
+                audioManager.abandonAudioFocusRequest(focusRequest)
+            } else {
+                if (audioManager.requestAudioFocus(focusRequest) != android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                    error = "Audio is in use by another app."; return
+                if (positionMs >= totalMs - 50) { player.seekTo(0); positionMs = 0 }
+                runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
+                player.start(); playing = true
+        } catch (e: Exception) {
+            playing = false; error = e.message ?: "Audio unavailable"
+        if (playing) runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
+            IconButton(onClick = onDelete, enabled = !busy, modifier = Modifier.size(52.dp).background(Color(theme.cardColor), CircleShape)) {
+                    runCatching { if (player.isPlaying) player.pause() }; playing = false
+                    runCatching { audioManager.abandonAudioFocusRequest(focusRequest) }
+                    onResume()
+            IconButton(onClick = onSend, enabled = !busy && !clip.joinFailed, modifier = Modifier.size(52.dp).background(accent.copy(alpha = if (clip.joinFailed) 0.4f else 1f), CircleShape)) {
+*/
+
+/* Previous implementation fragments retained (net217):
+    DisposableEffect(session) { onDispose { session.dispose() } }
+*/
+
+/* Previous implementation fragments retained (net218):
+    Column(Modifier.fillMaxWidth().background(Color(theme.surfaceColor), RoundedCornerShape(28.dp)).padding(12.dp),
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                VoiceLevelMeterBar(levels, accent, Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = onPause, enabled = !state.busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = RoundedCornerShape(26.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("●", color = Color(0xFFE65B64))
+                Text("‹ Slide to cancel", color = foreground, modifier = Modifier.weight(1f))
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = "Recording audio", color = foreground)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Modifier.weight(1f).heightIn(min = 48.dp).fillMaxWidth()
+        if (clip.joinFailed) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Parts could not be joined. Send is off until they are.", color = foreground, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = ::togglePlay, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = RoundedCornerShape(26.dp)) {
+                }, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = RoundedCornerShape(26.dp)) {
+            }
+*/
+
+/* Previous implementation fragments retained (net220):
+    Column(Modifier.fillMaxWidth().graphicsLayer { alpha = enter.value }.background(Color(theme.surfaceColor), RoundedCornerShape(28.dp)).padding(12.dp),
+*/

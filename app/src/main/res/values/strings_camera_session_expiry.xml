@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="camera_session_expired_reopen">Your camera session expired. Reopen the camera to continue.</string>
+</resources>

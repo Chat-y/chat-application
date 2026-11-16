@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_media_turn_on">Turn on</string>
+    <string name="privacy_media_turn_off">Turn off</string>
+</resources>

@@ -215,6 +215,12 @@ fun AuthPrimaryButton(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val reduced = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    // A1-31: after 8 s of waiting, say so next to the spinner (timeout unchanged).
+    var stillTrying by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(isLoading) {
+        stillTrying = false
+        if (isLoading) { kotlinx.coroutines.delay(8_000L); stillTrying = true }
+    }
     val scale by androidx.compose.animation.core.animateFloatAsState(
         if (pressed && !reduced) .98f else 1f,
         androidx.compose.animation.core.tween(if(reduced) 0 else 90), label = authCopy("auth-press"))
@@ -227,8 +233,11 @@ fun AuthPrimaryButton(
         colors = ButtonDefaults.buttonColors(
             containerColor = c(theme.accentColor),
             contentColor = c(AuthPresentationPolicy.readableText(theme.onAccentColor.toInt(), theme.accentColor.toInt()).toLong() and 0xffffffffL),
-            disabledContainerColor = c(argbWithAlpha(theme.accentColor, 0.6)),
-            disabledContentColor = c(theme.onAccentColor),
+            // Prior: disabledContainerColor = c(argbWithAlpha(theme.accentColor, 0.6)),
+            // Prior: disabledContentColor = c(theme.onAccentColor),
+            // A1-45: was accent at 0.6 alpha (looked almost enabled)
+            disabledContainerColor = c(argbWithAlpha(theme.accentColor, 0.3)),
+            disabledContentColor = c(argbWithAlpha(theme.primaryTextColor, 0.6)),
         ),
         elevation = ButtonDefaults.buttonElevation(defaultElevation = ChatyUiTokens.controlElevation),
     ) {
@@ -238,6 +247,11 @@ fun AuthPrimaryButton(
                 strokeWidth = ChatyUiTokens.space2_2,
                 color = c(theme.onAccentColor),
             )
+            if (stillTrying) {
+                Spacer(Modifier.width(ChatyUiTokens.space8))
+                Text(authCopy("Still trying…"), fontSize = ChatyUiTokens.text14,
+                    modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+            }
         } else {
             Box(Modifier.fillMaxWidth(), contentAlignment=Alignment.Center) {
                 Text(authCopy(text), fontSize = ChatyUiTokens.text16, fontWeight = FontWeight.Bold, letterSpacing = ChatyUiTokens.text0_2)
@@ -289,52 +303,58 @@ fun AuthOrDivider(theme: ThemeConfig) {
  *  type: 'welcome', 'forgot_password', 'otp'. */
 @Composable
 fun AuthIllustration(type: String, theme: ThemeConfig, height: Int = 180) {
-    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
-    val colors = LocalAppColors.current
-    val (mainIcon: ImageVector, badgeText: String) = remember(type,authCopy) { when (type) {
-        "forgot_password" -> Icons.Rounded.LockReset to authCopy("Reset Access")
-        "otp" -> Icons.Rounded.VerifiedUser to authCopy("Email verification")
-        "login" -> Icons.Rounded.Forum to authCopy("Welcome back")
-        "register" -> Icons.Rounded.VerifiedUser to authCopy("Your new account")
-        "success" -> Icons.Rounded.VerifiedUser to authCopy("You're ready")
-        else -> Icons.Rounded.Forum to authCopy("Fast & Private")
-    }}
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = height.dp)
-            .padding(vertical = ChatyUiTokens.space16)
-            .border(
-                ChatyUiTokens.space1_5,
-                c(argbWithAlpha(theme.accentColor, 0.15)),
-                ChatyUiTokens.cardShape,
-            )
-            .background(
-                c(argbWithAlpha(theme.cardColor, 0.6)),
-                ChatyUiTokens.cardShape,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(ChatyUiTokens.space76)
-                    .background(c(argbWithAlpha(theme.accentColor, 0.15)), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(mainIcon, contentDescription = null, tint = c(theme.accentColor), modifier = Modifier.size(ChatyUiTokens.space40))
-            }
-            Spacer(Modifier.height(ChatyUiTokens.touchGap))
-            Box(
-                modifier = Modifier
-                    .background(c(argbWithAlpha(theme.accentColor, 0.12)), ChatyUiTokens.cardShape)
-                    .padding(horizontal = ChatyUiTokens.space16, vertical = ChatyUiTokens.space8),
-            ) {
-                Text(badgeText, color = com.example.chat.ui.auth.authReadable(theme, theme.accentColor), fontSize = ChatyUiTokens.text12, fontWeight = FontWeight.Bold)
-            }
-        }
+    // Previous decorative illustrations retained inactive; auth headers now
+    // use only the shared message icon, independent of purpose.
+    Box(Modifier.fillMaxWidth().padding(vertical = ChatyUiTokens.space16), contentAlignment = Alignment.Center) {
+        com.example.chat.ui.core.components.auth.ChatyAppAuthIcon()
     }
 }
+//     val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+//     val colors = LocalAppColors.current
+//     val (mainIcon: ImageVector, badgeText: String) = remember(type,authCopy) { when (type) {
+//         "forgot_password" -> Icons.Rounded.LockReset to authCopy("Reset Access")
+//         "otp" -> Icons.Rounded.VerifiedUser to authCopy("Email verification")
+//         "login" -> Icons.Rounded.Forum to authCopy("Welcome back")
+//         "register" -> Icons.Rounded.VerifiedUser to authCopy("Your new account")
+//         "success" -> Icons.Rounded.VerifiedUser to authCopy("You're ready")
+//         else -> Icons.Rounded.Forum to authCopy("Fast & Private")
+//     }}
+//     Box(
+//         modifier = Modifier
+//             .fillMaxWidth()
+//             .heightIn(min = height.dp)
+//             .padding(vertical = ChatyUiTokens.space16)
+//             .border(
+//                 ChatyUiTokens.space1_5,
+//                 c(argbWithAlpha(theme.accentColor, 0.15)),
+//                 ChatyUiTokens.cardShape,
+//             )
+//             .background(
+//                 c(argbWithAlpha(theme.cardColor, 0.6)),
+//                 ChatyUiTokens.cardShape,
+//             ),
+//         contentAlignment = Alignment.Center,
+//     ) {
+//         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+//             Box(
+//                 modifier = Modifier
+//                     .size(ChatyUiTokens.space76)
+//                     .background(c(argbWithAlpha(theme.accentColor, 0.15)), CircleShape),
+//                 contentAlignment = Alignment.Center,
+//             ) {
+//                 Icon(mainIcon, contentDescription = null, tint = c(theme.accentColor), modifier = Modifier.size(ChatyUiTokens.space40))
+//             }
+//             Spacer(Modifier.height(ChatyUiTokens.touchGap))
+//             Box(
+//                 modifier = Modifier
+//                     .background(c(argbWithAlpha(theme.accentColor, 0.12)), ChatyUiTokens.cardShape)
+//                     .padding(horizontal = ChatyUiTokens.space16, vertical = ChatyUiTokens.space8),
+//             ) {
+//                 Text(badgeText, color = com.example.chat.ui.auth.authReadable(theme, theme.accentColor), fontSize = ChatyUiTokens.text12, fontWeight = FontWeight.Bold)
+//             }
+//         }
+//     }
+// }
 
 @Composable
 fun WorkspaceModeSelector(

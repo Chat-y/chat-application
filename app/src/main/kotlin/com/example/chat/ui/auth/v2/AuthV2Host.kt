@@ -17,7 +17,8 @@ import kotlinx.coroutines.launch
 /** Flag-gated destination. Legacy entry points stay unchanged while the server is undeployed. */
 @Composable
 fun AuthV2Host(flow: AuthV2FlowController, register: Boolean, initialWorkspace: String,
-    onBack: () -> Unit, onSignedIn: () -> Unit, onWorkspace: (String) -> Unit = {}, active: Boolean = true) {
+    onBack: () -> Unit, onSignedIn: () -> Unit, onWorkspace: (String) -> Unit = {}, active: Boolean = true,
+    onUseExistingForms: (() -> Unit)? = null) {
     val authCopy=com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
     val context=androidx.compose.ui.platform.LocalContext.current
@@ -43,7 +44,10 @@ fun AuthV2Host(flow: AuthV2FlowController, register: Boolean, initialWorkspace: 
     var signInAfterReset by remember {mutableStateOf(false)}
     var termsAccepted by remember { mutableStateOf(false) }
     var ageConfirmed by remember {mutableStateOf(false)}
-    var onboarding by remember { mutableStateOf<AuthV2Onboarding?>(null) }
+    var onboarding by remember(flow,initialWorkspace) { mutableStateOf<AuthV2Onboarding?>(null) }
+    var onboardingLoading by remember(flow,initialWorkspace) { mutableStateOf(true) }
+    var onboardingFailure by remember(flow,initialWorkspace) { mutableStateOf(false) }
+    var onboardingRetry by remember(flow,initialWorkspace) { mutableStateOf(0) }
     var alternatives by remember { mutableStateOf<List<String>>(emptyList()) }
     var approvalId by remember { mutableStateOf<String?>(null) }
     var approval by remember { mutableStateOf<AuthV2Approval?>(null) }
@@ -66,11 +70,13 @@ fun AuthV2Host(flow: AuthV2FlowController, register: Boolean, initialWorkspace: 
         }
     }
     DisposableEffect(flow) { onDispose { flow.discardRegistration() } }
-    LaunchedEffect(flow,initialWorkspace,active) {
+    LaunchedEffect(flow,initialWorkspace,active,onboardingRetry) {
         if(!active) return@LaunchedEffect
-        try { onboarding=flow.onboarding(workspace) }
+        onboardingLoading=true;onboardingFailure=false
+        try { onboarding=authRequest { flow.onboarding(workspace) } }
         catch(cancelled:kotlinx.coroutines.CancellationException){throw cancelled}
-        catch(e:Exception){error=e.message}
+        catch(_:Exception){onboardingFailure=true}
+        finally {onboardingLoading=false}
     }
     LaunchedEffect(email,flow,active) {
         domain=null
@@ -85,6 +91,24 @@ fun AuthV2Host(flow: AuthV2FlowController, register: Boolean, initialWorkspace: 
         }
     }
     val inviteForForm=invitation?.takeIf {it.result.workspace==workspace && it.result.expiresAt.isAfter(java.time.Instant.now())}
+    // No registration/login action before the workspace contract is loaded.
+    // Choosing existing forms changes only presentation, never grants a session.
+    if (onboardingLoading || onboardingFailure) {
+        ChatyAuthScreen(theme) {
+            ChatyBackButton(onBack,theme)
+            if (onboardingLoading) {
+                Text(authCopy("Checking workspace..."),color=authReadable(theme,theme.primaryTextColor))
+                LinearProgressIndicator(modifier=Modifier.fillMaxWidth())
+            } else {
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.auth_v2_contract_unavailable),color=authReadable(theme,theme.primaryTextColor))
+                TextButton(onClick={onboardingRetry++}) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.auth_v2_retry)) }
+            }
+            onUseExistingForms?.let { useExisting ->
+                TextButton(onClick=useExisting) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.auth_v2_existing_forms)) }
+            }
+        }
+        return
+    }
     when(step) {
         "scan" -> AuthWorkspaceScanner(theme,onBack={step="login"}) {raw->
             val parsed=com.example.chat.ui.auth.AuthLinkPolicy.parse(raw)
@@ -147,11 +171,13 @@ fun AuthV2Host(flow: AuthV2FlowController, register: Boolean, initialWorkspace: 
             notice?.let {Text(authCopy(it),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))}
             if(step=="register") {
                 AuthTextField(authCopy("Email"),"you@example.com",theme,email,{if(inviteForForm?.result?.boundEmail==null) email=it},keyboardType=KeyboardType.Email,readOnly=inviteForForm?.result?.boundEmail!=null)
-                com.example.chat.ui.core.components.auth.PhoneNumberEntry(phone,theme=theme,enabled=!busy,onValueChange={phone=it},onNormalized={phone=it.orEmpty()})
+                com.example.chat.ui.core.components.auth.PhoneNumberEntry(phone,theme=theme,enabled=!busy,deviceNumberOnly=true,onValueChange={phone=it},onNormalized={phone=it.orEmpty()})
             }
             AuthTextField(if(step=="register") authCopy("Username") else authCopy("Email or username"),"",theme,username,{username=it})
             AuthTextField(authCopy("Password"),"",theme,password,{password=it},obscureText=true,keyboardType=KeyboardType.Password)
-            Text(authCopy("Password: at least 8 characters, at most 72 UTF-8 bytes. Usernames use letters, numbers and underscores."),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
+            // Registration-only policy; login and reset password rules stay unchanged.
+            Text(authCopy(if(step=="register") "12 to 128 characters with an uppercase letter, a lowercase letter and a number."
+                else "Password: at least 8 characters, at most 72 UTF-8 bytes. Usernames use letters, numbers and underscores."),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
             Row(Modifier.padding(vertical=ChatyUiTokens.touchGap / 2)) {Checkbox(rememberMe,{rememberMe=it});Text(authCopy("Keep me signed in for longer. Turn off on a shared device; the workspace controls session length."),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))}
             onboarding?.terms?.takeIf {it.required && com.example.chat.data.auth.v2.AuthConsentReadiness.mayCollectAcceptance(com.example.chat.ReleaseFeatures.LEGAL_ACCEPTANCE_GATE,it.version,com.example.chat.data.auth.v2.AuthPendingContracts.finalLegalPolicyAvailable)}?.let {
                 Row(Modifier.padding(vertical=ChatyUiTokens.touchGap / 2)) {Checkbox(termsAccepted,{termsAccepted=it});Text(com.example.chat.core.i18n.authFormatted("I accept the terms, version %1\$s",it.version.orEmpty()),color=com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))}
@@ -163,6 +189,8 @@ fun AuthV2Host(flow: AuthV2FlowController, register: Boolean, initialWorkspace: 
             AuthErrorNotice(error,theme,email)
             AuthPrimaryButton(if(step=="register") "Create account" else "Log In",theme,onClick={run {
                 if(step=="register") {
+                    registrationPasswordError(password)?.let { throw IllegalArgumentException(it) }
+                    requireNotNull(com.example.chat.data.api.RegistrationPhonePolicy.normalize(phone)) { "Use your device number to continue." }
                     check(!com.example.chat.ui.auth.AuthTemporaryPolicy.ageRuleConfirmed || ageConfirmed) {"Confirm the configured age requirement before continuing."}
                     check(invitation==null || inviteForForm!=null) {"This invitation has expired or belongs to another workspace. Verify it again before registering."}
                     check(onboarding?.terms?.required != true || (com.example.chat.data.auth.v2.AuthConsentReadiness.mayCollectAcceptance(com.example.chat.ReleaseFeatures.LEGAL_ACCEPTANCE_GATE,onboarding?.terms?.version,com.example.chat.data.auth.v2.AuthPendingContracts.finalLegalPolicyAvailable) && termsAccepted)){"This workspace requires published terms. The local review draft is not an acceptance document yet."}

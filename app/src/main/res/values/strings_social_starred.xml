@@ -45,4 +45,11 @@
         <item quantity="other">%d matching messages</item>
     </plurals>
     <string name="social_starred_time_unavailable">Date unavailable</string>
+    <string name="social_starred_star_failed">Could not update the saved star on this device. Try again.</string>
+    <string name="social_starred_saving">Saving</string>
+    <string name="social_starred_partial_failure">Could not refresh: %1$s. Retry these conversations.</string>
+    <string name="social_starred_row_summary">Starred message in %1$s: %2$s, %3$s</string>
+    <string name="social_starred_sign_in_again">Sign in again</string>
+    <string name="social_starred_session_expired">Your session could not be authenticated. Starred messages are hidden until you sign in again.</string>
+    <string name="social_starred_back_to_top">Back to top</string>
 </resources>

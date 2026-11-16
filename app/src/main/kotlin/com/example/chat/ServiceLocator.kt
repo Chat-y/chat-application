@@ -1,5 +1,6 @@
 package com.example.chat
 
+import kotlinx.coroutines.flow.collect
 import android.content.Context
 import com.example.chat.core.crypto.uniffi.UniffiMlsEngine
 import com.example.chat.data.auth.AuthSessionManager
@@ -74,10 +75,36 @@ object ServiceLocator {
         com.example.chat.core.theme.ThemePresets.platformIsLightProvider = {
             (requireContext().resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_YES
         }
-        // gotrue session restore, mirroring supabase_flutter's initializeAuth
-        // which runs during Supabase.initialize before runApp.
-        apiBackend.initialize()
-        appScope.launch { sessionManager.restore() }
+        // Cold-start fix: initialize() does blocking Keystore / encrypted-preferences
+        // I/O (session restore, legacy migration, multi-account registry). On the
+        // main thread a slow or stuck Keystore froze Application.onCreate for every
+        // updated install. Run it off-main; the Firebase restore below depends on the
+        // restored auth state, so it stays strictly after initialize() in the same
+        // ordered block. Splash routes via its own (also off-main) initialize() call,
+        // which is synchronized and returns at once once this one completes.
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            if (runCatching { apiBackend.initialize() }.isSuccess) {
+                // Post-init tail (namespaces, network recovery) - moved out of
+                // the apiBackend lazy so it runs here, off-main, instead of on
+                // whichever thread first touched the lazy.
+                runCatching { runApiBackendPostInitTail() }
+            }
+            // gotrue session restore, mirroring supabase_flutter's initializeAuth.
+            // Sequenced strictly AFTER initialize() (not concurrently): restore()
+            // reads the auth state initialize() just rehydrated.
+            runCatching { sessionManager.restore() }
+            // Restore signed-in push support before a cold-start framework service receives an intent.
+            // Fresh auth screens leave Firebase uninitialized.
+            if(apiBackend.isAuthenticated && !com.example.chat.data.demo.DemoMode.active) {
+                runCatching {
+                    if(com.google.firebase.FirebaseApp.getApps(requireContext()).isEmpty())
+                        com.google.firebase.FirebaseApp.initializeApp(requireContext())
+                }.onFailure { android.util.Log.w("ChatyPush", "Messaging initialization unavailable") }
+            }
+            // Replay any resume sync that ProcessLifecycle onStart skipped while
+            // init was still running (signed-in session restored only now).
+            runCatching { (requireContext() as? com.example.chat.ChatyApplication)?.onBackendInitialized() }
+        }
         // Decrypted media temps never survive a process restart.
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { mediaCache.purgeTransientTemps() } }
         preferencesController // start load + remote reconcile (Dart controller constructor)
@@ -88,20 +115,21 @@ object ServiceLocator {
         // Always wire FcmRegistrarHolder + PushWakeHolder at process init so early
         // onNewToken / onMessageReceived callbacks never drop before UI launches.
         fcmRegistrar
-        // Restore signed-in push support before a cold-start framework service receives an intent.
-        // Fresh auth screens leave Firebase uninitialized.
-        if(apiBackend.isAuthenticated && !com.example.chat.data.demo.DemoMode.active) {
-            runCatching {
-                if(com.google.firebase.FirebaseApp.getApps(requireContext()).isEmpty())
-                    com.google.firebase.FirebaseApp.initializeApp(requireContext())
-            }.onFailure { android.util.Log.w("ChatyPush", "Messaging initialization unavailable") }
-        }
     }
 
     /** Defensive bootstrap invoked by background FCM entry points before accessing holders. */
     fun ensurePushReady(context: Context) {
         if (appContext == null) {
             init(context.applicationContext)
+        }
+        // Same guarded Firebase restore as the ordered init block: a background
+        // FCM entry point can arrive on a fresh process where the app-level
+        // init has not run (or its async block has not landed yet).
+        if(apiBackend.isAuthenticated && !com.example.chat.data.demo.DemoMode.active) {
+            runCatching {
+                if(com.google.firebase.FirebaseApp.getApps(requireContext()).isEmpty())
+                    com.google.firebase.FirebaseApp.initializeApp(requireContext())
+            }.onFailure { android.util.Log.w("ChatyPush", "Messaging initialization unavailable") }
         }
         fcmRegistrar
         startCallNotifications()
@@ -277,21 +305,34 @@ object ServiceLocator {
                     runCatching { hiddenVaultService.switchAccountNamespace(newHash, migrateLegacyIfEmpty = isFirstOrSingle) }
                 }
             }
-            service.initialize()
-            service.currentAccountHash()?.takeIf { it.isNotBlank() }?.let { activeHash ->
-                localLockService.setAccountNamespace(activeHash)
-                hiddenVaultService.resetForAccountSwitchSync(activeHash)
-                appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    runCatching {
-                        hiddenVaultService.switchAccountNamespace(
-                            activeHash,
-                            migrateLegacyIfEmpty = service.multiAccount.accounts().size <= 1,
-                        )
-                    }
+        }
+    }
+
+    /** Post-initialize tail (account namespace + vault namespace + network
+     *  recovery). Previously this ran inside the apiBackend lazy also{} right
+     *  after a synchronous initialize() - which meant whichever thread first
+     *  touched apiBackend (main at cold start, via preferencesController /
+     *  notificationCoordinator) ran blocking Keystore I/O. Now it runs only
+     *  after a SUCCESSFUL initialize(), off-main: from the cold-start IO
+     *  bootstrap, or from the splash retry path. Idempotent: runs once. */
+    private val apiBackendTailRan = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    internal fun runApiBackendPostInitTail() {
+        if (!apiBackendTailRan.compareAndSet(false, true)) return
+        val service = apiBackend
+        service.currentAccountHash()?.takeIf { it.isNotBlank() }?.let { activeHash ->
+            localLockService.setAccountNamespace(activeHash)
+            hiddenVaultService.resetForAccountSwitchSync(activeHash)
+            appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    hiddenVaultService.switchAccountNamespace(
+                        activeHash,
+                        migrateLegacyIfEmpty = service.multiAccount.accounts().size <= 1,
+                    )
                 }
             }
-            startNetworkRecovery(service)
         }
+        startNetworkRecovery(service)
     }
 
     /** FCM token lifecycle (firebase_notification_service.dart port),
@@ -547,7 +588,12 @@ object ServiceLocator {
     }
 
     val localLockService: com.example.chat.data.services.LocalLockService by lazy {
-        com.example.chat.data.services.LocalLockService(secureStore, biometrics = lockBiometrics)
+        // com.example.chat.data.services.LocalLockService(secureStore, biometrics = lockBiometrics)
+        com.example.chat.data.services.LocalLockService(
+            secureStore,
+            biometrics = lockBiometrics,
+            cooldownClock = com.example.chat.platform.AndroidLockCooldownClock(requireContext().applicationContext),
+        )
     }
 
     /** locator.dart TemplateController + AppearanceVariantController, persisted through
@@ -987,11 +1033,19 @@ object ServiceLocator {
     val audioCapabilityService: com.example.chat.core.audio.AudioCapabilityService by lazy {
         com.example.chat.core.audio.AudioCapabilityService(audioPlatform, appScope)
     }
+    val communicationMediaArbiter: com.example.chat.core.audio.CommunicationMediaArbiter by lazy {
+        com.example.chat.core.audio.DefaultCommunicationMediaArbiter()
+    }
     val audioPolicyCoordinator: com.example.chat.core.audio.AudioPolicyCoordinator by lazy {
         com.example.chat.core.audio.AudioPolicyCoordinator(audioCapabilityService)
     }
     val coreCallAudioController: com.example.chat.core.audio.CallAudioController by lazy {
-        com.example.chat.core.audio.CallAudioController(audioPolicyCoordinator, audioCapabilityService, callSignaling)
+// Previous implementation retained:         com.example.chat.core.audio.CallAudioController(audioPolicyCoordinator, audioCapabilityService, callSignaling)
+        // Media owns native audio. Do not call back into signaling from its own media factory.
+        com.example.chat.core.audio.CallAudioController(audioPolicyCoordinator, audioCapabilityService)
+    }
+    val callAudioSessions: com.example.chat.core.audio.OwnedCallAudioSessions by lazy {
+        com.example.chat.core.audio.OwnedCallAudioSessions(coreCallAudioController)
     }
     val mediaAudioController: com.example.chat.core.audio.MediaAudioController by lazy {
         com.example.chat.core.audio.MediaAudioController(audioPolicyCoordinator)
@@ -1000,7 +1054,11 @@ object ServiceLocator {
         com.example.chat.core.audio.NotificationAudioController(audioPolicyCoordinator)
     }
     val audioSettingsController: com.example.chat.core.audio.AudioSettingsController by lazy {
-        com.example.chat.core.audio.AudioSettingsController(audioCapabilityService, audioPolicyCoordinator)
+// Previous implementation retained:         com.example.chat.core.audio.AudioSettingsController(audioCapabilityService, audioPolicyCoordinator)
+        com.example.chat.core.audio.AudioSettingsController(audioCapabilityService, audioPolicyCoordinator,
+// Previous implementation retained:             com.example.chat.core.audio.AndroidAudioPreferenceStore(requireContext()), appScope)
+            com.example.chat.core.audio.AndroidAudioPreferenceStore(requireContext()), appScope,
+            com.example.chat.core.audio.AssetAudioDeviceRecordSource(requireContext()))
     }
 
     // ── calls: presentation prefs, signaling, presentation policy, lifecycle ──
@@ -1043,7 +1101,19 @@ object ServiceLocator {
                     null,
                     "Live call",
                 )
-                com.example.chat.data.services.WebRtcCallMediaController(requireContext()).also { media ->
+// Previous implementation retained:                 com.example.chat.data.services.WebRtcCallMediaController(requireContext()).also { media ->
+// Previous implementation retained:                 com.example.chat.data.services.WebRtcCallMediaController(requireContext(), callAudioSessions).also { media ->
+                val expectedMediaCallId = callSignaling.currentSession?.callId
+                com.example.chat.data.services.WebRtcCallMediaController(requireContext(), callAudioSessions,
+                    communicationArbiter = communicationMediaArbiter,
+                    foregroundStillExpected = {
+                        expectedMediaCallId != null && callSignaling.currentSession?.let {
+                            it.callId == expectedMediaCallId && !it.state.isTerminal
+                        } == true
+                    }).also { media ->
+                    media.onAudioFocusInterruption = { interrupted ->
+                        audioPolicyCoordinator.onInterruption(interrupted)
+                    }
                     media.onTrafficBytes = { uploaded, downloaded ->
                         transferMonitor.update(uploadId, uploaded)
                         transferMonitor.update(downloadId, downloaded)
@@ -1230,6 +1300,7 @@ object ServiceLocator {
         com.example.chat.ui.tasks.TasksController(
             client = apiBackend.tasksClient,
             accountKey = { apiBackend.currentUser?.id },
+            ownerSnapshot = { apiBackend.authSnapshot() },
             historyStore = object : com.example.chat.ui.tasks.TaskHistoryStore {
                 override fun load() = com.example.chat.ui.tasks.TaskHistoryCodec.decode(
                     prefs.getString("chaty_task_history_v1", null))
@@ -1458,7 +1529,14 @@ object ServiceLocator {
                 sessionManager.clearLocal()
             },
             kickPendingSends = { appScope.launch { outgoingQueue.processQueue() } },
-            onSignedOut = { mediaCache.purgeTransientTemps(); mediaDownloads.purgeAll() },
+            // onSignedOut = { mediaCache.purgeTransientTemps(); mediaDownloads.purgeAll() },
+            onSignedOut = {
+                com.example.chat.ui.settings.cleanupPrivateMediaOnLogout(
+                    purgeTransientTemps = { mediaCache.purgeTransientTemps() },
+                    purgeIncompleteDownloads = { mediaDownloads.purgeAll() },
+                )
+                Unit
+            },
             apiScopeIdentity = { apiBackend.authSnapshot() },
             onAccountSwitch = { apiBackend.clearChatCachesForAccountSwitch() },
         )

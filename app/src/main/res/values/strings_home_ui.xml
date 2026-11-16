@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- R1-43: Home copy passed straight to Text(). Added with the stringResource swap; existing strings untouched. -->
+    <string name="home_ui_camera_effects">Camera Effects</string>
+    <string name="home_ui_qr_scan">QR / Scan</string>
+    <string name="home_ui_account_settings">Account settings</string>
+    <string name="home_ui_toggle_light_dark">Toggle light / dark</string>
+    <string name="home_ui_how_to_catch_up">How to catch up</string>
+    <string name="home_ui_home_view_options">Home view options</string>
+    <string name="home_ui_temporary_scratchpad">Temporary scratchpad</string>
+    <string name="home_ui_saved_home_views">Saved Home views</string>
+    <string name="home_ui_recent_home_views">Recent Home views</string>
+    <string name="home_ui_keyboard_shortcuts">Keyboard shortcuts</string>
+    <string name="home_ui_command_palette">Command palette</string>
+    <string name="home_ui_examples_only_not_your_live_conversations">Examples only, not your live conversations.</string>
+    <string name="home_ui_search_chats">Search chats</string>
+    <string name="home_ui_select_plan">Select Plan</string>
+    <string name="home_ui_locked_chats">Locked Chats</string>
+    <string name="home_ui_appearance_reset_preview">Appearance reset preview</string>
+    <string name="home_ui_preview_only_nothing_will_be_reset_and_there_is_no">Preview only. Nothing will be reset, and there is no Apply action.</string>
+    <string name="home_ui_proposed_appearance_fields_compared_with_model_def">Proposed appearance fields compared with model defaults:</string>
+    <string name="home_ui_all_other_settings_are_outside_this_proposal_folde">All other settings are outside this proposal. Folders, messages, identity, privacy and security are untouched.</string>
+    <string name="home_ui_this_account_s_loaded_visible_chats_only_hidden_ch">This account\'s loaded, visible chats only. Hidden chats are excluded. These choices last for this Home session.</string>
+    <string name="home_ui_quick_view">Quick view</string>
+    <string name="home_ui_order_within_pinned_and_recent_sections">Order within pinned and recent sections</string>
+    <string name="home_ui_activity_is_based_on_each_chat_s_last_loaded_messa">Activity is based on each chat\'s last loaded message timestamp, not complete remote history.</string>
+    <string name="home_ui_named_combinations_of_filter_folder_and_order_for_">Named combinations of filter, folder and order for this account\'s Home session. They are cleared when you switch accounts and never store search text or chat content.</string>
+    <string name="home_ui_name_this_view">Name this view</string>
+    <string name="home_ui_a_saved_view_with_this_name_already_exists_saving_">A saved view with this name already exists; saving replaces it.</string>
+    <string name="home_ui_no_saved_views_yet">No saved views yet.</string>
+    <string name="home_ui_applying_a_saved_view_always_goes_through_the_prev">Applying a saved view always goes through the preview first.</string>
+    <string name="home_ui_sample_of_unlocked_chats">Sample of unlocked chats:</string>
+    <string name="home_ui_applying_only_changes_how_this_home_list_looks_for">Applying only changes how this Home list looks for this session. No chats, folders or messages change.</string>
+    <string name="home_ui_no_earlier_views_yet_filter_folder_and_order_chang">No earlier views yet. Filter, folder and order changes appear here for this session.</string>
+    <string name="home_ui_workspace_data_on_this_device">Workspace data on this device</string>
+    <string name="home_ui_what_the_personal_workspace_stores_on_this_device_">What the personal workspace stores on this device today. Nothing here deletes data.</string>
+    <string name="home_ui_temporary_home_scratchpad">Temporary Home scratchpad</string>
+    <string name="home_ui_temporary_text_only_not_saved_synced_or_sent_it_ca">Temporary text only. Not saved, synced or sent. It can be lost when Home closes, the app restarts or accounts change.</string>
+    <string name="home_ui_scratch_text">Scratch text</string>
+    <string name="home_ui_clear_temporary_text">Clear temporary text?</string>
+    <string name="home_ui_this_only_clears_the_home_scratchpad_no_chats_or_m">This only clears the Home scratchpad. No chats or messages are changed.</string>
+    <string name="home_ui_ctrl_tab_move_between_the_chat_list_and_the_detail">Ctrl + Tab - move between the chat list and the detail pane; Tab keeps normal traversal</string>
+    <string name="home_ui_alt_n_focus_the_next_visible_unlocked_unread_chat_">Alt + N - focus the next visible unlocked unread chat (opens nothing, marks nothing read)</string>
+    <string name="home_ui_up_down_move_row_focus_opens_nothing_marks_nothing">Up / Down - move row focus (opens nothing, marks nothing read)</string>
+    <string name="home_ui_home_end_jump_to_the_first_last_chat">Home / End - jump to the first / last chat</string>
+    <string name="home_ui_enter_or_space_open_the_focused_chat">Enter or Space - open the focused chat</string>
+    <string name="home_ui_shift_up_down_with_a_selection_extend_the_selected">Shift + Up / Down with a selection - extend the selected range</string>
+    <string name="home_ui_esc_back_close_the_top_layer_menu_pane_selection_t">Esc / Back - close the top layer (menu, pane, selection, then search)</string>
+    <string name="home_ui_type_while_the_list_is_focused_to_jump_to_a_chat_n">Type while the list is focused to jump to a chat name.</string>
+    <string name="home_ui_these_never_type_into_search_or_text_fields">These never type into search or text fields.</string>
+    <string name="home_ui_no_chats_selected">No chats selected.</string>
+    <string name="home_ui_in_the_order_shown_on_home">In the order shown on Home</string>
+    <string name="home_ui_screen_sharing_may_be_active">Screen sharing may be active</string>
+    <string name="home_ui_home_titles_and_previews_can_be_visible_to_anyone_">Home titles and previews can be visible to anyone watching. You can hide them with the privacy curtain - a display aid only, not an app lock or encryption.</string>
+    <string name="home_ui_message_a_number">Message a number</string>
+    <string name="home_ui_start_a_direct_chat_without_saving_contact">Start a direct chat without saving contact</string>
+    <string name="home_ui_phone_number">Phone number</string>
+    <string name="home_ui_include_country_code_1">Include country code (+1...)</string>
+    <string name="home_ui_group">Group:</string>
+    <string name="home_ui_privacy_curtain_on">Privacy curtain on</string>
+    <string name="home_ui_a_display_aid_only_not_an_app_lock_encryption_or_a">A display aid only - not an app lock, encryption or a screenshot guarantee.</string>
+    <string name="home_ui_top">Top</string>
+    <string name="home_ui_all_chats">All chats</string>
+    <string name="home_ui_select_a_chat">Select a chat</string>
+    <string name="home_ui_tap_a_chat_on_the_left_or_press_tab_to_move_here_a">Tap a chat on the left, or press Tab to move here and Enter to open the focused chat.</string>
+    <string name="home_ui_archived">Archived</string>
+    <string name="home_ui_failed_tap_to_retry">Failed - tap to retry</string>
+    <string name="home_ui_working">Working…</string>
+    <string name="home_ui_ghost">Ghost</string>
+    <string name="home_ui_workspace_activation_required">Workspace Activation Required</string>
+    <string name="home_ui_secure_conversations_with_biometric_pin_or_passwor">Secure conversations with biometric, PIN, or password</string>
+    <string name="home_ui_lock_individual_chats_and_keep_them_hidden_from_th">Lock individual chats and keep them hidden from the main list.</string>
+    <string name="home_ui_how_to_set_up_locked_chats">How to set up Locked Chats:</string>
+    <string name="home_ui_pin_chats_or_create_groups_to_see_them_here">Pin chats or create groups to see them here.</string>
+    <string name="home_ui_selected_chats_count" formatted="true">Selected chats (%1$s)</string>
+    <string name="home_ui_more_count" formatted="true">+ %1$s more</string>
+    <string name="home_ui_back_to_title" formatted="true">Back to %1$s</string>
+    <string name="home_ui_quick_summary" formatted="true">%1$s chats · %2$s pinned · %3$s muted · %4$s unlocked drafts</string>
+    <string name="home_ui_preview_matched" formatted="true">%1$s unlocked chats in this safe preview. Locked and hidden chats are left out, so this is not the exact total the applied view will show.</string>
+    <string name="home_ui_preview_title" formatted="true">Preview: %1$s</string>
+    <string name="home_ui_scratch_count" formatted="true">%1$s / %2$s characters</string>
+    <string name="home_ui_search_results_count" formatted="true">%1$s chats found</string>
+</resources>

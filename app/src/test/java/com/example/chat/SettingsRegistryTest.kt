@@ -11,8 +11,10 @@ class SettingsRegistryTest {
     @Test
     fun registryContainsUniqueValidatedSettingContracts() {
         assertTrue(SettingsRegistry.validateInvariants())
-        assertEquals(39, SettingsRegistry.allSettings.size)
-        assertEquals(18, SettingsRegistry.clusters.size)
+        // Previous pre-expansion count: assertEquals(39, SettingsRegistry.allSettings.size)
+        assertEquals(82, SettingsRegistry.allSettings.size)
+        // Previous pre-expansion count: assertEquals(18, SettingsRegistry.clusters.size)
+        assertEquals(26, SettingsRegistry.clusters.size)
         assertEquals("account_display_name", SettingsRegistry.allSettings.first().id)
         assertEquals(13, SettingsCategory.values().size)
         assertEquals(SettingsCategory.values().size, SettingsCategory.values().map { it.id }.distinct().size)
@@ -93,7 +95,8 @@ class SettingsRegistryTest {
             "/settings/customization",
             "/settings/app_icon",
         )
-        assertEquals(expectedIds, SettingsRegistry.allSettings.map { it.id }.toSet())
+        // Preserve the original39 contracts while separately accounting for existing27 expansion and16 Conversation entries.
+        assertEquals(expectedIds, SettingsRegistry.allSettings.filterNot { it.id.startsWith("x_") || it.id.startsWith("conv_visual_") }.map { it.id }.toSet())
         assertTrue(SettingsRegistry.allSettings.all { it.canonicalRoute in registeredSearchRoutes })
         assertTrue(SettingsRegistry.clusters.none { it.id in setOf("cluster_chaty_customization_hub", "cluster_advanced_feature_center") })
         assertTrue(SettingsRegistry.allSettings.none { it.canonicalRoute in setOf("/settings/chaty_customization_hub", "/settings/gb_features") })

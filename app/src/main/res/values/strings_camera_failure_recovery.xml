@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="camera_start_failed_recovery">The camera could not start. Close another app using it, then tap Retry or pick from your gallery.</string>
+    <string name="camera_effect_failed_recovery">The camera effect could not continue. Reopen the camera or turn off the lens or filter.</string>
+</resources>

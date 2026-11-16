@@ -19,8 +19,8 @@ class NewChatPresentationRulesTest {
     @Test fun emptyConfigurationRestoresAllRequiredSections() {
         assertEquals(listOf("search", "selected", "contacts"), NewChatPresentationRules.sections(emptyList()))
     }
-    @Test fun preservesKnownOrderWithoutDuplicatesAndIgnoresUnknownKeys() {
-        assertEquals(listOf("contacts", "search", "selected"),
+    @Test fun pinsSearchFirstPreservingOtherKnownOrderWithoutDuplicates() {
+        assertEquals(listOf("search", "contacts", "selected"),
             NewChatPresentationRules.sections(listOf("contacts", "unknown", "contacts", "search")))
     }
     @Test fun publicErrorsNeverContainDiagnosticPayloads() {
@@ -47,3 +47,7 @@ class NewChatPresentationRulesTest {
     }
 
 }
+
+// Superseded source lines retained inactive for review:
+//     @Test fun preservesKnownOrderWithoutDuplicatesAndIgnoresUnknownKeys() {
+//         assertEquals(listOf("contacts", "search", "selected"),

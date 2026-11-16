@@ -1,9 +1,16 @@
 package com.example.chat.core.audio
 
+import kotlinx.coroutines.flow.collect
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Service responsible for querying, caching, and streaming hardware and OS
@@ -17,9 +24,19 @@ import kotlinx.coroutines.launch
 class AudioCapabilityService(
     private val platform: ChatyAudioPlatform,
     scope: CoroutineScope,
-) {
-    private val cachedCapabilities = mutableMapOf<AudioUseCase, AudioCapabilities>()
+    private val routeTimeoutMillis: Long = 4000L,
+    private val routeDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+// Previous implementation retained: ) {
+) : AudioCapabilitySource {
+// Previous implementation retained:     private val cachedCapabilities = mutableMapOf<AudioUseCase, AudioCapabilities>()
+    private val cachedCapabilities = java.util.concurrent.ConcurrentHashMap<AudioUseCase, AudioCapabilities>()
+    // One serialization point for UI requests, release and platform callback cache updates.
+    private val routeMutex = Mutex()
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
+    private val _communicationCapabilities = kotlinx.coroutines.flow.MutableStateFlow<AudioCapabilities?>(null)
+// Previous implementation retained:     val communicationCapabilities: kotlinx.coroutines.flow.StateFlow<AudioCapabilities?> =
+    override val communicationCapabilities: kotlinx.coroutines.flow.StateFlow<AudioCapabilities?> =
+        _communicationCapabilities.asStateFlow()
 
     init {
         // Mirrors _initStreams(): capability stream replaces the cached
@@ -28,21 +45,35 @@ class AudioCapabilityService(
         // swallowed exactly like the Dart onError: (_) {} handlers.
         scope.launch {
             platform.capabilityChanges
+                .stableAudioCapabilities()
                 .catch { }
                 .collect { caps ->
-                    cachedCapabilities[AudioUseCase.communication] = caps
-                    notifyListeners()
+// Previous implementation retained:                     cachedCapabilities[AudioUseCase.communication] = caps
+// Previous implementation retained:                     notifyListeners()
+                    routeMutex.withLock {
+// Previous implementation retained:                         cachedCapabilities[AudioUseCase.communication] = caps
+                        // A debounced device snapshot can predate a manual route change.
+                        val currentRoute = platform.getCurrentRoute(AudioUseCase.communication)
+                        cachedCapabilities[AudioUseCase.communication] = caps.copy(activeRoute = currentRoute)
+                        notifyListeners()
+                    }
                 }
         }
         scope.launch {
             platform.routeChanges
                 .catch { }
                 .collect { route ->
-                    val current = cachedCapabilities[AudioUseCase.communication]
-                    if (current != null) {
-                        cachedCapabilities[AudioUseCase.communication] =
-                            current.copy(activeRoute = route)
-                        notifyListeners()
+// Previous implementation retained:                     val current = cachedCapabilities[AudioUseCase.communication]
+// Previous implementation retained:                     if (current != null) {
+// Previous implementation retained:                         cachedCapabilities[AudioUseCase.communication] =
+// Previous implementation retained:                             current.copy(activeRoute = route)
+// Previous implementation retained:                         notifyListeners()
+                    routeMutex.withLock {
+                        val current = cachedCapabilities[AudioUseCase.communication]
+                        if (current != null) {
+                            cachedCapabilities[AudioUseCase.communication] = current.copy(activeRoute = route)
+                            notifyListeners()
+                        }
                     }
                 }
         }
@@ -50,16 +81,28 @@ class AudioCapabilityService(
 
     fun addListener(listener: () -> Unit) { listeners.addIfAbsent(listener) }
     fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
-    private fun notifyListeners() { listeners.forEach { it() } }
+// Previous implementation retained:     private fun notifyListeners() { listeners.forEach { it() } }
+    private fun notifyListeners() {
+        _communicationCapabilities.value = cachedCapabilities[AudioUseCase.communication]?.let {
+            it.copy(availableRoutes = it.availableRoutes.toList())
+        }
+        listeners.forEach { it() }
+    }
 
     /** Get capabilities for a use case, returning cache if available or querying platform. */
-    suspend fun getCapabilities(useCase: AudioUseCase): AudioCapabilities {
+// Previous implementation retained:     suspend fun getCapabilities(useCase: AudioUseCase): AudioCapabilities {
+// Previous implementation retained:     suspend fun getCapabilities(useCase: AudioUseCase): AudioCapabilities = routeMutex.withLock {
+    override suspend fun getCapabilities(useCase: AudioUseCase): AudioCapabilities = routeMutex.withLock {
         val cached = cachedCapabilities[useCase]
-        if (cached != null) return cached
-        val queried = platform.getCapabilities(useCase)
+// Previous implementation retained:         if (cached != null) return cached
+// Previous implementation retained:         if (cached != null) return@withLock cached
+        if (cached != null && cached.failureKind == null) return@withLock cached
+// Previous implementation retained:         val queried = platform.getCapabilities(useCase)
+        val queried = kotlinx.coroutines.withContext(routeDispatcher) { platform.getCapabilities(useCase) }
         cachedCapabilities[useCase] = queried
         notifyListeners()
-        return queried
+// Previous implementation retained:         return queried
+        queried
     }
 
     /** Active route for communication use case. */
@@ -85,18 +128,42 @@ class AudioCapabilityService(
                 AudioOutputRoute.receiver,
             )
 
+    /** Only real call acquisition enters the native communication mode. */
+    suspend fun beginCommunicationSession() = routeMutex.withLock {
+        kotlinx.coroutines.withContext(routeDispatcher) { platform.beginCommunicationSession() }
+    }
+
     /** Request route selection through the platform. */
-    suspend fun setPreferredRoute(useCase: AudioUseCase, route: AudioOutputRoute): AudioCapabilities {
-        val updated = platform.setPreferredRoute(useCase, route)
+// Previous implementation retained:     suspend fun setPreferredRoute(useCase: AudioUseCase, route: AudioOutputRoute): AudioCapabilities {
+// Previous implementation retained:     suspend fun setPreferredRoute(useCase: AudioUseCase, route: AudioOutputRoute): AudioCapabilities = routeMutex.withLock {
+    override suspend fun setPreferredRoute(useCase: AudioUseCase, route: AudioOutputRoute): AudioCapabilities = routeMutex.withLock {
+// Previous implementation retained:         val updated = platform.setPreferredRoute(useCase, route)
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        val updated = kotlinx.coroutines.withTimeout(routeTimeoutMillis) {
+            // Binder/HAL work must not freeze Compose. Timeout is cooperative, not a HAL abort promise.
+            // Previous implementation retained: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO)
+            kotlinx.coroutines.withContext(routeDispatcher) {
+                platform.setPreferredRoute(useCase, route)
+            }
+        }
         cachedCapabilities[useCase] = updated
         notifyListeners()
-        return updated
+// Previous implementation retained:         return updated
+        updated
     }
 
     /** Release native session. */
-    suspend fun releaseSession(useCase: AudioUseCase) {
-        platform.releaseSession(useCase)
+// Previous implementation retained:     suspend fun releaseSession(useCase: AudioUseCase) {
+    suspend fun releaseSession(useCase: AudioUseCase) = routeMutex.withLock {
+// Previous implementation retained:         platform.releaseSession(useCase)
+        kotlinx.coroutines.withContext(routeDispatcher) { platform.releaseSession(useCase) }
         cachedCapabilities.remove(useCase)
         notifyListeners()
     }
 }
+
+
+/** Only availability flaps are coalesced; active-route callbacks stay immediate. */
+@OptIn(kotlinx.coroutines.FlowPreview::class)
+internal fun kotlinx.coroutines.flow.Flow<AudioCapabilities>.stableAudioCapabilities(): kotlinx.coroutines.flow.Flow<AudioCapabilities> =
+    debounce(500L).distinctUntilChanged()

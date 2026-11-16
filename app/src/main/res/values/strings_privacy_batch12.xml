@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_biometric_unlock">Biometric unlock</string>
+    <string name="privacy_biometric_testing">Testing device authentication. This is not a runtime permission.</string>
+    <string name="privacy_biometric_checking">Checking device authentication availability.</string>
+    <string name="privacy_biometric_ready">Enrolled biometrics are available. Tap to test device authentication; no permission changes.</string>
+    <string name="privacy_biometric_no_hardware">This device reports no biometric hardware. This is not a runtime permission.</string>
+    <string name="privacy_biometric_not_enrolled">No biometrics are enrolled. Set them up in Android security settings.</string>
+    <string name="privacy_biometric_temporarily_unavailable">Biometric hardware is temporarily unavailable. Try again later.</string>
+    <string name="privacy_biometric_update_required">Android reports a required security update before biometric use.</string>
+    <string name="privacy_biometric_unknown">Biometric unlock is unavailable to Chaty. The device did not provide a specific supported reason; check Android security settings.</string>
+    <string name="privacy_saving_call_policy">Saving call policy...</string>
+    <string name="privacy_saving_presence_policy">Saving privacy policy...</string>
+    <string name="privacy_unblocking_contact">Unblocking contact...</string>
+</resources>

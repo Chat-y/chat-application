@@ -107,12 +107,14 @@ fun OtpVerificationScreen(
     val scope = rememberCoroutineScope()
     // Auth screenshot blocking is off by default. Preserve the opt-in hook, do not apply globally.
     // com.example.chat.ui.kit.ProtectSensitiveWindow()
+    com.example.chat.ui.kit.ProtectSensitiveWindow() // A1-14: enabled (FLAG_SECURE lease while this screen is shown)
     val clipboardForCode = androidx.compose.ui.platform.LocalClipboardManager.current
     val feedbackView = androidx.compose.ui.platform.LocalView.current
     var submittedCode by remember { mutableStateOf<String?>(null) }
     var explicitlyPastedText by remember { mutableStateOf<String?>(null) }
 
 
+    // A2-14 skipped by owner pick: one-time codes stay out of saved state.
     var code by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     val completeCode by remember {androidx.compose.runtime.derivedStateOf {OtpVerificationLogic.isComplete(code)}}

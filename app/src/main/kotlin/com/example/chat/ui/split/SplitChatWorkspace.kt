@@ -21,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.Alignment
@@ -57,6 +58,8 @@ fun SplitChatWorkspace(
     val canvasStateHolder = rememberSaveableStateHolder()
     val windowStateHolder = rememberSaveableStateHolder()
     var dockExpanded by rememberSaveable { mutableStateOf(true) }
+    // SPL-23: host contract. paneContent is supplied by the host, which must enforce account and
+    // conversation authorization; this container only lays out windows and cannot authorize message access.
     val paneContentCurrent by rememberUpdatedState(paneContent)
     val contentByPane = remember { mutableMapOf<String, @Composable (SplitPaneItem, Modifier) -> Unit>() }
     val activeKeys = sessionState.paneItems.map { it.stateKey() }.toSet()
@@ -128,7 +131,8 @@ fun SplitChatWorkspace(
                         val canvasWidth = maxWidth.value
                         val canvasHeight = maxHeight.value
                         val minimizedItems = sessionState.paneItems.filter { it.stateKey() in minimizedKeys }
-                        Box(Modifier.fillMaxSize().padding(bottom = if (minimizedItems.isEmpty() || !dockExpanded) 0.dp else 72.dp)) {
+                        // SPL-31: reserve 88dp for labeled dock (previously 72dp).
+                        Box(Modifier.fillMaxSize().padding(bottom = if (minimizedItems.isEmpty() || !dockExpanded) 0.dp else 88.dp)) {
                             sessionState.paneItems.forEachIndexed { index, item ->
                                 val paneKey = item.stateKey()
                                 key(paneKey) {
@@ -142,6 +146,7 @@ fun SplitChatWorkspace(
                                                 onExpandToFull = { onOpenFullChat(item.conversationId) },
                                                 onClose = { onClosePane(item.conversationId) },
                                                 onFocus = { onUpdateSessionState(sessionState.copy(focusedConversationId = item.conversationId)) },
+                                                isFocused = sessionState.focusedConversationId == item.conversationId,
                                                 initialXFraction = index / 3f,
                                                 initialYFraction = index / 3f,
                                                 initialWidthDp = 320f.coerceAtMost(canvasWidth - 24f).coerceAtLeast(1f),
@@ -160,19 +165,25 @@ fun SplitChatWorkspace(
                             }
                         }
                         if (minimizedItems.isNotEmpty() && dockExpanded) {
-                            Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(72.dp)
+                            Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(88.dp)
                                 .background(colors.surfaceElevated).horizontalScroll(rememberScrollState()).padding(8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 minimizedItems.forEach { item ->
-                                    Box(Modifier.size(56.dp).clip(CircleShape).background(colors.surface)
-                                        .border(1.dp, colors.accent, CircleShape)
-                                        .semantics { contentDescription = "Restore ${item.title}" }
-                                        .clickable {
-                                            minimizedKeys = minimizedKeys - item.stateKey()
-                                            onUpdateSessionState(sessionState.copy(focusedConversationId = item.conversationId))
-                                        }, contentAlignment = Alignment.Center) {
-                                        Text(item.title.take(2).uppercase(), color = colors.foreground, fontWeight = FontWeight.Bold)
+                                    // SPL-31: title label under each bubble (initials alone are weak identity).
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Box(Modifier.size(56.dp).clip(CircleShape).background(colors.surface)
+                                            .border(1.dp, colors.accent, CircleShape)
+                                            .semantics { contentDescription = "Restore ${item.title}" }
+                                            .clickable {
+                                                minimizedKeys = minimizedKeys - item.stateKey()
+                                                onUpdateSessionState(sessionState.copy(focusedConversationId = item.conversationId))
+                                            }, contentAlignment = Alignment.Center) {
+                                            Text(item.title.take(2).uppercase(), color = colors.foreground, fontWeight = FontWeight.Bold)
+                                        }
+                                        Text(item.title, color = colors.foregroundSecondary, fontSize = 10.sp, maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.width(64.dp).clearAndSetSemantics { },
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                     }
                                 }
                             }

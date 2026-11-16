@@ -47,4 +47,15 @@ class ReviewedMediaSendTest {
         assertTrue(runCatching { ChatAttachmentActionController("c", backend, {}).sendReviewedMedia(listOf(PickedFile("doc")), "document", "", false) }.isFailure)
         assertTrue(backend.uploads.isEmpty())
     }
+    @Test fun eachReviewedItemKeepsItsOwnCaptionAndViewOncePolicy() = runBlocking {
+        val backend = Backend()
+        ChatAttachmentActionController("c", backend, {}).sendReviewedMedia(
+            listOf(PickedFile("a.jpg"), PickedFile("b.jpg")), "image", "batch fallback", false,
+            perItemCaptions = listOf("", "second caption"), perItemViewOnce = listOf(false, true))
+        assertEquals("", backend.sent[0].first)
+        assertEquals("second caption", backend.sent[1].first)
+        assertNull(backend.sent[0].third)
+        assertEquals(true, backend.sent[1].third?.get("view_once"))
+    }
+
 }

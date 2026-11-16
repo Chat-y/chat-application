@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -88,7 +89,10 @@ fun formatScheduledDateTime(value: ZonedDateTime): String {
 
 /** Dart: `if (rule.id.length == 36)` routes delete by id, otherwise by
  *  keyword+response signature. */
-fun shouldDeleteRuleById(ruleId: String): Boolean = ruleId.length == 36
+// AUT-121: validate a canonical UUID instead of inferring a remote id from string length.
+private val remoteRuleIdPattern = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+// fun shouldDeleteRuleById(ruleId: String): Boolean = ruleId.length == 36
+fun shouldDeleteRuleById(ruleId: String): Boolean = remoteRuleIdPattern.matches(ruleId)
 
 /** Dart quick-reply title fallback: `title.isEmpty ? shortcut : title`. */
 fun quickReplyTitle(shortcut: String, title: String): String =
@@ -107,16 +111,22 @@ fun MessageManagementPage(
     conversationSource: MessageManagementConversationSource,
     onBack: () -> Unit,
     showToast: (String) -> Unit = {},
+    // AUT-013: scheduling goes through the guarded service (encrypted-chat fail-closed guard). Null uses ServiceLocator.scheduledMessageService.
+    scheduleService: com.example.chat.ui.automation.ScheduledMessageService? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val colors = LocalAppColors.current
 
     // ListenableBuilder equivalent for the preferences controller.
     var prefsRevision by remember { mutableIntStateOf(0) }
     androidx.compose.runtime.DisposableEffect(preferencesController) {
-        val listener: () -> Unit = { prefsRevision++ }
+        // Previous listener: val listener: () -> Unit = { prefsRevision++ }
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        var attached = true
+        val listener: () -> Unit = { handler.post { if (attached) prefsRevision++ }; Unit }
         preferencesController.addListener(listener)
-        onDispose { preferencesController.removeListener(listener) }
+        onDispose { attached=false;preferencesController.removeListener(listener) }
     }
     @Suppress("UNUSED_EXPRESSION") prefsRevision
 
@@ -127,13 +137,18 @@ fun MessageManagementPage(
     }
     fun refreshScheduled() {
         refreshCounter++
+        // AUT-111: generation guard so an older response cannot replace a newer queue.
+        val generation = refreshCounter
         scope.launch {
             scheduledState = ScheduledLoadState.Loading
-            scheduledState = try {
+            // Prior: scheduledState = try {
+            val result = try {
                 ScheduledLoadState.Loaded(server.getScheduledMessages())
-            } catch (e: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 ScheduledLoadState.Failed(e)
             }
+            if (generation == refreshCounter) scheduledState = result
         }
     }
     androidx.compose.runtime.LaunchedEffect(server) {
@@ -142,7 +157,8 @@ fun MessageManagementPage(
         try {
             server.synchronizeAutomation(preferencesController.automation)
             refreshScheduled()
-        } catch (_: Exception) {
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
         }
     }
 
@@ -162,6 +178,7 @@ fun MessageManagementPage(
                     keyword = payload.keyword,
                     response = payload.response,
                     scope = payload.scope,
+                    // Prior: .first { it.id == payload.conversationId }
                 )
                 val auto = preferencesController.automation
                 val next = auto.autoReplyRules + AutoReplyRule(
@@ -175,7 +192,8 @@ fun MessageManagementPage(
                     logTitle = "Add server auto-reply rule",
                 )
                 showToast("Auto-reply rule is active on the server.")
-            } catch (error: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
                 showToast("Unable to add rule: $error")
             }
         }
@@ -194,7 +212,8 @@ fun MessageManagementPage(
                     auto.copy(autoReplyRules = auto.autoReplyRules.filter { it.id != rule.id }),
                     logTitle = "Delete server auto-reply rule",
                 )
-            } catch (error: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
                 showToast("Unable to delete rule: $error")
             }
         }
@@ -203,18 +222,24 @@ fun MessageManagementPage(
     fun scheduleMessage(payload: ScheduleDraft, scheduledAt: ZonedDateTime) {
         scope.launch {
             try {
-                val id = server.scheduleMessage(
+                // val id = server.scheduleMessage(conversationId = payload.conversationId, body = payload.body, scheduledAt = scheduledAt.toInstant())
+                // Falls back to the app-wide guarded service so no host change is required.
+                val guarded = scheduleService ?: com.example.chat.ServiceLocator.scheduledMessageService
+                val id = guarded.scheduleMessage(
                     conversationId = payload.conversationId,
                     body = payload.body,
-                    scheduledAt = scheduledAt.toInstant(),
+                    scheduledAt = scheduledAt,
                 )
-                val conversation = conversationSource.conversations
-                    .first { it.id == payload.conversationId }
+                // AUT-113: remote creation already succeeded; a missing chat must not report failure.
+                // val conversation = conversationSource.conversations.first { it.id == payload.conversationId }
+                val conversation = conversationSource.conversations.firstOrNull { it.id == payload.conversationId }
                 val auto = preferencesController.automation
+                    // Prior: recipientId = conversation.id,
+                    // Prior: recipientName = conversation.title,
                 val next = auto.scheduledMessages + ScheduledMessageEntry(
                     id = id,
-                    recipientId = conversation.id,
-                    recipientName = conversation.title,
+                    recipientId = payload.conversationId,
+                    recipientName = conversation?.title ?: "Unknown chat",
                     text = payload.body,
                     scheduledAtMillis = scheduledAt.toInstant().toEpochMilli(),
                 )
@@ -224,7 +249,8 @@ fun MessageManagementPage(
                 )
                 refreshScheduled()
                 showToast("Scheduled on the server for ${formatScheduledDateTime(scheduledAt)}.")
-            } catch (error: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
                 showToast("Unable to schedule message: $error")
             }
         }
@@ -235,7 +261,8 @@ fun MessageManagementPage(
             try {
                 server.cancelScheduledMessage(item.id)
                 refreshScheduled()
-            } catch (error: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
                 showToast("Unable to cancel: $error")
             }
         }
@@ -256,7 +283,8 @@ fun MessageManagementPage(
                     auto.copy(quickReplies = next),
                     logTitle = "Save server quick reply",
                 )
-            } catch (error: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
                 showToast("Unable to save quick reply: $error")
             }
         }
@@ -270,7 +298,8 @@ fun MessageManagementPage(
                     body = result.body,
                 )
                 showToast("Message sent to $sent conversation${if (sent == 1) "" else "s"}.")
-            } catch (error: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
                 showToast("Mass send failed: $error")
             }
         }
@@ -294,14 +323,15 @@ fun MessageManagementPage(
                 value = auto.enableAutoReply,
                 onChanged = { value ->
                     preferencesController.updateAutomation(
-                        auto.copy(enableAutoReply = value),
+                        preferencesController.automation.copy(enableAutoReply = value),
                         logTitle = "Enable server auto reply",
                     )
                     scope.launch {
                         try {
                             server.synchronizeAutomation(preferencesController.automation)
                             refreshScheduled()
-                        } catch (_: Exception) {
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
                         }
                     }
                 },
@@ -442,7 +472,8 @@ fun MessageManagementPage(
             onDismissRequest = { autoReplyDialogOpen = false },
             title = { Text("Add auto-reply rule") },
             text = {
-                Column {
+                // Previous unbounded body: Column {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     OutlinedTextField(
                         value = keyword,
                         onValueChange = { keyword = it },
@@ -487,14 +518,16 @@ fun MessageManagementPage(
 
     if (scheduleDialogOpen) {
         var conversationId by remember {
-            mutableStateOf(conversationSource.conversations.first().id)
+            // mutableStateOf(conversationSource.conversations.first().id)
+            mutableStateOf(conversationSource.conversations.firstOrNull()?.id.orEmpty())
         }
         var body by remember { mutableStateOf("") }
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { scheduleDialogOpen = false },
             title = { Text("Schedule message") },
             text = {
-                Column {
+                // Previous unbounded body: Column {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     ScopeDropdown(
                         value = conversationId,
                         onChange = { conversationId = it },
@@ -513,7 +546,8 @@ fun MessageManagementPage(
             confirmButton = {
                 Button(onClick = {
                     val b = body.trim()
-                    if (b.isNotEmpty()) {
+                    // A conversation may disappear while this dialog is open.
+                    if (b.isNotEmpty() && conversationSource.conversations.any { it.id == conversationId }) {
                         scheduleDialogOpen = false
                         pendingScheduleDraft = ScheduleDraft(conversationId, b)
                         datePickerOpen = true
@@ -568,6 +602,8 @@ fun MessageManagementPage(
                     // Dart: if (!scheduledAt.isAfter(DateTime.now())) toast.
                     if (!scheduledAt.toInstant().isAfter(Instant.now())) {
                         showToast("Choose a future date and time.")
+                    } else if (conversationSource.conversations.none { it.id == draft.conversationId }) {
+                        showToast(context.getString(com.example.chat.R.string.message_management_conversation_unavailable))
                     } else {
                         scheduleMessage(draft, scheduledAt)
                     }
@@ -586,7 +622,8 @@ fun MessageManagementPage(
             onDismissRequest = { quickReplyDialogOpen = false },
             title = { Text("Add quick reply") },
             text = {
-                Column {
+                // Previous unbounded body: Column {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     OutlinedTextField(
                         value = shortcut,
                         onValueChange = { shortcut = it },
@@ -637,7 +674,8 @@ fun MessageManagementPage(
             onDismissRequest = { massSendDialogOpen = false },
             title = { Text("Mass sender") },
             text = {
-                Column {
+                // Previous unbounded body: Column {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     OutlinedTextField(
                         value = body,
                         onValueChange = { body = it },
@@ -645,7 +683,8 @@ fun MessageManagementPage(
                         maxLines = 3,
                     )
                     Spacer(Modifier.height(10.dp))
-                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                    // Preserve reviewed bounded inner scroll in the confirmation body.
+                    Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                         conversationSource.conversations.forEach { conversation ->
                             Row(
                                 Modifier.fillMaxWidth()
@@ -673,7 +712,10 @@ fun MessageManagementPage(
                     val b = body.trim()
                     if (selected.value.isNotEmpty() && b.isNotEmpty()) {
                         massSendDialogOpen = false
-                        massSend(MassSendDraft(selected.value.toList(), b))
+                        // Previous: massSend(MassSendDraft(selected.value.toList(), b))
+                        val available = conversationSource.conversations.map { it.id }.toSet()
+                        if (selected.value.all { it in available }) massSend(MassSendDraft(selected.value.toList(), b))
+                        else showToast(context.getString(com.example.chat.R.string.message_management_conversation_unavailable))
                     }
                 }) { Text("Send") }
             },

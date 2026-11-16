@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Profile edit screen copy (P2-48 / P5-16). Only literals passed straight to Text(). -->
+    <string name="profile_edit_title">Edit Profile</string>
+    <string name="profile_edit_save">Save</string>
+    <string name="profile_edit_display_name">Display Name</string>
+    <string name="profile_edit_display_name_hint">Enter your full name</string>
+    <string name="profile_edit_username">Username</string>
+    <string name="profile_edit_username_hint">Choose a unique username</string>
+    <string name="profile_edit_about">About / Status</string>
+    <string name="profile_edit_about_hint">Say something about yourself or current mood</string>
+    <string name="profile_edit_phone">Phone Number</string>
+    <string name="profile_edit_phone_managed">Phone number is managed via Account settings</string>
+    <string name="profile_edit_capture_image">Capture Image</string>
+    <string name="profile_edit_capture_image_desc">Use camera to take a new photo</string>
+    <string name="profile_edit_pick_gallery">Pick / Choose from Gallery</string>
+    <string name="profile_edit_pick_gallery_desc">Select an image from device gallery</string>
+    <string name="profile_edit_discard_title">Discard changes?</string>
+    <string name="profile_edit_discard_body">You have unsaved changes that will be lost.</string>
+    <string name="profile_edit_discard">Discard</string>
+    <string name="profile_edit_keep_editing">Keep Editing</string>
+    <string name="profile_edit_err_name_empty">Display name cannot be empty</string>
+    <string name="profile_edit_err_name_short">Must be at least 2 characters</string>
+    <string name="profile_edit_err_username_unavailable">Please select an available username before saving.</string>
+    <string name="profile_edit_saved_snackbar">Profile updated.</string>
+    <string name="profile_edit_group_identity">Identity</string>
+    <string name="profile_edit_group_contact">Contact</string>
+    <string name="profile_edit_visibility_note">Your profile photo and banner are stored at public links: anyone who has a link can view them.</string>
+</resources>

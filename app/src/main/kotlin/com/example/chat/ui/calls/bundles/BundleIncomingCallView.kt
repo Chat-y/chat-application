@@ -60,7 +60,8 @@ import kotlin.math.roundToInt
  * Gesture-faithful answer mechanics per user-supplied references (2026-10-31):
  * Samsung = tap the action circle; Google Latest = horizontal puck;
  * red decline / green answer buttons; Azure Ring & Mono Chevron = vertical two-target drag;
- * Nextcloud Talk = tap or swipe up to accept. Unsupported reference functions
+// Previous implementation retained:  * Nextcloud Talk = tap or swipe up to accept. Unsupported reference functions
+ * Nextcloud Talk = swipe up to accept (or accessibility action). Unsupported reference functions
  * (Bixby text call, AI Call Assistant, Screen call, Live Translation, Remind,
  * SMS, Voicemail) are intentionally NOT rendered - no fake buttons.
  */
@@ -93,7 +94,9 @@ fun BundleIncomingCallView(
         SharedIncomingCallBanner(session, actionPending, requestAccept, requestDecline, onExpand, bundleId)
         return
     }
-    var previewOn by remember(session.callId) { mutableStateOf(true) }
+// Previous implementation retained:     var previewOn by remember(session.callId) { mutableStateOf(true) }
+    // Conservative per-call opt-in: an unanswered video ring never opens the camera by default.
+    var previewOn by remember(session.callId) { mutableStateOf(false) }
     var previewReady by remember(session.callId) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(baseTokens.surfaceBackground)) {
     if (session.isVideo && localPreviewOwner != null) {
@@ -104,6 +107,8 @@ fun BundleIncomingCallView(
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (session.isVideo) {
+                Text("Camera preview stays on this phone. Turning it on can show Android's camera indicator.",
+                    color = tokens.secondaryText, modifier = Modifier.fillMaxWidth().padding(12.dp))
                 Surface(color = tokens.cardBackground, shape = RoundedCornerShape(24.dp)) {
                     TextButton(modifier = Modifier.heightIn(min = 48.dp), enabled = !actionPending,
                         onClick = { previewOn = !previewOn; if (!previewOn) localPreviewOwner?.close() }) {
@@ -119,7 +124,14 @@ fun BundleIncomingCallView(
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-        Box(Modifier.fillMaxHeight().widthIn(max = 480.dp).fillMaxWidth()) {
+// Previous implementation retained:         Box(Modifier.fillMaxHeight().widthIn(max = 480.dp).fillMaxWidth()) {
+        // At large fonts/short displays allow the complete bundle body to scroll. Its
+        // weighted spacers may collapse in this mode, but no action is clipped offscreen.
+        val layout = androidx.compose.ui.platform.LocalConfiguration.current
+        val needsBodyScroll = (layout.fontScale >= 1.3f || layout.screenHeightDp < 600) &&
+            bundleId != CallBundleId.CHATY_DEFAULT && bundleId != CallBundleId.APPLE_IOS
+        Box(Modifier.fillMaxHeight().widthIn(max = 480.dp).fillMaxWidth()
+            .then(if (needsBodyScroll) Modifier.verticalScroll(rememberScrollState()) else Modifier)) {
     CompositionLocalProvider(com.example.chat.ui.calls.LocalIncomingVideoBackdrop provides session.isVideo) {
     when (bundleId) {
         CallBundleId.CHATY_DEFAULT -> ChatyDefaultIncomingCall(tokens, session, requestAccept, requestDecline)
@@ -162,9 +174,13 @@ private fun ChatyDefaultIncomingCall(
                 CallTypeCenterIcon(session, tint = tokens.secondaryText, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.height(8.dp))
                 Text(if (session.isVideo) "Incoming video call" else "Incoming voice call",
-                    color = tokens.secondaryText, fontSize = 16.sp, textAlign = TextAlign.Center)
+// Previous implementation retained: // Previous implementation retained: // Previous implementation retained:                     color = tokens.secondaryText, fontSize = 16.sp, textAlign = TextAlign.Center)
+// Previous implementation retained: // Previous implementation retained:                     color = tokens.secondaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, textAlign = TextAlign.Center)
+// Previous implementation retained:                     color = tokens.secondaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, textAlign = TextAlign.Center)
+                    color = tokens.secondaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(8.dp))
-                Text(session.remoteDisplayName, color = tokens.primaryText, fontSize = 28.sp,
+// Previous implementation retained:                 Text(session.remoteDisplayName, color = tokens.primaryText, fontSize = 28.sp,
+                Text(session.remoteDisplayName, color = tokens.primaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                     maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.semantics { heading() })
@@ -174,12 +190,16 @@ private fun ChatyDefaultIncomingCall(
                 Button(onClick = onDecline, shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(containerColor = tokens.declineColor),
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp)) {
-                    Text("Decline", color = Color.White, maxLines = 2, textAlign = TextAlign.Center)
+// Previous implementation retained:                     Text("Decline", color = Color.White, maxLines = 2, textAlign = TextAlign.Center)
+// Previous implementation retained:                     Text("Decline", color = Color.White, maxLines = 2, textAlign = TextAlign.Center, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
+                    Text("Decline", color = com.example.chat.ui.theme.LocalAppColors.current.onError, maxLines = 2, textAlign = TextAlign.Center, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
                 }
                 Button(onClick = onAccept, shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(containerColor = tokens.acceptColor),
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp)) {
-                    Text("Answer", color = Color.White, maxLines = 2, textAlign = TextAlign.Center)
+// Previous implementation retained:                     Text("Answer", color = Color.White, maxLines = 2, textAlign = TextAlign.Center)
+// Previous implementation retained:                     Text("Answer", color = Color.White, maxLines = 2, textAlign = TextAlign.Center, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
+                    Text("Answer", color = com.example.chat.ui.theme.LocalAppColors.current.onSuccess, maxLines = 2, textAlign = TextAlign.Center, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
                 }
             }
         }
@@ -211,9 +231,13 @@ private fun AppleIosIncomingCall(
                 CallTypeCenterIcon(session, tint = tokens.secondaryText, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.height(8.dp))
                 Text(if (session.isVideo) "Incoming video call" else "Incoming voice call",
-                    color = tokens.secondaryText, fontSize = 16.sp, textAlign = TextAlign.Center)
+// Previous implementation retained: // Previous implementation retained: // Previous implementation retained:                     color = tokens.secondaryText, fontSize = 16.sp, textAlign = TextAlign.Center)
+// Previous implementation retained: // Previous implementation retained:                     color = tokens.secondaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, textAlign = TextAlign.Center)
+// Previous implementation retained:                     color = tokens.secondaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, textAlign = TextAlign.Center)
+                    color = tokens.secondaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(8.dp))
-                Text(session.remoteDisplayName, color = tokens.primaryText, fontSize = 28.sp,
+// Previous implementation retained:                 Text(session.remoteDisplayName, color = tokens.primaryText, fontSize = 28.sp,
+                Text(session.remoteDisplayName, color = tokens.primaryText, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                     maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.semantics { heading() })
@@ -222,10 +246,12 @@ private fun AppleIosIncomingCall(
                 (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.5f).dp)
                 .verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
                 TextButton(onClick = onDecline, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text("Decline", color = tokens.declineColor)
+// Previous implementation retained:                     Text("Decline", color = tokens.declineColor)
+                    Text("Decline", color = tokens.declineColor, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
                 }
                 Spacer(Modifier.height(16.dp))
-                IosSlideToAnswerPill(tokens.acceptColor, onAccept)
+// Previous implementation retained:                 IosSlideToAnswerPill(tokens.acceptColor, onAccept)
+                IosSlideToAnswerPill(tokens.acceptColor, onAccept, onDecline)
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -244,16 +270,19 @@ private fun IosSecondaryAction(icon: ImageVector, label: String) {
         Spacer(Modifier.height(6.dp))
         Text(
             text = label,
-            fontSize = 12.sp,
+// Previous implementation retained:             fontSize = 12.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
             color = callForeground().copy(alpha = 0.85f),
         )
     }
 }
 
 @Composable
-private fun IosSlideToAnswerPill(accentColor: Color, onConfirmed: () -> Unit) {
+// Previous implementation retained: private fun IosSlideToAnswerPill(accentColor: Color, onConfirmed: () -> Unit) {
+private fun IosSlideToAnswerPill(accentColor: Color, onConfirmed: () -> Unit, onDecline: () -> Unit) {
     ReferenceHorizontalPuck(false, callForeground().copy(alpha = 0.16f), accentColor, com.example.chat.ui.theme.LocalAppColors.current.error,
-        onConfirmed, {}, Modifier.fillMaxWidth(), "Slide to answer")
+// Previous implementation retained:         onConfirmed, {}, Modifier.fillMaxWidth(), "Slide to answer")
+        onConfirmed, onDecline, Modifier.fillMaxWidth(), "Slide to answer")
 }
 
 /** Tracks the finger directly, clamps to measured width, and resets after cancellation/success. */
@@ -268,7 +297,8 @@ private fun ReferenceHorizontalPuck(twoWay: Boolean, background: Color, accept: 
     var settling by remember { mutableStateOf(false) }
     // Last LAID-OUT X translation of the moving puck (single writer: the
     // offset lambda below); used to measure drags in the unmoving rest frame.
-    val appliedOffsetPx = remember { object { var x = 0 } }
+// Previous implementation retained:     val appliedOffsetPx = remember { object { var x = 0 } }
+    val appliedOffsetPx = remember { IncomingPuckAppliedOffset() }
 
     BoxWithConstraints(modifier.heightIn(min = 80.dp).clip(RoundedCornerShape(40.dp))) {
         val range = with(LocalDensity.current) { ((maxWidth - 76.dp).coerceAtLeast(24.dp) / (if (twoWay) 2 else 1)).toPx() }
@@ -283,8 +313,10 @@ private fun ReferenceHorizontalPuck(twoWay: Boolean, background: Color, accept: 
         val home = if (twoWay) Alignment.Center else Alignment.CenterStart
         if (twoWay) {
             Row(Modifier.fillMaxWidth().align(Alignment.Center).padding(horizontal = 20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Decline", color = decline, fontSize = 14.sp)
-                Text("Answer", color = accept, fontSize = 14.sp)
+// Previous implementation retained:                 Text("Decline", color = decline, fontSize = 14.sp)
+// Previous implementation retained:                 Text("Answer", color = accept, fontSize = 14.sp)
+                Text("Decline", color = decline, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
+                Text("Answer", color = accept, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
             }
         } else {
             // Apple style slide to answer text with shimmer opacity fade on drag
@@ -293,7 +325,8 @@ private fun ReferenceHorizontalPuck(twoWay: Boolean, background: Color, accept: 
                 "slide to answer",
                 color = callForeground().copy(alpha = textAlpha),
                 modifier = Modifier.align(Alignment.Center).padding(start = 36.dp),
-                fontSize = 16.sp,
+// Previous implementation retained:                 fontSize = 16.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
                 fontWeight = FontWeight.Medium,
             )
         }
@@ -382,7 +415,8 @@ private fun SamsungOneUiIncomingCall(
             Text(
                 text = "Incoming call",
                 color = tokens.secondaryText,
-                fontSize = 14.sp,
+// Previous implementation retained:                 fontSize = 14.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 12.dp),
             )
@@ -403,21 +437,24 @@ private fun SamsungOneUiIncomingCall(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.semantics { heading() },
-                fontSize = 24.sp,
+// Previous implementation retained:                 fontSize = 24.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                 fontWeight = FontWeight.Bold,
                 color = callForeground(),
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 text = if (session.isVideo) "Video call" else "Voice call",
-                fontSize = 15.sp,
+// Previous implementation retained:                 fontSize = 15.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                 color = tokens.secondaryText,
             )
             Spacer(Modifier.weight(1f))
             Text(
                 text = "Tap Answer or Decline",
                 color = tokens.secondaryText,
-                fontSize = 13.sp,
+// Previous implementation retained:                 fontSize = 13.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
                 modifier = Modifier.padding(bottom = 18.dp),
             )
             Row(
@@ -482,7 +519,8 @@ private fun GoogleLatestIncomingCall(
                     maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    fontSize = 24.sp,
+// Previous implementation retained:                     fontSize = 24.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.Medium,
                     color = tokens.primaryText,
                 )
@@ -494,7 +532,8 @@ private fun GoogleLatestIncomingCall(
                     Text(
                         text = if (session.isVideo) "Video call" else "Incoming call",
                         color = tokens.secondaryText,
-                        fontSize = 13.sp,
+// Previous implementation retained:                         fontSize = 13.sp,
+                        style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
                     )
                 }
@@ -569,13 +608,15 @@ private fun GoogleClassicIncomingCall(
                     maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    fontSize = 24.sp,
+// Previous implementation retained:                     fontSize = 24.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.Bold,
                     color = com.example.chat.ui.theme.LocalAppColors.current.onAccent,
                 )
                 Text(
                     text = if (session.isVideo) "Incoming video call" else "Incoming voice call",
-                    fontSize = 14.sp,
+// Previous implementation retained:                     fontSize = 14.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                     color = com.example.chat.ui.theme.LocalAppColors.current.onAccent,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -610,7 +651,8 @@ private fun GoogleClassicIncomingCall(
                     Text(
                         text = "Swipe up to answer",
                         color = callSecondary(),
-                        fontSize = 13.sp,
+// Previous implementation retained:                         fontSize = 13.sp,
+                        style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
                     )
                 }
                 VerticalDragPuck(
@@ -622,7 +664,8 @@ private fun GoogleClassicIncomingCall(
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, semanticLabel = null, color = tokens.acceptColor, modifier = Modifier.size(32.dp))
                 } }
                 Spacer(Modifier.height(16.dp))
-                TextButton(onClick = onDecline, modifier = Modifier.heightIn(min = 48.dp)) { Text("Decline", color = tokens.declineColor) }
+// Previous implementation retained:                 TextButton(onClick = onDecline, modifier = Modifier.heightIn(min = 48.dp)) { Text("Decline", color = tokens.declineColor) }
+                TextButton(onClick = onDecline, modifier = Modifier.heightIn(min = 48.dp)) { Text("Decline", color = tokens.declineColor, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control) }
 
             }
         }
@@ -665,7 +708,8 @@ private fun VivoIqooIncomingCall(
                     Text(
                         text = if (session.isVideo) "INCOMING VIDEO" else "INCOMING CALL",
                         color = tokens.primaryAccent,
-                        fontSize = 12.sp,
+// Previous implementation retained:                         fontSize = 12.sp,
+                        style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -687,13 +731,15 @@ private fun VivoIqooIncomingCall(
                     maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    fontSize = 24.sp,
+// Previous implementation retained:                     fontSize = 24.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                     fontWeight = FontWeight.Bold,
                     color = callForeground(),
                 )
                 Text(
                     text = if (session.isVideo) "Video call" else "Voice call",
-                    fontSize = 14.sp,
+// Previous implementation retained:                     fontSize = 14.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                     color = tokens.secondaryText,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -766,14 +812,16 @@ private fun AzureRingVerticalIncomingCall(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.semantics { heading() },
-                fontSize = 24.sp,
+// Previous implementation retained:                 fontSize = 24.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                 fontWeight = FontWeight.Bold,
                 color = tokens.primaryText,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 text = if (session.isVideo) "Incoming video call" else "Incoming voice call",
-                fontSize = 15.sp,
+// Previous implementation retained:                 fontSize = 15.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                 color = tokens.secondaryText,
             )
             Spacer(Modifier.weight(1f))
@@ -884,7 +932,8 @@ private fun MonoChevronDarkIncomingCall(
         Text(
             text = "Incoming call",
             color = tokens.primaryText,
-            fontSize = 15.sp,
+// Previous implementation retained:             fontSize = 15.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
             fontWeight = FontWeight.Medium,
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -901,14 +950,16 @@ private fun MonoChevronDarkIncomingCall(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.semantics { heading() },
-                fontSize = 24.sp,
+// Previous implementation retained:                 fontSize = 24.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                 fontWeight = FontWeight.Bold,
                 color = tokens.primaryText,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 text = if (session.isVideo) "Video call" else "Voice call",
-                fontSize = 14.sp,
+// Previous implementation retained:                 fontSize = 14.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                 color = tokens.secondaryText,
             )
             Spacer(Modifier.weight(1f))
@@ -996,23 +1047,27 @@ private fun NextcloudTalkIncomingCall(
                     maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                fontSize = 22.sp,
+// Previous implementation retained:                 fontSize = 22.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                 fontWeight = FontWeight.Bold,
                 color = com.example.chat.ui.theme.LocalAppColors.current.onAccent,
             )
             Spacer(Modifier.height(2.dp))
             Text(
                 text = if (session.isVideo) "INCOMING VIDEO" else "INCOMING",
-                fontSize = 13.sp,
+// Previous implementation retained:                 fontSize = 13.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                 color = com.example.chat.ui.theme.LocalAppColors.current.onAccent.copy(alpha = 0.85f),
                 fontWeight = FontWeight.Medium,
             )
         }
         Spacer(Modifier.weight(1f))
         Text(
-            text = "Tap or swipe up to answer",
+// Previous implementation retained:             text = "Tap or swipe up to answer",
+            text = "Swipe up to answer",
             color = tokens.secondaryText,
-            fontSize = 13.sp,
+// Previous implementation retained:             fontSize = 13.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
         )
         Spacer(Modifier.height(16.dp))
         Row(
@@ -1212,7 +1267,8 @@ private fun VerticalDragPuck(
     var gestureAdmitted by remember { mutableStateOf(false) }
     // The node translates by exactly this much; the offset lambda below is
     // the single writer, so this always holds the last LAID-OUT translation.
-    val appliedOffsetPx = remember { object { var y = 0 } }
+// Previous implementation retained:     val appliedOffsetPx = remember { object { var y = 0 } }
+    val appliedOffsetPx = remember { IncomingPuckAppliedOffset() }
     val currentUp by androidx.compose.runtime.rememberUpdatedState(onDragUp)
     val currentDown by androidx.compose.runtime.rememberUpdatedState(onDragDown)
     val currentTap by androidx.compose.runtime.rememberUpdatedState(onTap)
@@ -1343,7 +1399,8 @@ fun BundleActionButton(
         Spacer(Modifier.height(8.dp))
         Text(
             text = label,
-            fontSize = 13.sp,
+// Previous implementation retained:             fontSize = 13.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
             fontWeight = FontWeight.Medium,
             color = callForeground(),
         )
@@ -1374,7 +1431,8 @@ private fun TapHaloControl(label: String, icon: ImageVector, iconTint: Color, ha
                 Icon(icon, null, tint = iconTint, modifier = Modifier.size(32.dp))
             }
         }
-        Text(label, color = callForeground(), fontSize = 12.sp)
+// Previous implementation retained:         Text(label, color = callForeground(), fontSize = 12.sp)
+        Text(label, color = callForeground(), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
     }
 }
 
@@ -1390,8 +1448,10 @@ fun SharedIncomingCallBanner(session: ChatyCallSession, pending: Boolean,
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (profile.bannerAccentEdge) Box(Modifier.fillMaxWidth().height(3.dp).background(colors.accent, CircleShape))
                 Column(Modifier.fillMaxWidth().clickable(onClickLabel = "Open incoming call", onClick = onExpand)) {
-                    Text(session.remoteDisplayName, color = callForeground(), fontWeight = FontWeight.SemiBold)
-                    Text(if (session.isVideo) "Incoming video call · Chaty" else "Incoming call · Chaty", color = callSecondary(), fontSize = 13.sp)
+// Previous implementation retained:                     Text(session.remoteDisplayName, color = callForeground(), fontWeight = FontWeight.SemiBold)
+                    Text(session.remoteDisplayName, color = callForeground(), fontWeight = FontWeight.SemiBold, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller)
+// Previous implementation retained:                     Text(if (session.isVideo) "Incoming video call · Chaty" else "Incoming call · Chaty", color = callSecondary(), fontSize = 13.sp)
+                    Text(if (session.isVideo) "Incoming video call · Chaty" else "Incoming call · Chaty", color = callSecondary(), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status)
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onDecline, enabled = !pending, modifier = Modifier.weight(1f).heightIn(min = 52.dp), colors = ButtonDefaults.buttonColors(containerColor = com.example.chat.ui.theme.LocalAppColors.current.error, contentColor = com.example.chat.ui.theme.LocalAppColors.current.onError)) {
@@ -1405,3 +1465,7 @@ fun SharedIncomingCallBanner(session: ChatyCallSession, pending: Boolean,
         }
     }
 }
+
+
+/** Plain layout bookkeeping, deliberately not snapshot state (avoids layout/recompose loops). */
+private class IncomingPuckAppliedOffset { var x: Int = 0; var y: Int = 0 }

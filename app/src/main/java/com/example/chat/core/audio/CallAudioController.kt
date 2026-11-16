@@ -16,14 +16,23 @@ import java.util.concurrent.CopyOnWriteArrayList
  * com.example.chat.data.services.CallAudioController, which owns the
  * AudioManager/WebRTC mechanics driven by the signaling state machine.
  */
+interface CallAudioSessionDriver {
+    val activeRoute: AudioOutputRoute
+    suspend fun initializeCallAudio(isVideo: Boolean = false): Boolean
+    suspend fun switchMediaRoute(targetRoute: AudioOutputRoute): Boolean
+    suspend fun terminateCallAudio()
+}
+
 class CallAudioController(
     private val coordinator: AudioPolicyGate,
     private val capabilityService: AudioCapabilityService,
     private val signalingService: CallSignalingService? = null,
-) {
+// Previous implementation retained: ) {
+) : CallAudioSessionDriver {
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
 
-    val activeRoute: AudioOutputRoute get() = coordinator.activeRoute
+// Previous implementation retained:     val activeRoute: AudioOutputRoute get() = coordinator.activeRoute
+    override val activeRoute: AudioOutputRoute get() = coordinator.activeRoute
     val sessionState: AudioSessionState get() = coordinator.state
     val isDualActive: Boolean get() = capabilityService.isDualOutputActive
 
@@ -32,7 +41,8 @@ class CallAudioController(
     private fun notifyListeners() { listeners.forEach { it() } }
 
     /** Start audio session coordinated with call engine. */
-    suspend fun initializeCallAudio(isVideo: Boolean = false): Boolean {
+// Previous implementation retained:     suspend fun initializeCallAudio(isVideo: Boolean = false): Boolean {
+    override suspend fun initializeCallAudio(isVideo: Boolean): Boolean {
         val defaultRoute =
             if (isVideo) AudioOutputRoute.speaker else AudioOutputRoute.receiver
         val ok = coordinator.startCallSession(initialRoute = defaultRoute)
@@ -50,6 +60,7 @@ class CallAudioController(
     }
 
     /** Switch audio route during an active call. */
+// Previous implementation retained:     suspend fun switchRoute(targetRoute: AudioOutputRoute): Boolean {
     suspend fun switchRoute(targetRoute: AudioOutputRoute): Boolean {
         val success = coordinator.setCallRoute(targetRoute)
         if (success && signalingService != null) {
@@ -63,8 +74,16 @@ class CallAudioController(
         return success
     }
 
+    /** Media path must not select a different output after a failed route request. */
+    override suspend fun switchMediaRoute(targetRoute: AudioOutputRoute): Boolean {
+        val switched = (coordinator as? NoFallbackCallRouteGate)?.setCallRouteWithoutFallback(targetRoute) == true
+        notifyListeners()
+        return switched
+    }
+
     /** Teardown call audio session deterministically. */
-    suspend fun terminateCallAudio() {
+// Previous implementation retained:     suspend fun terminateCallAudio() {
+    override suspend fun terminateCallAudio() {
         coordinator.endCallSession()
         notifyListeners()
     }

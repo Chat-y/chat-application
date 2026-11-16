@@ -125,6 +125,7 @@ fun GlobalSearchScreen(
     val inputLabel = stringResource(R.string.social_search_input_label)
     val busyLabel = stringResource(R.string.social_search_busy)
     val openingLabel = stringResource(R.string.social_search_opening)
+    val checkingLabel = stringResource(R.string.privacy_search_checking_local)
     // Suspended work must read current host policy/callbacks after it resumes.
     val currentSessionIdentity by androidx.compose.runtime.rememberUpdatedState(searchSessionIdentity)
     val currentSessionCheck by androidx.compose.runtime.rememberUpdatedState(isSearchSessionCurrent)
@@ -135,6 +136,8 @@ fun GlobalSearchScreen(
     val currentUnlock by androidx.compose.runtime.rememberUpdatedState(onOpenLockedChats)
     val currentVerifier by androidx.compose.runtime.rememberUpdatedState(verifySecretPhrase)
     val currentDirectory by androidx.compose.runtime.rememberUpdatedState(searchUsers)
+    val currentConversations by androidx.compose.runtime.rememberUpdatedState(conversations)
+    val currentOpenDirect by androidx.compose.runtime.rememberUpdatedState(openDirectConversation)
     fun isCurrentSearchSession(): Boolean = currentSessionIdentity == searchSessionIdentity && currentSessionCheck()
     val requestGuard = remember(searchSessionIdentity) { SearchRequestGuard() }
     var query by remember(searchSessionIdentity) { mutableStateOf("") }
@@ -151,6 +154,8 @@ fun GlobalSearchScreen(
         }
     } else emptyList()
     var isSearching by remember(searchSessionIdentity) { mutableStateOf(false) }
+    // Presentation only: never used for verification, routing or search eligibility.
+    var verifyingRequestId by remember(searchSessionIdentity) { mutableStateOf<Int?>(null) }
     var searchFailed by remember(searchSessionIdentity) { mutableStateOf(false) }
     var isOpeningChat by remember(searchSessionIdentity) { mutableStateOf(false) }
     var openingUserId by remember(searchSessionIdentity) { mutableStateOf<String?>(null) }
@@ -202,6 +207,7 @@ fun GlobalSearchScreen(
         searchFailed = false
         debounceJob?.cancel()
         remoteJob?.cancel()
+        verifyingRequestId = null
         val trimmed = raw.trim()
         val requestId = requestGuard.begin()
         // Keep the previous section stable while the next query loads, but disable its actions.
@@ -215,6 +221,7 @@ fun GlobalSearchScreen(
             if (!requestGuard.isCurrent(requestId) || !isCurrentSearchSession()) return@launch
             // A vault secret is not a remote username. Wait for local
             // verification before any remote search, even if it is slow.
+            verifyingRequestId = requestId
             val isMatch = try {
                 kotlinx.coroutines.withTimeout(10_000L) { currentVerifier(trimmed) }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
@@ -239,6 +246,9 @@ fun GlobalSearchScreen(
                     currentNotify(context.getString(R.string.social_search_private_failure))
                 }
                 return@launch
+            } finally {
+                // An older cancelled check must not clear a newer request's indicator.
+                if (verifyingRequestId == requestId) verifyingRequestId = null
             }
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (!requestGuard.isCurrent(requestId) || !isCurrentSearchSession()) return@launch
@@ -261,11 +271,22 @@ fun GlobalSearchScreen(
     var openingJob by remember(searchSessionIdentity) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     fun startConversationWith(user: UserProfile) {
         if (isOpeningChat || isSearching || !(currentSessionIdentity == searchSessionIdentity && currentSessionCheck())) return
+        if (SearchRecipientRules.hasProtectedDirect(user.id, currentConversations) {
+                currentHiddenCheck(it) || currentProtectedCheck(it)
+            }) {
+            currentNotify(context.getString(R.string.social_search_open_failure))
+            return
+        }
         isOpeningChat = true
         openingUserId = user.id
         openingJob = scope.launch {
             try {
-                val conversation = openDirectConversation(user)
+                if (!isCurrentSearchSession()) return@launch
+                check(!SearchRecipientRules.hasProtectedDirect(user.id, currentConversations) {
+                    currentHiddenCheck(it) || currentProtectedCheck(it)
+                })
+                val conversation = currentOpenDirect(user)
+                check(conversation.id.isNotBlank() && conversation.isDirect)
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (currentSessionIdentity == searchSessionIdentity && currentSessionCheck() && !currentHiddenCheck(conversation.id) &&
                     !currentProtectedCheck(conversation.id)) {
@@ -353,10 +374,17 @@ fun GlobalSearchScreen(
                     },
                 )
             }
-            if (isSearching || isOpeningChat) {
+            // if (isSearching || isOpeningChat) {
+            if (isSearching || isOpeningChat || verifyingRequestId != null) {
                 CircularProgressIndicator(
                     modifier = Modifier.padding(16.dp).size(18.dp).semantics {
-                        contentDescription = if (isOpeningChat) openingLabel else busyLabel
+                        // contentDescription = if (isOpeningChat) openingLabel else busyLabel
+                        contentDescription = when {
+                            isOpeningChat -> openingLabel
+                            verifyingRequestId != null -> checkingLabel
+                            else -> busyLabel
+                        }
+                        liveRegion = LiveRegionMode.Polite
                     },
                     strokeWidth = 2.dp,
                 )

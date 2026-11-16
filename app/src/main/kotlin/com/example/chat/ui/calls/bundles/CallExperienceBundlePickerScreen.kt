@@ -1,5 +1,6 @@
 package com.example.chat.ui.calls.bundles
 
+import androidx.compose.ui.semantics.Role
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -59,6 +60,8 @@ fun CallExperienceBundlePickerScreen(
                                 else error("Message bundle application is unavailable on this screen.")
                                 if (target != com.example.chat.ui.calls.BundleApplyTarget.MESSAGES) selectedId = pending.id
                                 pendingBundle = null; previewBundleId = null
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
                             } catch (error: Exception) { applyError = error.message ?: "Unable to apply bundle" }
                             finally { applying = false }
                         }
@@ -134,7 +137,7 @@ fun CallExperienceBundlePickerScreen(
                             else Modifier
                         )
                         // CALL-R1-57: tapping the card previews; only the Apply button opens the dialog.
-                        .clickable {
+                        .clickable(onClickLabel = "Preview ${bundle.displayName}", role = Role.Button) {
                             previewBundleId = bundle
                         },
                 ) {
@@ -242,6 +245,7 @@ fun CallBundleLivePreviewScreen(
     onClose: () -> Unit,
     onApply: () -> Unit,
 ) {
+    val previewColors = MaterialTheme.colorScheme
     var previewTab by remember { mutableIntStateOf(0) }
     // 0: Incoming, 1: Active 1:1, 2: Group Meeting, 3: Invite Screen, 4: Compact Cards
 
@@ -288,7 +292,8 @@ fun CallBundleLivePreviewScreen(
 
     Scaffold(
         topBar = {
-            Surface(color = Color(0xFF1E1E24)) {
+            // Prior preview chrome: fixed dark surface and white foregrounds.
+            Surface(color = previewColors.surface) {
                 Column(modifier = Modifier.statusBarsPadding()) {
                     Row(
                         modifier = Modifier
@@ -299,11 +304,11 @@ fun CallBundleLivePreviewScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = onClose) {
-                                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close", color = Color.White)
+                                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close", color = previewColors.onSurface)
                             }
                             Text(
                                 text = "Preview: ${bundleId.displayName}",
-                                color = Color.White,
+                                color = previewColors.onSurface,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                             )
@@ -327,7 +332,7 @@ fun CallBundleLivePreviewScreen(
                     androidx.compose.material3.TabRow(
                         selectedTabIndex = previewGroup,
                         containerColor = Color.Transparent,
-                        contentColor = Color.White,
+                        contentColor = previewColors.onSurface,
                     ) {
                         previewGroups.forEachIndexed { gi, group ->
                             Tab(
@@ -346,7 +351,7 @@ fun CallBundleLivePreviewScreen(
                             TextButton(onClick = { previewTab = entry.first }) {
                                 Text(
                                     entry.second,
-                                    color = if (chipSelected) Color.White else Color.White.copy(alpha = 0.6f),
+                                    color = if (chipSelected) previewColors.onSurface else previewColors.onSurfaceVariant,
                                     fontWeight = if (chipSelected) FontWeight.Bold else FontWeight.Normal,
                                     fontSize = 13.sp,
                                 )
@@ -429,9 +434,9 @@ fun CallBundleLivePreviewScreen(
             if (previewTab == 2 || previewTab == 3) {
                 Text(
                     text = "Concept fixture only: group calling is not available in the current runtime.",
-                    color = Color.White,
+                    color = previewColors.onSurface,
                     fontSize = 12.sp,
-                    modifier = Modifier.align(Alignment.BottomCenter).background(Color(0xFF1E1E24)).padding(8.dp),
+                    modifier = Modifier.align(Alignment.BottomCenter).background(previewColors.surface).padding(8.dp),
                 )
             }
         }

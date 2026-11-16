@@ -35,6 +35,8 @@ enum class ChatyIconType {
     volumeHigh, volumeMute, fullscreen, exitFullscreen, subtitles,
     search, convert, bookmark, rotateRight, pageExtract,
     merge, split, share, delete,
+    // MV-R4-048: transport modes share the same Canvas stroke language.
+    shuffle, repeat, repeatOne,
 }
 
 @Composable
@@ -154,6 +156,21 @@ fun ChatyMediaIcon(
                 line(0.15f, 0.5f, 0.65f, 0.5f)
                 line(0.15f, 0.75f, 0.55f, 0.75f)
                 path(fill = true) { m(0.72f, 0.6f); l(0.88f, 0.7f); l(0.72f, 0.8f); close() }
+            }
+            ChatyIconType.shuffle -> {
+                path { m(0.15f, 0.25f); l(0.30f, 0.25f); l(0.70f, 0.75f); l(0.85f, 0.75f) }
+                path { m(0.15f, 0.75f); l(0.30f, 0.75f); l(0.70f, 0.25f); l(0.85f, 0.25f) }
+                path { m(0.73f, 0.13f); l(0.85f, 0.25f); l(0.73f, 0.37f) }
+                path { m(0.73f, 0.63f); l(0.85f, 0.75f); l(0.73f, 0.87f) }
+            }
+            ChatyIconType.repeat, ChatyIconType.repeatOne -> {
+                path { m(0.18f, 0.38f); l(0.18f, 0.25f); l(0.82f, 0.25f) }
+                path { m(0.70f, 0.13f); l(0.82f, 0.25f); l(0.70f, 0.37f) }
+                path { m(0.82f, 0.62f); l(0.82f, 0.75f); l(0.18f, 0.75f) }
+                path { m(0.30f, 0.63f); l(0.18f, 0.75f); l(0.30f, 0.87f) }
+                if (icon == ChatyIconType.repeatOne) {
+                    path { m(0.44f, 0.44f); l(0.50f, 0.40f); l(0.50f, 0.60f) }
+                }
             }
             ChatyIconType.volumeHigh -> {
                 path {

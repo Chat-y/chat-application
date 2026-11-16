@@ -121,6 +121,7 @@ fun ThemeEditorScreen(
     conversationKey: String? = null,
     conversationTitle: String? = null,
     isScopeCurrent: () -> Boolean = { true },
+    additionalChatAppearance: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalAppColors.current
     val view = LocalView.current
@@ -142,10 +143,13 @@ fun ThemeEditorScreen(
     // Template/prefs changes re-resolve currentSetupLayout() in Dart's build; mirror with a listener tick.
     var layoutTick by remember { mutableStateOf(0) }
     DisposableEffect(templateController, preferences) {
-        val l: () -> Unit = { layoutTick++ }
+        // Previous callback: val l: () -> Unit = { layoutTick++ }
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        var attached = true
+        val l: () -> Unit = { handler.post { if (attached) layoutTick++ }; Unit }
         templateController?.addListener(l)
         preferences.addListener(l)
-        onDispose { templateController?.removeListener(l); preferences.removeListener(l) }
+        onDispose { attached=false;templateController?.removeListener(l); preferences.removeListener(l) }
     }
 
     fun show(msg: String, color: Color? = null) {
@@ -197,7 +201,8 @@ fun ThemeEditorScreen(
                     ChatyThemeManager.saveThemeToFile(exportDirectory, current)
                 }
                 show("Theme exported to ${file.name}", colors.success)
-            } catch (e: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 show("Export failed: $e")
             }
         }
@@ -216,7 +221,8 @@ fun ThemeEditorScreen(
                     else "Imported and applied \"${theme.name}\" successfully.",
                     colors.success,
                 )
-            } catch (e: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 show("Import failed: ${if (e is ThemeFormatException) e.message else "Invalid theme JSON"}", colors.error)
             }
         }
@@ -237,7 +243,8 @@ fun ThemeEditorScreen(
                     else "Palette extracted and applied from photo!",
                     colors.success,
                 )
-            } catch (e: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 show("Could not generate a theme from that image. Try another image.")
             }
         }
@@ -274,8 +281,8 @@ fun ThemeEditorScreen(
                     if (!scoped) {
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Reset to Defaults", color = Color(0xFFFF5252)) },
-                            leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(20.dp), tint = Color(0xFFFF5252)) },
+                            text = { Text("Reset to Defaults", color = colors.error) },
+                            leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(20.dp), tint = colors.error) },
                             onClick = { menuOpen = false; confirmReset() },
                         )
                     }
@@ -285,6 +292,8 @@ fun ThemeEditorScreen(
     ) {
         Box(Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth()) {
+                // Optional separately-scoped local controls. Existing theme staging/apply is unchanged.
+                if (scoped) additionalChatAppearance?.invoke()
                 // Live palette preview (two real chat bubbles).
                 Column(Modifier.padding(bottom = 12.dp)) {
                     ChatySettingsCard(padding = PaddingValues(12.dp)) {
@@ -348,12 +357,15 @@ fun ThemeEditorScreen(
                                 var tickMenu by remember { mutableStateOf(false) }
                                 Box {
                                     TextButton(onClick = { tickMenu = true }) {
-                                        Text(current.deliveryTickStyle.displayName, color = colors.foreground, fontSize = 13.sp)
+                                        // Previously displayed current.deliveryTickStyle.displayName. Old IDs now use the kept label.
+                                        Text(com.example.chat.core.theme.deliveryStyleLabel(current.deliveryTickStyle), color = colors.foreground, fontSize = 13.sp)
                                     }
                                     DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = tickMenu, onDismissRequest = { tickMenu = false }) {
-                                        DeliveryIconStyle.values().forEach { style ->
+                                        // Previous all-95 picker: DeliveryIconStyle.values().forEach { style ->
+                                        com.example.chat.core.theme.uniqueDeliveryStyles.forEach { style ->
                                             DropdownMenuItem(
-                                                text = { Text(style.displayName, color = colors.foreground, fontSize = 13.sp) },
+                                                // Previous label: style.displayName
+                                                text = { Text(com.example.chat.core.theme.deliveryStyleLabel(style), color = colors.foreground, fontSize = 13.sp) },
                                                 onClick = {
                                                     tickMenu = false
                                                     current = current.copy(deliveryTickStyle = style, tickStyle = style.displayName)
@@ -447,12 +459,12 @@ fun ThemeEditorScreen(
                     if (!scoped) OutlinedButton(
                         onClick = { confirmReset() },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        border = BorderStroke(1.2.dp, Color(0xFFFF5252)),
+                        border = BorderStroke(1.2.dp, colors.error),
                         contentPadding = PaddingValues(vertical = 14.dp),
                     ) {
-                        Icon(Icons.Rounded.RestartAlt, null, tint = Color(0xFFFF5252))
+                        Icon(Icons.Rounded.RestartAlt, null, tint = colors.error)
                         Spacer(Modifier.width(8.dp))
-                        Text("Reset to Default System Theme", color = Color(0xFFFF5252), fontWeight = FontWeight.SemiBold)
+                        Text("Reset to Default System Theme", color = colors.error, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 Spacer(Modifier.height(48.dp))
@@ -488,7 +500,8 @@ fun ThemeEditorScreen(
 
     if (guideOpen) {
         ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp, shape = com.example.chat.ui.kit.ChatyModalShape, onDismissRequest = { guideOpen = false }, containerColor = colors.surface) {
-            Column(Modifier.padding(24.dp)) {
+            // Previous non-scrolling sheet body: Column(Modifier.padding(24.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.CloudDownload, null, Modifier.size(28.dp), tint = colors.primary)
                     Spacer(Modifier.width(12.dp))
@@ -496,7 +509,7 @@ fun ThemeEditorScreen(
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Chaty includes 23 authentic built-in themes (WhatsApp, iOS, Midnight, AMOLED, Paper, Monochrome, and more). " +
+                    "Chaty includes ${ThemePresets.all.size} built-in themes (WhatsApp, iOS, Midnight, AMOLED, Paper, Monochrome, and more). " +
                         "You can also download and import custom community theme files (.json) or extract palettes from wallpapers directly.",
                     color = colors.foregroundSecondary, fontSize = 14.sp, lineHeight = 19.6.sp,
                 )
@@ -555,3 +568,5 @@ private fun LabeledSlider(
         },
     )
 }
+
+// Previous reset accent literal retained inactive: Color(0xFFFF5252)

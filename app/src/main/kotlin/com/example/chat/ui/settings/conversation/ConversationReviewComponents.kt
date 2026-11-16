@@ -35,6 +35,24 @@ import com.example.chat.ui.theme.LocalThemeConfig
 
 /** Scope listeners to conversation changes; unrelated preference changes do not redraw previews. */
 @Composable
+internal fun rememberConversationPreferences(
+    controller: ChatyPreferencesController,
+    project: (ConversationPreferences) -> ConversationPreferences = { it },
+): ConversationPreferences {
+    val currentProject by androidx.compose.runtime.rememberUpdatedState(project)
+    var state by remember(controller) { mutableStateOf(project(controller.conversation)) }
+    DisposableEffect(controller) {
+        val listener: () -> Unit = { state = currentProject(controller.conversation) }
+        controller.addListener(listener)
+        // Close the render-to-listener-registration race without waiting for another update.
+        listener()
+        onDispose { controller.removeListener(listener) }
+    }
+    return state
+}
+
+/* Previous whole-conversation snapshot retained for reference.
+@Composable
 internal fun rememberConversationPreferences(controller: ChatyPreferencesController): ConversationPreferences {
     var state by remember(controller) { mutableStateOf(controller.conversation) }
     DisposableEffect(controller) {
@@ -44,6 +62,8 @@ internal fun rememberConversationPreferences(controller: ChatyPreferencesControl
     }
     return state
 }
+
+*/
 
 /** All writes from these pages read the latest snapshot under the same controller lock. */
 internal fun ChatyPreferencesController.editConversation(change: (ConversationPreferences) -> ConversationPreferences) {
@@ -59,12 +79,15 @@ internal fun conversationContrast(a: Color, b: Color): Float {
 internal fun conversationOnColor(background: Color, first: Color, second: Color): Color =
     if (conversationContrast(first, background) >= conversationContrast(second, background)) first else second
 
+/** Pure threshold decision shared by the note and source regression tests. */
+internal fun isConversationContrastLow(ratio: Float, minimum: Float): Boolean = ratio < minimum
+
 @Composable
 internal fun ConversationContrastNote(foreground: Color, background: Color, minimum: Float, label: String) {
     val strings = androidx.compose.ui.platform.LocalContext.current.resources
     val canvas = Color(LocalThemeConfig.current.backgroundColor)
     val opaqueBackground = background.compositeOver(canvas)
-    if (conversationContrast(foreground, opaqueBackground) < minimum) {
+    if (isConversationContrastLow(conversationContrast(foreground, opaqueBackground), minimum)) {
         Text(strings.getString(com.example.chat.R.string.conv_helper_contrast_warning, label, minimum.toString()),
             color = Color(LocalThemeConfig.current.primaryTextColor), fontSize = 12.sp,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -82,11 +105,20 @@ internal fun ConversationColorRow(
     onColorTap: () -> Unit,
     onReset: () -> Unit,
     enabled: Boolean = true,
+    iconContent: (@Composable () -> Unit)? = null,
+    subtitleMaxLines: Int = Int.MAX_VALUE,
 ) {
     val strings = androidx.compose.ui.platform.LocalContext.current.resources
-    val description = colorValue?.let { strings.getString(com.example.chat.R.string.conv_helper_custom_colour, it and 0xFFFFFFFFL) } ?: strings.getString(com.example.chat.R.string.conv_helper_theme_default)
+    val colourPreference = ConversationColorPreference.fromStored(colorValue)
+    val description = when (colourPreference) {
+        ConversationColorPreference.ThemeDefault -> strings.getString(com.example.chat.R.string.conv_helper_theme_default)
+        is ConversationColorPreference.Custom -> strings.getString(com.example.chat.R.string.conv_helper_custom_colour,
+            colourPreference.argb and 0xFFFFFFFFL)
+    }
+    // Previous implicit null/custom branching retained:
+    // val description = colorValue?.let { strings.getString(com.example.chat.R.string.conv_helper_custom_colour, it and 0xFFFFFFFFL) } ?: strings.getString(com.example.chat.R.string.conv_helper_theme_default)
     Column(Modifier.alpha(if (enabled) 1f else 0.38f).semantics { stateDescription = description; if (!enabled) disabled() }) {
-        GbSettingRow(title = title, icon = icon, subtitle = listOfNotNull(subtitle, description).joinToString(" · "),
+        GbSettingRow(title = title, icon = icon, iconContent = iconContent, subtitleMaxLines = subtitleMaxLines, subtitle = listOfNotNull(subtitle, description).joinToString(" · "),
             onTap = { if (enabled) onColorTap() },
             trailing = {
                 Row {

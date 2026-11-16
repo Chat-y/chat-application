@@ -54,6 +54,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -118,6 +120,8 @@ fun FriendMapScreen(
     var styleChosenByUser by remember { mutableStateOf(false) }
     LaunchedEffect(systemDark) {
         if (!styleChosenByUser) selectedStyle = if (systemDark) "dark" else "positron"
+        // MAP-R1-004: 3D buildings reset to off on every theme/style change by design, so the toggle
+        // state always matches the freshly loaded style. Documented, not a bug.
         buildingsEnabled = false
         mapView?.setTheme(systemDark)
         mapView?.selectStyle(selectedStyle)
@@ -144,6 +148,8 @@ fun FriendMapScreen(
                 check(LocationManagerCompat.isLocationEnabled(manager)) { "Location services are off." }
                 val provider = when {
                     !precise && manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                    // MAP-R2-073: coarse-only never falls through to GPS (previous fallthrough kept below for precise).
+                    !precise -> error("Approximate location is unavailable on this device.")
                     manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
                     manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
                     else -> error("No location provider is available.")
@@ -152,8 +158,9 @@ fun FriendMapScreen(
                     ?: error("No current location was found. Try again.")
                 val ageMs = (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000
                 check(ageMs in 0..15_000) { "Location is too old. Try again." }
-                check(fix.hasAccuracy()) { "Location accuracy is unavailable." }
-                val pin = FriendMapOwnPin(LocationCoordinate(fix.latitude, fix.longitude), precise)
+                check(fix.hasAccuracy() && fix.accuracy.isFinite() && fix.accuracy >= 0f) { "Location accuracy is unavailable." } // MAP-R2-077
+                val pin = FriendMapOwnPin(LocationCoordinate(fix.latitude, fix.longitude), precise,
+                    accuracyMeters = fix.accuracy.toDouble(), acquiredAtElapsedMs = fix.elapsedRealtimeNanos / 1_000_000)
                 ownPin = pin
                 mapView?.showPin(pin.coordinate)
                 status = if (precise) "Your location is shown on this map only. Nothing is shared." else "Approximate location shown on this map only. Nothing is shared."
@@ -190,11 +197,12 @@ fun FriendMapScreen(
             LocateAction.explainRationale -> rationale = true
             LocateAction.offerAppSettings -> {
                 status = "Permission is unavailable. You can allow location in app settings."
-                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+                // MAP-R2-070: guarded so a missing settings handler cannot crash.
+                runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))) }
             }
             LocateAction.offerLocationSettings -> {
                 status = "Location services are off. Turn them on, then tap Current location again."
-                context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                runCatching { context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } // MAP-R2-070
             }
         }
     }
@@ -216,7 +224,8 @@ fun FriendMapScreen(
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 FriendMapControlButton(onClick = { stopLocate(); onDismiss() }, enabled = true, contentDescription = "Back", containerColor = mapColors.secondaryContainer, contentColor = mapColors.onSecondaryContainer, disabledContainerColor = mapColors.surfaceVariant, disabledContentColor = mapColors.onSurfaceVariant, icon = Icons.Rounded.ChevronLeft)
-                Text("Friends map", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.titleMedium)
+                // MAP-R1-044: bounded flexible title so both actions stay reachable at large font scale.
+                Text("Friends map", modifier = Modifier.weight(1f, fill = false).padding(12.dp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.size(48.dp))
             }
             Box(Modifier.fillMaxWidth().weight(1f).semantics { paneTitle = "Friends map preview" }) { // MAP-R4-168
@@ -226,7 +235,7 @@ fun FriendMapScreen(
                         // Friend pins are never fabricated; map taps place nothing in this preview.
                         onPinSelected = { },
                         onUnavailable = { status = it }, onAttributionLink = onAttributionLink,
-                        onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); status = ""; onMapReady() }, nativeLayers = true,
+                        onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); if (status == "Loading map...") status = ""; onMapReady() }, nativeLayers = true,
                         systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true }, onViewChanged = { buildingsEnabled = it },
                     ).also { mapView = it; ownPin?.let { pin -> it.showPin(pin.coordinate) } } },
                     modifier = Modifier.fillMaxSize(),
@@ -238,7 +247,8 @@ fun FriendMapScreen(
                 color = mapColors.surfaceContainerHigh,
                 contentColor = mapColors.onSurface,
                 shape = CircleShape,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).semantics { contentDescription = FriendMapCopy.MAP_STATUS_CHIP },
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp), // MAP-R1-038: redundant contentDescription removed (Text is read once)
+                // .semantics { contentDescription = FriendMapCopy.MAP_STATUS_CHIP },
             ) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eyeOff, semanticLabel = null, modifier = Modifier.size(14.dp), color = mapColors.onSurfaceVariant)
@@ -278,7 +288,8 @@ fun FriendMapScreen(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.W700)
-                            Text("0 sharing with you", fontSize = 12.5.sp, color = mapColors.onSurfaceVariant)
+                            // MAP-R1-048: was "0 sharing with you" while not connected
+                            Text("Friend sharing not connected", fontSize = 12.5.sp, color = mapColors.onSurfaceVariant)
                         }
                         FriendMapControlButton(
                             onClick = { locate() }, enabled = currentLocationEnabled && !locating,
@@ -292,7 +303,8 @@ fun FriendMapScreen(
                     }
                     if (status.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
-                        Text(status, fontSize = 12.sp, color = mapColors.onSurfaceVariant)
+                        // MAP-R1-034: polite live region so state changes are announced once
+                        Text(status, fontSize = 12.sp, color = mapColors.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
                     }
                     Spacer(Modifier.height(12.dp))
                     when (connection) {
@@ -409,13 +421,19 @@ private fun FriendMapControlButton(
 /** Minimal token-colored indeterminate arc; replaces the Material progress control. */
 @Composable
 private fun FriendMapLocatingSpinner(color: Color) {
-    val transition = rememberInfiniteTransition(label = "friendMapLocate")
-    val angle by transition.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(durationMillis = 900, easing = LinearEasing)),
-        label = "sweep",
-    )
-    Canvas(Modifier.size(24.dp)) {
+    // Use the existing reactive app/system reduced-motion policy, not a remembered Settings snapshot.
+    val animationsOff = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    val angle = if (animationsOff) 0f else {
+        val transition = rememberInfiniteTransition(label = "friendMapLocate")
+        val animatedAngle by transition.animateFloat(
+            initialValue = 0f, targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(durationMillis = 900, easing = LinearEasing)),
+            label = "sweep",
+        )
+        animatedAngle
+    }
+    // MAP-R1-033: expose an indeterminate progress state
+    Canvas(Modifier.size(24.dp).semantics { progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo.Indeterminate }) {
         drawArc(color = color, startAngle = angle, sweepAngle = 270f, useCenter = false, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
     }
 }
@@ -425,7 +443,7 @@ private fun FriendMapLocatingSpinner(color: Color) {
 private fun FriendMapDialogAction(label: String, color: Color, onClick: () -> Unit) {
     Text(
         label, color = color, fontSize = 15.sp, fontWeight = FontWeight.W600,
-        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier.clip(RoundedCornerShape(10.dp)).heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), // MAP-R1-040: 48dp target
     )
 }
 

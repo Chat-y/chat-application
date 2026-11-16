@@ -19,6 +19,10 @@ class CallInboxRetryWorker(context: Context, params: WorkerParameters) : Corouti
         if (System.currentTimeMillis() >= deadline) return Result.success()
         return try {
             ServiceLocator.ensurePushReady(applicationContext)
+            // Cold process: restore the session before reading apiBackend state;
+            // an uninitialized backend makes the inbox read fail and
+            // Result.success() would kill the retry chain.
+            runCatching { ServiceLocator.apiBackend.initialize() }
             val needsRetry = ServiceLocator.retryDurableCallInboxFromWorker(hash)
             if (needsRetry && runAttemptCount < 4 && System.currentTimeMillis() < deadline) Result.retry() else Result.success()
         } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }

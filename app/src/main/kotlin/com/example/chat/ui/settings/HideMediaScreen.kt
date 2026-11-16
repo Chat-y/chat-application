@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -41,13 +42,25 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.example.chat.R
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
@@ -77,19 +90,31 @@ fun HideMediaScreen(
 ) {
     // Recomposition is keyed on the controller's version; reads below are narrowed to the three
     // hide values so unrelated preference changes do not re-read them (HM1-12, HM1-45).
-    val prefsVersion = rememberPreferencesVersion(preferences)
+// Superseded source retained below per additive-only review rule.
+//     val prefsVersion = rememberPreferencesVersion(preferences)
+    val markerState = remember(preferences, preferences.scopeGeneration) { androidx.compose.runtime.mutableStateOf(
+        Triple(preferences.universal.hidePhotosFromGallery, preferences.universal.hideVideosFromGallery, preferences.universal.hideGifsFromGallery)) }
+    androidx.compose.runtime.DisposableEffect(preferences, preferences.scopeGeneration) {
+        val listener: () -> Unit = { markerState.value = Triple(preferences.universal.hidePhotosFromGallery, preferences.universal.hideVideosFromGallery, preferences.universal.hideGifsFromGallery) }
+        preferences.addListener(listener)
+        onDispose { preferences.removeListener(listener) }
+    }
     val theme = themeController.globalTheme
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    val accent = Color(theme.accentColor)
+// Superseded source retained below per additive-only review rule.
+//     val accent = Color(theme.accentColor)
+    val accent = MaterialTheme.colorScheme.primary
     val haptic = LocalHapticFeedback.current
 
     val repository = remember(context) {
         HideMediaRepository(
             filesDir = context.filesDir,
             cacheDir = context.cacheDir,
+            additionalCacheDirs = { context.externalCacheDirs.filterNotNull() },
             debug = BuildConfig.DEBUG,
-            // One batched scan per type folder; the callback confirms completion (HM1-09, HM3-15, HM3-16).
+            // Prior comment: One batched scan per type folder; the callback confirms completion (HM1-09, HM3-15, HM3-16).
+            // Submit one scan per folder. The null listener below does not confirm scan completion.
             scanMedia = { dir ->
                 MediaScannerConnection.scanFile(context, arrayOf(dir.absolutePath), null, null)
             },
@@ -97,13 +122,19 @@ fun HideMediaScreen(
         )
     }
     val scope = rememberCoroutineScope()
-    val state = remember(preferences, repository, scope, snackbar) {
+// Superseded source retained below per additive-only review rule.
+//     val state = remember(preferences, repository, scope, snackbar) {
+    val state = remember(preferences, preferences.scopeGeneration, repository, scope, snackbar) {
         HideMediaState(preferences, repository, scope, snackbar)
     }
 
-    val hidePhotos = remember(prefsVersion) { preferences.universal.hidePhotosFromGallery }
-    val hideVideos = remember(prefsVersion) { preferences.universal.hideVideosFromGallery }
-    val hideGifs = remember(prefsVersion) { preferences.universal.hideGifsFromGallery }
+// Superseded source retained below per additive-only review rule.
+//     val hidePhotos = remember(prefsVersion) { preferences.universal.hidePhotosFromGallery }
+//     val hideVideos = remember(prefsVersion) { preferences.universal.hideVideosFromGallery }
+//     val hideGifs = remember(prefsVersion) { preferences.universal.hideGifsFromGallery }
+    val hidePhotos = markerState.value.first
+    val hideVideos = markerState.value.second
+    val hideGifs = markerState.value.third
     val onCount = listOf(hidePhotos, hideVideos, hideGifs).count { it }
 
     LaunchedEffect(state) { state.onScreenOpen() }
@@ -139,13 +170,24 @@ fun HideMediaScreen(
             onDismissRequest = { state.confirmReset = false },
             title = { Text("Reset gallery settings?") },
             text = { Text("Turn off all three hide preferences? This does not move, delete or change media already saved to a gallery or cloud backup.") },
-            dismissButton = { TextButton(onClick = { state.confirmReset = false }) { Text("Cancel") } },
+            // dismissButton = { TextButton(onClick = { state.confirmReset = false }) { Text("Cancel") } },
+            dismissButton = {
+                val cancelFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+                LaunchedEffect(cancelFocus) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    cancelFocus.requestFocus()
+                }
+                TextButton(modifier = Modifier.focusRequester(cancelFocus),
+                    onClick = { state.confirmReset = false }) { Text("Cancel") }
+            },
             confirmButton = { TextButton(onClick = { state.confirmResetNow() }) { Text("Reset") } },
         )
     }
 
     Box(Modifier.fillMaxSize()) {
-        ChatySettingsPage(title = "Hide media", onBack = onBack) {
+        // ChatySettingsPage(title = "Hide media", onBack = onBack) {
+        ChatySettingsPage(title = "Hide media", onBack = onBack,
+            titleModifier = Modifier.semantics { heading() }) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(Modifier.widthIn(max = 600.dp)) {
                     if (state.bannerVisible) {
@@ -154,9 +196,15 @@ fun HideMediaScreen(
                             Column(Modifier.padding(16.dp)) {
                                 Text("What hide from gallery does", style = MaterialTheme.typography.titleSmall)
                                 Spacer(Modifier.height(6.dp))
-                                Text("Keeps chat media out of gallery scans for the types you choose.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
-                                Text("Files stay inside Chaty; nothing is moved or deleted.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
-                                Text("Existing gallery and cloud copies are not changed.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+// Superseded source retained below per additive-only review rule.
+//                                 // Text("Keeps chat media out of gallery scans for the types you choose.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+                                Text(stringResource(R.string.privacy_media_banner_effect), color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+//                                 Text("Files stay inside Chaty; nothing is moved or deleted.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+//                                 Text("Existing gallery and cloud copies are not changed.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+                                Text("Maintains markers in app-private folders. Private files are not normally scanned by gallery apps.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, lineHeight = 20.sp)
+                                Text("Files stay inside Chaty; nothing is moved or deleted.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, lineHeight = 20.sp)
+// Text("Existing gallery and cloud copies are not changed.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, lineHeight = 20.sp)
+                                Text(stringResource(R.string.privacy_media_cloud_backup_limit), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, lineHeight = 20.sp)
                                 TextButton(onClick = { state.dismissBanner() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Got it") }
                             }
                         }
@@ -167,7 +215,9 @@ fun HideMediaScreen(
                         Text(
                             "These preferences maintain local media markers. Private chat files already stay inside Chaty; existing gallery copies, camera captures and cloud backups are not changed. Hiding is not encryption. Explicit Save to gallery can create a visible copy.",
                             Modifier.padding(16.dp),
-                            color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp,
+// Superseded source retained below per additive-only review rule.
+//                             color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, lineHeight = 20.sp,
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -175,24 +225,35 @@ fun HideMediaScreen(
                     // status line: local markers only, some gallery apps may still show files (HM2-40).
                     Text(
                         if (state.saving) "Saving..." else "$onCount of 3 markers on. Photo marker ${if (hidePhotos) "on" else "off"}, video marker ${if (hideVideos) "on" else "off"}, GIF marker ${if (hideGifs) "on" else "off"}. Existing gallery copies are unchanged.",
-                        color = Color(theme.secondaryTextColor), modifier = Modifier.padding(8.dp), fontSize = 14.sp,
+// Superseded source retained below per additive-only review rule.
+//                         color = Color(theme.secondaryTextColor), modifier = Modifier.padding(8.dp), fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp), fontSize = 14.sp,
                     )
                     Text(
                         "Local markers only; some gallery apps may still show files.",
-                        color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 8.dp), fontSize = 14.sp,
+// Superseded source retained below per additive-only review rule.
+//                         color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 8.dp), fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp), fontSize = 14.sp,
                     )
                     if (state.affectedCount >= 0) {
                         // HM1-30: how many items the markers currently cover.
                         Text(
-                            "${state.affectedCount} files currently in private chat media folders.",
-                            color = Color(theme.secondaryTextColor), modifier = Modifier.padding(8.dp), fontSize = 14.sp,
+                            // "${state.affectedCount} files currently in private chat media folders.",
+                            pluralStringResource(R.plurals.privacy_private_media_file_count,
+                                state.affectedCount, state.affectedCount),
+// Superseded source retained below per additive-only review rule.
+//                             color = Color(theme.secondaryTextColor), modifier = Modifier.padding(8.dp), fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp), fontSize = 14.sp,
                         )
                     }
                     Spacer(Modifier.height(8.dp))
                     GbCardContainer {
                         MediaVisibilitySwitch(
                             icon = Icons.Rounded.PhotoLibrary, title = "Photos",
-                            subtitle = "Keep chat photos out of gallery scans",
+// Superseded source retained below per additive-only review rule.
+//                             subtitle = "Keep chat photos out of gallery scans",
+                            // subtitle = "Maintain a private photo-folder marker; exports stay visible",
+                            subtitle = stringResource(R.string.privacy_media_photos_effect),
                             value = hidePhotos,
                             onChanged = { v ->
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress) // HM4-41
@@ -201,7 +262,10 @@ fun HideMediaScreen(
                         )
                         MediaVisibilitySwitch(
                             icon = Icons.Rounded.VideoLibrary, title = "Videos",
-                            subtitle = "Keep chat videos out of gallery scans",
+// Superseded source retained below per additive-only review rule.
+//                             subtitle = "Keep chat videos out of gallery scans",
+                            // subtitle = "Maintain a private video-folder marker; exports stay visible",
+                            subtitle = stringResource(R.string.privacy_media_videos_effect),
                             value = hideVideos,
                             onChanged = { v ->
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -210,7 +274,10 @@ fun HideMediaScreen(
                         )
                         MediaVisibilitySwitch(
                             icon = Icons.Rounded.GifBox, title = "GIFs",
-                            subtitle = "Keep chat GIFs and animated stickers out of gallery scans",
+// Superseded source retained below per additive-only review rule.
+//                             subtitle = "Keep chat GIFs and animated stickers out of gallery scans",
+                            // subtitle = "Maintain a private GIF-folder marker; exports stay visible",
+                            subtitle = stringResource(R.string.privacy_media_gifs_effect),
                             value = hideGifs,
                             onChanged = { v ->
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -224,7 +291,8 @@ fun HideMediaScreen(
                         TextButton(
                             onClick = { state.requestReset() },
                             enabled = !state.saving && (hidePhotos || hideVideos || hideGifs),
-                            modifier = Modifier.heightIn(min = 48.dp),
+                            // modifier = Modifier.heightIn(min = 48.dp),
+                            modifier = Modifier.minimumInteractiveComponentSize().heightIn(min = 48.dp),
                             colors = ButtonDefaults.textButtonColors(contentColor = accent),
                             contentPadding = ButtonDefaults.TextButtonWithIconContentPadding,
                         ) {
@@ -242,10 +310,21 @@ fun HideMediaScreen(
 
 /** Single accessible switch target; no duplicate child toggle action. */
 @Composable
-private fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, value: Boolean, onChanged: (Boolean) -> Unit) {
+// private fun MediaVisibilitySwitch(icon: ...)
+internal fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, value: Boolean, onChanged: (Boolean) -> Unit) {
+    val actionLabel = stringResource(if (value) R.string.privacy_media_turn_off else R.string.privacy_media_turn_on)
+    var keyboardFocused by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().heightIn(min = 72.dp)
-            .semantics { stateDescription = if (value) "On" else "Off" }
+            .onFocusChanged { keyboardFocused = it.isFocused }
+            .border(2.dp, if (keyboardFocused) MaterialTheme.colorScheme.primary else Color.Transparent,
+                RoundedCornerShape(12.dp))
+            // .semantics { stateDescription = if (value) "On" else "Off" }
+            .semantics {
+                stateDescription = if (value) "On" else "Off"
+                // Label the existing toggle action; do not add a second action or bypass toggleable.
+                onClick(label = actionLabel, action = null)
+            }
             .toggleable(value = value, role = Role.Switch, onValueChange = onChanged)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),

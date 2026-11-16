@@ -28,6 +28,8 @@ import kotlinx.coroutines.withTimeout
  *   <service android:name=".data.services.CallForegroundService"
  *       android:foregroundServiceType="microphone|camera|mediaProjection" android:stopWithTask="false"/>
  */
+// Current media flow additionally requests a provisional ready lease before opening local capture.
+// The retained lifecycle-only ordering described above is superseded for the WebRTC media lane.
 class CallForegroundService : Service() {
 
     // Dart ForegroundTaskOptions allowWakeLock/allowWifiLock = true: held only while the service
@@ -35,6 +37,13 @@ class CallForegroundService : Service() {
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     @Volatile private var foregroundStarted = false
+    private val liveMediaLeases = java.util.Collections.synchronizedSet(
+        mutableSetOf<CallMediaForegroundLease>())
+
+// Previous implementation retained:     private var provisionalMediaToken: String? = null
+    private val provisionalMediaPolicy = CallForegroundLeasePolicy()
+    private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
 
     private fun acquireLocks() {
         try {
@@ -64,6 +73,10 @@ class CallForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        foregroundStarted = false
+        val lost = synchronized(liveMediaLeases) { liveMediaLeases.toList().also { liveMediaLeases.clear() } }
+        // No native owner may rely on an FGS lease after its actual Service instance dies.
+        for (lease in lost) try { lease.signalLoss() } catch (_: Exception) { /* Notify every owner. */ }
         releaseLocks()
         super.onDestroy()
     }
@@ -77,15 +90,31 @@ class CallForegroundService : Service() {
         intent?.getStringExtra(EXTRA_OWNER)?.substringBefore(':')?.takeIf { it.isNotBlank() }?.let { owner ->
             synchronized(ownerLock) { activeOwnerToken = owner }
         }
+        val mediaToken = intent?.getStringExtra(EXTRA_MEDIA_READY_TOKEN)
+// Previous implementation retained:         val pendingMedia = mediaToken?.let { mediaReadyRequests[it] }
+// Previous implementation retained:         if (mediaToken != null && pendingMedia == null) {
+        val pendingRequest = mediaToken?.let { mediaReadyRequests[it] }
+        val pendingMedia = pendingRequest?.ready
+        if (mediaToken != null && (pendingMedia == null || pendingRequest?.stillExpected?.invoke() != true)) {
+            // Timed out/cancelled before Android delivered the start. Do not disturb a live service.
+            pendingMedia?.complete(null)
+            if (!foregroundStarted) stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        // An ordinary lifecycle sync takes over provisional foreground ownership.
+// Previous implementation retained:         provisionalMediaToken = mediaToken
+        provisionalMediaPolicy.begin(mediaToken)
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Chaty call"
         val text = intent?.getStringExtra(EXTRA_TEXT) ?: ""
         val isVideo = intent?.getBooleanExtra(EXTRA_IS_VIDEO, false) == true
         val isScreenProjection = intent?.getBooleanExtra(EXTRA_SCREEN_PROJECTION, false) == true
         val callId = intent?.getStringExtra(EXTRA_CALL_ID).orEmpty()
-        acquireLocks()
-        ensureChannel()
-        val notification = buildNotification(title, text, callId)
+        // Channel/notification construction can fail too; always settle the waiting lease.
+        // Prior order: acquireLocks(); ensureChannel(); val notification = buildNotification(...); try { ... }
         try {
+            acquireLocks()
+            ensureChannel()
+            val notification = buildNotification(title, text, callId)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 var types = if (isVideo) {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
@@ -100,8 +129,26 @@ class CallForegroundService : Service() {
                 startForeground(SERVICE_ID, notification)
             }
             foregroundStarted = true
+// Previous implementation retained:             pendingMedia?.complete(CallMediaForegroundLease {
+            if (pendingMedia != null) {
+                lateinit var lease: CallMediaForegroundLease
+                lease = CallMediaForegroundLease {
+                serviceHandler.post {
+                    liveMediaLeases.remove(lease)
+// Previous implementation retained:                     if (provisionalMediaToken == mediaToken) {
+// Previous implementation retained:                         provisionalMediaToken = null
+                    if (mediaToken != null && provisionalMediaPolicy.releaseIfCurrent(mediaToken)) {
+                        stopSelf(startId)
+                    }
+                }
+// Previous implementation retained:             })
+                }
+                liveMediaLeases.add(lease)
+                if (!pendingMedia.complete(lease)) lease.close()
+            }
             if (isScreenProjection) projectionForegroundReady?.complete(true)
         } catch (error: Exception) {
+            pendingMedia?.complete(null)
             if (isScreenProjection) projectionForegroundReady?.complete(false)
             android.util.Log.e("CallForegroundService", "Unable to enter requested foreground-service mode", error)
             // Preserve an already-running voice/video call if only the optional
@@ -186,6 +233,55 @@ class CallForegroundService : Service() {
         const val EXTRA_SCREEN_PROJECTION = "chaty.call.screen_projection"
         const val EXTRA_CALL_ID = "chaty.call.call_id"
         const val EXTRA_OWNER = "chaty.call.owner"
+        private const val EXTRA_MEDIA_READY_TOKEN = "chaty.call.media_ready_token"
+// Previous implementation retained:         private val mediaReadyRequests = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<CallMediaForegroundLease?>>()
+        private data class MediaReadyRequest(
+            val ready: CompletableDeferred<CallMediaForegroundLease?>, val stillExpected: () -> Boolean,
+        )
+        private val mediaReadyRequests = java.util.concurrent.ConcurrentHashMap<String, MediaReadyRequest>()
+
+        // Previous ordering retained: readiness was initially placed after local media construction.
+        /** Called after the user's permission gate, before any local camera/microphone capture. */
+        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+// Previous implementation retained:         suspend fun ensureCallMediaForeground(context: Context, isVideo: Boolean): CallMediaForegroundLease? {
+        suspend fun ensureCallMediaForeground(
+            context: Context, isVideo: Boolean, stillExpected: () -> Boolean,
+        ): CallMediaForegroundLease? {
+            val token = java.util.UUID.randomUUID().toString()
+            val ready = CompletableDeferred<CallMediaForegroundLease?>()
+// Previous implementation retained:             mediaReadyRequests[token] = ready
+            if (!stillExpected()) return null
+            val requestState = MediaReadyRequest(ready, stillExpected)
+            mediaReadyRequests[token] = requestState
+            var accepted = false
+            try {
+                val request = Intent(context, CallForegroundService::class.java).apply {
+                    putExtra(EXTRA_MEDIA_READY_TOKEN, token)
+                    putExtra(EXTRA_TITLE, if (isVideo) "Chaty video call" else "Chaty voice call")
+                    putExtra(EXTRA_TEXT, "Preparing call audio")
+                    putExtra(EXTRA_IS_VIDEO, isVideo)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(request)
+                else context.startService(request)
+                val lease = withTimeout(5_000L) { ready.await() }
+                accepted = lease != null
+                return lease
+            } catch (_: TimeoutCancellationException) {
+                return null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return null
+            } finally {
+// Previous implementation retained:                 mediaReadyRequests.remove(token, ready)
+                mediaReadyRequests.remove(token, requestState)
+                // A cancelled waiter must release a service that completed at the same instant.
+                if (!accepted) ready.invokeOnCompletion {
+                    if (!ready.isCancelled) runCatching { ready.getCompleted()?.close() }
+                }
+            }
+        }
+
 
         private fun activeCallId(context: Context): String? =
             runCatching { com.example.chat.ServiceLocator.callSignaling.currentSession?.callId }.getOrNull()

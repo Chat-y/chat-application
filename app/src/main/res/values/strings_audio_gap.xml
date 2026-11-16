@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="audio_dual_active">Active &amp; verified</string>
+    <string name="audio_dual_not_verified">Available (standard route)</string>
+    <string name="audio_dual_unavailable">Temporarily unavailable</string>
+    <string name="audio_dual_unsupported">Unsupported by OS/hardware</string>
+    <string name="audio_dual_failed">Activation failed</string>
+    <string name="call_audio_output">Audio output: %1$s</string>
+    <string name="call_audio_earpiece">Phone earpiece</string>
+    <string name="call_audio_speaker">Phone speaker</string>
+    <string name="call_audio_bluetooth">Bluetooth</string>
+    <string name="call_audio_wired">Wired headset</string>
+    <string name="call_log_unknown_date">Unknown date</string>
+    <string name="call_log_unknown_time">Unknown time</string>
+    <string name="audio_capabilities_loading">Checking audio outputs...</string>
+    <string name="audio_capabilities_failed">Audio outputs could not be checked.</string>
+    <string name="audio_capabilities_retry">Retry audio check</string>
+    <string name="audio_debug_share_title">Share debug audio events</string>
+    <string name="audio_debug_share_scope">Shares event times, routes and session states only. No contact names, device identifiers or raw error details. You choose where to share.</string>
+    <string name="audio_debug_share_failed">Could not open sharing. Nothing was sent.</string>
+    <string name="audio_record_security_patch">Android security patch: %1$s</string>
+    <string name="audio_record_not_recorded">Not recorded</string>
+</resources>

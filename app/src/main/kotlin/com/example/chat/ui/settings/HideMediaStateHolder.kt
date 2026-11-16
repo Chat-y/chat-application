@@ -40,32 +40,47 @@ class HideMediaState(
     private fun UniversalPreferences.markerState() =
         HideMediaRepository.MarkerState(hidePhotosFromGallery, hideVideosFromGallery, hideGifsFromGallery)
 
+    private val diskQueue = HideMediaDiskQueue()
+
     /** Entry re-sync: markers may have been lost while the preferences say ON (partial HM1-08,
      *  screen-entry scope), with a debug drift self-check (HM3-49). */
     fun onScreenOpen() {
         scope.launch {
             var failure: String? = null
             try {
+                if (preferences.scopeGeneration != accountGeneration) return@launch
                 val state = preferences.universal.markerState()
-                repository.driftReport(state)?.let { repository.logDebugOnce(it) }
-                repository.sync(state).onFailure {
-                    failure = "Could not restore local media markers. Try saving the setting again."
+//                 repository.driftReport(state)?.let { repository.logDebugOnce(it) }
+//                 repository.sync(state).onFailure {
+//                     failure = "Could not restore local media markers. Try saving the setting again."
+                val loaded = diskQueue.run {
+                    repository.driftReport(state)?.let { repository.logDebugOnce(it) }
+                    repository.sync(state).getOrThrow()
+                    (!repository.isBannerSeen()) to repository.affectedFileCount()
                 }
-                bannerVisible = !repository.isBannerSeen()
-                affectedCount = repository.affectedFileCount()
+//                 bannerVisible = !repository.isBannerSeen()
+//                 affectedCount = repository.affectedFileCount()
+                if (preferences.scopeGeneration != accountGeneration) return@launch
+                bannerVisible = loaded.first
+                affectedCount = loaded.second
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 failure = "Could not restore local media markers. Try saving the setting again."
             }
-            saving = false
+            if (preferences.scopeGeneration != accountGeneration) return@launch
+            // saving = false
+            // Entry sync does not own a user operation's saving flag after IO suspension.
+            // Release initial loading, but never clear a subsequently started write's flag.
+            if (operationGeneration == 0L) saving = false
             failure?.let { snackbar.showSnackbar(it) }
         }
     }
 
     fun dismissBanner() {
         bannerVisible = false
-        scope.launch { repository.markBannerSeen() }
+//         scope.launch { repository.markBannerSeen() }
+        scope.launch { diskQueue.run { repository.markBannerSeen() } }
     }
 
     /** Single owner API for one preference+marker change (HM3-50). */
@@ -107,16 +122,29 @@ class HideMediaState(
                 if (preferences.scopeGeneration != accountGeneration) return@launch
                 val latest = preferences.universal
                 val requested = transform(latest)
-                repository.sync(requested.markerState())
-                    .onSuccess { repository.audit(auditEvent) }
-                    .onFailure { repository.auditFailure(auditEvent) }
-                    .getOrThrow()
-                // Debug-only guard: marker state must equal the three preferences (HM3-45).
-                repository.assertMarkersMatch(requested.markerState())
+//                 repository.sync(requested.markerState())
+//                     .onSuccess { repository.audit(auditEvent) }
+//                     .onFailure { repository.auditFailure(auditEvent) }
+//                     .getOrThrow()
+//                 // Debug-only guard: marker state must equal the three preferences (HM3-45).
+//                 repository.assertMarkersMatch(requested.markerState())
+                val changedCount: Int = diskQueue.transaction(action = {
+                    repository.sync(requested.markerState())
+                        .onSuccess { repository.audit(auditEvent) }
+                        .onFailure { repository.auditFailure(auditEvent) }
+                        .getOrThrow()
+                    repository.assertMarkersMatch(requested.markerState())
+                    repository.affectedFileCount()
+                }, publish = {
+                    if (preferences.scopeGeneration == accountGeneration) {
+                        preferences.updateUniversal(transform(preferences.universal))
+                    }
+                })
                 // Do not overwrite unrelated preferences with the snapshot captured before I/O.
                 if (preferences.scopeGeneration != accountGeneration) return@launch
-                preferences.updateUniversal(transform(preferences.universal))
-                affectedCount = repository.affectedFileCount()
+                // preferences.updateUniversal(transform(preferences.universal))
+//                 affectedCount = repository.affectedFileCount()
+                affectedCount = changedCount
                 saving = false
                 val result = snackbar.showSnackbar(
                     "Gallery preference saved. Existing exported copies are unchanged.",
@@ -132,17 +160,23 @@ class HideMediaState(
                         return@launch
                     }
                     saving = true
-                    repository.sync(latest.markerState()).getOrThrow()
-                    if (preferences.scopeGeneration == accountGeneration) {
-                        preferences.updateUniversal(
-                            current.copy(
+//                     repository.sync(latest.markerState()).getOrThrow()
+                    val restoredCount: Int = diskQueue.transaction(action = {
+                        repository.sync(latest.markerState()).getOrThrow()
+                        repository.audit("undo reset")
+                        repository.affectedFileCount()
+                    }, publish = {
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updateUniversal(
+                            // current.copy would overwrite unrelated values changed during IO.
+                            preferences.universal.copy(
                                 hidePhotosFromGallery = latest.hidePhotosFromGallery,
                                 hideVideosFromGallery = latest.hideVideosFromGallery,
                                 hideGifsFromGallery = latest.hideGifsFromGallery,
                             ),
                         )
-                    }
-                    repository.audit("undo reset")
+                    })
+                    if (preferences.scopeGeneration == accountGeneration) affectedCount = restoredCount
+//                     repository.audit("undo reset")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

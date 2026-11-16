@@ -53,12 +53,17 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
         }
     }
     var revision by remember { mutableIntStateOf(0) }
-    DisposableEffect(service, presentation) {
-        val l: () -> Unit = { revision++ }
+// Previous implementation retained:     DisposableEffect(service, presentation) {
+// Previous implementation retained:         val l: () -> Unit = { revision++ }
+    DisposableEffect(service, presentation, prefsStore) {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        var attached = true
+        val l: () -> Unit = { handler.post { if (attached) revision++ }; Unit }
         service.addStateListener(l)
         presentation.addListener(l)
         prefsStore.addListener(l)
         onDispose {
+            attached = false
             service.removeStateListener(l)
             presentation.removeListener(l)
             prefsStore.removeListener(l)
@@ -212,6 +217,7 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
             session = session,
             callDurationSeconds = service.callDurationSeconds,
             hasLocalMedia = service.hasLocalMedia,
+            microphoneCapture = service.activeMedia as? com.example.chat.data.services.CallMicrophoneCaptureProvider,
             videoSurfaces = surfaces,
             setupError = null,
             template = bundlePresentation.template,

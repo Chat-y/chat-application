@@ -1,5 +1,8 @@
 package com.example.chat.ui.settings.privacy
 
+import com.example.chat.ui.settings.state.settingsSnapshotFlow
+import com.example.chat.ui.settings.state.collectSettingsState
+
 import com.example.chat.ui.kit.ChatyHapticsPort
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.LooksOne
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.AdminPanelSettings
@@ -77,6 +81,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -87,8 +93,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.stringResource
+import androidx.compose.material3.CircularProgressIndicator
+import com.example.chat.R
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -129,39 +142,109 @@ fun WhoCanCallMeDialog(
     loadCallPolicy: (suspend () -> com.example.chat.data.api.ApiContactsClient.CallPolicy)? = null,
     saveCallPolicy: (suspend (String, List<String>?) -> com.example.chat.data.api.ApiContactsClient.CallPolicy)? = null,
 ) {
+//     val colors = LocalAppColors.current
+//     val prefs = preferences.privacy
+//     if (loadCallPolicy != null && saveCallPolicy != null) {
+//         // Route the shared dialog through the same server plane as the privacy center.
+//         var policy by remember { mutableStateOf<com.example.chat.data.api.ApiContactsClient.CallPolicy?>(null) }
+//         var busy by remember { mutableStateOf(false) }
+//         val scope = rememberCoroutineScope()
+//         LaunchedEffect(loadCallPolicy) { policy = runCatching { loadCallPolicy() }.getOrNull() }
+//         val current = policy
+//         if (current != null) {
+//             ServerWhoCanCallMeDialog(
+//                 current = current,
+//                 busy = busy,
+//                 onPick = { label ->
+//                     val picked = PrivacyOptionsLogic.audiencePolicy(label) ?: return@ServerWhoCanCallMeDialog
+//                     if (busy) return@ServerWhoCanCallMeDialog
+//                     busy = true
+//                     scope.launch {
+//                         try {
+//                             val saved = saveCallPolicy(picked, null)
+//                             if (saved.policy == picked) {
+//                                 policy = saved
+//                                 PrivacyOptionsLogic.audiencePreferenceValue(saved.policy)?.let {
+//                                     preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = it), logTitle = "Who can call me")
+//                                 }
+//                                 onDismiss()
+//                             }
+//                         } catch (cancelled: CancellationException) { throw cancelled }
+//                         catch (_: Exception) { }
+//                         finally { busy = false }
+//                     }
+//                 },
+//                 onDismiss = onDismiss,
+//             )
+//         }
+//         return
+//     }
     val colors = LocalAppColors.current
+    var sharedGeneration by remember(preferences) { mutableStateOf(preferences.scopeGeneration) }
+    DisposableEffect(preferences) {
+        // Previous callback wrote Compose state on the notifying thread with no retirement guard.
+        // val listener: () -> Unit = { sharedGeneration = preferences.scopeGeneration }
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val active = java.util.concurrent.atomic.AtomicBoolean(true)
+        val listener: () -> Unit = { handler.post {
+            if (active.get()) sharedGeneration = preferences.scopeGeneration
+        }; Unit }
+        preferences.addListener(listener)
+        // Previous: onDispose { preferences.removeListener(listener) }
+        onDispose { active.set(false); preferences.removeListener(listener) }
+    }
+    val originGeneration = sharedGeneration // Immutable token for every callback from this composition.
     val prefs = preferences.privacy
     if (loadCallPolicy != null && saveCallPolicy != null) {
-        // Route the shared dialog through the same server plane as the privacy center.
-        var policy by remember { mutableStateOf<com.example.chat.data.api.ApiContactsClient.CallPolicy?>(null) }
-        var busy by remember { mutableStateOf(false) }
+        var policy by remember(preferences, sharedGeneration) { mutableStateOf<com.example.chat.data.api.ApiContactsClient.CallPolicy?>(null) }
+        var busy by remember(preferences, sharedGeneration) { mutableStateOf(false) }
+        var error by remember(preferences, sharedGeneration) { mutableStateOf<String?>(null) }
+        var retry by remember(preferences, sharedGeneration) { mutableIntStateOf(0) }
         val scope = rememberCoroutineScope()
-        LaunchedEffect(loadCallPolicy) { policy = runCatching { loadCallPolicy() }.getOrNull() }
+        LaunchedEffect(preferences, sharedGeneration, loadCallPolicy, retry) {
+            try {
+                if (preferences.scopeGeneration != originGeneration) return@LaunchedEffect
+                val loaded = loadCallPolicy()
+                if (preferences.scopeGeneration == originGeneration) { policy = loaded; error = null }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (preferences.scopeGeneration == originGeneration) error = "Could not load call privacy. Retry or close this dialog."
+            }
+        }
         val current = policy
-        if (current != null) {
-            ServerWhoCanCallMeDialog(
-                current = current,
-                busy = busy,
+        if (current != null && error == null) {
+            ServerWhoCanCallMeDialog(current = current, busy = busy,
                 onPick = { label ->
                     val picked = PrivacyOptionsLogic.audiencePolicy(label) ?: return@ServerWhoCanCallMeDialog
-                    if (busy) return@ServerWhoCanCallMeDialog
+                    if (busy || preferences.scopeGeneration != originGeneration) return@ServerWhoCanCallMeDialog
                     busy = true
                     scope.launch {
                         try {
+                            if (preferences.scopeGeneration != originGeneration) return@launch
                             val saved = saveCallPolicy(picked, null)
-                            if (saved.policy == picked) {
-                                policy = saved
-                                PrivacyOptionsLogic.audiencePreferenceValue(saved.policy)?.let {
-                                    preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = it), logTitle = "Who can call me")
-                                }
-                                onDismiss()
+                            if (preferences.scopeGeneration != originGeneration) return@launch
+                            if (saved.policy != picked) {
+                                error = "The saved policy differs. Reload before trying again."
+                                return@launch
                             }
+                            val value = PrivacyOptionsLogic.audiencePreferenceValue(saved.policy)
+                                ?: throw IllegalStateException("Unsupported call policy")
+                            policy = saved
+                            preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = value), logTitle = "Who can call me")
+                            onDismiss()
                         } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { }
-                        finally { busy = false }
+                        catch (_: Exception) {
+                            if (preferences.scopeGeneration == originGeneration) error = "Could not save call privacy. Retry or close this dialog."
+                        } finally { busy = false }
                     }
-                },
-                onDismiss = onDismiss,
+                }, onDismiss = onDismiss)
+        } else {
+            AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+                onDismissRequest = onDismiss,
+                title = { Text("Who can call me?") },
+                text = { Text(error ?: "Loading call privacy...") },
+                dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+                confirmButton = { if (error != null) TextButton(onClick = { error = null; policy = null; retry++ }) { Text("Retry") } },
             )
         }
         return
@@ -175,16 +258,25 @@ fun WhoCanCallMeDialog(
                 Text("The contacts-except option needs an existing exception list.")
                 AudienceOptions.forEach { opt ->
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
-                            selected = opt == prefs.whoCanCallMe,
+                        // Prior sizing: Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                        Modifier.fillMaxWidth().minimumInteractiveComponentSize().heightIn(min = 48.dp).selectable(
+                            // selected = opt == prefs.whoCanCallMe,
+                            selected = PrivacyOptionsLogic.audiencePolicy(opt) == PrivacyOptionsLogic.audiencePolicy(prefs.whoCanCallMe),
                             enabled = opt != "My Contacts Except…" || prefs.whoCanCallMeExceptions.isNotEmpty(),
                             role = Role.RadioButton,
-                            onClick = { preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = opt), logTitle = "Who can call me"); onDismiss() },
+                            // onClick = { preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = opt), logTitle = "Who can call me"); onDismiss() },
+                            onClick = {
+                                if (preferences.scopeGeneration != originGeneration) return@selectable
+                                val value = PrivacyOptionsLogic.audiencePreferenceValue(PrivacyOptionsLogic.audiencePolicy(opt)) ?: return@selectable
+                                preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = value), logTitle = "Who can call me")
+                                onDismiss()
+                            },
                         ).padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(
-                            selected = opt == prefs.whoCanCallMe,
+                            // selected = opt == prefs.whoCanCallMe,
+                            selected = PrivacyOptionsLogic.audiencePolicy(opt) == PrivacyOptionsLogic.audiencePolicy(prefs.whoCanCallMe),
                             onClick = null,
                             enabled = opt != "My Contacts Except…" || prefs.whoCanCallMeExceptions.isNotEmpty(),
                             colors = RadioButtonDefaults.colors(selectedColor = colors.primary),
@@ -206,17 +298,29 @@ private sealed interface PrivacyModal {
     object Recovery : PrivacyModal
     object Reset : PrivacyModal
     object History : PrivacyModal
+    object DebugState : PrivacyModal
 }
 
 /** Last-good server privacy planes per account generation (stale-while-revalidate). */
-private object PrivacyPlaneCache {
-    var generation: Long = -1L
+// private object PrivacyPlaneCache {
+//     var generation: Long = -1L
+//     var presence: com.example.chat.data.api.ApiPresenceClient.PresencePrivacy? = null
+//     var presenceLoaded: Boolean = false
+//     var callPolicy: com.example.chat.data.api.ApiContactsClient.CallPolicy? = null
+//     var blocked: List<com.example.chat.data.api.ApiContactsClient.BlockedEntry>? = null
+//     var blockedLoaded: Boolean = false
+//     var syncedAtMs: Long? = null
+// }
+private class PrivacyPlaneSnapshot {
     var presence: com.example.chat.data.api.ApiPresenceClient.PresencePrivacy? = null
     var presenceLoaded: Boolean = false
     var callPolicy: com.example.chat.data.api.ApiContactsClient.CallPolicy? = null
     var blocked: List<com.example.chat.data.api.ApiContactsClient.BlockedEntry>? = null
     var blockedLoaded: Boolean = false
     var syncedAtMs: Long? = null
+    var presenceRevision = 0L
+    var callRevision = 0L
+    var blockedRevision = 0L
 }
 
 /** Stable row styling so the hoisted row composables can skip recomposition. */
@@ -235,6 +339,8 @@ private class PrivacyRowStyle(
 private val PrivacyChannelOffIcon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.channelOff)
 private val PrivacyRowIconShape = RoundedCornerShape(11.dp)
 private val PrivacyCardShape = RoundedCornerShape(20.dp)
+private val PrivacyFocusShape = RoundedCornerShape(12.dp)
+private val PrivacyBadgeShape = RoundedCornerShape(8.dp)
 
 @Composable
 private fun PrivacyRow2(
@@ -249,10 +355,15 @@ private fun PrivacyRow2(
     onTap: () -> Unit,
     trailing: @Composable () -> Unit,
 ) {
+    var keyboardFocused by remember { mutableStateOf(false) }
     Box(if (animate) Modifier.springInteractiveScale(0.98f) else Modifier) {
         Row(
             Modifier.fillMaxWidth()
                 .heightIn(min = 64.dp)
+                // Existing clickable remains the only focusable/action target.
+                .onFocusChanged { keyboardFocused = it.isFocused }
+                // .border(2.dp, if (keyboardFocused) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(12.dp))
+                .border(2.dp, if (keyboardFocused) MaterialTheme.colorScheme.primary else Color.Transparent, PrivacyFocusShape)
                 .clickable(role = Role.Button, onClickLabel = "Open") { ChatyHapticsPort.selection(view); onTap() }
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -263,15 +374,23 @@ private fun PrivacyRow2(
             ) { Icon(icon, null, tint = iconTint ?: style.accent, modifier = Modifier.size(24.dp)) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = style.primaryText, fontSize = (14.5f * style.fs).sp, fontWeight = FontWeight.W600)
+                // Text(title, color = style.primaryText, fontSize = (14.5f * style.fs).sp, fontWeight = FontWeight.W600)
+                Text(title, color = style.primaryText,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = (16f * style.fs).sp, lineHeight = (24f * style.fs).sp),
+                    fontWeight = FontWeight.W600)
                 Spacer(Modifier.height(2.dp))
-                Text(subtitle, color = style.secondaryText, fontSize = (14f * style.fs).sp)
+//                 Text(subtitle, color = style.secondaryText, fontSize = (14f * style.fs).sp)
+                // Text(subtitle, color = style.secondaryText, fontSize = (14f * style.fs).coerceAtLeast(12f).sp)
+                Text(subtitle, color = style.secondaryText,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = (14f * style.fs).coerceAtLeast(12f).sp, lineHeight = (20f * style.fs).sp))
             }
             if (badge != null) {
                 Text(
                     badge,
-                    Modifier.background(style.accent.copy(alpha = 0.12f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
-                    color = style.secondaryText, fontSize = 11.sp,
+                    // Modifier.background(style.accent.copy(alpha = 0.12f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                    Modifier.background(style.accent.copy(alpha = 0.12f), PrivacyBadgeShape).padding(horizontal = 6.dp, vertical = 2.dp),
+                    // color = style.secondaryText, fontSize = 11.sp,
+                    color = style.secondaryText, fontSize = 12.sp,
                 )
             }
             Spacer(Modifier.width(8.dp))
@@ -290,17 +409,29 @@ private fun PrivacySwitchRow(
     value: Boolean,
     reduceMotion: Boolean,
     enabled: Boolean = true,
+    affectedPeople: String? = null,
     onChanged: (Boolean) -> Unit,
 ) {
+    var keyboardFocused by remember { mutableStateOf(false) }
     var flash by remember { mutableStateOf(false) }
-    LaunchedEffect(flash) { if (flash) { kotlinx.coroutines.delay(1500); flash = false } }
+    // LaunchedEffect(flash) { if (flash) { kotlinx.coroutines.delay(1500); flash = false } }
+    LaunchedEffect(flash, reduceMotion) {
+        if (reduceMotion) flash = false
+        else if (flash) { kotlinx.coroutines.delay(1500); flash = false }
+    }
     Row(
         Modifier.fillMaxWidth()
             .heightIn(min = 64.dp)
+            // Observe existing toggleable focus; do not add another focusable or key handler.
+            .onFocusChanged { keyboardFocused = it.isFocused }
+            // .border(2.dp, if (keyboardFocused) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(12.dp))
+            .border(2.dp, if (keyboardFocused) MaterialTheme.colorScheme.primary else Color.Transparent, PrivacyFocusShape)
             .semantics { stateDescription = if (value) "On" else "Off" }
             .toggleable(value = value, role = Role.Switch, enabled = enabled) {
                 ChatyHapticsPort.selection(view)
-                view.announceForAccessibility(title + " " + if (it) "on" else "off")
+                // view.announceForAccessibility(title + " " + if (it) "on" else "off")
+                // Callback may open a consent dialog or fail to save. State semantics update
+                // from the actual value after acceptance, not an optimistic requested result.
                 if (!reduceMotion) flash = true
                 onChanged(it)
             }
@@ -311,7 +442,18 @@ private fun PrivacySwitchRow(
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, color = style.primaryText, fontSize = (16f * style.fs).sp, fontWeight = FontWeight.W600)
-            Text(subtitle, color = style.secondaryText, fontSize = (14f * style.fs).sp)
+            Spacer(Modifier.height(2.dp)) // PV2-44: match title/subtitle grouping, no extra action.
+//             Text(subtitle, color = style.secondaryText, fontSize = (14f * style.fs).sp)
+            Text(subtitle, color = style.secondaryText, fontSize = (14f * style.fs).coerceAtLeast(12f).sp)
+            affectedPeople?.let { label ->
+                Spacer(Modifier.height(4.dp))
+                Text(label,
+                    Modifier.background(MaterialTheme.colorScheme.secondaryContainer, PrivacyBadgeShape)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    fontSize = (12f * style.fs).sp,
+                    lineHeight = (16f * style.fs).sp)
+            }
         }
         if (flash) {
             Icon(Icons.Rounded.Check, null, tint = style.accent, modifier = Modifier.size(24.dp).clearAndSetSemantics { })
@@ -343,7 +485,8 @@ private fun PrivacySectionDivider(style: PrivacyRowStyle, label: String) {
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 6.dp)) {
         Text(
             label, Modifier.fillMaxWidth().semantics { heading() }, color = style.accent, fontWeight = FontWeight.W700, fontSize = 16.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            // maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(6.dp))
         val dividerBrush = remember(style.accent) { Brush.horizontalGradient(listOf(style.accent.copy(alpha = 0f), style.accent.copy(alpha = 0.7f), style.accent.copy(alpha = 0f))) }
@@ -370,6 +513,14 @@ private fun PrivacyCardContainer(style: PrivacyRowStyle, lowRam: Boolean, conten
  * fields are declared (ignore_for_file: unused_*) but never reachable from build(), so they are not ported
  * as UI (the lock flow is in SecurityCenterScreen). UNCOMPILED (Compose).
  */
+private data class PrivacyScreenSnapshot(
+    val generation: Long,
+    val privacy: com.example.chat.domain.models.PrivacyPreferences,
+    val security: com.example.chat.domain.models.SecurityPreferences,
+    val ready: Boolean,
+    val history: List<com.example.chat.core.preferences.PreferenceHistoryEntry>,
+)
+
 @Composable
 fun PrivacyCenterScreen(
     preferences: ChatyPreferencesController,
@@ -390,48 +541,94 @@ fun PrivacyCenterScreen(
     val snackbar = remember { SnackbarHostState() }
     val view = androidx.compose.ui.platform.LocalView.current
     val context = androidx.compose.ui.platform.LocalContext.current
-    val reduceMotion = remember { android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
+    // val reduceMotion = remember { android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
+    val reduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
     val lowRam = remember { (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)?.isLowRamDevice == true }
-    val window = remember(context) {
-        var c: android.content.Context? = context
-        while (c is android.content.ContextWrapper && c !is android.app.Activity) c = c.baseContext
-        (c as? android.app.Activity)?.window
+//     val window = remember(context) {
+//         var c: android.content.Context? = context
+//         while (c is android.content.ContextWrapper && c !is android.app.Activity) c = c.baseContext
+//         (c as? android.app.Activity)?.window
+//     }
+//     var version by remember { mutableIntStateOf(0) }
+//     DisposableEffect(preferences) {
+//         val l: () -> Unit = { version += 1 }
+//         preferences.addListener(l)
+//         onDispose { preferences.removeListener(l) }
+//     var version by remember { mutableIntStateOf(0) }
+//     DisposableEffect(preferences) {
+//         val l: () -> Unit = { version += 1 }
+//         preferences.addListener(l)
+//         onDispose { preferences.removeListener(l) }
+//     }
+//     val accountGeneration = preferences.scopeGeneration
+    val selectedFlow = remember(preferences, scope) {
+        settingsSnapshotFlow(scope,
+            snapshot = { PrivacyScreenSnapshot(preferences.scopeGeneration, preferences.privacy,
+                preferences.security, preferences.preferencesReady,
+                // preferences.history().filter { it.key == "privacy" }.takeLast(50).reversed()) },
+                privacyRecentHistory(preferences.history())) },
+            addListener = preferences::addListener, removeListener = preferences::removeListener)
     }
-    var version by remember { mutableIntStateOf(0) }
-    DisposableEffect(preferences) {
-        val l: () -> Unit = { version += 1 }
-        preferences.addListener(l)
-        onDispose { preferences.removeListener(l) }
-    }
-    val accountGeneration = preferences.scopeGeneration
+//     val accountGeneration = preferences.scopeGeneration
+    val selected by selectedFlow.collectSettingsState()
+    val accountGeneration = selected.generation
+    // No cross-owner singleton: every account generation gets all-empty plane slots together.
+    val planeCache = remember(preferences, accountGeneration) { PrivacyPlaneSnapshot() }
     var modal by remember(preferences, accountGeneration) { mutableStateOf<PrivacyModal?>(null) }
     var retentionTitle by remember(preferences, accountGeneration) { mutableStateOf<String?>(null) }
     var retentionChange by remember(preferences, accountGeneration) { mutableStateOf<(() -> Unit)?>(null) }
     var offline by remember { mutableStateOf(false) }
     var tipDismissed by rememberSaveable { mutableStateOf(false) }
     var showMoreOptions by rememberSaveable { mutableStateOf(false) }
-    var syncedAtMs by remember(preferences, accountGeneration) { mutableStateOf<Long?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.syncedAtMs else null) }
+    var syncedAtMs by remember(preferences, accountGeneration) { mutableStateOf<Long?>(planeCache.syncedAtMs) }
+//     DisposableEffect(context) {
+//         val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+//         val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+//             override fun onAvailable(network: android.net.Network) { offline = false }
+//             override fun onLost(network: android.net.Network) { offline = true }
+//         }
+//         cm?.registerDefaultNetworkCallback(cb)
+//         onDispose { cm?.unregisterNetworkCallback(cb) }
+//     }
     DisposableEffect(context) {
         val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: android.net.Network) { offline = false }
-            override fun onLost(network: android.net.Network) { offline = true }
+        var watching = true
+        fun updateConnectivity() {
+            scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                if (watching) offline = runCatching {
+                    val active = cm?.activeNetwork
+                    val capabilities = active?.let { cm?.getNetworkCapabilities(it) }
+                    capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) != true
+                }.getOrDefault(false)
+            }
         }
-        cm?.registerDefaultNetworkCallback(cb)
-        onDispose { cm?.unregisterNetworkCallback(cb) }
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) = updateConnectivity()
+            override fun onLost(network: android.net.Network) = updateConnectivity()
+            override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) = updateConnectivity()
+        }
+        val registered = runCatching { cm?.registerDefaultNetworkCallback(cb); cm != null }.getOrDefault(false)
+        updateConnectivity()
+        onDispose {
+            watching = false
+            if (registered) runCatching { cm?.unregisterNetworkCallback(cb) }
+        }
     }
-    val secureScreen = preferences.security.protectFromScreenshots || modal is PrivacyModal.Blocked
-    DisposableEffect(window, secureScreen) {
-        if (secureScreen) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { if (secureScreen) window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
-    }
+    // val secureScreen = preferences.security.protectFromScreenshots || modal is PrivacyModal.Blocked
+    // DisposableEffect(window, secureScreen) {
+    //     if (secureScreen) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    //     onDispose { if (secureScreen) window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
+    // }
+    // Share the app-wide lease: disposing this page must not clear another owner's secure flag.
+    val secureScreen = selected.security.protectFromScreenshots || modal is PrivacyModal.Blocked
+    com.example.chat.ui.kit.ProtectSensitiveWindow(active = secureScreen)
 
     // Server privacy planes (research 5.2/5.3). null after load = plane
     // unavailable; rows then fail closed to the legacy local behaviour.
-    var presencePrivacy by remember(preferences, accountGeneration) { mutableStateOf<com.example.chat.data.api.ApiPresenceClient.PresencePrivacy?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.presence else null) }
-    var presenceLoaded by remember(preferences, accountGeneration) { mutableStateOf(PrivacyPlaneCache.generation == accountGeneration && PrivacyPlaneCache.presenceLoaded) }
-    var serverCallPolicy by remember(preferences, accountGeneration) { mutableStateOf<com.example.chat.data.api.ApiContactsClient.CallPolicy?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.callPolicy else null) }
-    var blockedUsers by remember(preferences, accountGeneration) { mutableStateOf<List<com.example.chat.data.api.ApiContactsClient.BlockedEntry>?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.blocked else null) }
+    var presencePrivacy by remember(preferences, accountGeneration) { mutableStateOf<com.example.chat.data.api.ApiPresenceClient.PresencePrivacy?>(planeCache.presence) }
+    var presenceLoaded by remember(preferences, accountGeneration) { mutableStateOf(planeCache.presenceLoaded) }
+    var serverCallPolicy by remember(preferences, accountGeneration) { mutableStateOf<com.example.chat.data.api.ApiContactsClient.CallPolicy?>(planeCache.callPolicy) }
+    var blockedUsers by remember(preferences, accountGeneration) { mutableStateOf<List<com.example.chat.data.api.ApiContactsClient.BlockedEntry>?>(planeCache.blocked) }
     var callBusy by remember(preferences, accountGeneration) { mutableStateOf(false) }
     var presenceBusy by remember(preferences, accountGeneration) { mutableStateOf(false) }
     var unblockBusy by remember(preferences, accountGeneration) { mutableStateOf(false) }
@@ -443,53 +640,57 @@ fun PrivacyCenterScreen(
     val currentBlockedLoader by rememberUpdatedState(loadBlocked)
     suspend fun reloadPrivacyPlanes() = coroutineScope {
         currentPresenceLoader?.let { loader -> launch {
+            val requestRevision = ++planeCache.presenceRevision
             try {
                 val loaded = loader()
-                if (preferences.scopeGeneration == accountGeneration) {
+                if (preferences.scopeGeneration == accountGeneration && planeCache.presenceRevision == requestRevision) {
                     presencePrivacy = loaded; presenceError = null; presenceLoaded = true
                     val nowMs = System.currentTimeMillis(); syncedAtMs = nowMs
-                    PrivacyPlaneCache.generation = accountGeneration; PrivacyPlaneCache.presence = loaded
-                    PrivacyPlaneCache.presenceLoaded = true; PrivacyPlaneCache.syncedAtMs = nowMs
+                    planeCache.presence = loaded
+                    planeCache.presenceLoaded = true; planeCache.syncedAtMs = nowMs
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
-                if (preferences.scopeGeneration == accountGeneration) { presenceError = "Could not load. Tap to retry."; presenceLoaded = true }
+                if (preferences.scopeGeneration == accountGeneration && planeCache.presenceRevision == requestRevision) { presenceError = "Could not load. Tap to retry."; presenceLoaded = true }
             }
         } }
         currentCallLoader?.let { loader -> launch {
+            val requestRevision = ++planeCache.callRevision
             try {
                 val loaded = loader()
-                if (preferences.scopeGeneration == accountGeneration) {
+                if (preferences.scopeGeneration == accountGeneration && planeCache.callRevision == requestRevision) {
                     serverCallPolicy = loaded; callError = null
                     val nowMs = System.currentTimeMillis(); syncedAtMs = nowMs
-                    PrivacyPlaneCache.generation = accountGeneration; PrivacyPlaneCache.callPolicy = loaded
-                    PrivacyPlaneCache.syncedAtMs = nowMs
+                    planeCache.callPolicy = loaded
+                    planeCache.syncedAtMs = nowMs
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: com.example.chat.data.api.ApiContactsClient.PlaneUnavailable) {
-                if (preferences.scopeGeneration == accountGeneration) callError = "Unavailable on this server. Tap to retry."
+                if (preferences.scopeGeneration == accountGeneration && planeCache.callRevision == requestRevision) callError = "Unavailable on this server. Tap to retry."
             } catch (_: Exception) {
-                if (preferences.scopeGeneration == accountGeneration) callError = "Could not load. Tap to retry."
+                if (preferences.scopeGeneration == accountGeneration && planeCache.callRevision == requestRevision) callError = "Could not load. Tap to retry."
             }
         } }
         currentBlockedLoader?.let { loader -> launch {
+            val requestRevision = ++planeCache.blockedRevision
             try {
                 val loaded = loader()
-                if (preferences.scopeGeneration == accountGeneration) {
+                if (preferences.scopeGeneration == accountGeneration && planeCache.blockedRevision == requestRevision) {
                     blockedUsers = loaded; blockedError = null
                     val nowMs = System.currentTimeMillis(); syncedAtMs = nowMs
-                    PrivacyPlaneCache.generation = accountGeneration; PrivacyPlaneCache.blocked = loaded
-                    PrivacyPlaneCache.blockedLoaded = true; PrivacyPlaneCache.syncedAtMs = nowMs
+                    planeCache.blocked = loaded
+                    planeCache.blockedLoaded = true; planeCache.syncedAtMs = nowMs
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: com.example.chat.data.api.ApiContactsClient.PlaneUnavailable) {
-                if (preferences.scopeGeneration == accountGeneration) blockedError = "Unavailable on this server. Tap to retry."
+                if (preferences.scopeGeneration == accountGeneration && planeCache.blockedRevision == requestRevision) blockedError = "Unavailable on this server. Tap to retry."
             } catch (_: Exception) {
-                if (preferences.scopeGeneration == accountGeneration) blockedError = "Could not load. Tap to retry."
+                if (preferences.scopeGeneration == accountGeneration && planeCache.blockedRevision == requestRevision) blockedError = "Could not load. Tap to retry."
             }
         } }
     }
-    LaunchedEffect(preferences, accountGeneration, preferences.preferencesReady) {
+//     LaunchedEffect(preferences, accountGeneration, preferences.preferencesReady) {
+    LaunchedEffect(preferences, accountGeneration, selected.ready) {
         if (preferences.preferencesReady) reloadPrivacyPlanes()
     }
 
@@ -516,8 +717,10 @@ fun PrivacyCenterScreen(
         }.onFailure { snack("Couldn't export right now.", long = true) }
     }
 
-    @Suppress("UNUSED_EXPRESSION") version
-    val p = preferences.privacy
+//     @Suppress("UNUSED_EXPRESSION") version
+//     val p = preferences.privacy
+    // Version counter replaced by selected lifecycle state.
+    val p = selected.privacy
 
     Column(Modifier.fillMaxSize().background(bg)) {
         // AppBar: back button in 8dp padding, title 20*fontScale w700 letterSpacing -0.3.
@@ -531,9 +734,11 @@ fun PrivacyCenterScreen(
                 fontWeight = FontWeight.W700, letterSpacing = (-0.3).sp,
             )
         }
-        // R2/R3: grouped lists capped at 720dp centered (approved plan 8 Nov 2026).
-        Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
-            Column(Modifier.fillMaxWidth().widthIn(max = 720.dp).windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 10.dp)) {
+        // Grouped privacy content uses a centered 720dp width cap; this comment is not an approval record.
+        // Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            // Cap before filling, so the parent's tight full width does not defeat the cap.
+            Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 10.dp)) {
                 val privacyCheckup = buildList {
                     if (p.freezeLastSeen) add("Freeze last seen is on: nobody can see your live last seen, whatever the audience below.")
                     if (!p.readReceipts) add("Read receipts are off: you won't see read receipts from others either.")
@@ -570,11 +775,27 @@ fun PrivacyCenterScreen(
                     ) {
                         Icon(Icons.Rounded.WarningAmber, null, tint = accent, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text(
-                            "Message delays? Check your connection and Android battery restrictions. Resetting privacy choices does not repair message delivery.",
-                            Modifier.weight(1f), color = primaryText, fontSize = (12.5f * fs).sp, lineHeight = (12.5f * fs * 1.5f).sp,
-                        )
-                        IconButton(onClick = { tipDismissed = true }) { Icon(Icons.Rounded.Close, "Dismiss tip", tint = secondaryText, modifier = Modifier.size(18.dp)) }
+//                         Text(
+//                             "Message delays? Check your connection and Android battery restrictions. Resetting privacy choices does not repair message delivery.",
+//                             Modifier.weight(1f), color = primaryText, fontSize = (12.5f * fs).sp, lineHeight = (12.5f * fs * 1.5f).sp,
+//                         )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                androidx.compose.ui.res.stringResource(com.example.chat.R.string.privacy_delivery_tip),
+                                color = primaryText, fontSize = (12.5f * fs).sp, lineHeight = (12.5f * fs * 1.5f).sp,
+                            )
+                            TextButton(onClick = {
+                                try {
+                                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                } catch (_: Exception) {
+                                    snack(context.getString(R.string.privacy_connection_settings_unavailable))
+                                }
+                            }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.privacy_open_connection_settings))
+                            }
+                        }
+                        IconButton(onClick = { tipDismissed = true }) { Icon(Icons.Rounded.Close, androidx.compose.ui.res.stringResource(com.example.chat.R.string.privacy_dismiss_tip), tint = secondaryText, modifier = Modifier.size(18.dp)) }
                     }
                     Spacer(Modifier.height(16.dp))
                 }
@@ -582,9 +803,13 @@ fun PrivacyCenterScreen(
                     Text("You're offline. Showing the last synced values.", Modifier.fillMaxWidth().padding(horizontal = 4.dp), color = secondaryText, fontSize = 12.sp)
                     Spacer(Modifier.height(16.dp))
                 }
+                val blockedCountLabel = blockedUsers?.let {
+                    pluralStringResource(R.plurals.privacy_blocked_contact_count, it.size, it.size)
+                }
                 PrivacyCardContainer(style, lowRam) {
                     val syncedLabel = syncedAtMs?.let { " · Updated " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it)) } ?: ""
-                    Text("Last seen: ${presencePrivacy?.let { PrivacyOptionsLogic.audienceLabel(it.lastSeenPolicy) } ?: p.hideLastSeenAudience} · Calls: ${serverCallPolicy?.let { PrivacyOptionsLogic.audienceLabel(it.policy) } ?: p.whoCanCallMe}${blockedUsers?.let { " · " + it.size + " blocked" } ?: ""}$syncedLabel", Modifier.padding(16.dp), color = secondaryText, fontSize = 14.sp)
+                    // Text("Last seen: ${presencePrivacy?.let { PrivacyOptionsLogic.audienceLabel(it.lastSeenPolicy) } ?: p.hideLastSeenAudience} · Calls: ${serverCallPolicy?.let { PrivacyOptionsLogic.audienceLabel(it.policy) } ?: p.whoCanCallMe}${blockedUsers?.let { " · " + it.size + " blocked" } ?: ""}$syncedLabel", Modifier.padding(16.dp), color = secondaryText, fontSize = 14.sp)
+                    Text("Last seen: ${presencePrivacy?.let { PrivacyOptionsLogic.audienceLabel(it.lastSeenPolicy) } ?: p.hideLastSeenAudience} · Calls: ${serverCallPolicy?.let { PrivacyOptionsLogic.audienceLabel(it.policy) } ?: p.whoCanCallMe}${blockedCountLabel?.let { " · " + it } ?: ""}$syncedLabel", Modifier.padding(16.dp), color = secondaryText, fontSize = 14.sp)
                     PrivacySectionDivider(style, "Privacy")
                     Text("Local switches affect this device. Last seen and call policies use server confirmation when supported.", Modifier.padding(16.dp), color = secondaryText, fontSize = 14.sp)
                     if (loadPresencePrivacy != null && presenceLoaded) {
@@ -602,108 +827,157 @@ fun PrivacyCenterScreen(
                         Icons.Outlined.Call,
                         "Who can call me?",
                         callError ?: serverCallPolicy?.let { pol -> PrivacyOptionsLogic.audienceLabel(pol.policy)?.let { lbl -> if (pol.policy == "contacts_except") "$lbl (${pol.exceptions.size})" else lbl } } ?: p.whoCanCallMe,
-                        badge = if (loadCallPolicy != null) "Server" else null,
+// Superseded source retained below per additive-only review rule.
+//                         badge = if (loadCallPolicy != null) "Server" else null,
+                        badge = if ((serverCallPolicy?.policy ?: if (p.whoCanCallMe == "Everyone") "everyone" else "restricted") != "everyone") "Restricted" else "Everyone",
                         iconTint = if ((serverCallPolicy?.policy ?: "everyone") != "everyone") style.error else null,
                     ) { if (loadCallPolicy != null && (callError != null || serverCallPolicy == null)) scope.launch { reloadPrivacyPlanes() } else modal = PrivacyModal.WhoCanCall }
                     if (loadBlocked != null) {
                         PrivacyChevronRow(style, view,
                             Icons.Rounded.Block,
                             "Blocked contacts",
-                            blockedError ?: blockedUsers?.let { if (it.isEmpty()) "None" else "${it.size} blocked" } ?: "Loading...",
+                            // blockedError ?: blockedUsers?.let { if (it.isEmpty()) "None" else "${it.size} blocked" } ?: "Loading...",
+                            blockedError ?: blockedUsers?.let { if (it.isEmpty()) "None" else blockedCountLabel.orEmpty() } ?: "Loading...",
                             badge = "Server",
                         ) { if (blockedError != null || blockedUsers == null) scope.launch { reloadPrivacyPlanes() } else modal = PrivacyModal.Blocked }
                     }
                     // Scoped custom controls have no publication consumer yet. Preserve saved keys, do not promise enforcement.
                     // PrivacyChevronRow(style, view, Icons.Outlined.AdminPanelSettings, "Custom privacy", "View all") { modal = PrivacyModal.Custom("Custom") }
                     PrivacySwitchRow(style, view, Icons.Rounded.AcUnit, "Freeze last seen", "Stops publishing your live last seen. Applies right away.", p.freezeLastSeen, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(freezeLastSeen = it), logTitle = "Freeze last seen")
+// preferences.updatePrivacy(p.copy(freezeLastSeen = it), logTitle = "Freeze last seen")
+// preferences.updatePrivacy(preferences.privacy.copy(freezeLastSeen = it), logTitle = "Freeze last seen")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(freezeLastSeen = it), logTitle = "Freeze last seen")
                     }
-                    PrivacySwitchRow(style, view, Icons.Outlined.RemoveRedEye, "Anti-view once", "Keep view-once content locally. Affects the sender too: respect their privacy and consent.", p.antiViewOnce, reduceMotion) {
+// PrivacySwitchRow(style, view, Icons.Outlined.RemoveRedEye, "Anti-view once", "Keep view-once content locally. Affects the sender too: respect their privacy and consent.", p.antiViewOnce, reduceMotion) {
+// PrivacySwitchRow(style, view, Icons.Outlined.RemoveRedEye, "Anti-view once", "Keep view-once content locally. Affects the sender too: respect their privacy and consent.", p.antiViewOnce, reduceMotion, affectedPeople = stringResource(R.string.privacy_affects_you_sender)) {
+                    PrivacySwitchRow(style, view, Icons.Rounded.LooksOne, "Anti-view once", "Keep view-once content locally. Affects the sender too: respect their privacy and consent.", p.antiViewOnce, reduceMotion, affectedPeople = stringResource(R.string.privacy_affects_you_sender)) {
                         if (it) {
                             retentionTitle = "Anti-view once"
-                            retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiViewOnce = true), logTitle = "Anti-view once") }
-                        } else preferences.updatePrivacy(preferences.privacy.copy(antiViewOnce = false), logTitle = "Anti-view once")
+// retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiViewOnce = true), logTitle = "Anti-view once") }
+                            retentionChange = { if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiViewOnce = true), logTitle = "Anti-view once") }
+// } else preferences.updatePrivacy(preferences.privacy.copy(antiViewOnce = false), logTitle = "Anti-view once")
+                        } else if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiViewOnce = false), logTitle = "Anti-view once")
                     }
-                    PrivacySwitchRow(style, view, Icons.Rounded.ForwardToInbox, "Disable forwarded tag", "Resend messages without the Forwarded tag. Affects the receiver too.", p.disableForwardedLabel, reduceMotion) {
+// PrivacySwitchRow(style, view, Icons.Rounded.ForwardToInbox, "Disable forwarded tag", "Resend messages without the Forwarded tag. Affects the receiver too.", p.disableForwardedLabel, reduceMotion) {
+                    PrivacySwitchRow(style, view, Icons.Rounded.ForwardToInbox, "Disable forwarded tag", "Resend messages without the Forwarded tag. Affects the receiver too.", p.disableForwardedLabel, reduceMotion, affectedPeople = stringResource(R.string.privacy_affects_you_recipient)) {
                         if (it) {
                             retentionTitle = "Disable forwarded tag"
-                            retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(disableForwardedLabel = true), logTitle = "Disable forwarded tag") }
-                        } else preferences.updatePrivacy(preferences.privacy.copy(disableForwardedLabel = false), logTitle = "Disable forwarded tag")
+// retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(disableForwardedLabel = true), logTitle = "Disable forwarded tag") }
+                            retentionChange = { if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(disableForwardedLabel = true), logTitle = "Disable forwarded tag") }
+// } else preferences.updatePrivacy(preferences.privacy.copy(disableForwardedLabel = false), logTitle = "Disable forwarded tag")
+                        } else if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(disableForwardedLabel = false), logTitle = "Disable forwarded tag")
                     }
 
                     PrivacySectionDivider(style, "Receipts and presence")
                     PrivacySwitchRow(style, view, Icons.Rounded.DoneAll, "Read receipts", "Let contacts know when you have read their messages.", p.readReceipts, reduceMotion) {
-                        preferences.updatePrivacy(preferences.privacy.copy(readReceipts = it), logTitle = "Read receipts")
+// preferences.updatePrivacy(preferences.privacy.copy(readReceipts = it), logTitle = "Read receipts")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(readReceipts = it), logTitle = "Read receipts")
                     }
                     PrivacySwitchRow(style, view, Icons.Outlined.MarkChatRead, "Typing indicators", "Let contacts know when you are typing.", p.typingIndicators, reduceMotion) {
-                        preferences.updatePrivacy(preferences.privacy.copy(typingIndicators = it), logTitle = "Typing indicators")
+// preferences.updatePrivacy(preferences.privacy.copy(typingIndicators = it), logTitle = "Typing indicators")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(typingIndicators = it), logTitle = "Typing indicators")
                     }
                     PrivacySwitchRow(style, view, Icons.Outlined.NotificationsActive, "Recording indicators", "Let contacts know when you are recording a voice message.", p.recordingIndicators, reduceMotion) {
-                        preferences.updatePrivacy(preferences.privacy.copy(recordingIndicators = it), logTitle = "Recording indicators")
+// preferences.updatePrivacy(preferences.privacy.copy(recordingIndicators = it), logTitle = "Recording indicators")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(recordingIndicators = it), logTitle = "Recording indicators")
                     }
                     PrivacySwitchRow(style, view, Icons.Rounded.DoneAll, "Show blue ticks after reply", "Contacts only see blue ticks after you reply.", p.showBlueTicksAfterReply, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(showBlueTicksAfterReply = it), logTitle = "Show blue ticks after reply")
+// preferences.updatePrivacy(p.copy(showBlueTicksAfterReply = it), logTitle = "Show blue ticks after reply")
+// preferences.updatePrivacy(preferences.privacy.copy(showBlueTicksAfterReply = it), logTitle = "Show blue ticks after reply")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(showBlueTicksAfterReply = it), logTitle = "Show blue ticks after reply")
                     }
 
                     PrivacySectionDivider(style, "Home menu options")
                     PrivacySwitchRow(style, view, Icons.Outlined.Lock, "Hide the privacy option", "Hide the Privacy entry from the Home Screen Options menu. You can still open it from Settings.", p.hidePrivacyOption, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(hidePrivacyOption = it), logTitle = "Hide the privacy option")
+// preferences.updatePrivacy(p.copy(hidePrivacyOption = it), logTitle = "Hide the privacy option")
+// preferences.updatePrivacy(preferences.privacy.copy(hidePrivacyOption = it), logTitle = "Hide the privacy option")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(hidePrivacyOption = it), logTitle = "Hide the privacy option")
                     }
                     PrivacySwitchRow(style, view, Icons.Rounded.History, "Hide the update option", "Hide the Chaty Update entry from the Home Screen Options menu. App updates are not affected.", p.hideUpdateOption, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(hideUpdateOption = it), logTitle = "Hide the update option")
+// preferences.updatePrivacy(p.copy(hideUpdateOption = it), logTitle = "Hide the update option")
+// preferences.updatePrivacy(preferences.privacy.copy(hideUpdateOption = it), logTitle = "Hide the update option")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(hideUpdateOption = it), logTitle = "Hide the update option")
                     }
 
                     PrivacySectionDivider(style, "Status")
                     PrivacySwitchRow(style, view, PrivacyChannelOffIcon, "Disable channels", "Hide Channels on the Status screen. Channels you follow are kept.", p.disableChannels, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(disableChannels = it), logTitle = "Disable channels")
+// preferences.updatePrivacy(p.copy(disableChannels = it), logTitle = "Disable channels")
+// preferences.updatePrivacy(preferences.privacy.copy(disableChannels = it), logTitle = "Disable channels")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(disableChannels = it), logTitle = "Disable channels")
                     }
                     PrivacySwitchRow(style, view, Icons.Rounded.VisibilityOff, "Hide view status", "Do not tell contacts that you have viewed their status.", p.hideViewStatus, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(hideViewStatus = it), logTitle = "Hide view status")
+// preferences.updatePrivacy(p.copy(hideViewStatus = it), logTitle = "Hide view status")
+// preferences.updatePrivacy(preferences.privacy.copy(hideViewStatus = it), logTitle = "Hide view status")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(hideViewStatus = it), logTitle = "Hide view status")
                     }
-                    PrivacySwitchRow(style, view, Icons.Outlined.DeleteForever, "Anti-delete status", "Keep local copies of deleted status and stories. Affects the sender too: respect their privacy.", p.antiDeleteStatus, reduceMotion) {
+// PrivacySwitchRow(style, view, Icons.Outlined.DeleteForever, "Anti-delete status", "Keep local copies of deleted status and stories. Affects the sender too: respect their privacy.", p.antiDeleteStatus, reduceMotion) {
+                    PrivacySwitchRow(style, view, Icons.Outlined.DeleteForever, "Anti-delete status", "Keep local copies of deleted status and stories. Affects the sender too: respect their privacy.", p.antiDeleteStatus, reduceMotion, affectedPeople = stringResource(R.string.privacy_affects_you_sender)) {
                         if (it) {
                             retentionTitle = "Anti-delete status"
-                            retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiDeleteStatus = true), logTitle = "Anti-delete status") }
-                        } else preferences.updatePrivacy(preferences.privacy.copy(antiDeleteStatus = false), logTitle = "Anti-delete status")
+// retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiDeleteStatus = true), logTitle = "Anti-delete status") }
+                            retentionChange = { if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiDeleteStatus = true), logTitle = "Anti-delete status") }
+// } else preferences.updatePrivacy(preferences.privacy.copy(antiDeleteStatus = false), logTitle = "Anti-delete status")
+                        } else if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiDeleteStatus = false), logTitle = "Anti-delete status")
                     }
                     PrivacySwitchRow(style, view, Icons.Outlined.NotificationImportant, "Status revoke alert", "Show an immediate notification when one of your contacts deletes their status/Story.", p.statusRevocationAlert, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(statusRevocationAlert = it), logTitle = "Status revoke alert")
+// preferences.updatePrivacy(p.copy(statusRevocationAlert = it), logTitle = "Status revoke alert")
+// preferences.updatePrivacy(preferences.privacy.copy(statusRevocationAlert = it), logTitle = "Status revoke alert")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(statusRevocationAlert = it), logTitle = "Status revoke alert")
                     }
 
                     PrivacySectionDivider(style, "Messages")
-                    PrivacySwitchRow(style, view, Icons.Outlined.MarkChatRead, "Hide the first message", "When this feature is enabled, the first message in hidden chats will not be shown, and you can only read it after opening the chat." + if (preferences.security.hiddenConversationIds.isEmpty()) " No hidden chats yet." else "", p.hideFirstMessage, reduceMotion, enabled = p.hideFirstMessage || preferences.security.hiddenConversationIds.isNotEmpty()) {
-                        preferences.updatePrivacy(p.copy(hideFirstMessage = it), logTitle = "Hide the first message")
+//                     PrivacySwitchRow(style, view, Icons.Outlined.MarkChatRead, "Hide the first message", "When this feature is enabled, the first message in hidden chats will not be shown, and you can only read it after opening the chat." + if (preferences.security.hiddenConversationIds.isEmpty()) " No hidden chats yet." else "", p.hideFirstMessage, reduceMotion, enabled = p.hideFirstMessage || preferences.security.hiddenConversationIds.isNotEmpty()) {
+                    PrivacySwitchRow(style, view, Icons.Outlined.MarkChatRead, "Hide the first message", "When this feature is enabled, the first message in hidden chats will not be shown, and you can only read it after opening the chat." + if (selected.security.hiddenConversationIds.isEmpty()) " No hidden chats yet." else "", p.hideFirstMessage, reduceMotion, enabled = p.hideFirstMessage || selected.security.hiddenConversationIds.isNotEmpty()) {
+// preferences.updatePrivacy(p.copy(hideFirstMessage = it), logTitle = "Hide the first message")
+// preferences.updatePrivacy(preferences.privacy.copy(hideFirstMessage = it), logTitle = "Hide the first message")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(hideFirstMessage = it), logTitle = "Hide the first message")
                     }
-                    PrivacySwitchRow(style, view, Icons.Outlined.Timer, "Anti-disappearing messages", "If disappearing messages is enabled, messages will not delete from your side. Affects the sender too.", p.antiDisappearingMessages, reduceMotion) {
+// PrivacySwitchRow(style, view, Icons.Outlined.Timer, "Anti-disappearing messages", "If disappearing messages is enabled, messages will not delete from your side. Affects the sender too.", p.antiDisappearingMessages, reduceMotion) {
+                    PrivacySwitchRow(style, view, Icons.Outlined.Timer, "Anti-disappearing messages", "If disappearing messages is enabled, messages will not delete from your side. Affects the sender too.", p.antiDisappearingMessages, reduceMotion, affectedPeople = stringResource(R.string.privacy_affects_you_sender)) {
                         if (it) {
                             retentionTitle = "Anti-disappearing messages"
-                            retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiDisappearingMessages = true), logTitle = "Anti-disappearing messages") }
-                        } else preferences.updatePrivacy(preferences.privacy.copy(antiDisappearingMessages = false), logTitle = "Anti-disappearing messages")
+// retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiDisappearingMessages = true), logTitle = "Anti-disappearing messages") }
+                            retentionChange = { if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiDisappearingMessages = true), logTitle = "Anti-disappearing messages") }
+// } else preferences.updatePrivacy(preferences.privacy.copy(antiDisappearingMessages = false), logTitle = "Anti-disappearing messages")
+                        } else if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiDisappearingMessages = false), logTitle = "Anti-disappearing messages")
                     }
                     PrivacySwitchRow(style, view, Icons.Rounded.EditNote, "Show edited message", "Show that a message was edited when that information is available.", p.showEditedMessage, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(showEditedMessage = it), logTitle = "Show edited message")
+// preferences.updatePrivacy(p.copy(showEditedMessage = it), logTitle = "Show edited message")
+// preferences.updatePrivacy(preferences.privacy.copy(showEditedMessage = it), logTitle = "Show edited message")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(showEditedMessage = it), logTitle = "Show edited message")
                     }
-                    PrivacySwitchRow(style, view, Icons.Outlined.Delete, "Anti-delete messages", "Keep a local copy when a sender deletes a message. Affects the sender too: this does not change their copy.", p.antiDeleteMessages, reduceMotion) {
+// PrivacySwitchRow(style, view, Icons.Outlined.Delete, "Anti-delete messages", "Keep a local copy when a sender deletes a message. Affects the sender too: this does not change their copy.", p.antiDeleteMessages, reduceMotion) {
+                    PrivacySwitchRow(style, view, Icons.Outlined.Delete, "Anti-delete messages", "Keep a local copy when a sender deletes a message. Affects the sender too: this does not change their copy.", p.antiDeleteMessages, reduceMotion, affectedPeople = stringResource(R.string.privacy_affects_you_sender)) {
                         if (it) {
                             retentionTitle = "Anti-delete messages"
-                            retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiDeleteMessages = true), logTitle = "Anti-delete messages") }
-                        } else preferences.updatePrivacy(preferences.privacy.copy(antiDeleteMessages = false), logTitle = "Anti-delete messages")
+// retentionChange = { preferences.updatePrivacy(preferences.privacy.copy(antiDeleteMessages = true), logTitle = "Anti-delete messages") }
+                            retentionChange = { if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiDeleteMessages = true), logTitle = "Anti-delete messages") }
+// } else preferences.updatePrivacy(preferences.privacy.copy(antiDeleteMessages = false), logTitle = "Anti-delete messages")
+                        } else if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(antiDeleteMessages = false), logTitle = "Anti-delete messages")
                     }
                     PrivacySwitchRow(style, view, Icons.Outlined.NotificationsActive, "Message revoke alert", "Show a notification in the status bar when someone deletes a message sent to you.", p.messageRevokeAlert, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(messageRevokeAlert = it), logTitle = "Message revoke alert")
+// preferences.updatePrivacy(p.copy(messageRevokeAlert = it), logTitle = "Message revoke alert")
+// preferences.updatePrivacy(preferences.privacy.copy(messageRevokeAlert = it), logTitle = "Message revoke alert")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(messageRevokeAlert = it), logTitle = "Message revoke alert")
                     }
                     PrivacySwitchRow(style, view, Icons.Outlined.DeleteSweep, "Delete for everyone", "Request deletion for everyone when the server allows it. Time limits still apply.", p.deletionOfEveryone, reduceMotion) {
-                        preferences.updatePrivacy(p.copy(deletionOfEveryone = it), logTitle = "Delete for everyone")
+// preferences.updatePrivacy(p.copy(deletionOfEveryone = it), logTitle = "Delete for everyone")
+// preferences.updatePrivacy(preferences.privacy.copy(deletionOfEveryone = it), logTitle = "Delete for everyone")
+                        if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(deletionOfEveryone = it), logTitle = "Delete for everyone")
                     }
 
                     PrivacySectionDivider(style, "More options")
                     PrivacyChevronRow(style, view, Icons.Outlined.AccessTime, "Advanced", "Deleted media time and unviewed chat counters") { showMoreOptions = !showMoreOptions }
                     if (showMoreOptions) {
                         PrivacySwitchRow(style, view, Icons.Outlined.AccessTime, "Deleted media time", "Find out the exact moment a message or status was deleted.", p.deletedMediaTime, reduceMotion) {
-                            preferences.updatePrivacy(p.copy(deletedMediaTime = it), logTitle = "Deleted media time")
+// preferences.updatePrivacy(p.copy(deletedMediaTime = it), logTitle = "Deleted media time")
+// preferences.updatePrivacy(preferences.privacy.copy(deletedMediaTime = it), logTitle = "Deleted media time")
+                            if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(deletedMediaTime = it), logTitle = "Deleted media time")
                         }
                         PrivacySwitchRow(style, view, Icons.Outlined.MarkChatUnread, "Unviewed chats", "When enabled the unread counter stays after you open a chat, until you read the messages.", p.unviewedChats, reduceMotion) {
-                            preferences.updatePrivacy(p.copy(unviewedChats = it), logTitle = "Unviewed chats")
+// preferences.updatePrivacy(p.copy(unviewedChats = it), logTitle = "Unviewed chats")
+// preferences.updatePrivacy(preferences.privacy.copy(unviewedChats = it), logTitle = "Unviewed chats")
+                            if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(unviewedChats = it), logTitle = "Unviewed chats")
                         }
                     }
                     // Scoped custom controls have no publication consumer yet. Preserve saved keys, do not promise enforcement.
@@ -711,6 +985,28 @@ fun PrivacyCenterScreen(
                     // PrivacyChevronRow(style, view, Icons.Outlined.Groups, "Groups", "Change privacy settings") { modal = PrivacyModal.Custom("Groups") }
                 }
                 Spacer(Modifier.height(16.dp))
+//                 PrivacyCardContainer(style, lowRam) {
+//                     PrivacySectionDivider(style, "Danger zone")
+//                     // Recovery has no persistence or verification implementation. Keep the row disabled, not a false recovery promise.
+//                     // PrivacyChevronRow(style, view, Icons.Outlined.HelpOutline, "Recovery question", "Set secret question for password reset") { modal = PrivacyModal.Recovery }
+//                     PrivacyChevronRow(style, view, Icons.Rounded.RestartAlt, "Reset privacy", "Restore Chaty default privacy choices on this device", iconTint = style.error) {
+//                         modal = PrivacyModal.Reset
+//                     }
+//                 }
+//                 Spacer(Modifier.height(24.dp))
+                PrivacyCardContainer(style, lowRam) {
+                    PrivacySectionDivider(style, "Diagnostics")
+                    if (com.example.chat.BuildConfig.DEBUG) {
+                        PrivacyChevronRow(style, view, Icons.Outlined.AdminPanelSettings,
+                            stringResource(R.string.privacy_debug_state_title),
+                            stringResource(R.string.privacy_debug_state_description)) { modal = PrivacyModal.DebugState }
+                    }
+// OptionalCrashReportingChoice(style)
+                    OptionalCrashReportingChoice(style, view, reduceMotion)
+                    PrivacyChevronRow(style, view, Icons.Rounded.History, "Recent changes", "Privacy changes made on this device") { modal = PrivacyModal.History }
+                    PrivacyChevronRow(style, view, Icons.Outlined.Share, "Export privacy settings", "Share a JSON copy of this device's privacy choices") { export() }
+                }
+                Spacer(Modifier.height(24.dp))
                 PrivacyCardContainer(style, lowRam) {
                     PrivacySectionDivider(style, "Danger zone")
                     // Recovery has no persistence or verification implementation. Keep the row disabled, not a false recovery promise.
@@ -719,16 +1015,11 @@ fun PrivacyCenterScreen(
                         modal = PrivacyModal.Reset
                     }
                 }
-                Spacer(Modifier.height(24.dp))
-                PrivacyCardContainer(style, lowRam) {
-                    PrivacySectionDivider(style, "Diagnostics")
-                    OptionalCrashReportingChoice(style)
-                    PrivacyChevronRow(style, view, Icons.Rounded.History, "Recent changes", "Privacy changes made on this device") { modal = PrivacyModal.History }
-                    PrivacyChevronRow(style, view, Icons.Outlined.Share, "Export privacy settings", "Share a JSON copy of this device's privacy choices") { export() }
-                }
                 Spacer(Modifier.height(36.dp))
             }
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+            // SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter)
+                .imePadding().windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)))
         }
     }
 
@@ -742,7 +1033,9 @@ fun PrivacyCenterScreen(
             confirmButton = { TextButton(onClick = {
                 if (preferences.scopeGeneration == accountGeneration) retentionChange?.invoke()
                 retentionChange = null; retentionTitle = null
-            }) { Text("Enable local retention") } },
+            // }) { Text("Enable local retention") } },
+            }) { Text(stringResource(if (retentionTitle == "Disable forwarded tag")
+                R.string.privacy_hide_forwarded_tag_action else R.string.privacy_enable_local_retention_action)) } },
         )
     }
 
@@ -755,6 +1048,7 @@ fun PrivacyCenterScreen(
                     val policy = PrivacyOptionsLogic.audiencePolicy(label) ?: return@ServerWhoCanCallMeDialog
                     if (callBusy) return@ServerWhoCanCallMeDialog
                     callBusy = true
+                    ++planeCache.callRevision // Invalidate GETs started before this write.
                     scope.launch {
                         try {
                             if (preferences.scopeGeneration != accountGeneration) return@launch
@@ -766,10 +1060,15 @@ fun PrivacyCenterScreen(
                                 reloadPrivacyPlanes()
                                 return@launch
                             }
+                            ++planeCache.callRevision // Also reject GETs started during the save.
+                            planeCache.callPolicy = saved
+                            planeCache.syncedAtMs = System.currentTimeMillis()
+                            syncedAtMs = planeCache.syncedAtMs
                             serverCallPolicy = saved
                             val serverLabel = PrivacyOptionsLogic.audiencePreferenceValue(saved.policy)
                                 ?: throw IllegalStateException("Unsupported call policy")
-                            preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = serverLabel), logTitle = "Who can call me")
+// preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = serverLabel), logTitle = "Who can call me")
+                            if (preferences.scopeGeneration == accountGeneration) preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = serverLabel), logTitle = "Who can call me")
                             modal = null
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) {
@@ -793,6 +1092,7 @@ fun PrivacyCenterScreen(
                     val olPolicy = PrivacyOptionsLogic.onlinePolicy(onlineLabel) ?: return@LastSeenOnlineDialog
                     if (presenceBusy || savePresencePrivacy == null) return@LastSeenOnlineDialog
                     presenceBusy = true
+                    ++planeCache.presenceRevision // Invalidate GETs started before this write.
                     scope.launch {
                         try {
                             if (preferences.scopeGeneration != accountGeneration) return@launch
@@ -809,6 +1109,10 @@ fun PrivacyCenterScreen(
                                 ?: throw IllegalStateException("Unsupported last-seen policy")
                             val savedOnline = PrivacyOptionsLogic.onlinePreferenceValue(saved.onlinePolicy)
                                 ?: throw IllegalStateException("Unsupported online policy")
+                            ++planeCache.presenceRevision
+                            planeCache.presence = saved; planeCache.presenceLoaded = true
+                            planeCache.syncedAtMs = System.currentTimeMillis()
+                            syncedAtMs = planeCache.syncedAtMs
                             presencePrivacy = saved
                             preferences.updatePrivacy(
                                 preferences.privacy.copy(hideLastSeenAudience = savedLastSeen, hideOnlineAudience = savedOnline),
@@ -833,12 +1137,17 @@ fun PrivacyCenterScreen(
                 onUnblock = { entry ->
                     if (unblockBusy || unblockUser == null) return@BlockedContactsDialog
                     unblockBusy = true
+                    ++planeCache.blockedRevision // Invalidate GETs started before this write.
                     scope.launch {
                         try {
                             if (preferences.scopeGeneration != accountGeneration) return@launch
                             unblockUser(entry.userId)
                             if (preferences.scopeGeneration != accountGeneration) return@launch
+                            ++planeCache.blockedRevision
                             blockedUsers = blockedUsers.orEmpty().filterNot { it.userId == entry.userId }
+                            planeCache.blocked = blockedUsers; planeCache.blockedLoaded = true
+                            planeCache.syncedAtMs = System.currentTimeMillis()
+                            syncedAtMs = planeCache.syncedAtMs
                             snack("${entry.displayName} unblocked")
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) {
@@ -861,9 +1170,23 @@ fun PrivacyCenterScreen(
             onDismissRequest = { modal = null },
             title = { Text("Reset privacy?") },
             text = { Text("Reset local Chaty privacy choices to Chaty defaults? Last seen returns to My Contacts, online to Everyone and read receipts turn on. Server policies, custom privacy and the separate crash-report choice are not changed. You can change them again at any time.") },
-            dismissButton = { TextButton(onClick = { modal = null }) { Text("Cancel") } },
+            // dismissButton = { TextButton(onClick = { modal = null }) { Text("Cancel") } },
+            dismissButton = {
+                val cancelFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+                LaunchedEffect(cancelFocus) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    cancelFocus.requestFocus()
+                }
+                TextButton(modifier = Modifier.focusRequester(cancelFocus),
+                    onClick = { modal = null }) { Text("Cancel") }
+            },
             confirmButton = {
-                Button(onClick = {
+                // Button(onClick = {
+                Button(colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ), onClick = {
+                    if (preferences.scopeGeneration != accountGeneration) return@Button
                     val previous = preferences.privacy
                     preferences.updatePrivacy(PrivacyPreferences(), logTitle = "Reset Privacy")
                     modal = null
@@ -874,15 +1197,48 @@ fun PrivacyCenterScreen(
                             actionLabel = "Undo",
                             duration = androidx.compose.material3.SnackbarDuration.Long,
                         )
-                        if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+// Superseded source retained below per additive-only review rule.
+//                         if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        if (result == androidx.compose.material3.SnackbarResult.ActionPerformed &&
+                            preferences.scopeGeneration == accountGeneration && preferences.privacy == PrivacyPreferences()) {
                             preferences.updatePrivacy(previous, logTitle = "Reset Privacy (undo)")
                         }
                     }
                 }) { Text("Reset privacy") }
             },
         )
+        PrivacyModal.DebugState -> if (com.example.chat.BuildConfig.DEBUG) {
+            val rows = privacyDebugRows(p, serverCallPolicy?.policy, presencePrivacy?.lastSeenPolicy, presencePrivacy?.onlinePolicy)
+            AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+                properties = androidx.compose.ui.window.DialogProperties(
+                    securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
+                onDismissRequest = { modal = null },
+                title = { Text(stringResource(R.string.privacy_debug_state_title)) },
+                text = {
+                    // Bound the diagnostic body independently of its fixed close action.
+                    Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                        Text(stringResource(R.string.privacy_debug_state_description), fontSize = 12.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Row(Modifier.fillMaxWidth()) {
+                            Text("Local", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                            Text("Cached server", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        }
+                        rows.forEach { row ->
+                            Text(row.key, fontWeight = FontWeight.W600)
+                            Row(Modifier.fillMaxWidth()) {
+                                Text(row.local, Modifier.weight(1f))
+                                Text(row.cachedServer, Modifier.weight(1f))
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { modal = null }) { Text("Done") } },
+            )
+        }
         PrivacyModal.History -> {
-            val entries = remember(version) { preferences.history().filter { it.key == "privacy" }.takeLast(50).reversed() }
+//             val entries = remember(version) { preferences.history().filter { it.key == "privacy" }.takeLast(50).reversed() }
+            val entries = selected.history
             AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
                 modifier = Modifier.widthIn(280.dp, 560.dp),
                 onDismissRequest = { modal = null },
@@ -891,7 +1247,11 @@ fun PrivacyCenterScreen(
                     if (entries.isEmpty()) {
                         Text("No privacy changes recorded on this device.")
                     } else {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                        Column(
+                            // Scroll removed (was Modifier.verticalScroll(rememberScrollState())):
+                            // ChatyConfirmationDialog's body already scrolls; an inner unbounded scrollable
+                            // is measured with infinite max height and throws at first composition.
+                        ) {
                             Text("Newest first. Values stay on this device.", color = appColors.foregroundSecondary, fontSize = 12.sp)
                             Spacer(Modifier.height(8.dp))
                             entries.forEach { e ->
@@ -913,36 +1273,61 @@ fun PrivacyCenterScreen(
 private fun CustomPrivacyDialog(preferences: ChatyPreferencesController, title: String, onDone: () -> Unit) {
     var tick by remember { mutableIntStateOf(0) }
     @Suppress("UNUSED_EXPRESSION") tick
-    @Composable
-    fun Item(label: String, key: String) {
-        val full = "${title}_$key"
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .toggleable(value = preferences.gbBool(full, false), role = Role.Checkbox) { preferences.updateGbFeature(full, !preferences.gbBool(full, false)); tick++ },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label, Modifier.weight(1f).padding(start = 8.dp))
-            Checkbox(checked = preferences.gbBool(full, false), onCheckedChange = null, modifier = Modifier.clearAndSetSemantics { })
-        }
-    }
+// Superseded source retained below per additive-only review rule.
+//     @Composable
+//     fun Item(label: String, key: String) {
+//         val full = "${title}_$key"
+//         Row(
+//             Modifier.fillMaxWidth().heightIn(min = 48.dp)
+//                 .toggleable(value = preferences.gbBool(full, false), role = Role.Checkbox) { preferences.updateGbFeature(full, !preferences.gbBool(full, false)); tick++ },
+//             verticalAlignment = Alignment.CenterVertically,
+//         ) {
+//             Text(label, Modifier.weight(1f).padding(start = 8.dp))
+//             Checkbox(checked = preferences.gbBool(full, false), onCheckedChange = null, modifier = Modifier.clearAndSetSemantics { })
+//         }
+//     }
     AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
         modifier = Modifier.widthIn(280.dp, 560.dp),
         onDismissRequest = onDone,
         title = { Text("Custom privacy ($title)") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                // Scroll removed (was Modifier.verticalScroll(rememberScrollState())):
+                // the dialog body measures its text slot with unbounded height; an inner
+                // unbounded scrollable throws at first composition (Bandi's 11-14/11-16 crashes).
+            ) {
+                @Suppress("UNUSED_EXPRESSION") tick
                 Text("These saved choices apply to $title conversations.")
-                Item("Hide blue ticks", "hide_blue_ticks")
-                Item("Hide second tick", "hide_second_tick")
-                Item("Hide blue microphone", "hide_blue_mic")
+// Superseded source retained below per additive-only review rule.
+//                 Item("Hide blue ticks", "hide_blue_ticks")
+//                 Item("Hide second tick", "hide_second_tick")
+//                 Item("Hide blue microphone", "hide_blue_mic")
+                CustomPrivacyItem("Hide blue ticks", preferences.gbBool("${title}_hide_blue_ticks", false)) { value -> preferences.updateGbFeature("${title}_hide_blue_ticks", value); tick++ }
+                CustomPrivacyItem("Hide second tick", preferences.gbBool("${title}_hide_second_tick", false)) { value -> preferences.updateGbFeature("${title}_hide_second_tick", value); tick++ }
+                CustomPrivacyItem("Hide blue microphone", preferences.gbBool("${title}_hide_blue_mic", false)) { value -> preferences.updateGbFeature("${title}_hide_blue_mic", value); tick++ }
                 // The "Broadcast" scope was planned but never wired; the dead
                 // branch is removed so it cannot hide missing work.
-                Item("Hide typing\u2026", "hide_typing")
-                Item("Hide recording\u2026", "hide_recording")
+// Superseded source retained below per additive-only review rule.
+//                 Item("Hide typing\u2026", "hide_typing")
+//                 Item("Hide recording\u2026", "hide_recording")
+                CustomPrivacyItem("Hide typing\u2026", preferences.gbBool("${title}_hide_typing", false)) { value -> preferences.updateGbFeature("${title}_hide_typing", value); tick++ }
+                CustomPrivacyItem("Hide recording\u2026", preferences.gbBool("${title}_hide_recording", false)) { value -> preferences.updateGbFeature("${title}_hide_recording", value); tick++ }
             }
         },
         confirmButton = { Button(onClick = onDone) { Text("Done") } },
     )
+}
+
+@Composable
+private fun CustomPrivacyItem(label: String, checked: Boolean, onChanged: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .toggleable(value = checked, role = Role.Checkbox, onValueChange = onChanged),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.weight(1f).padding(start = 8.dp))
+        Checkbox(checked = checked, onCheckedChange = null, modifier = Modifier.clearAndSetSemantics { })
+    }
 }
 
 @Composable
@@ -955,7 +1340,9 @@ private fun RecoveryQuestionDialog(onCancel: () -> Unit, onSave: () -> Unit) {
         title = { Text("Recovery Question") },
         text = {
             Column(Modifier.imePadding()) {
-                Text("Set a security question to help recover access if you forget your credential.", fontSize = 13.sp)
+// Superseded source retained below per additive-only review rule.
+//                 Text("Set a security question to help recover access if you forget your credential.", fontSize = 13.sp)
+                Text("Set a security question to help recover access if you forget your credential.", style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(q, { q = it }, label = { Text("Security Question") })
                 Spacer(Modifier.height(12.dp))
@@ -988,11 +1375,13 @@ private fun ServerWhoCanCallMeDialog(
         title = { Text("Who can call me?") },
         text = {
             Column(Modifier.selectableGroup()) {
-                if (busy) Text("Saving call policy...", Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+//                 if (busy) Text("Saving call policy...", Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+                if (busy) PrivacySavingProgress(stringResource(R.string.privacy_saving_call_policy))
                 if (current.exceptions.isEmpty()) Text("Contact exceptions need an existing list. An exceptions editor is not available here.", color = colors.foregroundSecondary)
                 PrivacyOptionsLogic.audienceLabels.forEach { opt ->
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = opt == selected,
+                        // Prior sizing: Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = opt == selected,
+                        Modifier.fillMaxWidth().minimumInteractiveComponentSize().heightIn(min = 48.dp).selectable(selected = opt == selected,
                             enabled = !busy && (opt != "My Contacts Except…" || current.exceptions.isNotEmpty()),
                             role = Role.RadioButton, onClick = { onPick(opt) }).padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1037,13 +1426,18 @@ private fun LastSeenOnlineDialog(
         onDismissRequest = onDismiss,
         title = { Text("Last seen & online") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup()) {
+            Column(
+                // Scroll removed (was Modifier.verticalScroll(...)); ChatyConfirmationDialog body already
+                // scrolls - an inner unbounded scrollable is measured with infinite max height (crash).
+                Modifier.selectableGroup()) {
                 if (current.lastSeenExceptions.isEmpty()) Text("Contact exceptions need an existing list. An exceptions editor is not available here.", color = colors.foregroundSecondary)
-                if (busy) Text("Saving privacy policy...", Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+//                 if (busy) Text("Saving privacy policy...", Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+                if (busy) PrivacySavingProgress(stringResource(R.string.privacy_saving_presence_policy))
                 Text("Who can see my last seen", color = colors.foregroundSecondary, fontSize = 12.sp, fontWeight = FontWeight.W600)
                 PrivacyOptionsLogic.audienceLabels.forEach { opt ->
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = opt == lastSeen,
+                        // Prior sizing: Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = opt == lastSeen,
+                        Modifier.fillMaxWidth().minimumInteractiveComponentSize().heightIn(min = 48.dp).selectable(selected = opt == lastSeen,
                             enabled = !busy && (opt != "My Contacts Except…" || current.lastSeenExceptions.isNotEmpty()),
                             role = Role.RadioButton, onClick = { lastSeen = opt }).padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1069,7 +1463,8 @@ private fun LastSeenOnlineDialog(
                 Text("Who can see when I'm online", color = colors.foregroundSecondary, fontSize = 12.sp, fontWeight = FontWeight.W600)
                 PrivacyOptionsLogic.onlineLabels.forEach { opt ->
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = opt == online, enabled = !busy,
+                        // Prior sizing: Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = opt == online, enabled = !busy,
+                        Modifier.fillMaxWidth().minimumInteractiveComponentSize().heightIn(min = 48.dp).selectable(selected = opt == online, enabled = !busy,
                             role = Role.RadioButton, onClick = { online = opt }).padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1098,7 +1493,8 @@ private fun LastSeenOnlineDialog(
 
 /** Server-backed blocked list (research 5.3): silent unblock, no leaks. */
 @Composable
-private fun BlockedContactsDialog(
+// private fun BlockedContactsDialog(
+internal fun BlockedContactsDialog(
     blocked: List<com.example.chat.data.api.ApiContactsClient.BlockedEntry>,
     busy: Boolean,
     onUnblock: (com.example.chat.data.api.ApiContactsClient.BlockedEntry) -> Unit,
@@ -1110,6 +1506,8 @@ private fun BlockedContactsDialog(
     confirmEntry?.let { entry ->
         AlertDialog(
             shape = com.example.chat.ui.kit.ChatyModalShape,
+            properties = androidx.compose.ui.window.DialogProperties(
+                securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
             modifier = Modifier.widthIn(280.dp, 560.dp),
             onDismissRequest = { confirmEntry = null },
             title = { Text("Unblock ${entry.displayName}?") },
@@ -1119,14 +1517,30 @@ private fun BlockedContactsDialog(
         )
     }
     AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+        properties = androidx.compose.ui.window.DialogProperties(
+            securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
         modifier = Modifier.widthIn(280.dp, 560.dp),
         onDismissRequest = onDismiss,
         title = { Text("Blocked contacts") },
         text = {
             if (blocked.isEmpty()) {
-                Text("No blocked contacts.", color = colors.foregroundSecondary)
+                // Text("No blocked contacts.", color = colors.foregroundSecondary)
+                Column(Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Rounded.Block, contentDescription = null,
+                        tint = colors.foregroundSecondary,
+                        modifier = Modifier.size(48.dp).testTag("blocked-contacts-empty-illustration"))
+                    Spacer(Modifier.height(12.dp))
+                    Text("No blocked contacts.", color = colors.foregroundSecondary)
+                }
             } else {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(
+                    // Scroll bounded (was an unbounded Modifier.verticalScroll(rememberScrollState())):
+                    // an unbounded scrollable inside a dialog text slot is measured with
+                    // infinite max height and throws at first composition (11-14/11-16 crashes).
+                    Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())
+                ) {
+                    if (busy) PrivacySavingProgress(stringResource(R.string.privacy_unblocking_contact))
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
@@ -1147,7 +1561,8 @@ private fun BlockedContactsDialog(
                                 Text(entry.displayName, fontWeight = FontWeight.W600)
                                 Text(if (entry.username.isBlank()) "Account identifier unavailable" else "@${entry.username}", color = colors.foregroundSecondary, fontSize = 14.sp)
                             }
-                            TextButton(enabled = !busy, onClick = { if (!busy) confirmEntry = entry }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Unblock ${entry.displayName}") }
+                            // TextButton(enabled = !busy, onClick = { if (!busy) confirmEntry = entry }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Unblock ${entry.displayName}") }
+                            TextButton(enabled = !busy, onClick = { if (!busy) confirmEntry = entry }, modifier = Modifier.minimumInteractiveComponentSize().heightIn(min = 48.dp)) { Text("Unblock ${entry.displayName}") }
                         }
                     }
                 }
@@ -1159,35 +1574,223 @@ private fun BlockedContactsDialog(
 
 
 @Composable
-private fun OptionalCrashReportingChoice(style: PrivacyRowStyle) {
+// private fun OptionalCrashReportingChoice(style: PrivacyRowStyle) {
+private fun OptionalCrashReportingChoice(style: PrivacyRowStyle, view: android.view.View, reduceMotion: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    val prefs = remember(context) { context.getSharedPreferences("chaty_diagnostics", android.content.Context.MODE_PRIVATE) }
-    // Read off the main thread; StrictMode-safe on first open.
-    val stored by produceState<Boolean?>(initialValue = null, prefs) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { prefs.getBoolean("crash_reports_opt_in", false) }
+// Superseded source retained below per additive-only review rule.
+//     val prefs = remember(context) { context.getSharedPreferences("chaty_diagnostics", android.content.Context.MODE_PRIVATE) }
+//     // Read off the main thread; StrictMode-safe on first open.
+    // Both preference acquisition and its first read run on IO, not only getBoolean.
+    var storageFailure by remember { mutableStateOf(false) }
+    val prefs by produceState<android.content.SharedPreferences?>(initialValue = null, context) {
+        // value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        //     context.getSharedPreferences("chaty_diagnostics", android.content.Context.MODE_PRIVATE)
+        // }
+        try {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                context.getSharedPreferences("chaty_diagnostics", android.content.Context.MODE_PRIVATE)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { storageFailure = true }
+    }
+    // val stored by produceState<Boolean?>(initialValue = null, prefs) {
+    val stored by produceState<OptionalCrashConsent?>(initialValue = null, prefs) {
+// Superseded source retained below per additive-only review rule.
+//         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { prefs.getBoolean("crash_reports_opt_in", false) }
+        // value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { prefs?.getBoolean("crash_reports_opt_in", false) }
+        try {
+            // value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { prefs?.getBoolean("crash_reports_opt_in", false) }
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                prefs?.let { OptionalCrashConsent(it.getBoolean("crash_reports_opt_in", false),
+                    it.getInt("crash_reports_consent_version", 0)) }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { storageFailure = true }
     }
     var local by remember { mutableStateOf<Boolean?>(null) }
-    val allowed = local ?: stored ?: false
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp)
-            .semantics { stateDescription = if (allowed) "On" else "Off" }
-            .toggleable(value = allowed, role = Role.Switch) {
-                local = it
-                prefs.edit()
-                    .putBoolean("crash_reports_opt_in", it)
-                    .putLong("crash_reports_consent_at", System.currentTimeMillis())
-                    .putInt("crash_reports_consent_version", 1)
-                    .apply()
-            }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Outlined.AdminPanelSettings, null, tint = style.accent, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text("Allow optional crash reports", color = style.primaryText, fontSize = (16f * style.fs).sp, fontWeight = FontWeight.W600)
-            Text("Off by default. No crash reporter is installed in this version; this choice alone sends nothing.", color = style.secondaryText, fontSize = (14f * style.fs).sp)
+    // val allowed = local ?: stored ?: false
+    val allowed = local ?: stored?.allowedForCurrentVersion ?: false
+    var reviewDismissed by remember(stored) { mutableStateOf(false) }
+    val needsReview = stored?.needsReview == true && local == null
+
+//     fun saveChoice(enabled: Boolean) {
+//         prefs?.let { storage ->
+//             val previous = local
+//             try {
+//                 storage.edit().putBoolean("crash_reports_opt_in", enabled)
+//                     .putLong("crash_reports_consent_at", System.currentTimeMillis())
+//                     .putInt("crash_reports_consent_version", OPTIONAL_CRASH_CONSENT_VERSION).apply()
+//                 local = enabled
+//                 storageFailure = false
+//                 reviewDismissed = true
+//             } catch (_: Exception) {
+//                 local = previous
+//                 storageFailure = true
+//             }
+//         }
+//     }
+    val consentScope = rememberCoroutineScope()
+    var consentSaving by remember { mutableStateOf(false) }
+    fun saveChoice(enabled: Boolean) {
+        val storage = prefs ?: return
+        if (consentSaving) return
+        consentSaving = true
+        consentScope.launch {
+            try {
+                val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    storage.edit().putBoolean("crash_reports_opt_in", enabled)
+                        .putLong("crash_reports_consent_at", System.currentTimeMillis())
+                        .putInt("crash_reports_consent_version", OPTIONAL_CRASH_CONSENT_VERSION).commit()
+                }
+                if (saved) { local = enabled; storageFailure = false; reviewDismissed = true }
+                else storageFailure = true
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { storageFailure = true }
+            finally { consentSaving = false }
         }
-        Switch(checked = allowed, onCheckedChange = null, modifier = Modifier.clearAndSetSemantics { })
+    }
+    if (needsReview && !reviewDismissed) {
+        AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+            onDismissRequest = { reviewDismissed = true },
+            title = { Text(stringResource(R.string.privacy_crash_review_title)) },
+            text = { Text(stringResource(R.string.privacy_crash_review_description)) },
+            dismissButton = { TextButton(enabled = !consentSaving, onClick = { saveChoice(false) }) { Text(stringResource(R.string.privacy_crash_keep_off)) } },
+            confirmButton = { TextButton(enabled = !consentSaving, onClick = { saveChoice(true) }) { Text(stringResource(R.string.privacy_crash_allow_choice)) } },
+        )
+    }
+    if (needsReview && reviewDismissed) {
+        TextButton(onClick = { reviewDismissed = false }) { Text(stringResource(R.string.privacy_crash_review_title)) }
+    }
+//     Row(
+//         Modifier.fillMaxWidth().heightIn(min = 64.dp)
+//             .semantics { stateDescription = if (allowed) "On" else "Off" }
+// // Superseded source retained below per additive-only review rule.
+// //             .toggleable(value = allowed, role = Role.Switch) {
+//             .toggleable(value = allowed, role = Role.Switch, enabled = stored != null && prefs != null) {
+//                 val storage = prefs ?: return@toggleable
+//                 local = it
+// // Superseded source retained below per additive-only review rule.
+// //                 prefs.edit()
+//                 storage.edit()
+//                     .putBoolean("crash_reports_opt_in", it)
+//                     .putLong("crash_reports_consent_at", System.currentTimeMillis())
+//                     .putInt("crash_reports_consent_version", 1)
+//                     .apply()
+//             }
+//             .padding(horizontal = 16.dp, vertical = 12.dp),
+//         verticalAlignment = Alignment.CenterVertically,
+//     ) {
+//         Icon(Icons.Outlined.AdminPanelSettings, null, tint = style.accent, modifier = Modifier.size(24.dp))
+//         Spacer(Modifier.width(14.dp))
+//         Column(Modifier.weight(1f)) {
+//             Text("Allow optional crash reports", color = style.primaryText, fontSize = (16f * style.fs).sp, fontWeight = FontWeight.W600)
+// //             Text("Off by default. No crash reporter is installed in this version; this choice alone sends nothing.", color = style.secondaryText, fontSize = (14f * style.fs).sp)
+//             Text("Off by default. No crash reporter is installed in this version; this choice alone sends nothing.", color = style.secondaryText, fontSize = (14f * style.fs).coerceAtLeast(12f).sp)
+//         }
+//         Switch(checked = allowed, onCheckedChange = null, modifier = Modifier.clearAndSetSemantics { })
+//     }
+    // Same standard row/target/focus/spacing as the other choices. Consent storage and
+    // loaded-state guard stay unchanged; displaying this row never opts the user in.
+    PrivacySwitchRow(style, view, Icons.Outlined.AdminPanelSettings,
+        stringResource(R.string.privacy_crash_choice_title),
+        // stringResource(R.string.privacy_crash_choice_explanation),
+        stringResource(if (storageFailure) R.string.privacy_crash_choice_unavailable else R.string.privacy_crash_choice_explanation),
+//         allowed, reduceMotion, enabled = stored != null && prefs != null) { enabled ->
+//         prefs?.let { storage ->
+//             // local = enabled
+//             // storage.edit()
+//             //     .putBoolean("crash_reports_opt_in", enabled)
+//             //     .putLong("crash_reports_consent_at", System.currentTimeMillis())
+//             //     .putInt("crash_reports_consent_version", 1)
+//             //     .apply()
+//             val previous = local
+//             try {
+//                 storage.edit()
+//                     .putBoolean("crash_reports_opt_in", enabled)
+//                     .putLong("crash_reports_consent_at", System.currentTimeMillis())
+//                     .putInt("crash_reports_consent_version", 1)
+//                     .apply()
+//                 local = enabled
+//                 storageFailure = false
+//             } catch (_: Exception) {
+//                 local = previous
+//                 storageFailure = true
+//             }
+//         }
+//     }
+        allowed, reduceMotion, enabled = stored != null && prefs != null && !needsReview && !consentSaving) { enabled ->
+        saveChoice(enabled)
     }
 }
+
+/** One polite status announcement and a visible progress indicator for pending server writes. */
+@Composable
+private fun PrivacySavingProgress(label: String) {
+    Row(Modifier.semantics(mergeDescendants = true) { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(20.dp).clearAndSetSemantics { }, strokeWidth = 2.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(label)
+    }
+}
+
+// b115 superseded active lines retained for source review (not executable):
+//         var policy by remember { mutableStateOf<com.example.chat.data.api.ApiContactsClient.CallPolicy?>(null) }
+//         var busy by remember { mutableStateOf(false) }
+//         LaunchedEffect(loadCallPolicy) { policy = runCatching { loadCallPolicy() }.getOrNull() }
+//         if (current != null) {
+//             ServerWhoCanCallMeDialog(
+//                 current = current,
+//                 busy = busy,
+//                     if (busy) return@ServerWhoCanCallMeDialog
+//                             if (saved.policy == picked) {
+//                                 policy = saved
+//                                 PrivacyOptionsLogic.audiencePreferenceValue(saved.policy)?.let {
+//                                     preferences.updatePrivacy(preferences.privacy.copy(whoCanCallMe = it), logTitle = "Who can call me")
+//                                 }
+//                                 onDismiss()
+//                         catch (_: Exception) { }
+//                         finally { busy = false }
+//                     }
+//                 },
+//                 onDismiss = onDismiss,
+// private object PrivacyPlaneCache {
+//     var generation: Long = -1L
+//     var syncedAtMs by remember(preferences, accountGeneration) { mutableStateOf<Long?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.syncedAtMs else null) }
+//             override fun onAvailable(network: android.net.Network) { offline = false }
+//             override fun onLost(network: android.net.Network) { offline = true }
+//         cm?.registerDefaultNetworkCallback(cb)
+//         onDispose { cm?.unregisterNetworkCallback(cb) }
+//     var presencePrivacy by remember(preferences, accountGeneration) { mutableStateOf<com.example.chat.data.api.ApiPresenceClient.PresencePrivacy?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.presence else null) }
+//     var presenceLoaded by remember(preferences, accountGeneration) { mutableStateOf(PrivacyPlaneCache.generation == accountGeneration && PrivacyPlaneCache.presenceLoaded) }
+//     var serverCallPolicy by remember(preferences, accountGeneration) { mutableStateOf<com.example.chat.data.api.ApiContactsClient.CallPolicy?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.callPolicy else null) }
+//     var blockedUsers by remember(preferences, accountGeneration) { mutableStateOf<List<com.example.chat.data.api.ApiContactsClient.BlockedEntry>?>(if (PrivacyPlaneCache.generation == accountGeneration) PrivacyPlaneCache.blocked else null) }
+//                 if (preferences.scopeGeneration == accountGeneration) {
+//                     PrivacyPlaneCache.generation = accountGeneration; PrivacyPlaneCache.presence = loaded
+//                     PrivacyPlaneCache.presenceLoaded = true; PrivacyPlaneCache.syncedAtMs = nowMs
+//                 if (preferences.scopeGeneration == accountGeneration) { presenceError = "Could not load. Tap to retry."; presenceLoaded = true }
+//                 if (preferences.scopeGeneration == accountGeneration) {
+//                     PrivacyPlaneCache.generation = accountGeneration; PrivacyPlaneCache.callPolicy = loaded
+//                     PrivacyPlaneCache.syncedAtMs = nowMs
+//                 if (preferences.scopeGeneration == accountGeneration) callError = "Unavailable on this server. Tap to retry."
+//                 if (preferences.scopeGeneration == accountGeneration) callError = "Could not load. Tap to retry."
+//                 if (preferences.scopeGeneration == accountGeneration) {
+//                     PrivacyPlaneCache.generation = accountGeneration; PrivacyPlaneCache.blocked = loaded
+//                     PrivacyPlaneCache.blockedLoaded = true; PrivacyPlaneCache.syncedAtMs = nowMs
+//                 if (preferences.scopeGeneration == accountGeneration) blockedError = "Unavailable on this server. Tap to retry."
+//                 if (preferences.scopeGeneration == accountGeneration) blockedError = "Could not load. Tap to retry."
+//         prefs?.let { storage ->
+//             val previous = local
+//                 storage.edit().putBoolean("crash_reports_opt_in", enabled)
+//                     .putLong("crash_reports_consent_at", System.currentTimeMillis())
+//                     .putInt("crash_reports_consent_version", OPTIONAL_CRASH_CONSENT_VERSION).apply()
+//                 local = enabled
+//                 storageFailure = false
+//                 reviewDismissed = true
+//             } catch (_: Exception) {
+//                 local = previous
+//                 storageFailure = true
+//             }
+//             dismissButton = { TextButton(onClick = { saveChoice(false) }) { Text(stringResource(R.string.privacy_crash_keep_off)) } },
+//             confirmButton = { TextButton(onClick = { saveChoice(true) }) { Text(stringResource(R.string.privacy_crash_allow_choice)) } },
+//         allowed, reduceMotion, enabled = stored != null && prefs != null && !needsReview) { enabled ->

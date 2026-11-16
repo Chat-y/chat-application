@@ -31,11 +31,20 @@ internal suspend fun stageMediaSource(context: Context, source: String, prefix: 
 }
 
 internal fun openMediaInput(context: Context, source: String): InputStream {
+    // MV-R2-020: shared staging/gallery routes must not bypass the viewer allowlist.
+    require(isAllowedViewerSource(source, listOf(context.cacheDir, context.filesDir, context.noBackupFilesDir))) {
+        "Unsupported attachment source"
+    }
+    // Match source policy: a raw absolute path is a File even with URI punctuation.
+    if (File(source).isAbsolute) return File(source).inputStream()
     val uri = Uri.parse(source)
     return when (uri.scheme?.lowercase(java.util.Locale.ROOT)) {
         "http", "https" -> {
             val connection = URL(source).openConnection() as HttpURLConnection
             try {
+                // Fail closed on redirects rather than allow a secure URL to redirect to a
+                // different scheme/host. Caller can obtain a fresh direct attachment URL.
+                connection.instanceFollowRedirects = false
                 connection.connectTimeout = 15_000
                 connection.readTimeout = 30_000
                 connection.connect()

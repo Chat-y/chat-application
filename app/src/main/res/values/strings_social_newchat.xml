@@ -75,4 +75,18 @@
     <string name="social_newchat_error_request">Unable to complete this request. Please try again.</string>
     <string name="social_newchat_checked_username">Checked username: @%1$s</string>
     <string name="social_newchat_request_sending">Sending contact request</string>
+    <string name="social_newchat_account_deletion_settings">To delete your own account, use Account settings. Other accounts cannot be deleted from New Conversation.</string>
+    <string name="social_newchat_restore_unavailable">Some selected people are unavailable. Remove them or search their exact usernames before continuing.</string>
+    <string name="social_newchat_request_uncertain">This request may have been sent. Check its status before trying again.</string>
+    <string name="social_newchat_request_status_unavailable">Contact request status is not available yet.</string>
+    <string name="social_newchat_check_request_status">Check request status</string>
+    <string name="social_newchat_discard_title">Discard this draft?</string>
+    <string name="social_newchat_discard_body">The selected people and name will be cleared. Nothing will be sent.</string>
+    <string name="social_newchat_keep_editing">Keep editing</string>
+    <string name="social_newchat_discard_selection">Discard draft</string>
+    <string name="social_newchat_broadcast_unavailable">Broadcast delivery is not available for this connection. An ordinary group does not provide separate private delivery.</string>
+    <string name="social_newchat_switch_to_group">Switch to group</string>
+    <string name="social_newchat_creating_broadcast">Creating broadcast</string>
+    <string name="social_newchat_broadcast_review_step">2 of 2 · Review broadcast</string>
+    <string name="social_newchat_broadcast_review_explanation">Review the recipients and title before creating. Delivery and permissions are controlled by the connected service. Standard chats are not end-to-end encrypted in this build.</string>
 </resources>

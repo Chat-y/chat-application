@@ -39,17 +39,23 @@ class EncryptedMultiAccountStore(
     }
 
     override fun loadRegistry(): List<ApiRegisteredAccountMeta> = synchronized(lock) {
-        val raw = runCatching { securePrefs().getString(KEY_REGISTRY, null) }.getOrNull() ?: return emptyList()
+        // Previously a read/decrypt failure became emptyList(), allowing the
+        // next registration to overwrite an unreadable existing registry.
+        // val raw = runCatching { securePrefs().getString(KEY_REGISTRY, null) }.getOrNull() ?: return emptyList()
         return try {
+            val raw = securePrefs().getString(KEY_REGISTRY, null) ?: return emptyList()
             val arr = JSONArray(raw)
             buildList {
                 for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    ApiRegisteredAccountMeta.fromJson(o)?.let { add(it) }
+                    // Do not silently discard malformed accounts on a later save.
+                    // val o = arr.optJSONObject(i) ?: continue
+                    val o = arr.getJSONObject(i)
+                    add(checkNotNull(ApiRegisteredAccountMeta.fromJson(o)) { "Invalid account registry entry" })
                 }
             }
-        } catch (_: Exception) {
-            emptyList()
+        } catch (failure: Exception) {
+            // emptyList() // Fail closed instead; persisted bytes remain intact.
+            throw ApiSessionStorageException(ApiSessionStorageFailure.SECURE_STORAGE_UNAVAILABLE, failure)
         }
     }
 

@@ -1,6 +1,8 @@
 package com.example.chat.core.audio
 
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * Manages user audio preference mode and holds verified hardware test records.
@@ -10,21 +12,98 @@ import java.util.concurrent.CopyOnWriteArrayList
 class AudioSettingsController(
     private val capabilityService: AudioCapabilityService,
     private val coordinator: AudioPolicyCoordinator,
+    private val preferenceStore: AudioPreferenceStore? = null,
+    preferenceScope: kotlinx.coroutines.CoroutineScope? = null,
+    private val recordSource: AudioDeviceRecordSource? = null,
 ) {
-    private var _preferenceMode: AudioPreferenceMode = AudioPreferenceMode.automatic
+// Previous implementation retained:     private var _preferenceMode: AudioPreferenceMode = AudioPreferenceMode.automatic
+    @Volatile private var _preferenceMode: AudioPreferenceMode = AudioPreferenceMode.automatic
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
+    private val _preferenceModeState = kotlinx.coroutines.flow.MutableStateFlow(_preferenceMode)
+    val preferenceModeState: kotlinx.coroutines.flow.StateFlow<AudioPreferenceMode> = _preferenceModeState.asStateFlow()
+    private val _deviceRecords = kotlinx.coroutines.flow.MutableStateFlow(
+        if (recordSource == null) deviceVerifications else emptyList())
+    val deviceRecords: kotlinx.coroutines.flow.StateFlow<List<DeviceVerification>> = _deviceRecords.asStateFlow()
+    private val _deviceRecordsFailed = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val deviceRecordsFailed: kotlinx.coroutines.flow.StateFlow<Boolean> = _deviceRecordsFailed.asStateFlow()
+    private val recordReloads = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+
+    fun retryDeviceRecords() { recordReloads.trySend(Unit) }
+
+    private val preferenceLock = Any()
+    private var editRevision = 0L
+    private val saveRequests = kotlinx.coroutines.channels.Channel<AudioPreferenceMode>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val _saveError = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val saveError: kotlinx.coroutines.flow.StateFlow<Boolean> = _saveError.asStateFlow()
+
+    init {
+        if (recordSource != null && preferenceScope != null) preferenceScope.launch {
+            recordReloads.trySend(Unit)
+            for (ignored in recordReloads) {
+                try {
+                    _deviceRecords.value = recordSource.load().toList()
+                    _deviceRecordsFailed.value = false
+                } catch (failure: Exception) {
+                    if (failure is kotlinx.coroutines.CancellationException) throw failure
+                    _deviceRecordsFailed.value = true
+                }
+            }
+        }
+        if (preferenceStore != null && preferenceScope != null) preferenceScope.launch {
+            try {
+                val stored = preferenceStore.readMode()
+                synchronized(preferenceLock) {
+                    // A slow disk read cannot undo a choice made since the screen opened.
+                    if (editRevision == 0L) {
+                        _preferenceMode = parseAudioPreferenceMode(stored)
+                        notifyListeners()
+                    }
+                    // Normalize null/unknown legacy values to the canonical enum-name format.
+                    if (stored != _preferenceMode.name) saveRequests.trySend(_preferenceMode)
+                }
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                _saveError.value = true
+            }
+            for (mode in saveRequests) {
+                try {
+                    preferenceStore.writeMode(mode.name)
+                    _saveError.value = false
+                } catch (failure: Exception) {
+                    if (failure is kotlinx.coroutines.CancellationException) throw failure
+                    _saveError.value = true
+                }
+            }
+        }
+    }
+
+    fun retryPreferenceSave() { saveRequests.trySend(preferenceMode) }
+
 
     val preferenceMode: AudioPreferenceMode get() = _preferenceMode
 
     fun setPreferenceMode(mode: AudioPreferenceMode) {
-        if (_preferenceMode == mode) return
-        _preferenceMode = mode
-        notifyListeners()
+// Previous implementation retained:         if (_preferenceMode == mode) return
+// Previous implementation retained:         _preferenceMode = mode
+// Previous implementation retained:         notifyListeners()
+        synchronized(preferenceLock) {
+            editRevision++ // An explicit tap on the default also wins over an in-flight initial read.
+            if (preferenceStore != null) saveRequests.trySend(mode)
+            if (_preferenceMode == mode) return
+            _preferenceMode = mode
+// Previous implementation retained:             editRevision++
+// Previous implementation retained:             if (preferenceStore != null) saveRequests.trySend(mode)
+            notifyListeners()
+        }
     }
 
     fun addListener(listener: () -> Unit) { listeners.addIfAbsent(listener) }
     fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
-    private fun notifyListeners() { listeners.forEach { it() } }
+// Previous implementation retained:     private fun notifyListeners() { listeners.forEach { it() } }
+    private fun notifyListeners() {
+        _preferenceModeState.value = _preferenceMode
+        listeners.forEach { it() }
+    }
 
     companion object {
         /** Verified device test results population for diagnostics and evidence
@@ -115,6 +194,11 @@ class AudioSettingsController(
                 "failureReason" to null,
             ),
         )
+
+        /** Typed read-only projection; legacy table retained for compatibility, no storage migration. */
+        val deviceVerifications: List<DeviceVerification> by lazy {
+            verifiedDeviceRecords.map(DeviceVerification::fromRecord)
+        }
 
         /** Computes distribution of tested device configurations. */
         fun computeTestDistribution(): Map<String, Int> {

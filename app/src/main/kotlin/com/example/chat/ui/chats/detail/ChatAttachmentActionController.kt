@@ -2,6 +2,7 @@ package com.example.chat.ui.chats.detail
 
 import com.example.chat.domain.models.MessageAttachment
 import com.example.chat.domain.models.MessageType
+import kotlinx.coroutines.ensureActive
 
 /** A platform-picked file handed to the controller (Dart MediaFileDescriptor /
  *  file_picker result). [bytes] is what ChatMediaService.uploadBytes consumes;
@@ -128,8 +129,7 @@ class ChatAttachmentActionController(
     /** Dart shareMedia(). [pickFiles] plays the platform picker for the type
      *  (document -> multi custom picker; image/video/audio -> single or multi
      *  per prefs); [confirmViewOnce] plays the view-once sheet for single
-     *  image/video sends. Returns after the flow completes (never throws:
-     *  Dart catches everything into a toast). */
+     *  image/video sends. Returns after the flow completes; cancellation propagates without a failure toast. */
     suspend fun shareMedia(
         type: String,
         pickFiles: suspend (multiple: Boolean, maxFiles: Int) -> List<PickedFile>?,
@@ -173,25 +173,39 @@ class ChatAttachmentActionController(
                     if (viewOnce) mapOf("view_once" to true) else null,
                 )
             }
-        } catch (error: Throwable) {
-            toast("Unable to send $type: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to send $type. Please try again.")
         }
     }
 
     /** Explicit local review completes before this method uploads anything. */
-    suspend fun sendReviewedMedia(files: List<PickedFile>, type: String, caption: String, viewOnce: Boolean) {
+    suspend fun sendReviewedMedia(files: List<PickedFile>, type: String, caption: String, viewOnce: Boolean,
+        perItemCaptions: List<String>? = null, perItemViewOnce: List<Boolean>? = null,
+        isStillCurrent: () -> Boolean = { true }) {
         require(type == "image" || type == "video")
         require(files.isNotEmpty()) { "Choose an attachment first." }
         val limit = if (type == "image") imageShareLimit().coerceIn(1, 100) else 1
         require(files.size <= limit) { "Your configured send limit is $limit." }
-        val albumId = if (type == "image" && files.size > 1 && !viewOnce) java.util.UUID.randomUUID().toString() else null
+        require(perItemCaptions == null || perItemCaptions.size == files.size) { "Attachment caption count changed." }
+        require(perItemViewOnce == null || perItemViewOnce.size == files.size) { "Attachment view-once count changed." }
+        val onceFlags = perItemViewOnce ?: List(files.size) { viewOnce }
+        // Mixed view-once batches are independent messages, never an album with mixed policy.
+        val albumId = if (type == "image" && files.size > 1 && onceFlags.none { it }) java.util.UUID.randomUUID().toString() else null
         for ((index, file) in files.withIndex()) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!isStillCurrent()) return
             val attachment = backend.upload(type, file)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!isStillCurrent()) return
             backend.sendMessage(
-                if (index == 0) caption else "",
+                perItemCaptions?.get(index) ?: if (index == 0) caption else "",
                 messageTypeFor(type), attachment,
-                if (viewOnce) mapOf("view_once" to true) else albumId?.let { MediaAlbumContract.stamp(it, index, files.size) },
+                if (onceFlags[index]) mapOf("view_once" to true) else albumId?.let { MediaAlbumContract.stamp(it, index, files.size) },
             )
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!isStillCurrent()) return
         }
     }
 
@@ -233,8 +247,10 @@ class ChatAttachmentActionController(
             )
             backend.reloadConversation()
             toast("Location sent.")
-        } catch (error: Throwable) {
-            toast("Unable to share location: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to share location. Please try again.")
         }
     }
 
@@ -266,8 +282,10 @@ class ChatAttachmentActionController(
             )
             backend.reloadConversation()
             toast("Contact sent.")
-        } catch (error: Throwable) {
-            toast("Unable to share contact: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to share contact. Please try again.")
         }
     }
 
@@ -280,8 +298,10 @@ class ChatAttachmentActionController(
             backend.createPoll(draft.question, draft.options, draft.allowMultiple)
             backend.reloadConversation()
             toast("Poll created.")
-        } catch (error: Throwable) {
-            toast("Unable to create poll: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to create poll. Please try again.")
         }
     }
 
@@ -293,15 +313,18 @@ class ChatAttachmentActionController(
         return PollState.from(raw)
     }
 
-    /** Dart _vote(): rethrows nothing; on failure shows 'Unable to vote: ...'
+    /** Cancellation propagates; ordinary vote failure shows a generic notice
      *  and leaves the previous state in place. Returns the refreshed state on
      *  success, null on failure (error surfaced via [toast]). */
     suspend fun votePoll(messageId: String, optionId: String): PollState? {
         return try {
+            require(messageId.isNotBlank() && optionId.isNotBlank()) { "Invalid poll selection." }
             backend.votePoll(messageId, optionId)
             loadPoll(messageId)
-        } catch (error: Throwable) {
-            toast("Unable to vote: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to vote. Please try again.")
             null
         }
     }
@@ -319,8 +342,10 @@ class ChatAttachmentActionController(
             )
             backend.sendMessage("", MessageType.audio, attachment)
             toast("Voice note sent.")
-        } catch (error: Throwable) {
-            toast("Unable to send voice note: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to send voice note. Please try again.")
         }
     }
 
@@ -352,7 +377,7 @@ class ChatAttachmentActionController(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            if (isStillCurrent()) toast("Could not send photo. ${error.message ?: error}")
+            if (isStillCurrent()) toast("Could not send photo. Local photo kept.")
             return CapturedPhotoSubmission.Failed
         }
         kotlinx.coroutines.currentCoroutineContext().let { context ->
@@ -379,27 +404,36 @@ class ChatAttachmentActionController(
     ): Boolean {
         require(path.isNotBlank()) { "Missing recorded video." }
         require(mimeType == "video/mp4" && durationMs > 0) { "Invalid finalized video." }
-        return try {
+        try {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (!isStillCurrent()) return false
             val seconds = ((durationMs / 1000) + if (durationMs % 1000 > 0) 1 else 0)
                 .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             val attachment = backend.upload("video", PickedFile(
                 name = path.substringAfterLast('/'), path = path, mimeType = mimeType,
             ), seconds)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (!isStillCurrent()) {
                 toast("Video was not submitted because the account or conversation changed. Local recording kept.")
                 return false
             }
             backend.sendMessage(caption, MessageType.video, attachment)
-            if (isStillCurrent()) onSubmitted()
-            toast("Video submission requested. Delivery is not confirmed; local recording kept.")
-            true
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            toast("Could not send video. Your local recording is kept. ${error.message ?: error}")
-            false
+            toast("Could not send video. Your local recording is kept.")
+            return false
         }
+        // Submission already happened. Observer/UI failure must not offer a duplicate retry.
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (isStillCurrent()) {
+            try {
+                onSubmitted()
+                toast("Video submission requested. Delivery is not confirmed; local recording kept.")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Submitted, regardless of observer/UI failure. */ }
+        }
+        return true
     }
 
     // ------------------------------------------------------------------ demos
@@ -420,8 +454,10 @@ class ChatAttachmentActionController(
             )
             backend.reloadConversation()
             toast("📄 Demo document sent.")
-        } catch (error: Throwable) {
-            toast("Unable to send demo document: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to send demo document. Please try again.")
         }
     }
 
@@ -448,8 +484,10 @@ class ChatAttachmentActionController(
             )
             backend.reloadConversation()
             toast("🎵 Demo music track sent.")
-        } catch (error: Throwable) {
-            toast("Unable to send demo audio: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to send demo audio. Please try again.")
         }
     }
 
@@ -470,8 +508,10 @@ class ChatAttachmentActionController(
             )
             backend.reloadConversation()
             toast("📞 Demo call card sent.")
-        } catch (error: Throwable) {
-            toast("Unable to send demo call card: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to send demo call card. Please try again.")
         }
     }
 
@@ -490,8 +530,10 @@ class ChatAttachmentActionController(
             )
             backend.reloadConversation()
             toast("📋 Demo task card sent.")
-        } catch (error: Throwable) {
-            toast("Unable to send demo task: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to send demo task. Please try again.")
         }
     }
 
@@ -514,8 +556,10 @@ class ChatAttachmentActionController(
             )
             backend.reloadConversation()
             toast("📍 Demo location sent.")
-        } catch (error: Throwable) {
-            toast("Unable to send demo location: ${error.message ?: error}")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            toast("Unable to send demo location. Please try again.")
         }
     }
 
@@ -557,7 +601,7 @@ data class PollState(
     ) {
         /** Dart LinearProgressIndicator value: votes / totalVotes clamped 0..1. */
         fun progress(totalVotes: Int): Double =
-            if (totalVotes == 0) 0.0 else (votes.toDouble() / totalVotes).coerceIn(0.0, 1.0)
+            if (totalVotes <= 0 || votes <= 0) 0.0 else (votes.toDouble() / totalVotes).coerceIn(0.0, 1.0)
     }
 
     /** Dart footer: 'N total vote(s)' + ' • multiple answers allowed'. */
@@ -567,22 +611,78 @@ data class PollState(
 
     companion object {
         fun from(raw: Map<String, Any?>): PollState {
+            fun safeCount(value: Any?): Int {
+                val number = (value as? Number)?.toDouble() ?: return 0
+                return if (!number.isFinite() || number <= 0.0) 0
+                    else number.coerceAtMost(Int.MAX_VALUE.toDouble()).toInt()
+            }
+            val seenIds = mutableSetOf<String>()
             val rawOptions = raw["options"]
             val options = (rawOptions as? List<*>).orEmpty().mapNotNull { item ->
                 val map = item as? Map<*, *> ?: return@mapNotNull null
+                val id = map["id"]?.toString()?.trim().orEmpty()
+                // Reject malformed choices rather than inventing a votable identifier.
+                if (id.isBlank() || !seenIds.add(id)) return@mapNotNull null
                 PollOption(
-                    id = map["id"]?.toString() ?: "",
+                    id = id,
                     label = map["label"]?.toString() ?: "Option",
-                    votes = (map["votes"] as? Number)?.toInt() ?: 0,
+                    votes = safeCount(map["votes"]),
                     votedByMe = map["voted_by_me"] == true,
                 )
             }
             return PollState(
                 question = raw["question"]?.toString() ?: "Poll",
                 options = options,
-                totalVotes = (raw["total_votes"] as? Number)?.toInt() ?: 0,
+                totalVotes = safeCount(raw["total_votes"]),
                 allowMultiple = raw["allow_multiple"] == true,
             )
         }
     }
 }
+
+/* Previous implementation fragments retained (net230):
+    suspend fun sendReviewedMedia(files: List<PickedFile>, type: String, caption: String, viewOnce: Boolean) {
+        val albumId = if (type == "image" && files.size > 1 && !viewOnce) java.util.UUID.randomUUID().toString() else null
+                if (index == 0) caption else "",
+                if (viewOnce) mapOf("view_once" to true) else albumId?.let { MediaAlbumContract.stamp(it, index, files.size) },
+*/
+
+/* Previous net235 fragments:
+     *  image/video sends. Returns after the flow completes (never throws:
+     *  Dart catches everything into a toast). * /
+        } catch (error: Throwable) {
+            toast("Unable to send $type: ${error.message ?: error}")
+        perItemCaptions: List<String>? = null, perItemViewOnce: List<Boolean>? = null) {
+        } catch (error: Throwable) {
+            toast("Unable to share location: ${error.message ?: error}")
+        } catch (error: Throwable) {
+            toast("Unable to share contact: ${error.message ?: error}")
+        } catch (error: Throwable) {
+            toast("Unable to create poll: ${error.message ?: error}")
+    / ** Dart _vote(): rethrows nothing; on failure shows 'Unable to vote: ...'
+        } catch (error: Throwable) {
+            toast("Unable to vote: ${error.message ?: error}")
+        } catch (error: Throwable) {
+            toast("Unable to send voice note: ${error.message ?: error}")
+            if (isStillCurrent()) toast("Could not send photo. ${error.message ?: error}")
+        return try {
+            if (isStillCurrent()) onSubmitted()
+            toast("Video submission requested. Delivery is not confirmed; local recording kept.")
+            true
+            toast("Could not send video. Your local recording is kept. ${error.message ?: error}")
+            false
+        } catch (error: Throwable) {
+            toast("Unable to send demo document: ${error.message ?: error}")
+        } catch (error: Throwable) {
+            toast("Unable to send demo audio: ${error.message ?: error}")
+        } catch (error: Throwable) {
+            toast("Unable to send demo call card: ${error.message ?: error}")
+        } catch (error: Throwable) {
+            toast("Unable to send demo task: ${error.message ?: error}")
+        } catch (error: Throwable) {
+            toast("Unable to send demo location: ${error.message ?: error}")
+            if (totalVotes == 0) 0.0 else (votes.toDouble() / totalVotes).coerceIn(0.0, 1.0)
+                    id = map["id"]?.toString() ?: "",
+                    votes = (map["votes"] as? Number)?.toInt() ?: 0,
+                totalVotes = (raw["total_votes"] as? Number)?.toInt() ?: 0,
+*/

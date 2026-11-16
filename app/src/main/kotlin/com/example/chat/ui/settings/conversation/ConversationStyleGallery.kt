@@ -39,6 +39,10 @@ internal fun <T> ConversationStyleGallery(
     onSelected: (T) -> Unit,
     familyOf: (T) -> String = { "Styles" },
     subtitle: String? = null,
+    quickPickCount: Int = 0,
+    enhanced: Boolean = true,
+    quickPickKeys: List<String> = emptyList(),
+    quickPickTitle: String? = null,
     previewOf: @Composable (T) -> Unit,
 ) {
     val strings = androidx.compose.ui.platform.LocalContext.current.resources
@@ -56,8 +60,33 @@ internal fun <T> ConversationStyleGallery(
             choicesOpen = true
         }, Modifier.fillMaxWidth())
         subtitle?.let { Text(it, color = colors.foregroundSecondary, fontSize = 12.sp) }
+        if (enhanced && quickPickCount > 0) {
+            Text(quickPickTitle ?: strings.getString(com.example.chat.R.string.conv_proposal_quick_picks), color = colors.foregroundSecondary)
+            val quick = conversationQuickPicks(values, keyOf, quickPickKeys + recentKeys, quickPickCount)
+            LazyRow(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(quick, key = keyOf) { option ->
+                    com.example.chat.ui.kit.ChatyOptionCard(label = labelOf(option), selected = keyOf(option) == keyOf(selected),
+                        onTap = {
+                            // Quick cards enter the existing review/Apply flow; never save a surprise selection.
+                            draftKey = keyOf(option); query = ""; family = ""; choicesOpen = true
+                        }) { previewOf(option) }
+                }
+            }
+            TextButton(onClick = { draftKey = keyOf(selected); query = ""; family = ""; choicesOpen = true }) {
+                Text(strings.getString(com.example.chat.R.string.conv_proposal_see_all))
+            }
+        }
     }
-    if (choicesOpen) ChatySelectionModal(
+    if (choicesOpen && !enhanced) ChatySelectionModal(
+        title = title,onDismiss = { choicesOpen = false },
+        applyEnabled = draftKey != keyOf(selected) && values.any { keyOf(it) == draftKey },
+        onApply = { values.firstOrNull { keyOf(it) == draftKey }?.let(onSelected);choicesOpen = false },
+    ) {
+        androidx.compose.foundation.lazy.LazyColumn {
+            items(values,key = keyOf) { option -> ChatyPreviewRadioRow(label = labelOf(option),selected = keyOf(option) == draftKey,onSelect = { draftKey = keyOf(option) }) }
+        }
+    }
+    else if (choicesOpen) ChatySelectionModal(
         title = title,
         onDismiss = { choicesOpen = false },
         applyEnabled = draftKey != keyOf(selected) && values.any { keyOf(it) == draftKey },
@@ -107,7 +136,9 @@ internal fun <T> ConversationStyleGallery(
                                 onSelect = { draftKey = keyOf(option) })
                             // Full width matters for entry bars with several 48dp actions.
                             androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                                previewOf(option)
+                                // Previous per-row live renderer: previewOf(option)
+                                // Render only the pending selection; other rows remain cheap searchable labels.
+                                if (keyOf(option) == draftKey) previewOf(option)
                             }
                         }
                     }
@@ -116,3 +147,13 @@ internal fun <T> ConversationStyleGallery(
         }
     }
 }
+
+/** Session recents first, then existing registry order. No popularity or personal-favourite claim. */
+internal fun <T> conversationQuickPicks(values: List<T>, keyOf: (T) -> String, recents: List<String>, count: Int): List<T> {
+    val byKey = values.associateBy(keyOf)
+    return (recents.mapNotNull(byKey::get) + values).distinctBy(keyOf).take(count.coerceAtLeast(0))
+}
+
+// Superseded source retained inactive:
+//         if (quickPickCount > 0) {
+//     if (choicesOpen) ChatySelectionModal(

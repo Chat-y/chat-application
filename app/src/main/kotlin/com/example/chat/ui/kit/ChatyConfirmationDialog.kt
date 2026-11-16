@@ -36,7 +36,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.chat.ui.theme.LocalAppColors
 
-/** Custom Chaty confirmation chrome. Existing form fields/actions remain caller-owned. */
+/** Custom Chaty confirmation chrome. Existing form fields/actions remain caller-owned.
+ *  Contract: [text] must not contain an unbounded vertically-scrollable component
+ *  (verticalScroll / Lazy* without a height cap) - the dialog body below already scrolls,
+ *  and a nested unbounded scrollable is measured with infinite max height and throws
+ *  IllegalStateException at first composition. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatyConfirmationDialog(

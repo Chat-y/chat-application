@@ -62,6 +62,7 @@ class CameraVideoSession(
     private val lensProvider: () -> LensDefinition? = { null },
     private val posesProvider: () -> List<FacePose> = { emptyList() },
     private val matrixProvider: () -> FloatArray? = { null },
+    private val maxDurationMillis: Long = 300_000L,
     private val onState: (VideoSessionState) -> Unit,
 ) : DefaultLifecycleObserver, AutoCloseable {
     private val app = context.applicationContext
@@ -79,12 +80,34 @@ class CameraVideoSession(
     private var reviewFile: File? = null
     private var closed = false
     private var busy = false
+    private var storagePreflightPending = false
+    private var lowBatteryWarningShown = false
+    private val recorderTransitions = kotlinx.coroutines.sync.Mutex()
+    private var recorderPhase = CameraRecorderPhase.Idle
+    private fun recorderTransition(action: () -> Unit) {
+        checkMain()
+        if (!recorderTransitions.tryLock()) {
+            if (com.example.chat.BuildConfig.DEBUG) android.util.Log.d("CameraRecorder", "transition-busy")
+            return
+        }
+        try { action() } finally { recorderTransitions.unlock() }
+    }
     private var generation = 0
     private var stabilized = false
     private var binding = false
     private var boundFront = false
+    // Retain real bind capabilities across discard/stale completion/preflight recovery.
+    private var boundSnapshotAvailable = false
+    private var boundLensEffectActive = false
+    // Previous three recovery sites: publish(VideoSessionState.Ready(stabilized, boundFront))
+    private fun retainedReadyState() = VideoSessionState.Ready(
+        stabilizationEnabled = stabilized,
+        boundFront = boundFront,
+        snapshotAvailable = boundSnapshotAvailable,
+        lensEffectActive = boundLensEffectActive,
+    )
 
-    init { owner.lifecycle.addObserver(this) }
+    init { require(maxDurationMillis > 0); owner.lifecycle.addObserver(this) }
     private fun publish(state: VideoSessionState) {
         // The auth barrier authorizes only a short decision. Compose/native work stays outside.
         if (auth.isCurrent()) {
@@ -163,7 +186,11 @@ class CameraVideoSession(
                     processor,
                     androidx.core.util.Consumer { err ->
                         main.execute {
-                            onState(VideoSessionState.Error("Camera effect failed; reopen the camera or disable the lens/filter. (" + (err.message ?: "unknown") + ")"))
+                            // Previous callback exposed err.message and bypassed current-session checks.
+                            // onState(VideoSessionState.Error("Camera effect failed; reopen the camera or disable the lens/filter. (" + (err.message ?: "unknown") + ")"))
+                            if (!closed && auth.isCurrent() && overlayProcessorRef === processor) {
+                                publish(VideoSessionState.Error(app.getString(com.example.chat.R.string.camera_effect_failed_recovery)))
+                            }
                         }
                     },
                 ) {}
@@ -191,7 +218,10 @@ class CameraVideoSession(
                 if (actual == null) actual = p.bindToLifecycle(owner, selector, view, video)
                 boundFront = CameraSelector.DEFAULT_FRONT_CAMERA.filter(listOf(actual.cameraInfo)).isNotEmpty()
                 provider = p; preview = view; capture = video; camera = actual
-                publish(VideoSessionState.Ready(stabilized, boundFront, snapshot != null, lensEffectActive))
+                boundSnapshotAvailable = snapshot != null
+                boundLensEffectActive = lensEffectActive
+                // Previous: publish(VideoSessionState.Ready(stabilized, boundFront, snapshot != null, lensEffectActive))
+                publish(retainedReadyState())
             } catch (e: Exception) { publish(VideoSessionState.Error("Video camera could not start. Try Photo or reopen the camera.")) }
         }
         future.addListener({
@@ -207,6 +237,44 @@ class CameraVideoSession(
 
     fun start(requestAudio: Boolean) {
         checkMain()
+        if (!auth.isCurrent() || closed || busy || capture == null ||
+            !owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        // CAM-R3-039: storage IO precedes allocation/old-draft removal, off the UI thread.
+        val ticket = generation
+        busy = true
+        storagePreflightPending = true
+        io.execute {
+            val enough = runCatching { hasCameraVideoStorage(android.os.StatFs(app.cacheDir.path).availableBytes) }.getOrDefault(false)
+            val battery = runCatching {
+                app.getSystemService(android.os.BatteryManager::class.java)
+                    ?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: Int.MIN_VALUE
+            }.getOrDefault(Int.MIN_VALUE)
+            main.execute preflightResult@{
+                busy = false
+                storagePreflightPending = false
+                if (closed) { io.shutdown(); return@preflightResult }
+                if (ticket != generation) {
+                    if (auth.isCurrent()) publish(retainedReadyState())
+                    return@preflightResult
+                }
+                if (!auth.isCurrent() ||
+                    !owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@preflightResult
+                if (!enough) {
+                    publish(VideoSessionState.Error("Not enough storage to record. Free at least 500 MB and try again."))
+                } else {
+                    if (!lowBatteryWarningShown && shouldWarnCameraLowBattery(battery)) {
+                        lowBatteryWarningShown = true
+                        android.widget.Toast.makeText(app, app.getString(com.example.chat.R.string.camera_low_battery_video_warning), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    startAfterStorageCheck(requestAudio)
+                }
+            }
+        }
+    }
+
+    // Previous start body now runs only after the off-main storage guard above.
+    private fun startAfterStorageCheck(requestAudio: Boolean) {
+        checkMain()
         if (!auth.isCurrent() || closed || busy || !owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         val video = capture ?: return
         val audio = shouldRecordAudio(requestAudio, ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
@@ -220,22 +288,40 @@ class CameraVideoSession(
         activeFile = file; busy = true
         val ticket = ++generation
         try {
-            var pending = video.output.prepareRecording(app, FileOutputOptions.Builder(file).build())
+            // CAM-R2-035 previous output had no native duration limit.
+            // var pending = video.output.prepareRecording(app, FileOutputOptions.Builder(file).build())
+            var pending = video.output.prepareRecording(app,
+                FileOutputOptions.Builder(file).setDurationLimitMillis(maxDurationMillis).build())
             if (audio) pending = pending.withAudioEnabled()
             if (!auth.isCurrent()) { busy = false; activeFile = null; file.delete(); return }
+            recorderPhase = CameraRecorderPhase.Starting
             recording = pending.start(main) { event ->
-                if (event is VideoRecordEvent.Start && !closed && auth.isCurrent()) { recordingAudio = audio; publish(VideoSessionState.Recording(audio)) }
+                // Pause/resume UI changes follow native acknowledgement, not merely a request.
+                // Previous Start handler published Recording without a command phase.
+                if (event is VideoRecordEvent.Start && recorderPhase == CameraRecorderPhase.Starting && !closed && auth.isCurrent()) {
+                    recorderPhase = CameraRecorderPhase.Recording; recordingAudio = audio; publish(VideoSessionState.Recording(audio))
+                }
+                if (event is VideoRecordEvent.Pause && recorderPhase == CameraRecorderPhase.Pausing && !closed && auth.isCurrent()) {
+                    recorderPhase = CameraRecorderPhase.Paused; publish(VideoSessionState.Paused(recordingAudio))
+                }
+                if (event is VideoRecordEvent.Resume && recorderPhase == CameraRecorderPhase.Resuming && !closed && auth.isCurrent()) {
+                    recorderPhase = CameraRecorderPhase.Recording; publish(VideoSessionState.Recording(recordingAudio))
+                }
                 if (event is VideoRecordEvent.Finalize) {
+                    recorderPhase = CameraRecorderPhase.Idle
                     recording = null
                     io.execute {
-                        val metadata = if (!event.hasError()) validatedMetadata(file) else null
+                        // Duration-limit completion saves bytes; validate those like an explicit stop.
+                        // Previous: val metadata = if (!event.hasError()) validatedMetadata(file) else null
+                        val expectedLimit = event.error == VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED
+                        val metadata = if (!event.hasError() || expectedLimit) validatedMetadata(file) else null
                         main.execute {
                             if (closed) io.shutdown()
                             busy = false; activeFile = null
                             if (!auth.isCurrent() || closed || ticket != generation || metadata == null) {
                                 file.delete()
                                 if (!closed) {
-                                    if (ticket != generation) publish(VideoSessionState.Ready(stabilized, boundFront))
+                                    if (ticket != generation) publish(retainedReadyState())
                                     else publish(VideoSessionState.Error("Video was not saved. Please record again."))
                                 }
                             } else {
@@ -247,6 +333,7 @@ class CameraVideoSession(
                 }
             }
         } catch (e: Exception) {
+            recorderPhase = CameraRecorderPhase.Idle
             busy = false; activeFile = null; file.delete()
             publish(VideoSessionState.Error("Recording could not start. Please try again."))
         }
@@ -263,6 +350,10 @@ class CameraVideoSession(
         val snap = snapshot
         if (snap == null || !auth.isCurrent() || closed || recording == null) { onResult(false); return }
         if (android.os.Build.VERSION.SDK_INT < 29) { onResult(false); return }
+        val requestGeneration = generation
+        val requestCapture = capture
+        fun requestCurrent(): Boolean = !closed && auth.isCurrent() && generation == requestGeneration &&
+            capture === requestCapture && snapshot === snap
         val values = android.content.ContentValues().apply {
             put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "chaty-recording-${System.currentTimeMillis()}.jpg")
             put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -270,34 +361,73 @@ class CameraVideoSession(
         }
         val output = ImageCapture.OutputFileOptions.Builder(app.contentResolver, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values).build()
         snap.takePicture(output, main, object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(results: ImageCapture.OutputFileResults) { onResult(true) }
-            override fun onError(exception: ImageCaptureException) { onResult(false) }
+            // Previous callbacks unconditionally notified a possibly replaced session.
+            // override fun onImageSaved(results: ImageCapture.OutputFileResults) { onResult(true) }
+            // override fun onError(exception: ImageCaptureException) { onResult(false) }
+            override fun onImageSaved(results: ImageCapture.OutputFileResults) { if (requestCurrent()) onResult(true) }
+            override fun onError(exception: ImageCaptureException) { if (requestCurrent()) onResult(false) }
         })
     }
     /** Pause an active recording (reference camera UI: pause control beside stop).
      *  Same auth/main-thread discipline as start/stop; no-op unless recording. */
-    fun pauseRecording() {
-        checkMain()
-        if (!auth.isCurrent() || closed) return
-        val active = recording ?: return
-        active.pause()
-        publish(VideoSessionState.Paused(recordingAudio))
+    // Previous optimistic transitions retained inactive:
+    // fun pauseRecording() {
+    // checkMain()
+    // if (!auth.isCurrent() || closed) return
+    // val active = recording ?: return
+    // active.pause()
+    // publish(VideoSessionState.Paused(recordingAudio))
+    // }
+    // fun resumeRecording() {
+    // checkMain()
+    // if (!auth.isCurrent() || closed) return
+    // val active = recording ?: return
+    // active.resume()
+    // publish(VideoSessionState.Recording(recordingAudio))
+    // }
+    // // Previous stop: main-thread recording stop only, with no pending preflight to cancel.
+    // fun stop() {
+    // checkMain()
+    // if (storagePreflightPending) { generation++; storagePreflightPending = false }
+    // if (recording != null) { publish(VideoSessionState.Finalizing); recording?.stop() }
+    // }
+    fun pauseRecording() = recorderTransition {
+        if (!auth.isCurrent() || closed || !canPauseCameraRecorder(recorderPhase)) return@recorderTransition
+        val active = recording ?: return@recorderTransition
+        recorderPhase = CameraRecorderPhase.Pausing
+        try { active.pause() } catch (_: Exception) {
+            recorderPhase = CameraRecorderPhase.Recording
+            if (com.example.chat.BuildConfig.DEBUG) android.util.Log.d("CameraRecorder", "pause-rejected")
+        }
     }
-    fun resumeRecording() {
-        checkMain()
-        if (!auth.isCurrent() || closed) return
-        val active = recording ?: return
-        active.resume()
-        publish(VideoSessionState.Recording(recordingAudio))
+    fun resumeRecording() = recorderTransition {
+        if (!auth.isCurrent() || closed || !canResumeCameraRecorder(recorderPhase)) return@recorderTransition
+        val active = recording ?: return@recorderTransition
+        recorderPhase = CameraRecorderPhase.Resuming
+        try { active.resume() } catch (_: Exception) {
+            recorderPhase = CameraRecorderPhase.Paused
+            if (com.example.chat.BuildConfig.DEBUG) android.util.Log.d("CameraRecorder", "resume-rejected")
+        }
     }
-    fun stop() { checkMain(); if (recording != null) { publish(VideoSessionState.Finalizing); recording?.stop() } }
+    fun stop() = recorderTransition {
+        if (storagePreflightPending) { generation++; storagePreflightPending = false }
+        val active = recording ?: return@recorderTransition
+        if (!canStopCameraRecorder(recorderPhase)) return@recorderTransition
+        recorderPhase = CameraRecorderPhase.Stopping
+        if (!closed) publish(VideoSessionState.Finalizing)
+        try { active.stop() } catch (_: Exception) {
+            // Close is the native cancellation fallback, never claim a saved clip here.
+            runCatching { active.close() }
+            if (com.example.chat.BuildConfig.DEBUG) android.util.Log.d("CameraRecorder", "stop-rejected")
+        }
+    }
     fun discard() {
         checkMain()
         if (closed) return
         generation++
         reviewFile?.delete(); reviewFile = null
-        if (busy) { publish(VideoSessionState.Finalizing); recording?.stop() }
-        else publish(VideoSessionState.Ready(stabilized, boundFront))
+        if (busy) { publish(VideoSessionState.Finalizing); stop() }
+        else publish(retainedReadyState())
     }
     /** Only transfers a finalized local video after explicit review confirmation. */
     fun takeReviewedVideo(video: FinalizedVideo): FinalizedVideo? {
@@ -318,12 +448,14 @@ class CameraVideoSession(
         checkMain()
         if (closed) return
         closed = true; generation++; owner.lifecycle.removeObserver(this)
-        recording?.stop(); reviewFile?.delete(); reviewFile = null
+        // All explicit recorder stop requests cross the same transition gate.
+        stop(); reviewFile?.delete(); reviewFile = null
         // Finalize owns active-file cleanup, so do not delete a file still being encoded.
         if (!busy) activeFile?.delete()
         preview?.let { provider?.unbind(it) }; capture?.let { provider?.unbind(it) }
         snapshot?.let { provider?.unbind(it) }
         preview = null; capture = null; camera = null; snapshot = null
+        boundSnapshotAvailable = false; boundLensEffectActive = false
         // Shutdown accepts already queued finalization work; no further starts are possible.
         if (!busy) io.shutdown()
     }
@@ -342,5 +474,15 @@ class CameraVideoSession(
             } else null
         } finally { retriever.release() }
     }.getOrNull()
+    /** Focus only this video session's bound camera, never the photo session's stale handle. */
+    fun startFocusAndMetering(action: androidx.camera.core.FocusMeteringAction):
+        com.google.common.util.concurrent.ListenableFuture<androidx.camera.core.FocusMeteringResult>? {
+        checkMain()
+        return if (closed) null else camera?.cameraControl?.startFocusAndMetering(action)
+    }
     private fun checkMain() { check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) }
 }
+
+/* Previous net234 fragments:
+
+*/

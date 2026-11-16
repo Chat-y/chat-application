@@ -2,13 +2,15 @@ package com.example.chat
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.test.assertDoesNotExist
+// Invalid package-level import retained: import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -39,12 +41,16 @@ class StarredScreenStateBoundaryTest {
         revision: Int = 0,
         refresh: suspend () -> Boolean = { true },
         open: (String, String?) -> Unit = { _, _ -> },
+        authenticationRequired: Boolean = false,
+        readSnapshot: () -> Unit = {},
+        back: () -> Unit = {},
     ) {
         val theme = ThemePresets.getSystemDefaultTheme(true)
         ChatyTheme(theme) {
-            StarredMessagesScreen(conversations = listOf(room), messagesFor = { messages },
+            StarredMessagesScreen(conversations = listOf(room), messagesFor = { readSnapshot(); messages },
                 messagesRevision = revision, onRefresh = refresh, onToggleStar = { _, _ -> },
-                onOpenConversation = open, onBack = {}, queryStateKey = session)
+                onOpenConversation = open, onBack = back, queryStateKey = session,
+                authenticationRequired = authenticationRequired)
         }
     }
 
@@ -143,6 +149,58 @@ class StarredScreenStateBoundaryTest {
         rule.waitForIdle()
         rule.onNodeWithTag("starred-message:room:one").assertDoesNotExist()
         rule.onNodeWithTag("starred-message:room:two").assertIsDisplayed()
+    }
+
+    @Test fun authenticationRequiredDoesNotReadOrRefreshPrivateSnapshots() {
+        var reads = 0
+        var refreshes = 0
+        rule.setContent { Screen(messages = listOf(message("private", "Private synthetic fixture")),
+            authenticationRequired = true, readSnapshot = { reads++ }, refresh = { refreshes++; true }) }
+        rule.onNodeWithText("Sign in again").assertIsDisplayed()
+        rule.onNodeWithText("Private synthetic fixture").assertDoesNotExist()
+        rule.onNodeWithTag("starred-search-input").assertDoesNotExist()
+        rule.onNodeWithTag("starred-message:room:private").assertDoesNotExist()
+        rule.runOnIdle { assertEquals(0, reads); assertEquals(0, refreshes) }
+    }
+
+    @Test fun authenticationFailureRemovesAlreadyVisibleRows() {
+        val needsAuth = mutableStateOf(false)
+        var reads = 0
+        rule.setContent { Screen(messages = listOf(message("private", "Private synthetic fixture")),
+            authenticationRequired = needsAuth.value, readSnapshot = { reads++ }) }
+        rule.waitUntil(timeoutMillis = 5_000) {
+            rule.onAllNodesWithTag("starred-message:room:private").fetchSemanticsNodes().isNotEmpty()
+        }
+        rule.onNodeWithTag("starred-message:room:private").assertIsDisplayed()
+        var readsBeforeFailure = 0
+        rule.runOnIdle { readsBeforeFailure = reads; needsAuth.value = true }
+        rule.waitForIdle()
+        rule.onNodeWithText("Sign in again").assertIsDisplayed()
+        rule.onNodeWithTag("starred-message:room:private").assertDoesNotExist()
+        rule.onNodeWithTag("starred-search-input").assertDoesNotExist()
+        rule.runOnIdle { assertEquals(readsBeforeFailure, reads) }
+    }
+
+    @Test fun hiddenSessionStillHasANondestructiveBackAction() {
+        var backs = 0
+        rule.setContent { Screen(authenticationRequired = true, back = { backs++ }) }
+        rule.onNodeWithText("Back").performClick()
+        rule.runOnIdle { assertEquals(1, backs) }
+        rule.onNodeWithText("Sign in again").assertIsDisplayed()
+    }
+
+    @Test fun explicitBackToTopAppearsOnlyAfterDeepScrollingAndHidesAtTop() {
+        rule.setContent { Screen(messages = List(100) { message("message$it", "Synthetic item $it") }) }
+        rule.waitUntil(timeoutMillis = 5_000) {
+            rule.onAllNodesWithTag("starred-message-list").fetchSemanticsNodes().isNotEmpty()
+        }
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Back to top").assertDoesNotExist()
+        rule.onNodeWithTag("starred-message-list").performScrollToIndex(80)
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Back to top").assertIsDisplayed().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Back to top").assertDoesNotExist()
     }
 
 }

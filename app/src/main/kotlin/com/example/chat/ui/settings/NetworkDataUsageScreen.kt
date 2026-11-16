@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -38,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,7 +58,7 @@ fun NetworkStatusScreen(onBack: () -> Unit) {
     val network by ServiceLocator.networkMonitor.state.collectAsState()
 
     ChatySettingsPage("Network", "Live connection status", onBack = onBack) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.widthIn(max = 600.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ND1-46: icon plus text for the connection state.
@@ -108,12 +111,21 @@ fun DataUsageScreen(onBack: () -> Unit) {
     var confirmResetTotals by remember { mutableStateOf(false) }
     var confirmResetTraffic by remember { mutableStateOf(false) }
     val colors = LocalAppColors.current
+    val context = LocalContext.current
 
     ChatySettingsPage("Data Usage", "Usage totals and transfer monitor", onBack = onBack) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.widthIn(max = 600.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Data used", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+                // ND1-61: plain-text summary first, for screen readers.
+                Text(
+                    // Prior summary calls omitted Context after the formatter migrated to Android SI units.
+                    "Chaty has used " + formatBytes(context, totals.uploadedBytes + totals.downloadedBytes) +
+                        " in total: " + formatBytes(context, totals.uploadedBytes) + " uploaded, " +
+                        formatBytes(context, totals.downloadedBytes) + " downloaded.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 Text(
                     "Counts media and messages sent through Chaty's transfer monitor, since install or the last reset.",
                     style = MaterialTheme.typography.bodySmall,
@@ -121,11 +133,11 @@ fun DataUsageScreen(onBack: () -> Unit) {
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Uploaded")
-                    Text(formatBytes(totals.uploadedBytes))
+                    Text(formatBytes(context, totals.uploadedBytes))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Downloaded")
-                    Text(formatBytes(totals.downloadedBytes))
+                    Text(formatBytes(context, totals.downloadedBytes))
                 }
                 Text("By media type", style = MaterialTheme.typography.labelLarge)
                 // ND1-43: rows with no data are hidden.
@@ -141,6 +153,12 @@ fun DataUsageScreen(onBack: () -> Unit) {
                 if (totals.messageBytes + totals.imageBytes + totals.videoBytes + totals.audioBytes + totals.documentBytes + totals.callBytes + totals.otherBytes == 0L) {
                     Text("No data used yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                // ND1-25: nothing on this screen leaves the device.
+                Text(
+                    "This information stays on your device and is not sent anywhere.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 // ND1-02/41: confirm first; quiet text button instead of a full-width outlined button.
                 TextButton(onClick = { confirmResetTotals = true }) {
                     Text("Reset usage totals", color = colors.error)
@@ -157,11 +175,11 @@ fun DataUsageScreen(onBack: () -> Unit) {
                 } else {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("All uploaded data")
-                        Text(formatBytes(appTraffic.uploadedBytes))
+                        Text(formatBytes(context, appTraffic.uploadedBytes))
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("All downloaded data")
-                        Text(formatBytes(appTraffic.downloadedBytes))
+                        Text(formatBytes(context, appTraffic.downloadedBytes))
                     }
                     Text(
                         "Includes realtime sockets, call signaling, API traffic, media and protocol overhead. Counters are measured by Android for Chaty's app UID.",
@@ -223,14 +241,16 @@ fun DataUsageScreen(onBack: () -> Unit) {
 
 @Composable
 private fun UsageRow(label: String, bytes: Long) {
+    val context = LocalContext.current
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(formatBytes(bytes))
+        Text(formatBytes(context, bytes))
     }
 }
 
 @Composable
 private fun TransferCard(item: TransferItem) {
+    val context = LocalContext.current
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +265,9 @@ private fun TransferCard(item: TransferItem) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(
                         if (item.direction == TransferDirection.upload) androidx.compose.material.icons.Icons.Rounded.ArrowUpward else androidx.compose.material.icons.Icons.Rounded.ArrowDownward,
-                        contentDescription = if (item.direction == TransferDirection.upload) "Upload" else "Download",
+                        // ND1-38: decorative - direction is announced once by the adjacent
+                        // direction label; contentDescription null approved by coordinator.
+                        contentDescription = null,
                         modifier = Modifier.size(14.dp),
                     )
                     if (item.status == TransferStatus.completed || item.status == TransferStatus.failed) {
@@ -255,22 +277,36 @@ private fun TransferCard(item: TransferItem) {
                             modifier = Modifier.size(14.dp),
                         )
                     }
+                    // ND1-38: direction and status are separate, individually labeled elements
+                    // instead of one mixed "Upload · In progress" string, so screen readers
+                    // announce each on its own; the visual separator stays out of the semantics tree.
                     Text(
-                        (if (item.direction == TransferDirection.upload) "Upload" else "Download") + " · " + statusLabel(item.status),
+                        if (item.direction == TransferDirection.upload) "Upload" else "Download",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "·",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clearAndSetSemantics {},
+                    )
+                    Text(
+                        statusLabel(item.status),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
             item.progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
-            val total = item.totalBytes?.let(::formatBytes) ?: "Unknown"
-            Text("${formatBytes(item.transferredBytes)} of $total transferred")
+            val total = item.totalBytes?.let { formatBytes(context, it) } ?: "Unknown"
+            Text("${formatBytes(context, item.transferredBytes)} of $total transferred")
             Text(
                 buildString {
                     append("Remaining: ")
-                    append(item.remainingBytes?.let(::formatBytes) ?: "Unknown")
+                    append(item.remainingBytes?.let { formatBytes(context, it) } ?: "Unknown")
                     append(" · ")
-                    append(formatBytes(item.bytesPerSecond))
+                    append(formatBytes(context, item.bytesPerSecond))
                     append("/s")
                     item.etaSeconds?.let { append(" · ETA "); append(formatDuration(it)) }
                 },
@@ -281,17 +317,24 @@ private fun TransferCard(item: TransferItem) {
     }
 }
 
-private fun formatBytes(value: Long): String {
-    if (value < 1024) return "$value B"
-    val units = listOf("KB", "MB", "GB", "TB")
-    var amount = value.toDouble()
-    var index = -1
-    while (amount >= 1024 && index < units.lastIndex) {
-        amount /= 1024.0
-        index++
-    }
-    return String.format(java.util.Locale.getDefault(), "%.1f %s", amount, units[index])
-}
+// ND1-06: match Android Settings, which shows SI (1000-based) units; Formatter is also
+// locale-aware, so the old default-locale "%.1f %s" formatting goes away with it.
+private fun formatBytes(context: android.content.Context, value: Long): String =
+    android.text.format.Formatter.formatShortFileSize(context, value)
+
+// ND1-06: superseded 1024-based implementation retained per owner convention (commented out,
+// not deleted); replaced by Formatter.formatShortFileSize above.
+// private fun formatBytes(value: Long): String {
+//     if (value < 1024) return "$value B"
+//     val units = listOf("KB", "MB", "GB", "TB")
+//     var amount = value.toDouble()
+//     var index = -1
+//     while (amount >= 1024 && index < units.lastIndex) {
+//         amount /= 1024.0
+//         index++
+//     }
+//     return String.format(java.util.Locale.getDefault(), "%.1f %s", amount, units[index])
+// }
 
 private fun formatDuration(seconds: Long): String {
     if (seconds < 60) return "${seconds}s"

@@ -11,7 +11,7 @@ import org.json.JSONObject
  *  overwrite each other's settings. The bare key is the signed-out bucket
  *  and the legacy pre-namespacing read. Errors surface as empty/false, never
  *  with payload content (preference values are sensitive). */
-class LocalPreferencesStorage(context: Context) : com.example.chat.core.theme.ThemeStateStore {
+class LocalPreferencesStorage(private val context: Context) : com.example.chat.core.theme.ThemeStateStore {
 
     private val prefs = context.applicationContext
         .getSharedPreferences("chaty_local_preferences", Context.MODE_PRIVATE)
@@ -22,8 +22,15 @@ class LocalPreferencesStorage(context: Context) : com.example.chat.core.theme.Th
         withContext(Dispatchers.IO) {
             val raw = prefs.getString(keyFor(userId), null) ?: return@withContext emptyMap()
             try {
-                unwrap(JSONObject(raw)) as Map<String, Any?>
-            } catch (_: Exception) {
+                // Previous legacy-only result: unwrap(JSONObject(raw)) as Map<String, Any?>
+                val legacy = unwrap(JSONObject(raw)) as Map<String, Any?>
+                val conversation = try {
+                    ConversationAppearanceDataStore.get(context,prefs,keyFor(userId)).readConversation()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { null }
+                @Suppress("UNCHECKED_CAST")
+                val originalConversation = legacy[PreferenceKeys.conversation] as? Map<String,Any?> ?: emptyMap()
+                if (conversation == null) legacy else legacy + (PreferenceKeys.conversation to (originalConversation + conversation))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) {
                 emptyMap()
             }
         }
@@ -34,8 +41,11 @@ class LocalPreferencesStorage(context: Context) : com.example.chat.core.theme.Th
             try {
                 // commit(): synchronous on this IO thread so the write is on disk when
                 // this returns (apply() is asynchronous and can be lost on process death).
-                prefs.edit().putString(keyFor(userId), JSONObject(data).toString()).commit()
-            } catch (_: Exception) {
+                // Retained legacy mirror first: no key deletion and old app versions still read it.
+                val committed = prefs.edit().putString(keyFor(userId), JSONObject(data).toString()).commit()
+                if (committed) ConversationAppearanceDataStore.get(context,prefs,keyFor(userId)).mirrorCommittedConversation()
+                committed
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) {
                 false
             }
         }

@@ -115,6 +115,7 @@ fun GbSettingRow(
     trailing: (@Composable () -> Unit)? = null,
     iconColor: Color? = null,
     iconBgColor: Color? = null,
+    subtitleMaxLines: Int = Int.MAX_VALUE,
 ) {
     val config = LocalThemeConfig.current
     val colors = LocalAppColors.current
@@ -166,7 +167,9 @@ fun GbSettingRow(
             Text(title, color = Color(config.primaryTextColor), fontSize = 14.5.sp, fontWeight = FontWeight.W600, letterSpacing = (-0.1).sp)
             if (!subtitle.isNullOrEmpty()) {
                 Spacer(Modifier.height(3.dp))
-                Text(subtitle, color = Color(config.secondaryTextColor), fontSize = 12.sp, lineHeight = 15.sp)
+                // Previous subtitle used unlimited lines; default remains unlimited.
+                Text(subtitle, color = Color(config.secondaryTextColor), fontSize = 12.sp, lineHeight = 15.sp,
+                    maxLines = subtitleMaxLines.coerceAtLeast(1), overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
         }
         when {
@@ -287,6 +290,7 @@ fun GbLivePreviewCard(
     label: String = "LIVE INTERACTIVE PREVIEW",
     height: Dp? = null,
     padding: PaddingValues = PaddingValues(12.dp),
+    showLabel: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val config = LocalThemeConfig.current
@@ -299,7 +303,7 @@ fun GbLivePreviewCard(
             .background(colors.surfaceElevated, shape)
             .border(1.2.dp, accent.copy(alpha = 0.35f), shape),
     ) {
-        Row(
+        if (showLabel) Row(
             Modifier.fillMaxWidth()
                 .background(accent.copy(alpha = 0.12f), RoundedCornerShape(topStart = 19.dp, topEnd = 19.dp))
                 .padding(horizontal = 14.dp, vertical = 8.dp),

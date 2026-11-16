@@ -69,7 +69,11 @@ fun ChatyAboutDialog(
         onDismissRequest = onDismiss,
         containerColor = colors.surfaceElevated,
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                // Scroll removed (was Modifier.verticalScroll(rememberScrollState())):
+                // ChatyConfirmationDialog's body already scrolls; an inner unbounded scrollable
+                // is measured with infinite max height and throws at first composition.
+            ) {
                 Row {
                     if (icon != null) { icon(); Spacer(Modifier.width(24.dp)) }
                     Column(Modifier.weight(1f)) {

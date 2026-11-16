@@ -1004,4 +1004,38 @@ class CallSignalingParityTest {
         assertNull(service.currentSession)
     }
 
+    @Test fun `connected incoming call ended before timer tick records connection`() = runTest {
+        val media = FakeMediaController()
+        val records = mutableListOf<CallRecord>()
+        val service = newService(backgroundScope, media = media, records = records)
+        service.handleRemoteSignal(mapOf("signal_type" to "offer", "call_id" to "short-connected",
+            "caller_id" to "peer", "sdp" to "offer"))
+        runCurrent()
+        service.acceptCall()
+        runCurrent()
+        media.onConnectionState?.invoke(CallTransportState.connected)
+        runCurrent()
+        assertEquals(0, service.callDurationSeconds)
+        service.handleRemoteSignal(mapOf("signal_type" to "hangup", "call_id" to "short-connected", "sender_id" to "peer"))
+        runCurrent()
+        val record = records.single()
+        assertEquals(CallDirection.incoming, record.direction)
+        assertEquals(true, record.wasConnected)
+        assertEquals(0L, record.durationSeconds)
+        assertEquals(com.example.chat.domain.models.CallOutcome.ended, record.outcome)
+    }
+    @Test fun `remote decline and transport failure keep different outcomes`() = runTest {
+        for ((signal, outcome) in listOf("decline" to com.example.chat.domain.models.CallOutcome.declined,
+            "busy" to com.example.chat.domain.models.CallOutcome.busy)) {
+            val records = mutableListOf<CallRecord>()
+            val service = newService(backgroundScope, records = records)
+            service.initiateCall("peer", "Peer", isVideo = false)
+            runCurrent()
+            val id = service.currentSession!!.callId
+            service.handleRemoteSignal(mapOf("signal_type" to signal, "call_id" to id, "sender_id" to "peer"))
+            runCurrent()
+            assertEquals(outcome, records.single().outcome)
+            assertEquals(false, records.single().wasConnected)
+        }
+    }
 }

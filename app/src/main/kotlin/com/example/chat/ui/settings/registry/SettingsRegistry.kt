@@ -463,7 +463,7 @@ object SettingsRegistry {
             ),
             ),
         ),
-    ) + settingsSearchExpansionClusters
+    ) + settingsSearchExpansionClusters + conversationVisualSearchClusters
 
     val allSettings: List<SettingDefinition> get() = clusters.flatMap { it.settings }
 

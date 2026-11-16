@@ -1,5 +1,7 @@
 package com.example.chat.ui.camera
 
+import androidx.compose.ui.res.stringResource
+
 import android.util.Log
 
 import android.content.Context
@@ -83,6 +85,10 @@ import kotlinx.coroutines.withContext
  *  the host, which owns delivery status. Unsent files tracked by the active camera entry
  *  are discarded on retake/close. Crash/process-death orphan cleanup is not verified:
  *  there is no guaranteed 24-hour deletion promise. See docs/media-camera-privacy.md.
+ *
+ *  CAM-R5-049 sound rule: no custom capture sounds. Leave the platform shutter behavior
+ *  to the camera stack; do not add a completion ding or suppress platform sounds here.
+ *  Actual platform audio output still needs device verification.
  *
  *  CameraX mapping (camera package -> CameraX):
  *  - CameraController(ResolutionPreset.high, enableAudio false) ->
@@ -326,7 +332,8 @@ private class CameraSession(
             if (nightActive || portraitActive || hdrActive) {
                 night = false; nightActive = false; portrait=false; portraitActive=false; hdr = false; hdrActive = false
                 bind(previewView,onFrame,onError,onReady)
-            } else onError(error.message ?: "The camera could not start.")
+            // Previous raw native fallback: onError(error.message ?: "The camera could not start.")
+            } else onError(context.getString(com.example.chat.R.string.camera_start_failed_recovery))
         }
     }
 
@@ -344,18 +351,18 @@ private class CameraSession(
     }
 
     fun unbind() {
-        camera?.cameraInfo?.cameraState?.removeObservers(lifecycleOwner)
-        try {
-            preview?.let { provider?.unbind(it) }
-            imageCapture?.let { provider?.unbind(it) }
-            analysis?.let { provider?.unbind(it) }
-        } catch (_: Exception) {}
+        runCatching { camera?.cameraInfo?.cameraState?.removeObservers(lifecycleOwner) }
+        runCatching { preview?.let { provider?.unbind(it) } }
+        runCatching { imageCapture?.let { provider?.unbind(it) } }
+        runCatching { analysis?.clearAnalyzer() }
+        runCatching { analysis?.let { provider?.unbind(it) } }
+        camera = null
     }
 
     fun dispose() {
-        unbind()
-        analysisExecutor.shutdown()
-        captureExecutor.shutdown()
+        runCatching { unbind() }
+        runCatching { analysisExecutor.shutdown() }
+        runCatching { captureExecutor.shutdown() }
     }
 }
 
@@ -384,13 +391,18 @@ fun ChatyCameraCaptureScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
         ) {
-            androidx.compose.material3.Text("Camera unavailable for this request", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
-            androidx.compose.material3.Text("Go back and try opening the camera again.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
-            androidx.compose.material3.TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { androidx.compose.material3.Text("Go back") }
+            // CAM-R4-004 prior: androidx.compose.material3.Text("Camera unavailable for this request", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
+            androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_request_unavailable), color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
+            // CAM-R4-004 prior: androidx.compose.material3.Text("Go back and try opening the camera again.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+            androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_request_reopen), color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+            // CAM-R4-004 prior: androidx.compose.material3.TextButton(onClick = onDismiss, modifier = Modifier.cameraActionFocusRing().heightIn(min = 48.dp)) { androidx.compose.material3.Text("Go back") }
+            androidx.compose.material3.TextButton(onClick = onDismiss, modifier = Modifier.cameraActionFocusRing().heightIn(min = 48.dp)) { androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_go_back)) }
         }
         return
     }
     val context = LocalContext.current
+    val cameraPowerSaveMode by rememberCameraPowerSaveMode()
+    val cameraThermalLimited by rememberCameraThermalLimit()
     val view = LocalView.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -421,8 +433,12 @@ fun ChatyCameraCaptureScreen(
     }
     val faceSolver = remember { FaceAnchorSolver() }
     val faceDetection = remember { CameraFaceDetectionBridge(context) }
+    // CAM-R2-044: recreation must restore the user's camera direction so a retry
+    // re-binds the same camera, not the entry-preset default. Saveable mirror of
+    // session.lensFacing; flipCamera is its only other writer.
+    var savedLensFacing by androidx.compose.runtime.saveable.rememberSaveable(entryPreset) { mutableStateOf(if(entryPreset == CameraEntryPreset.composerFrontVideo) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK) }
     val session = remember(context, lifecycleOwner, entryPreset) { CameraSession(context, lifecycleOwner).apply {
-        lensFacing = if(entryPreset == CameraEntryPreset.composerFrontVideo) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+        lensFacing = savedLensFacing
     } }
 
     var phase by remember { mutableStateOf(CameraPhase.initializing) }
@@ -440,6 +456,15 @@ fun ChatyCameraCaptureScreen(
             captureFlashAlpha.snapTo(0.55f)
             captureFlashAlpha.animateTo(0f, androidx.compose.animation.core.tween(280))
         }
+    }
+    // CAM-R1-028: a flip unbinds+rebinds every use case (~300-800 ms frozen
+    // preview); a 200 ms crossfade overlay masks the gap. Flip-triggered only:
+    // options rebinds, video binds and retry never raise it. Cleared when the
+    // bind resolves (ready or noCamera); the render gate also requires
+    // phase == initializing. The marker is assigned only after bind preconditions.
+    var flipOverlayPending by remember { mutableStateOf(false) }
+    LaunchedEffect(phase) {
+        if (phase != CameraPhase.initializing) flipOverlayPending = false
     }
     // GB DragGalleryStrip: recent gallery photos above the shutter, revealed by
     // dragging up (or tapping the handle). Hidden without photos permission.
@@ -472,7 +497,25 @@ fun ChatyCameraCaptureScreen(
     var capturing by remember { mutableStateOf(false) }
     var sendingPhoto by remember { mutableStateOf(false) }
     var sentPhotoPath by remember { mutableStateOf<String?>(null) }
-    var options by remember { mutableStateOf(CameraCaptureOptions()) }
+    // CAM-R2-044: options must survive recreation so a retry re-bind keeps the
+    // user's capture settings. Small custom Saver; unknown enum names from an
+    // older save reset honestly to defaults.
+    val cameraCaptureOptionsSaver = androidx.compose.runtime.saveable.listSaver<CameraCaptureOptions, Any>(
+        save = { listOf(it.aspect.name, it.timerSeconds, it.grid, it.level, it.stabilization, it.watermark, it.clarity, it.night, it.mirrorSelfies) },
+        restore = { runCatching { CameraCaptureOptions(
+            aspect = runCatching { CaptureAspect.valueOf(it[0] as String) }.getOrDefault(CaptureAspect.full),
+            timerSeconds = it[1] as Int,
+            grid = it[2] as Boolean,
+            level = it[3] as Boolean,
+            stabilization = it[4] as Boolean,
+            watermark = it[5] as Boolean,
+            clarity = it[6] as Boolean,
+            night = it[7] as Boolean,
+            mirrorSelfies = it[8] as Boolean,
+        ) }.getOrNull() },
+    )
+    // Original: var options by remember { mutableStateOf(CameraCaptureOptions()) }
+    var options by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = cameraCaptureOptionsSaver) { mutableStateOf(CameraCaptureOptions()) }
     var optionsOpen by remember { mutableStateOf(false) }
     var flashSupported by remember { mutableStateOf(false) }
     var stabilizationSupported by remember { mutableStateOf(false) }
@@ -507,8 +550,18 @@ fun ChatyCameraCaptureScreen(
     var nightActive by remember { mutableStateOf(false) }
     var minZoom by remember { mutableStateOf(1f) }
     var maxZoom by remember { mutableStateOf(1f) }
-    var videoOpen by remember(entryPreset) { mutableStateOf(entryPreset == CameraEntryPreset.composerFrontVideo) }
-    var captureViewMode by remember(entryPreset) { mutableStateOf(if(entryPreset == CameraEntryPreset.composerFrontVideo) CaptureViewMode.video else CaptureViewMode.photo) }
+    // Prior: var videoOpen by remember(entryPreset) { mutableStateOf(entryPreset == CameraEntryPreset.composerFrontVideo) }
+    // CAM-R2-044: the chosen capture mode must survive recreation so a retry
+    // re-bind keeps it (e.g. lenses) instead of reverting to the entry preset.
+    var captureViewMode by androidx.compose.runtime.saveable.rememberSaveable(
+        entryPreset,
+        stateSaver = androidx.compose.runtime.saveable.Saver<CaptureViewMode, String>(
+            save = { it.name },
+            restore = { runCatching { CaptureViewMode.valueOf(it) }.getOrDefault(CaptureViewMode.photo) },
+        ),
+    ) { mutableStateOf(if(entryPreset == CameraEntryPreset.composerFrontVideo) CaptureViewMode.video else CaptureViewMode.photo) }
+    // Keep the transient pipeline flag consistent with the restored mode.
+    var videoOpen by remember(entryPreset) { mutableStateOf(captureViewMode == CaptureViewMode.video) }
     // ---- Inline video mode (user redesign, 2026-10-30): recording happens on the
     // shared PreviewView; the pinned auth-lease architecture is preserved and the
     // separate VideoCaptureHost screen is no longer used by this composable.
@@ -591,6 +644,8 @@ fun ChatyCameraCaptureScreen(
     ) engine.activeEffect.shaderKey else null
 
     fun processSegmentFrame(frame: FrameData, rotationDegrees: Int) {
+        // CAM-R3-040: state is read dynamically even by a previously bound callback.
+        if (cameraPowerSaveMode || cameraThermalLimited) return
         val key = segmentEffectKey ?: return
         if (processingSegmentFrame) return
         val nowMs = android.os.SystemClock.elapsedRealtime()
@@ -620,7 +675,7 @@ fun ChatyCameraCaptureScreen(
                     // publish (stale effect key, disposed slot) - recycles it.
                     // Never both, never the caller, never a published frame.
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
-                        val shown = segmentFrames.publish(bmp, accept = segmentEffectKey == key &&
+                        val shown = segmentFrames.publish(bmp, accept = !cameraPowerSaveMode && !cameraThermalLimited && segmentEffectKey == key &&
                             renderGeneration == faceFrameGeneration &&
                             mirrored == (session.lensFacing == CameraSelector.LENS_FACING_FRONT) &&
                             intensity == engine.intensity)
@@ -696,7 +751,12 @@ fun ChatyCameraCaptureScreen(
 
     androidx.compose.runtime.SideEffect {
         session.analyzeFaces = wantsFaceTracking && !nightActive && !portraitActive && !capturing && !videoOpen && documentReviewPath == null
-        session.analyzeSegment = segmentEffectKey != null && !nightActive && !portraitActive
+        // Previous analyzer gate did not consider battery saver.
+        session.analyzeSegment = !cameraPowerSaveMode && !cameraThermalLimited && segmentEffectKey != null && !nightActive && !portraitActive
+        if (cameraPowerSaveMode || cameraThermalLimited) {
+            segmentFrames.clear()
+            segmentPreviewFrame = segmentFrames.visible
+        }
         // A key change (blur -> office/gradient, or deselect) must never keep the
         // previous effect's composite on screen while its replacement is in flight.
         if (segmentEffectKey != segmentPublishedKey) {
@@ -705,9 +765,51 @@ fun ChatyCameraCaptureScreen(
         }
     }
 
-    fun bindCamera() {
+    val zoomRequests = remember(session) { kotlinx.coroutines.channels.Channel<() -> Unit>(kotlinx.coroutines.channels.Channel.CONFLATED) }
+    var zoomRequestSequence by remember(session) { mutableStateOf(0L) }
+    LaunchedEffect(zoomRequests) { dispatchCameraZoomRequests(zoomRequests) }
+    fun requestCameraZoom(requested: Float) {
+        val camera = if (videoOpen) videoSession?.boundCamera() else session.camera
+        if (camera == null || phase != CameraPhase.ready || capturing) return
+        val sequence = ++zoomRequestSequence
+        zoomRequests.trySend(zoomAction@{
+            fun current(): Boolean = sequence == zoomRequestSequence && ownedFiles.isOpen() &&
+                phase == CameraPhase.ready && !capturing && cameraPermissionGranted &&
+                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+                (if (videoOpen) videoSession?.boundCamera() else session.camera) === camera
+            if (!current()) return@zoomAction
+            val target = clampCameraZoom(requested, minZoom, effectiveZoomMax(maxZoom, workingMaxZoom))
+            try {
+                val result = camera.cameraControl.setZoomRatio(target)
+                result.addListener(zoomResult@{
+                    if (!current()) return@zoomResult
+                    try { result.get(); zoomRatio = target }
+                    catch (failure: Exception) {
+                        val cancelled = generateSequence(failure as Throwable?) { it.cause }.any { it is androidx.camera.core.CameraControl.OperationCanceledException }
+                        if (!cancelled) {
+                            workingMaxZoom = maxOf(minZoom, zoomRatio)
+                            transientNotice = "Zoom is unavailable on this camera."
+                        }
+                    }
+                }, ContextCompat.getMainExecutor(context))
+            } catch (_: Exception) { if (current()) transientNotice = "Zoom is unavailable on this camera." }
+        })
+    }
+
+    // Prior power-only notice now shares the same explicit live-preview budget with thermal state.
+    LaunchedEffect(cameraPowerSaveMode, cameraThermalLimited, segmentEffectKey) {
+        if (segmentEffectKey != null) {
+            if (cameraThermalLimited) transientNotice = context.getString(com.example.chat.R.string.camera_background_preview_thermal)
+            else if (cameraPowerSaveMode) transientNotice = context.getString(com.example.chat.R.string.camera_background_preview_power_save)
+        }
+    }
+
+    // Prior: fun bindCamera() {
+    fun bindCamera(forFlip: Boolean = false) {
         val pv = previewView ?: return
         if (!cameraPermissionGranted || capturedPath != null || documentReviewPath != null || scannerBusy || videoOpen) return
+        // Only an accepted bind owns the flip marker; unrelated binds clear it.
+        flipOverlayPending = forFlip
         bindJob?.cancel()
         bindJob = scope.launch {
             faceFrameGeneration++
@@ -719,9 +821,22 @@ fun ChatyCameraCaptureScreen(
             try {
                 session.ensureProvider()
                 try { session.ensureExtensions() } catch (_: Exception) { /* Photo stays available. */ }
+                val analysisGeneration = faceFrameGeneration
+                val pendingMainFrame = java.util.concurrent.atomic.AtomicBoolean(false)
                 session.bind(
                     previewView = pv,
-                    onFrame = { frame, rotation -> processFaceFrame(frame, rotation); processSegmentFrame(frame, rotation) },
+                    onFrame = { frame, rotation ->
+                        // FrameData owns copied planes and does not depend on ImageProxy lifetime.
+                        // Bound the Main queue to one copied frame per binding.
+                        if (pendingMainFrame.compareAndSet(false, true)) scope.launch(Dispatchers.Main.immediate) {
+                            try {
+                                if (ownedFiles.isOpen() && analysisGeneration == faceFrameGeneration) {
+                                    processFaceFrame(frame, rotation)
+                                    processSegmentFrame(frame, rotation)
+                                }
+                            } finally { pendingMainFrame.set(false) }
+                        }
+                    },
                     onError = { message ->
                         errorMessage = message
                         phase = CameraPhase.noCamera
@@ -760,7 +875,8 @@ fun ChatyCameraCaptureScreen(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                errorMessage = error.message ?: "The camera could not start. Try reopening it."
+                // Previous raw native fallback: errorMessage = error.message ?: "The camera could not start. Try reopening it."
+                errorMessage = context.getString(com.example.chat.R.string.camera_start_failed_recovery)
                 phase = CameraPhase.noCamera
             }
         }
@@ -788,7 +904,7 @@ fun ChatyCameraCaptureScreen(
         phase = CameraPhase.initializing
         errorMessage = null
         val sessionSelector = if (session.lensFacing == CameraSelector.LENS_FACING_FRONT) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
-        val vs = CameraVideoSession(pv.context, lifecycleOwner, pv, sessionSelector, options.stabilization, lease, { viewportSize }, { lensManager.selected }, { facePoses }, { engine.activeColorMatrix()?.let { m -> FloatArray(m.size) { i -> m[i].toFloat() } } }) { next ->
+        val vs = CameraVideoSession(pv.context, lifecycleOwner, pv, sessionSelector, options.stabilization, lease, { viewportSize }, { lensManager.selected }, { facePoses }, { engine.activeColorMatrix()?.let { m -> FloatArray(m.size) { i -> m[i].toFloat() } } }, maxDurationMillis = cameraVideoDurationLimitMillis(mode == ChatyCaptureMode.story)) { next ->
             videoState = next
             if (next is VideoSessionState.Ready || next is VideoSessionState.Recording || next is VideoSessionState.Paused) phase = CameraPhase.ready
             if (next is VideoSessionState.Ready) {
@@ -820,7 +936,12 @@ fun ChatyCameraCaptureScreen(
         for (ignored in videoInvalidationSignal) {
             videoStopPlayback?.invoke(); videoStopPlayback = null
             videoSession?.close(); videoSession = null
+            // CAM-R2-047: explain security teardown before the capture surface disappears.
+            // A screen-local notice would be lost immediately on dismiss.
+            android.widget.Toast.makeText(context.applicationContext,
+                context.getString(com.example.chat.R.string.camera_session_expired_reopen), android.widget.Toast.LENGTH_LONG).show()
             onDismiss()
+            break // This capture entry is invalid; do not emit duplicate expiry messages.
         }
     }
 
@@ -839,17 +960,31 @@ fun ChatyCameraCaptureScreen(
     }
 
     LaunchedEffect(Unit) { requestPermission(ChatyPermissions.camera) }
+    var lastPhotoBindingOptions by remember(session) { mutableStateOf<List<Boolean>?>(null) }
     LaunchedEffect(previewView, cameraPermissionGranted, capturedPath, documentReviewPath, scannerBusy, videoOpen, options.stabilization, options.night, captureViewMode, hdrOn) {
         if (!cameraPermissionGranted) {
+            lastPhotoBindingOptions = null
             session.unbind()
             videoSession?.close(); videoSession = null
             phase = CameraPhase.permissionDenied
         } else if (videoOpen) {
+            lastPhotoBindingOptions = null
             // Inline video owns the shared PreviewView: release the image session first.
             session.unbind()
             if (capturedPath == null && documentReviewPath == null && !scannerBusy) bindVideo()
         } else if (capturedPath == null && documentReviewPath == null && !scannerBusy) {
             videoSession?.close(); videoSession = null; videoState = null
+            val desiredBinding = listOf(options.stabilization,
+                options.night || captureViewMode == CaptureViewMode.night,
+                captureViewMode == CaptureViewMode.portrait,
+                hdrOn && captureViewMode in listOf(CaptureViewMode.photo, CaptureViewMode.lenses))
+            if (lastPhotoBindingOptions != null && lastPhotoBindingOptions != desiredBinding) {
+                // CAM-R2-008: only option-driven native changes settle; first open remains immediate.
+                bindJob?.cancel()
+                phase = CameraPhase.initializing // Do not capture with options the camera has not bound.
+                kotlinx.coroutines.delay(300L)
+            }
+            lastPhotoBindingOptions = desiredBinding
             session.stabilization = options.stabilization
             session.night = options.night || captureViewMode == CaptureViewMode.night
             session.portrait = captureViewMode == CaptureViewMode.portrait
@@ -858,7 +993,7 @@ fun ChatyCameraCaptureScreen(
                 !session.night && !session.portrait
             bindCamera()
         }
-        else session.unbind()
+        else { lastPhotoBindingOptions = null; session.unbind() }
     }
     // Re-check after returning from Android app settings. A granted permission
     // must not leave this composition stranded in its old denied state.
@@ -956,6 +1091,7 @@ fun ChatyCameraCaptureScreen(
         } else {
             CameraSelector.LENS_FACING_BACK
         }
+        savedLensFacing = session.lensFacing
         if (session.lensFacing == CameraSelector.LENS_FACING_FRONT) {
             flashOn = false
             flashAuto = false
@@ -967,7 +1103,8 @@ fun ChatyCameraCaptureScreen(
         faceSolver.reset()
         lastFaceSeenElapsedMs = null
         facePoses = emptyList()
-        bindCamera()
+        // Prior peer marker was set before bindCamera early-return checks.
+        bindCamera(forFlip = true)
     }
 
     fun stagePickedOrCaptured(path: String) {
@@ -979,12 +1116,19 @@ fun ChatyCameraCaptureScreen(
     // Shared by the photo picker and the GB recent-photos strip: copy the
     // picked image into app-owned cache, then stage it like any capture.
     fun stageRecentPhoto(uri: android.net.Uri) {
+        if (!callsAllowed) {
+            transientNotice = "Contact acceptance required - both users must accept before media can be shared."
+            return
+        }
         scope.launch {
             try {
-                val mime = context.contentResolver.getType(uri)
-                require(mime == null || mime.startsWith("image/")) { "Choose an image, not another file type." }
-                val dest = File.createTempFile("chaty_picked_", ".jpg", context.cacheDir)
-                if(!ownedFiles.own(dest)) return@launch
+                val dest = withContext(Dispatchers.IO) {
+                    val mime = context.contentResolver.getType(uri)
+                    require(mime == null || mime.startsWith("image/")) { "Choose an image, not another file type." }
+                    File.createTempFile("chaty_picked_", ".jpg", context.cacheDir).also {
+                        check(ownedFiles.own(it)) { "Camera session ended." }
+                    }
+                }
                 try { withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         dest.outputStream().use { output ->
@@ -1055,12 +1199,26 @@ fun ChatyCameraCaptureScreen(
             return
         }
         if(!ownedFiles.own(out)) { capturing=false; return }
+        val awaitingCallback = java.util.concurrent.atomic.AtomicBoolean(true)
+        val callbackWatchdog = scope.launch {
+            delay(30_000L)
+            if (awaitingCallback.compareAndSet(true, false)) {
+                // Do not accept a late callback into a new capture. Recovery requires rebind.
+                runCatching { session.unbind() }
+                capturing = false
+                phase = CameraPhase.noCamera
+                errorMessage = "The camera did not finish the photo. Tap Retry or choose a gallery photo."
+                withContext(Dispatchers.IO) { runCatching { out.delete() } }
+            }
+        }
         try {
         val opts = ImageCapture.OutputFileOptions.Builder(out).build()
         capture.takePicture(opts, session.captureExecutor, object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+                if (!awaitingCallback.compareAndSet(true, false)) { out.delete(); return }
                 if(!ownedFiles.isOpen()) { out.delete(); return }
                 val work = scope.launch {
+                    callbackWatchdog.cancel()
                     var path = out.absolutePath
                     if (!documentCapture && !session.nightActive && !session.portraitActive) {
                         // Original callback read the later mutable lens/poses with only a health gate.
@@ -1133,8 +1291,10 @@ fun ChatyCameraCaptureScreen(
             }
 
             override fun onError(exception: ImageCaptureException) {
+                if (!awaitingCallback.compareAndSet(true, false)) { out.delete(); return }
                 out.delete()
                 scope.launch {
+                    callbackWatchdog.cancel()
                     capturing = false
                     // Native exception text can include local paths; keep the user notice generic.
                     // errorMessage = exception.message ?: "The photo could not be captured."
@@ -1144,6 +1304,8 @@ fun ChatyCameraCaptureScreen(
             }
         })
         } catch (_: Exception) {
+            awaitingCallback.set(false)
+            callbackWatchdog.cancel()
             out.delete()
             capturing = false
             transientNotice = "The photo could not start. Try again or reopen the camera."
@@ -1277,10 +1439,21 @@ fun ChatyCameraCaptureScreen(
             // recycles it because it can never be shown. The last visible
             // frame is dereferenced without recycle - teardown does not prove
             // the RenderThread released it.
-            session.analyzeSegment = false
-            segmentFrames.dispose()
-            segmentPreviewFrame = null
-            videoHoldRequest?.close(); videoStopPlayback?.invoke(); videoSession?.close(); videoAuth?.close(); videoInvalidationSignal.close(); ownedFiles.close(); timerJob?.cancel(); bindJob?.cancel(); session.dispose(); faceDetection.dispose(); lensManager.dispose()
+            runCatching { session.analyzeSegment = false }
+            runCatching { segmentFrames.dispose() }
+            runCatching { segmentPreviewFrame = null }
+            runCatching { zoomRequests.close() }
+            runCatching { videoHoldRequest?.close() }
+            runCatching { videoStopPlayback?.invoke() }
+            runCatching { videoSession?.close() }
+            runCatching { videoAuth?.close() }
+            runCatching { videoInvalidationSignal.close() }
+            runCatching { ownedFiles.close() }
+            runCatching { timerJob?.cancel() }
+            runCatching { bindJob?.cancel() }
+            runCatching { session.dispose() }
+            runCatching { faceDetection.dispose() }
+            runCatching { lensManager.dispose() }
         }
     }
 
@@ -1295,6 +1468,8 @@ fun ChatyCameraCaptureScreen(
             CameraCaptureViewfinder(
                 videoLensRecorded = videoLensEffectActive,
                 phase = phase,
+                // CAM-R1-028: flip-only gate - options/video/retry binds stay bare.
+                flipOverlay = flipOverlayPending && phase == CameraPhase.initializing,
                 onRetryCamera = {
                     // This action only appears in noCamera, never during a live recording.
                     // Preserve camera, mode and options while recreating the failed session.
@@ -1334,8 +1509,8 @@ fun ChatyCameraCaptureScreen(
                                     else session.camera?.cameraControl
                                 if (control == null || startSpan <= 0f) return false
                                 val target = clampCameraZoom(startRatio * detector.currentSpan / startSpan, minZoom, effectiveZoomMax(maxZoom, workingMaxZoom))
-                                control.setZoomRatio(target)
-                                zoomRatio = target
+                                // Previous per-pixel native request: control.setZoomRatio(target); zoomRatio = target
+                                requestCameraZoom(target)
                                 pinchZoomed = true
                                 return true
                             }
@@ -1348,7 +1523,10 @@ fun ChatyCameraCaptureScreen(
                                 touchDownY = event.y
                                 pinchZoomed = false
                             }
-                            android.view.MotionEvent.ACTION_UP -> if (phase == CameraPhase.ready && !pinchZoomed) {
+                            // CAM-R2-041: no preview swipe/tap action behind overlaid controls.
+                            // Previous: android.view.MotionEvent.ACTION_UP -> if (phase == CameraPhase.ready && !pinchZoomed) {
+                            android.view.MotionEvent.ACTION_UP -> if (phase == CameraPhase.ready && !pinchZoomed &&
+                                !effectsOpen && !lensBrowserOpen && !optionsOpen) {
                                 val dx = event.x - touchDownX
                                 val dy = event.y - touchDownY
                                 val swipeThreshold = 56 * pv.resources.displayMetrics.density
@@ -1370,7 +1548,8 @@ fun ChatyCameraCaptureScreen(
                                     val point = pv.meteringPointFactory.createPoint(event.x, event.y)
                                     val action = androidx.camera.core.FocusMeteringAction.Builder(point)
                                         .setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS).build()
-                                    val focus = session.camera?.cameraControl?.startFocusAndMetering(action)
+                                    val focus = if (videoOpen) videoSession?.startFocusAndMetering(action)
+                                    else session.camera?.cameraControl?.startFocusAndMetering(action)
                                     focus?.addListener({
                                         runCatching { focus.get() }.getOrNull()?.takeIf { it.isFocusSuccessful }?.let {
                                             view.announceForAccessibility("Focus locked")
@@ -1425,34 +1604,46 @@ fun ChatyCameraCaptureScreen(
                     // Original white-on-preview notice retained for review:
                     // transientNotice?.let { message -> TextButton(onClick = { transientNotice = null }) { Text(message + "  Dismiss", color = Color.White) } }
                     if (!lensManager.selected.isNoLens && captureViewMode in listOf(CaptureViewMode.photo, CaptureViewMode.lenses)) {
-                        androidx.compose.material3.Text("Saved lens overlays use a copy up to 2048 pixels on the longest side.",
+                        // CAM-R4-004 prior: androidx.compose.material3.Text("Saved lens overlays use a copy up to 2048 pixels on the longest side.",
+                        androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_lens_copy_size_note),
                             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.fillMaxWidth().background(androidx.compose.material3.MaterialTheme.colorScheme.surface).padding(8.dp))
                     }
                     transientNotice?.let { message ->
                         androidx.compose.material3.TextButton(
                             onClick = { transientNotice = null },
-                            modifier = Modifier.fillMaxWidth().semantics {
+                            modifier = Modifier.cameraActionFocusRing().fillMaxWidth().semantics {
                                 liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
                             },
                             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                                 containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
                                 contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             ),
-                        ) { androidx.compose.material3.Text(message + "  Dismiss") }
+                        ) // CAM-R4-004 prior: { androidx.compose.material3.Text(message + "  Dismiss") }
+                        { androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_notice_dismiss, message)) }
                     }
                 }
-                if (countdown > 0) androidx.compose.material3.Text("$countdown\nTap shutter to cancel", modifier = Modifier.align(Alignment.Center)
+                // CAM-R4-004 prior: if (countdown > 0) androidx.compose.material3.Text("$countdown\nTap shutter to cancel",
+                if (countdown > 0) androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_countdown_cancel, countdown), modifier = Modifier.align(Alignment.Center)
                     .background(androidx.compose.material3.MaterialTheme.colorScheme.surface, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                     .padding(16.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
                     color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 24.sp)
                 // Reference-grounded (Snap/IG recording frames): elapsed time sits
                 // top-center while a video records.
+                // Previous timer displayed elapsed time only.
                 if (videoTimerActive) CameraCaptureTimerTop(videoSeconds,
-                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp))
+                    Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp),
+                    remainingSeconds = cameraVideoRemainingSeconds(videoSeconds, cameraVideoDurationLimitMillis(mode == ChatyCaptureMode.story)),
+                    muted = when (val current = videoState) {
+                        is VideoSessionState.Recording -> !current.hasAudio
+                        is VideoSessionState.Paused -> !current.hasAudio
+                        else -> false
+                    })
                 androidx.compose.foundation.layout.Column(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .heightIn(max = maxHeight)
                         .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .verticalScroll(rememberScrollState())
                         .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .35f)),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -1460,37 +1651,41 @@ fun ChatyCameraCaptureScreen(
                     "Lenses unavailable this session", color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
                         .padding(horizontal = 12.dp, vertical = 8.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
-                if (portraitActive) androidx.compose.material3.Text("Portrait · device background blur",color=androidx.compose.ui.graphics.Color.White)
-                if (nightActive) androidx.compose.material3.Text("Night · hold still while capturing",color=androidx.compose.ui.graphics.Color.White)
+                // CAM-R4-004 prior: if (portraitActive) androidx.compose.material3.Text("Portrait · device background blur",color=androidx.compose.ui.graphics.Color.White)
+                if (portraitActive) androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_portrait_active),color=androidx.compose.ui.graphics.Color.White)
+                // CAM-R4-004 prior: if (nightActive) androidx.compose.material3.Text("Night · hold still while capturing",color=androidx.compose.ui.graphics.Color.White)
+                if (nightActive) androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_night_active),color=androidx.compose.ui.graphics.Color.White)
                 val videoZoomReady = videoState is VideoSessionState.Ready || videoTimerActive
                 CameraZoomControls(zoomRatio,minZoom,effectiveZoomMax(maxZoom,workingMaxZoom),enabled = phase == CameraPhase.ready && !capturing && (!videoOpen || videoZoomReady),forceSlider = videoTimerActive) { requested ->
-                    val control = if (videoOpen) videoSession?.boundCamera()?.cameraControl else session.camera?.cameraControl
-                    if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "request=" + requested + " clamped=" + clampCameraZoom(requested,minZoom,maxZoom) + " current=" + zoomRatio + " range=[" + minZoom + "," + maxZoom + "] workingMax=" + workingMaxZoom + " controlNull=" + (control == null))
-                    if (control != null) {
-                        val result = control.setZoomRatio(clampCameraZoom(requested,minZoom,maxZoom))
-                        result.addListener({ try { result.get(); zoomRatio = clampCameraZoom(requested,minZoom,maxZoom)
-                            if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "accepted ratio=" + zoomRatio) }
-                            catch (e: Exception) {
-                                // A superseded drag request is cancelled by CameraX, not
-                                // a camera capability failure: collapsing workingMax here
-                                // hid the slider mid-drag (run 122 ZOOM-DIAG evidence:
-                                // OperationCanceledException for 1.17x while 1.36x was
-                                // accepted 0.3s later on the same camera).
-                                val cancelled = generateSequence(e as Throwable?) { it.cause }.any { it is androidx.camera.core.CameraControl.OperationCanceledException }
-                                if (!cancelled) {
-                                    // Clamp the offered range to what the camera accepted,
-                                    // so the failed preset disappears instead of failing again.
-                                    workingMaxZoom = maxOf(minZoom, zoomRatio)
-                                    transientNotice = "Zoom is unavailable on this camera."
-                                }
-                                // A rejection here is a failed REQUEST, not proof of
-                                // missing camera capability - log the exact error.
-                                // Original diagnostic appended e.message, which can contain provider details/paths.
-                                // Log.i("ZOOM-DIAG", "... error=" + e.javaClass.simpleName + ":" + e.message + "...")
-                                if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "rejected requested=" + requested + " error=" + e.javaClass.simpleName + " cancelled=" + cancelled + (if (cancelled) "" else " workingMax->" + workingMaxZoom))
-                            }
-                        }, ContextCompat.getMainExecutor(context))
-                    }
+                    // Previous unthrottled slider/preset handler retained inactive:
+                    // val control = if (videoOpen) videoSession?.boundCamera()?.cameraControl else session.camera?.cameraControl
+                    // if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "request=" + requested + " clamped=" + clampCameraZoom(requested,minZoom,maxZoom) + " current=" + zoomRatio + " range=[" + minZoom + "," + maxZoom + "] workingMax=" + workingMaxZoom + " controlNull=" + (control == null))
+                    // if (control != null) {
+                    // val result = control.setZoomRatio(clampCameraZoom(requested,minZoom,maxZoom))
+                    // result.addListener({ try { result.get(); zoomRatio = clampCameraZoom(requested,minZoom,maxZoom)
+                    // if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "accepted ratio=" + zoomRatio) }
+                    // catch (e: Exception) {
+                    // // A superseded drag request is cancelled by CameraX, not
+                    // // a camera capability failure: collapsing workingMax here
+                    // // hid the slider mid-drag (run 122 ZOOM-DIAG evidence:
+                    // // OperationCanceledException for 1.17x while 1.36x was
+                    // // accepted 0.3s later on the same camera).
+                    // val cancelled = generateSequence(e as Throwable?) { it.cause }.any { it is androidx.camera.core.CameraControl.OperationCanceledException }
+                    // if (!cancelled) {
+                    // // Clamp the offered range to what the camera accepted,
+                    // // so the failed preset disappears instead of failing again.
+                    // workingMaxZoom = maxOf(minZoom, zoomRatio)
+                    // transientNotice = "Zoom is unavailable on this camera."
+                    // }
+                    // // A rejection here is a failed REQUEST, not proof of
+                    // // missing camera capability - log the exact error.
+                    // // Original diagnostic appended e.message, which can contain provider details/paths.
+                    // // Log.i("ZOOM-DIAG", "... error=" + e.javaClass.simpleName + ":" + e.message + "...")
+                    // if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "rejected requested=" + requested + " error=" + e.javaClass.simpleName + " cancelled=" + cancelled + (if (cancelled) "" else " workingMax->" + workingMaxZoom))
+                    // }
+                    // }, ContextCompat.getMainExecutor(context))
+                    // }
+                    requestCameraZoom(requested)
                 }
             if (lensBrowserOpen) {
                 // Lens explorer: shares this screen's LensManager so selection,
@@ -1502,6 +1697,9 @@ fun ChatyCameraCaptureScreen(
                 )
             }
             CameraCaptureBottomControls(
+                paneHeight = maxHeight,
+                // CAM-R1-037: UI label only; selector/camera-switch behavior unchanged.
+                frontCamera = session.lensFacing == CameraSelector.LENS_FACING_FRONT,
                 phase = phase,
                 captureViewMode = captureViewMode,
                 effectsOpen = effectsOpen,
@@ -1620,15 +1818,44 @@ fun ChatyCameraCaptureScreen(
                 onDismissRequest = { videoExitPrompt = false; videoRetakePrompt = false },
                 title = { androidx.compose.material3.Text("Discard this unsaved video?") },
                 text = { androidx.compose.material3.Text("This is a temporary draft. It is not sent or saved. Closing the app can lose it.") },
-                confirmButton = { androidx.compose.material3.Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = {
+                confirmButton = { androidx.compose.material3.Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick = {
                     val leave = videoExitPrompt
                     videoStopPlayback?.invoke(); videoStopPlayback = null
                     videoSession?.discard()
                     videoExitPrompt = false; videoRetakePrompt = false
                     if (leave) { videoOpen = false; captureViewMode = CaptureViewMode.photo }
                 }) { androidx.compose.material3.Text("Discard video") } },
-                dismissButton = { androidx.compose.material3.Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { videoExitPrompt = false; videoRetakePrompt = false }) { androidx.compose.material3.Text("Keep reviewing") } },
+                dismissButton = { androidx.compose.material3.Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { videoExitPrompt = false; videoRetakePrompt = false }) { androidx.compose.material3.Text("Keep reviewing") } },
             )
         }
     }
 }
+
+// CAM-R4-034 prior UI modifier lines retained inactive:
+//             androidx.compose.material3.TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { androidx.compose.material3.Text("Go back") }
+//                             modifier = Modifier.fillMaxWidth().semantics {
+//                 confirmButton = { androidx.compose.material3.Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = {
+//                 dismissButton = { androidx.compose.material3.Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { videoExitPrompt = false; videoRetakePrompt = false }) { androidx.compose.material3.Text("Keep reviewing") } },
+
+/* Previous net234 fragments:
+        camera?.cameraInfo?.cameraState?.removeObservers(lifecycleOwner)
+        try {
+            preview?.let { provider?.unbind(it) }
+            imageCapture?.let { provider?.unbind(it) }
+            analysis?.let { provider?.unbind(it) }
+        } catch (_: Exception) {}
+        unbind()
+        analysisExecutor.shutdown()
+        captureExecutor.shutdown()
+                    onFrame = { frame, rotation -> processFaceFrame(frame, rotation); processSegmentFrame(frame, rotation) },
+                val mime = context.contentResolver.getType(uri)
+                require(mime == null || mime.startsWith("image/")) { "Choose an image, not another file type." }
+                val dest = File.createTempFile("chaty_picked_", ".jpg", context.cacheDir)
+                if(!ownedFiles.own(dest)) return@launch
+            session.analyzeSegment = false
+            segmentFrames.dispose()
+            segmentPreviewFrame = null
+            zoomRequests.close()
+            videoHoldRequest?.close(); videoStopPlayback?.invoke(); videoSession?.close(); videoAuth?.close(); videoInvalidationSignal.close(); ownedFiles.close(); timerJob?.cancel(); bindJob?.cancel(); session.dispose(); faceDetection.dispose(); lensManager.dispose()
+                                    val focus = session.camera?.cameraControl?.startFocusAndMetering(action)
+*/

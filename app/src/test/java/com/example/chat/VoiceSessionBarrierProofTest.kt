@@ -43,6 +43,7 @@ class VoiceSessionBarrierProofTest {
                 uploads++; uploadGate?.await()
                 MessageAttachment("synthetic-attachment", "audio", "test", "1 KB", "offline")
             }, sendAudioMessage = { sends++ }, now = { now },
+            communicationArbiter = com.example.chat.core.audio.DefaultCommunicationMediaArbiter(),
         )
     }
     @Test fun releaseDuringNativeStartCannotLeaveUnlockedOrphanCapture() = runTest {
@@ -114,4 +115,16 @@ class VoiceSessionBarrierProofTest {
         assertEquals(1, h.recorder.stops); assertEquals(1, h.deleted.size)
         assertEquals(0, h.uploads); assertEquals(0, h.sends); assertEquals(1, errors.size)
     }
+    @Test fun lifecycleFenceWaitsForBusyNativeStartThenAwaitsActualRecorderDisposal() = runTest {
+        val h = Harness(); val gate = CompletableDeferred<Unit>(); h.recorder.startGate = gate
+        val session = VoiceSessionController(h.controller, backgroundScope)
+        session.beginVoice(locked = false); runCurrent()
+        session.dispose() // Immediate fence, no launch on the leaving session's scope.
+        val survivingCleanup = async { session.disposeAndAwait() }; runCurrent()
+        assertFalse(survivingCleanup.isCompleted)
+        gate.complete(Unit); runCurrent(); survivingCleanup.await()
+        assertTrue(h.recorder.disposed); assertFalse(h.controller.isRecording)
+        assertEquals(0, h.uploads); assertEquals(0, h.sends)
+    }
+
 }

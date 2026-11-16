@@ -65,7 +65,7 @@ private fun Context.hostActivity(): Activity? {
 }
 
 @Composable
-internal fun PhoneNumberEntry(value: String, theme: com.example.chat.core.theme.ThemeConfig, enabled: Boolean = true, onValueChange: (String) -> Unit, onNormalized: (String?) -> Unit) {
+internal fun PhoneNumberEntry(value: String, theme: com.example.chat.core.theme.ThemeConfig, enabled: Boolean = true, deviceNumberOnly: Boolean = false, onValueChange: (String) -> Unit, onNormalized: (String?) -> Unit) {
     val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val context = LocalContext.current
     val activity = remember(context) { context.hostActivity() }
@@ -130,6 +130,19 @@ internal fun PhoneNumberEntry(value: String, theme: com.example.chat.core.theme.
             }
     }
     Column(Modifier.fillMaxWidth()) {
+        if (deviceNumberOnly) {
+            // Register: no country-code control and no typing. The field only ever shows the
+            // number the device picker returned, read-only. (Manual path below is kept for other callers.)
+            // Strip the known calling prefix for display only. Keep the full
+            // normalized value in callbacks/requests, including after recreation.
+            val displayCode = PhoneCountries.all.map { it.code }.distinct()
+                .filter { value.startsWith("+" + it) }.maxByOrNull { it.length }
+            val displayNumber = displayCode?.let { value.removePrefix("+" + it) }.orEmpty()
+            // AuthTextField(value = value, onValueChange = {}, readOnly = true,
+            AuthTextField(value = displayNumber, onValueChange = {}, readOnly = true,
+                label = authCopy("Contact number"), hintText = authCopy("Tap Use device number to choose your number"), theme = theme,
+                capsule = true, keyboardType = KeyboardType.Phone)
+        } else
         AuthTextField(value = national, onValueChange = { emitNational(it) }, readOnly = false,
             label = authCopy("Contact number"), hintText = authCopy("Phone number"), theme = theme,
             capsule = true, keyboardType = KeyboardType.Phone,
@@ -149,7 +162,7 @@ internal fun PhoneNumberEntry(value: String, theme: com.example.chat.core.theme.
         }
         hintStatus?.let { Text(authCopy(it),color=androidx.compose.ui.graphics.Color(theme.secondaryTextColor)) }
     }
-    if(pickingCountry) AlertDialog(onDismissRequest={pickingCountry=false},
+    if(pickingCountry && !deviceNumberOnly) AlertDialog(onDismissRequest={pickingCountry=false},
         title={Text(authCopy("Choose country"))},
         text={Column {
             AuthTextField(value=countryQuery,onValueChange={countryQuery=it},label=authCopy("Search country or code"),hintText=authCopy("Country or +code"),theme=theme)
@@ -162,3 +175,7 @@ internal fun PhoneNumberEntry(value: String, theme: com.example.chat.core.theme.
             }
         }},confirmButton={TextButton(onClick={pickingCountry=false}) {Text(authCopy("Close"))}})
 }
+
+// Superseded source retained inactive:
+// internal fun PhoneNumberEntry(value: String, theme: com.example.chat.core.theme.ThemeConfig, enabled: Boolean = true, onValueChange: (String) -> Unit, onNormalized: (String?) -> Unit) {
+//     if(pickingCountry) AlertDialog(onDismissRequest={pickingCountry=false},

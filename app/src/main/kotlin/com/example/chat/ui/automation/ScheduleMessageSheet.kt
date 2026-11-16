@@ -93,11 +93,16 @@ internal fun ScheduleMessageSheet(
     if (conversations.isEmpty()) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedConversation by remember { mutableStateOf(conversations.firstOrNull { it.id == initialConversationId } ?: conversations.first()) }
+    // AUT-010: an explicit initial recipient that is unavailable must not be silently replaced.
+    var recipientChosen by remember { mutableStateOf(initialConversationId == null || conversations.any { it.id == initialConversationId }) }
+    val recipientAvailable = recipientChosen && conversations.any { it.id == selectedConversation.id }
     var body by remember { mutableStateOf(initialBody) }
     var selectedDateTime by remember {
         mutableStateOf(ZonedDateTime.now().plusHours(1))
     }
-    var attemptedRequest by remember { mutableStateOf<Pair<String, java.time.Instant>?>(null) }
+    // AUT-009: request identity includes the recipient (was Pair(body, instant)).
+    // Prior: var attemptedRequest by remember { mutableStateOf<Pair<String, java.time.Instant>?>(null) }
+    var attemptedRequest by remember { mutableStateOf<Triple<String, String, java.time.Instant>?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
 
@@ -126,7 +131,10 @@ internal fun ScheduleMessageSheet(
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = onDismiss) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close")
-                }
+                // Prior: if (body.isBlank() || (!selectedDateTime.isAfter(ZonedDateTime.now()) && attemptedRequest != (body.trim() to selectedDateTime.toInstant()))) {
+                // Prior: enabled = confirmEnabled && body.isNotBlank() && (selectedDateTime.isAfter(ZonedDateTime.now()) ||
+                    // Prior: attemptedRequest == (body.trim() to selectedDateTime.toInstant())),
+            }
             }
             Spacer(Modifier.height(16.dp))
 
@@ -135,8 +143,9 @@ internal fun ScheduleMessageSheet(
                 expanded = convExpanded,
                 onExpandedChange = { convExpanded = it },
             ) {
+                    // Prior: value = conversationDisplayTitle(selectedConversation),
                 OutlinedTextField(
-                    value = conversationDisplayTitle(selectedConversation),
+                    value = if (recipientAvailable) conversationDisplayTitle(selectedConversation) else "Select a chat",
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Recipient / Chat") },
@@ -160,6 +169,7 @@ internal fun ScheduleMessageSheet(
                             },
                             onClick = {
                                 selectedConversation = conversation
+                                recipientChosen = true
                                 convExpanded = false
                             },
                         )
@@ -195,7 +205,7 @@ internal fun ScheduleMessageSheet(
                 }
             }
             // AUT-042: say why Confirm is disabled.
-            if (body.isBlank() || (!selectedDateTime.isAfter(ZonedDateTime.now()) && attemptedRequest != (body.trim() to selectedDateTime.toInstant()))) {
+            if (body.isBlank() || (!selectedDateTime.isAfter(ZonedDateTime.now()) && attemptedRequest != Triple(selectedConversation.id, body.trim(), selectedDateTime.toInstant()))) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (body.isBlank()) "Enter a message to schedule." else "Choose a time in the future.",
@@ -204,12 +214,14 @@ internal fun ScheduleMessageSheet(
                 )
             }
             Spacer(Modifier.height(20.dp))
+                        // Prior: attemptedRequest = body.trim() to selectedDateTime.toInstant()
             Button(
-                enabled = confirmEnabled && body.isNotBlank() && (selectedDateTime.isAfter(ZonedDateTime.now()) ||
-                    attemptedRequest == (body.trim() to selectedDateTime.toInstant())),
+                enabled = confirmEnabled && recipientAvailable && body.isNotBlank() && (selectedDateTime.isAfter(ZonedDateTime.now()) ||
+                    attemptedRequest == Triple(selectedConversation.id, body.trim(), selectedDateTime.toInstant())),
                 onClick = {
-                    if (body.trim().isNotEmpty()) {
-                        attemptedRequest = body.trim() to selectedDateTime.toInstant()
+                    // Prior: checked only nonblank body; a disappeared recipient stayed sendable.
+                    if (confirmEnabled && recipientAvailable && body.trim().isNotEmpty()) {
+                        attemptedRequest = Triple(selectedConversation.id, body.trim(), selectedDateTime.toInstant())
                         onConfirm(selectedConversation.id, body.trim(), selectedDateTime)
                     }
                 },

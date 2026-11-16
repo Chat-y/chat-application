@@ -163,12 +163,12 @@ fun GhostModePill(
             .semantics { contentDescription = if (isGhost) "Turn off ghost mode" else "Turn on ghost mode" }
             .padding(start = 6.dp)
             .background(
-                if (isGhost) Color(0x336366F1) else Color.Transparent,
+                if (isGhost) Color(theme.accentColor).copy(alpha = 0.2f) else Color.Transparent /* Prior active fill: 0x336366F1 */,
                 RoundedCornerShape(12.dp),
             )
             .border(
                 1.dp,
-                if (isGhost) Color(0x806366F1) else Color(argbWithAlpha(theme.secondaryTextColor, 0.2)),
+                if (isGhost) Color(theme.accentColor).copy(alpha = 0.5f) else /* Prior active border: 0x806366F1 */ Color(argbWithAlpha(theme.secondaryTextColor, 0.2)),
                 RoundedCornerShape(12.dp),
             )
             .clickable {
@@ -177,7 +177,8 @@ fun GhostModePill(
                     if (!isGhost) {
                         "Ghost mode requested. Check Privacy settings for its protections."
                     } else {
-                        "Ghost Mode Deactivated: Normal presence restored"
+                        // Previous overclaim: "Ghost Mode Deactivated: Normal presence restored"
+                        "Ghost mode off requested. Check Privacy settings for your presence choices."
                     },
                 )
             }
@@ -187,15 +188,15 @@ fun GhostModePill(
         HomeGlyphIcon(
             glyph = if (isGhost) HomeGlyph.ghostActive else HomeGlyph.ghostInactive,
             size = 14.dp,
-            color = if (isGhost) Color(0xFF818CF8) else Color(theme.secondaryTextColor),
+            color = if (isGhost) Color(theme.accentColor) else Color(theme.secondaryTextColor) /* Prior active tint: 0xFF818CF8 */,
         )
         if (isGhost) {
             Spacer(Modifier.width(5.dp))
             Text(
-                "Ghost",
+                androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_ghost),  // was: "Ghost"
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF818CF8),
+                color = Color(theme.accentColor), // Prior active text: 0xFF818CF8
             )
         }
     }
@@ -494,6 +495,7 @@ fun HomeOverflowMenu(
     onOpenCommandPalette: (() -> Unit)? = null,
     onOpenSavedViews: (() -> Unit)? = null,
     onOpenViewHistory: (() -> Unit)? = null,
+    onCheckHomeAppearance: (() -> Unit)? = null,
 ) {
     val (adaptiveWidthDp, _) = com.example.chat.ui.kit.rememberAdaptiveWindowSize()
     val useCompactActions = adaptiveWidthDp < 600f || LocalDensity.current.fontScale > 1.3f
@@ -530,45 +532,49 @@ fun HomeOverflowMenu(
         // existing, always-visible Home menu instead of a second overflow button.
         if (useCompactActions) {
             if (menuPreferences.showCameraIcon) {
-                DropdownMenuItem(text = { Text("Camera Effects") }, onClick = { onDismiss(); nav.onOpenCameraEffects() })
+                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_camera_effects)) }, onClick = { onDismiss(); nav.onOpenCameraEffects() })  // was: "Camera Effects"
             }
             if (menuPreferences.showDesktopIcon) {
-                DropdownMenuItem(text = { Text("QR / Scan") }, onClick = { onDismiss(); nav.onOpenQr() })
+                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.qrCode, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_qr_scan)) }, onClick = { onDismiss(); nav.onOpenQr() })  // was: "QR / Scan"
             }
             if (menuPreferences.showIconAddAccount) {
-                DropdownMenuItem(text = { Text("Account settings") }, onClick = { onDismiss(); nav.onOpenProfile() })
+                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_account_settings)) }, onClick = { onDismiss(); nav.onOpenProfile() })  // was: "Account settings"
             }
             if (menuPreferences.themesEnabled) {
-                DropdownMenuItem(text = { Text("Toggle light / dark") }, onClick = { onDismiss(); nav.onToggleBrightness() })
+                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.palette, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_toggle_light_dark)) }, onClick = { onDismiss(); nav.onToggleBrightness() })  // was: "Toggle light / dark"
             }
         }
-        DropdownMenuItem(text = { Text("How to catch up") }, onClick = { onDismiss(); catchUpGuideOpen = true })
-        DropdownMenuItem(text={Text("Home view options")},onClick={onDismiss();onOpenViewOptions()})
-        DropdownMenuItem(text={Text("Temporary scratchpad")},onClick={onDismiss();onOpenScratchpad()})
+        onCheckHomeAppearance?.let { checkAppearance ->
+            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text("Check Home appearance") },
+                onClick = { onDismiss(); checkAppearance() })
+        }
+        DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.help, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_how_to_catch_up)) }, onClick = { onDismiss(); catchUpGuideOpen = true })  // was: "How to catch up"
+        DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.tune, color = Color(theme.secondaryTextColor), size = 20.dp) }, text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_home_view_options))},onClick={onDismiss();onOpenViewOptions()})  // was: "Home view options"
+        DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, color = Color(theme.secondaryTextColor), size = 20.dp) }, text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_temporary_scratchpad))},onClick={onDismiss();onOpenScratchpad()})  // was: "Temporary scratchpad"
         // S13: session saved views and the view back-history appear only when the
         // Home owner supplies the routes; unwired callers keep the current menu.
         onOpenSavedViews?.let { openSavedViews ->
-            DropdownMenuItem(
-                text = { Text("Saved Home views") },
+            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, color = Color(theme.secondaryTextColor), size = 20.dp) },
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_saved_home_views)) },  // was: "Saved Home views"
                 onClick = { onDismiss(); openSavedViews() },
             )
         }
         onOpenViewHistory?.let { openViewHistory ->
-            DropdownMenuItem(
-                text = { Text("Recent Home views") },
+            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.history, color = Color(theme.secondaryTextColor), size = 20.dp) },
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_recent_home_views)) },  // was: "Recent Home views"
                 onClick = { onDismiss(); openViewHistory() },
             )
         }
         // No inert entries: the active Home owner supplies only supported routes.
         onOpenShortcutHelp?.let { openHelp ->
-            DropdownMenuItem(
-                text = { Text("Keyboard shortcuts") },
+            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.keyboard, color = Color(theme.secondaryTextColor), size = 20.dp) },
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_keyboard_shortcuts)) },  // was: "Keyboard shortcuts"
                 onClick = { onDismiss(); openHelp() },
             )
         }
         onOpenCommandPalette?.let { openPalette ->
-            DropdownMenuItem(
-                text = { Text("Command palette") },
+            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, color = Color(theme.secondaryTextColor), size = 20.dp) },
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_command_palette)) },  // was: "Command palette"
                 onClick = { onDismiss(); openPalette() },
             )
         }
@@ -596,10 +602,10 @@ fun HomeOverflowMenu(
 private fun HomeCatchUpGuide(theme: ThemeConfig, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("How to catch up", fontWeight = FontWeight.W700) },
+        title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_how_to_catch_up), fontWeight = FontWeight.W700) },  // was: "How to catch up"
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Examples only, not your live conversations.", color = Color(theme.secondaryTextColor))
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_examples_only_not_your_live_conversations), color = Color(theme.secondaryTextColor))  // was: "Examples only, not your live conversations."
                 CatchUpGuideState("Unread", "Example: a badge with 2 means two unread messages. Use the Unread filter to find chats with unread messages.", theme)
                 CatchUpGuideState("Pinned", "Example: pin a chat you want to find quickly. Pinned chats are grouped ahead of other active chats.", theme)
                 CatchUpGuideState("Archived", "Example: archive a conversation to move it out of the main list. Open Archived Chats from the Home menu when that entry is enabled.", theme)
@@ -849,7 +855,7 @@ fun HomeSearchField(
                 }
             }
         },
-        label={Text("Search chats")},
+        label={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_search_chats))},  // was: "Search chats"
         keyboardOptions=androidx.compose.foundation.text.KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Search),
         singleLine = true,
         shape = RoundedCornerShape(28.dp),
@@ -977,7 +983,7 @@ fun SubscriptionRequiredBanner(
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                "Workspace Activation Required",
+                androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_workspace_activation_required),  // was: "Workspace Activation Required"
                 fontSize = 13.sp,
                 fontWeight = FontWeight.W700,
                 color = Color(0xFFB45309),
@@ -996,7 +1002,7 @@ fun SubscriptionRequiredBanner(
                 .clickable(onClick = onSelectPlan)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            Text("Select Plan", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.W700)
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_select_plan), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.W700)  // was: "Select Plan"
         }
     }
 }
@@ -1104,9 +1110,9 @@ fun LockedChatsSetupDialog(
         onDismissRequest = onClose,
         title = {
             Column {
-                Text("Locked Chats", fontWeight = FontWeight.W700)
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_locked_chats), fontWeight = FontWeight.W700)  // was: "Locked Chats"
                 Text(
-                    "Secure conversations with biometric, PIN, or password",
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_secure_conversations_with_biometric_pin_or_passwor),  // was: "Secure conversations with biometric, PIN, or password"
                     fontSize = 13.sp,
                     color = Color(theme.secondaryTextColor),
                 )
@@ -1128,7 +1134,7 @@ fun LockedChatsSetupDialog(
                     }
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        "Lock individual chats and keep them hidden from the main list.",
+                        androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_lock_individual_chats_and_keep_them_hidden_from_th),  // was: "Lock individual chats and keep them hidden from the main list."
                         fontSize = 13.5.sp,
                         color = Color(theme.primaryTextColor),
                         fontWeight = FontWeight.W500,
@@ -1136,7 +1142,7 @@ fun LockedChatsSetupDialog(
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "How to set up Locked Chats:",
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_how_to_set_up_locked_chats),  // was: "How to set up Locked Chats:"
                     fontWeight = FontWeight.W700,
                     fontSize = 13.5.sp,
                     color = Color(theme.accentColor),
@@ -1193,6 +1199,7 @@ private fun LockedSetupStep(number: String, title: String, description: String, 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeActionTooltip(label: String, content: @Composable () -> Unit) {
+    val tooltipColors = LocalAppColors.current
     val tooltipState = androidx.compose.material3.rememberTooltipState()
     var hasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(hasFocus) {
@@ -1203,13 +1210,13 @@ private fun HomeActionTooltip(label: String, content: @Composable () -> Unit) {
         tooltip = {
             androidx.compose.material3.Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = Color(0xFF3B3F44),
+                color = tooltipColors.surfaceElevated /* Prior: Color(0xFF3B3F44) */,
                 shadowElevation = 2.dp,
             ) {
                 Text(
                     label,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    color = Color.White,
+                    color = tooltipColors.foreground /* Prior: Color.White */,
                     fontSize = 12.sp,
                 )
             }
@@ -1220,3 +1227,124 @@ private fun HomeActionTooltip(label: String, content: @Composable () -> Unit) {
         content()
     }
 }
+
+/* Before per-item menu icons, retained for reference.
+fun HomeOverflowMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    theme: ThemeConfig,
+    nav: ChatsHomeNav,
+    onMarkAllAsRead: () -> Unit,
+    onMessageANumber: () -> Unit,
+    onOpenArchived: () -> Unit = {},
+    onOpenViewOptions:()->Unit = {},
+    onOpenScratchpad:()->Unit = {},
+    onOpenConnectionDetail: (() -> Unit)? = null,
+    menuPreferences: HomePreferences = HomePreferences(),
+    onOpenShortcutHelp: (() -> Unit)? = null,
+    onOpenCommandPalette: (() -> Unit)? = null,
+    onOpenSavedViews: (() -> Unit)? = null,
+    onOpenViewHistory: (() -> Unit)? = null,
+    onCheckHomeAppearance: (() -> Unit)? = null,
+) {
+    val (adaptiveWidthDp, _) = com.example.chat.ui.kit.rememberAdaptiveWindowSize()
+    val useCompactActions = adaptiveWidthDp < 600f || LocalDensity.current.fontScale > 1.3f
+    var catchUpGuideOpen by remember { mutableStateOf(false) }
+    if (catchUpGuideOpen) {
+        HomeCatchUpGuide(theme = theme, onDismiss = { catchUpGuideOpen = false })
+    }
+    // Linked Devices / Scheduler / Auto Reply are deferred to the next release (ReleaseFeatures).
+    val items: List<Triple<@Composable () -> Unit, String, () -> Unit>> = listOfNotNull(
+        if (ReleaseFeatures.MESSAGE_AUTOMATION) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.scheduleSend, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Message Scheduler") { nav.onOpenMessageManagement() } else null,
+        if (ReleaseFeatures.MESSAGE_AUTOMATION) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.reply, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Auto Reply") { nav.onOpenMessageManagement() } else null,
+        if (menuPreferences.menuShowNewActions) Triple({ Icon(Icons.Outlined.GroupAdd, null, tint = Color(theme.secondaryTextColor), modifier = Modifier.size(20.dp)) }, "New Group") { nav.onOpenNewChat(true, false) } else null,
+        if (menuPreferences.menuShowNewActions) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chats, color = Color(theme.secondaryTextColor), size = 20.dp) }, "New Chat") { nav.onOpenNewChat(false, false) } else null,
+        if (menuPreferences.menuShowNewActions) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = Color(theme.secondaryTextColor), size = 20.dp) }, "New Call") { nav.onNewCall() } else null,
+        if (nav.showUpdatesEntry) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.updates, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Updates") { nav.onOpenUpdates() } else null,
+        if (nav.showTasksEntry) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.tasks, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Tasks") { nav.onOpenTasks() } else null,
+        if (ReleaseFeatures.LINKED_DEVICES) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.desktop, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Linked Devices") { nav.onOpenLinkedDevices() } else null,
+        if (menuPreferences.menuShowSavedChats) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Starred Messages") { nav.onOpenStarredMessages() } else null,
+        if (menuPreferences.menuShowSavedChats) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.archive, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Archived Chats") { onOpenArchived() } else null,
+        if (menuPreferences.menuShowMarkRead) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.markRead, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Mark All as Read") { onMarkAllAsRead() } else null,
+        Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Who can call me?") { nav.onWhoCanCallMe() },
+        if (menuPreferences.menuShowShare) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Share Chaty") { nav.onShareApp() } else null,
+        if (menuPreferences.menuShowMessageNumber) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.phone, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Message a number", onMessageANumber) else null,
+        onOpenConnectionDetail?.let { openDetails -> Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.signal, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Connection health", openDetails) },
+    )
+    DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape,
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        rememberKey = "home-overflow-menu",
+        containerColor = Color(theme.cardColor),
+        border = androidx.compose.foundation.BorderStroke(1.1.dp, Color(argbWithAlpha(theme.secondaryTextColor, 0.2))),
+    ) {
+        // Match the compact header policy; all secondary actions remain in the
+        // existing, always-visible Home menu instead of a second overflow button.
+        if (useCompactActions) {
+            if (menuPreferences.showCameraIcon) {
+                DropdownMenuItem(text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_camera_effects)) }, onClick = { onDismiss(); nav.onOpenCameraEffects() })  // was: "Camera Effects"
+            }
+            if (menuPreferences.showDesktopIcon) {
+                DropdownMenuItem(text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_qr_scan)) }, onClick = { onDismiss(); nav.onOpenQr() })  // was: "QR / Scan"
+            }
+            if (menuPreferences.showIconAddAccount) {
+                DropdownMenuItem(text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_account_settings)) }, onClick = { onDismiss(); nav.onOpenProfile() })  // was: "Account settings"
+            }
+            if (menuPreferences.themesEnabled) {
+                DropdownMenuItem(text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_toggle_light_dark)) }, onClick = { onDismiss(); nav.onToggleBrightness() })  // was: "Toggle light / dark"
+            }
+        }
+        onCheckHomeAppearance?.let { checkAppearance ->
+            DropdownMenuItem(text = { Text("Check Home appearance") },
+                onClick = { onDismiss(); checkAppearance() })
+        }
+        DropdownMenuItem(text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_how_to_catch_up)) }, onClick = { onDismiss(); catchUpGuideOpen = true })  // was: "How to catch up"
+        DropdownMenuItem(text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_home_view_options))},onClick={onDismiss();onOpenViewOptions()})  // was: "Home view options"
+        DropdownMenuItem(text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_temporary_scratchpad))},onClick={onDismiss();onOpenScratchpad()})  // was: "Temporary scratchpad"
+        // S13: session saved views and the view back-history appear only when the
+        // Home owner supplies the routes; unwired callers keep the current menu.
+        onOpenSavedViews?.let { openSavedViews ->
+            DropdownMenuItem(
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_saved_home_views)) },  // was: "Saved Home views"
+                onClick = { onDismiss(); openSavedViews() },
+            )
+        }
+        onOpenViewHistory?.let { openViewHistory ->
+            DropdownMenuItem(
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_recent_home_views)) },  // was: "Recent Home views"
+                onClick = { onDismiss(); openViewHistory() },
+            )
+        }
+        // No inert entries: the active Home owner supplies only supported routes.
+        onOpenShortcutHelp?.let { openHelp ->
+            DropdownMenuItem(
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_keyboard_shortcuts)) },  // was: "Keyboard shortcuts"
+                onClick = { onDismiss(); openHelp() },
+            )
+        }
+        onOpenCommandPalette?.let { openPalette ->
+            DropdownMenuItem(
+                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_command_palette)) },  // was: "Command palette"
+                onClick = { onDismiss(); openPalette() },
+            )
+        }
+        items.forEach { (icon, label, action) ->
+            DropdownMenuItem(
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        icon()
+                        Spacer(Modifier.width(12.dp))
+                        Text(label, color = Color(theme.primaryTextColor), fontSize = 15.5.sp, fontWeight = FontWeight.Normal)
+                    }
+                },
+                onClick = {
+                    onDismiss()
+                    action()
+                },
+            )
+        }
+    }
+}
+
+
+*/

@@ -35,11 +35,21 @@ class NewChatExactRecipientBoundaryTest {
         assertTrue(NewChatRules.exactUsernameMatch(listOf(candidate), " ", "self").isEmpty())
     }
 
+    @Test fun unauthenticatedAndBlankRecipientIdsFailClosed() {
+        assertTrue(NewChatRules.exactUsernameMatch(listOf(user("other", "maya")), "maya", null).isEmpty())
+        assertTrue(NewChatRules.exactUsernameMatch(listOf(user("other", "maya")), "maya", " ").isEmpty())
+        assertTrue(NewChatRules.exactUsernameMatch(listOf(user("", "maya")), "maya", "self").isEmpty())
+    }
+
     @Test fun onlyOneLeadingAtIsRemovedWithoutConfusableFolding() {
         val candidate = user("other", "maya")
-        assertEquals(listOf(candidate), NewChatRules.exactUsernameMatch(listOf(candidate), " @MAYA ", null))
+        assertEquals(listOf(candidate), NewChatRules.exactUsernameMatch(listOf(candidate), " @MAYA ", "self"))
         for (query in listOf("@@maya", "máya", "mаya")) {
-            assertTrue(NewChatRules.exactUsernameMatch(listOf(candidate), query, null).isEmpty())
+            assertTrue(NewChatRules.exactUsernameMatch(listOf(candidate), query, "self").isEmpty())
         }
     }
 }
+
+// Superseded source lines retained inactive for review:
+//         assertEquals(listOf(candidate), NewChatRules.exactUsernameMatch(listOf(candidate), " @MAYA ", null))
+//             assertTrue(NewChatRules.exactUsernameMatch(listOf(candidate), query, null).isEmpty())

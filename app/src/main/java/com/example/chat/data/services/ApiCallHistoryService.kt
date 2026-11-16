@@ -117,6 +117,8 @@ class ApiCallHistoryService(
                 isEncrypted = true,
                 remoteDisplayName = entry.otherDisplayName?.trim()?.takeIf { it.isNotEmpty() },
                 remoteUsername = entry.otherUsername?.trim()?.takeIf { it.isNotEmpty() },
+                outcome = com.example.chat.domain.models.callOutcomeFromStatus(entry.status),
+                wasConnected = com.example.chat.domain.models.callConnectionEvidence(entry.status, entry.durationSec.toLong()),
             )
         }
     }

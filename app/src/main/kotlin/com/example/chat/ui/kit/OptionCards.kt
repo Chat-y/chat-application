@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -58,20 +59,24 @@ fun ChatyOptionCard(
     previewHeight: Dp = 56.dp,
     preview: @Composable () -> Unit,
 ) {
+    val selectionDescription = androidx.compose.ui.platform.LocalContext.current.getString(
+        if (selected) com.example.chat.R.string.conv_proposal_selected else com.example.chat.R.string.conv_proposal_not_selected)
+    val selectionAnimationMillis = if (rememberSystemAnimationsAllowed()) 160 else 0
     val colors = LocalAppColors.current
     val view = LocalView.current
     val shape = RoundedCornerShape(14.dp)
     val bg by animateColorAsState(
         if (selected) colors.primary.copy(alpha = 0.12f) else colors.surfaceSecondary,
-        tween(160), label = "optBg",
+        tween(selectionAnimationMillis) /* Previous fixed duration:160ms */, label = "optBg",
     )
     val borderColor by animateColorAsState(
-        if (selected) colors.primary else colors.borderSubtle, tween(160), label = "optBorder",
+        if (selected) colors.primary else colors.borderSubtle, tween(selectionAnimationMillis) /* Previous fixed duration:160ms */, label = "optBorder",
     )
     Column(
         modifier
             .width(width)
-            .semantics { role = Role.Button; this.selected = selected; contentDescription = label }
+            .semantics { role = Role.Button; this.selected = selected; contentDescription = label
+                stateDescription = selectionDescription }
             .clip(shape)
             .clickable {
                 ChatyHapticsPort.selection(view)

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_affects_you_sender">Affects others: you and the sender</string>
+    <string name="privacy_affects_you_recipient">Affects others: you and the recipient</string>
+    <string name="privacy_crash_choice_title">Allow optional crash reports</string>
+    <string name="privacy_crash_choice_explanation">Off by default. No crash reporter is installed in this version; this choice alone sends nothing.</string>
+    <string name="privacy_android_access_history">Android access history</string>
+    <string name="privacy_android_access_history_help">Open Android privacy settings to review camera, microphone and location access history where supported.</string>
+    <string name="privacy_hide_forwarded_tag_action">Hide forwarded tag</string>
+    <string name="privacy_enable_local_retention_action">Enable local retention</string>
+    <string name="privacy_crash_choice_unavailable">The optional crash-report choice could not be read or saved. No crash report is sent by this screen. Try again, or reopen this page.</string>
+    <string name="privacy_debug_state_title">Privacy state review (debug)</string>
+    <string name="privacy_debug_state_description">Local flags and cached server policies only. No identifiers, automatic refresh, export or logging. Cached values may be out of date.</string>
+    <string name="privacy_location_more_digits">Show more decimal places</string>
+    <string name="privacy_location_fewer_digits">Show fewer decimal places</string>
+    <string name="privacy_location_digits_accuracy">More decimal places do not improve location accuracy. Android may provide an approximate location.</string>
+    <string name="privacy_crash_review_title">Review optional crash-report choice</string>
+    <string name="privacy_crash_review_description">Your saved opt-in is for a different explanation version. It is not treated as current consent on this page. Choose again after reviewing: no crash reporter is installed in this version, and this choice alone sends nothing.</string>
+    <string name="privacy_crash_keep_off">Keep off</string>
+    <string name="privacy_crash_allow_choice">Allow optional reports</string>
+</resources>

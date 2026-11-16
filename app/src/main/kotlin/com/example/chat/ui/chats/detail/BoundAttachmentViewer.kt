@@ -40,7 +40,11 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
         catch (_: Exception) { error = "Attachment unavailable" }
         finally { releaseConsumerSource(pending) }
     }
+    // Owned routes bypass MediaViewerScreen's ordinary external-action busy state.
+    var operationBusy by remember { mutableStateOf(false) }
     fun external(purpose: ExportPurpose) {
+        if (restricted || !active || operationBusy || edit) return
+        operationBusy = true
         scope.launch {
             var token: ExportToken? = null
             var delivered = false
@@ -65,7 +69,55 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
                 if (edited === result.token) edited = null // registry timer/logout owns successful external lifetime
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { error = "No application could open this attachment" }
-            finally { if (!delivered) token?.release() }
+            // Previous: finally { if (!delivered) token?.release() }
+            // A reused edited token still belongs to the visible viewer after a failed launch.
+            finally {
+                if (!delivered && token !== edited) token?.release()
+                operationBusy = false
+            }
+        }
+    }
+    // Previous gallery-only busy state did not serialize external actions using the same token.
+    // var galleryBusy by remember { mutableStateOf(false) }
+    fun gallery() {
+        // Previous: if (restricted || galleryBusy) return
+        if (restricted || operationBusy || edit) return
+        var authorized = false
+        binding.deliverIfCurrent { authorized = active }
+        if (!authorized) return
+        // Previous: galleryBusy = true
+        operationBusy = true
+        // Barrier above only made a short state decision. No provider/file IO inside its lock.
+        scope.launch {
+            var token: ExportToken? = null
+            try {
+                val existing = edited
+                val result = if (existing != null && existing.isValid()) ExportResult.Granted(existing)
+                    else binding.resolver.exportCopy(binding.ref(message), binding.session, ExportPurpose.SHARE,
+                        attachment.name.substringAfterLast('.', "bin"), 10 * 60_000L) { binding.authorizedUrl(message) }
+                check(result is ExportResult.Granted) { "Gallery export not permitted." }
+                val snapshot = result.token
+                token = snapshot
+                coroutineContext.ensureActive()
+                fun ownerCurrent(): Boolean {
+                    if (!active || !snapshot.isValid()) return false
+                    var valid = false
+                    binding.deliverIfCurrent { valid = active && snapshot.isValid() }
+                    return valid
+                }
+                val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    saveMediaToGallery(context, snapshot.uri, attachment.name, attachment.type == "video", ::ownerCurrent)
+                }
+                android.widget.Toast.makeText(context, status, android.widget.Toast.LENGTH_LONG).show()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                android.widget.Toast.makeText(context,
+                    "Could not save this attachment. Reopen it from the chat and try again.", android.widget.Toast.LENGTH_LONG).show()
+            } finally {
+                if (token !== edited) token?.release()
+                // Previous: galleryBusy = false
+                operationBusy = false
+            }
         }
     }
     if (edit) {
@@ -74,8 +126,16 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
             10 * 60_000L, ExportPurpose.SHARE, { binding.authorizedUrl(message) },
             onCancel = { edit = false }, onCommitted = { token ->
                 var accepted = false
-                try { accepted = binding.deliverIfCurrent { edited = token; edit = false } }
-                finally { if (!accepted) token.release() }
+                var replaced: ExportToken? = null
+                // Previous callback overwrote the old edited token without releasing it.
+                // try { accepted = binding.deliverIfCurrent { edited = token; edit = false } }
+                try { accepted = binding.deliverIfCurrent {
+                    if (active) { replaced = edited; edited = token; edit = false }
+                } && active }
+                finally {
+                    if (!accepted) token.release()
+                    else if (replaced !== token) replaced?.release()
+                }
             },
         )
         return
@@ -94,7 +154,15 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
             providedModel = edited?.uri ?: current.consumerModel(), ownedActions = true,
             registerStopReader = { stopReader[0] = it },
             deliverPlayback = binding.deliverIfCurrent,
-            onOwnedEdit = { stopReader[0]?.invoke(); edit = true }, onOwnedShare = { external(ExportPurpose.SHARE) }, onOwnedOpen = { external(ExportPurpose.OPEN) },
+            onOwnedSaveToGallery = ::gallery,
+            // Previous edit callback had no shared operation gate.
+            // onOwnedEdit = { stopReader[0]?.invoke(); edit = true },
+            onOwnedEdit = { if (!restricted && active && !operationBusy && !edit) { stopReader[0]?.invoke(); edit = true } },
+            onOwnedShare = { external(ExportPurpose.SHARE) }, onOwnedOpen = { external(ExportPurpose.OPEN) },
         )
     }
 }
+
+/* Previous implementation fragments retained (net227):
+
+*/

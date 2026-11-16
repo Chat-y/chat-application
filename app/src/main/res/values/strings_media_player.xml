@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_player_now_playing">Now Playing</string>
+    <string name="media_player_queue_title">Play Queue</string>
+    <string name="media_player_queue_close">Close queue</string>
+    <string name="media_player_queue_search">Search audio queue</string>
+    <string name="media_player_queue_no_matches">No matching tracks</string>
+    <string name="media_player_empty">No audio playing</string>
+    <string name="media_player_browse">Browse media</string>
+    <plurals name="media_player_queue_tracks">
+        <item quantity="one">%1$d track</item>
+        <item quantity="other">%1$d tracks</item>
+    </plurals>
+</resources>

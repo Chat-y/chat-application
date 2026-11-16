@@ -2,7 +2,7 @@ package com.example.chat
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.test.assertDoesNotExist
+// Invalid package-level import retained: import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -35,6 +35,8 @@ class GlobalSearchAsyncBoundaryTest {
     private fun Screen(
         session: Any = "session",
         hidden: (String) -> Boolean = { false },
+        isProtected: (String) -> Boolean = { false },
+        conversations: List<Conversation> = emptyList(),
         open: suspend (UserProfile) -> Conversation = { room },
         navigate: (String) -> Unit = {},
         notify: (String) -> Unit = {},
@@ -44,9 +46,9 @@ class GlobalSearchAsyncBoundaryTest {
     ) {
         val theme = ThemePresets.getSystemDefaultTheme(true)
         ChatyTheme(theme) {
-            GlobalSearchScreen(colors = ChatyColors(theme), conversations = emptyList(),
+            GlobalSearchScreen(colors = ChatyColors(theme), conversations = conversations,
                 searchUsers = search, openDirectConversation = open, verifySecretPhrase = verify,
-                isConversationHidden = hidden, isConversationProtected = { false },
+                isConversationHidden = hidden, isConversationProtected = isProtected,
                 searchSessionIdentity = session, isSearchSessionCurrent = { true },
                 onOpenConversationReplace = navigate, onNotify = notify, onOpenLockedChats = unlock)
         }
@@ -234,6 +236,32 @@ class GlobalSearchAsyncBoundaryTest {
         rule.runOnIdle { result.completeExceptionally(IllegalStateException("synthetic late failure")) }
         rule.waitForIdle()
         rule.runOnIdle { assertEquals(0, notices); assertEquals(0, navigations) }
+    }
+
+    @Test fun knownHiddenRoomStopsBeforeCreateCallback() {
+        var creates = 0
+        var navigations = 0
+        rule.setContent { Screen(conversations = listOf(room), hidden = { it == room.id },
+            open = { creates++; room }, navigate = { navigations++ }) }
+        findAlice()
+        rule.onNodeWithContentDescription(action).performClick()
+        rule.runOnIdle { assertEquals(0, creates); assertEquals(0, navigations) }
+    }
+    @Test fun knownProtectedRoomStopsBeforeCreateCallback() {
+        var creates = 0
+        rule.setContent { Screen(conversations = listOf(room), isProtected = { it == room.id }, open = { creates++; room }) }
+        findAlice()
+        rule.onNodeWithContentDescription(action).performClick()
+        rule.runOnIdle { assertEquals(0, creates) }
+    }
+    @Test fun blankRoomCompletionCannotNavigate() {
+        var navigations = 0
+        var notices = 0
+        rule.setContent { Screen(open = { room.copy(id = "") }, navigate = { navigations++ }, notify = { notices++ }) }
+        findAlice()
+        rule.onNodeWithContentDescription(action).performClick()
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals(0, navigations); assertEquals(1, notices) }
     }
 
 }

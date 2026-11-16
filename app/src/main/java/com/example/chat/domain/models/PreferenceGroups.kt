@@ -44,9 +44,8 @@ data class PrivacyPreferences(
     val hideOnlineStatus: Boolean = false,
     val hideSecondTick: Boolean = false,
 ) {
-    /** Dart toMap asymmetry preserved: antiDisappearingMessages and
-     *  hideOnlineStatus are NOT serialized upstream, so a round trip
-     *  restores their fromMap defaults. */
+    // Legacy Dart serialization omitted antiDisappearingMessages and hideOnlineStatus.
+    // Persist both choices so changing away from the defaults survives reload.
     fun toMap(): Map<String, Any?> = mapOf(
         "freezeLastSeen" to freezeLastSeen,
         "frozenLastSeenTime" to frozenLastSeenTime,
@@ -70,6 +69,8 @@ data class PrivacyPreferences(
         "hideUpdateOption" to hideUpdateOption,
         "disableChannels" to disableChannels,
         "hideFirstMessage" to hideFirstMessage,
+        "antiDisappearingMessages" to antiDisappearingMessages,
+        "hideOnlineStatus" to hideOnlineStatus,
         "deletionOfEveryone" to deletionOfEveryone,
         "deletedMediaTime" to deletedMediaTime,
         "unviewedChats" to unviewedChats,
@@ -80,14 +81,17 @@ data class PrivacyPreferences(
         fun fromMap(map: Map<String, Any?>): PrivacyPreferences = PrivacyPreferences(
             freezeLastSeen = map["freezeLastSeen"] as Boolean? ?: false,
             frozenLastSeenTime = map["frozenLastSeenTime"] as String? ?: "",
-            hideLastSeenAudience = map["hideLastSeenAudience"] as String? ?: "My Contacts",
-            hideOnlineAudience = map["hideOnlineAudience"] as String? ?: "Everyone",
+//             hideLastSeenAudience = map["hideLastSeenAudience"] as String? ?: "My Contacts",
+//             hideOnlineAudience = map["hideOnlineAudience"] as String? ?: "Everyone",
+            hideLastSeenAudience = (map["hideLastSeenAudience"] as String?)?.let { PrivacyAudienceValue.parse(it)?.preference ?: it } ?: "My Contacts",
+            hideOnlineAudience = (map["hideOnlineAudience"] as String?)?.let { PrivacyOnlineValue.parse(it)?.preference ?: it } ?: "Everyone",
             antiViewOnce = map["antiViewOnce"] as Boolean? ?: false,
             disableForwardedLabel = map["disableForwardedLabel"] as Boolean? ?: false,
             readReceipts = map["readReceipts"] as Boolean? ?: true,
             typingIndicators = map["typingIndicators"] as Boolean? ?: true,
             recordingIndicators = map["recordingIndicators"] as Boolean? ?: true,
-            whoCanCallMe = map["whoCanCallMe"] as String? ?: "Everyone",
+//             whoCanCallMe = map["whoCanCallMe"] as String? ?: "Everyone",
+            whoCanCallMe = (map["whoCanCallMe"] as String?)?.let { PrivacyAudienceValue.parse(it)?.preference ?: it } ?: "Everyone",
             whoCanCallMeExceptions = (map["whoCanCallMeExceptions"] as List<*>?)
                 ?.map { it.toString() } ?: emptyList(),
             hidePrivacyOption = map["hidePrivacyOption"] as Boolean? ?: false,
@@ -862,10 +866,28 @@ data class HomePreferences(
     }
 }
 
+/** Cohesive nullable emoji palette. Legacy scalar keys remain written for rollback readers. */
+// Only final scalar backing fields; maps returned by serialization are detached values.
+@androidx.compose.runtime.Immutable
+data class EmojiPopupStyle(val header: Long? = null, val icons: Long? = null, val background: Long? = null) {
+    fun toMap(): Map<String,Any?> = mapOf("header" to header,"icons" to icons,"background" to background)
+    companion object {
+        fun fromMap(value: Any?): EmojiPopupStyle? {
+            val map = value as? Map<*,*> ?: return null
+            val keys = setOf("header","icons","background")
+            if (!keys.all { map.containsKey(it) }) return null
+            if (keys.any { key -> val v = map[key]; v != null && (v !is Number || !v.toDouble().isFinite() || v.toDouble() % 1.0 != 0.0 || v.toDouble() < Int.MIN_VALUE.toDouble() || v.toDouble() > UInt.MAX_VALUE.toDouble()) }) return null
+            return EmojiPopupStyle((map["header"] as? Number)?.toLong(),(map["icons"] as? Number)?.toLong(),(map["background"] as? Number)?.toLong())
+        }
+    }
+}
+
 // ── ConversationPreferences ──────────────────────────────────────────────
 
 /** Exact port including legacy abu_saleh_* fallbacks and dual-key color
  *  aliases from the Dart model. */
+// Only final scalar backing fields; maps returned by serialization are detached values.
+@androidx.compose.runtime.Immutable
 data class ConversationPreferences(
     val bubbleStyle: String = "Stock",
     val tickStyle: String = "Stock",
@@ -940,6 +962,10 @@ data class ConversationPreferences(
     val voiceNotePlayingBarColor: Long? = null,
     val voiceNotePlayButtonColor: Long? = null,
 ) {
+    val emojiPopupStyle: EmojiPopupStyle get() = EmojiPopupStyle(emojiHeaderColor,emojiHeaderIconsColor,emojiPickerBgColor)
+    fun withEmojiPopupStyle(style: EmojiPopupStyle): ConversationPreferences = copy(
+        emojiHeaderColor = style.header,emojiHeaderIconsColor = style.icons,emojiPickerBgColor = style.background)
+
     /** Dart alias getters. */
     val bubbleShape: String get() = bubbleStyle
     val bubbleRadius: Double get() = 16.0
@@ -1008,6 +1034,8 @@ data class ConversationPreferences(
         "micSendBgCircleColor" to micSendBgCircleColor,
         "textEntryBackgroundColor" to textEntryBackgroundColor,
         "textEntryColor" to textEntryColor,
+        "emojiPopupStyle" to emojiPopupStyle.toMap(),
+        // Legacy scalar keys intentionally preserved for rollback; the object is authoritative on read.
         "emojiHeaderColor" to emojiHeaderColor,
         "emojiHeaderIconsColor" to emojiHeaderIconsColor,
         "emojiPickerBgColor" to emojiPickerBgColor,
@@ -1089,9 +1117,18 @@ data class ConversationPreferences(
             micSendBgCircleColor = ((map["micSendBgCircleColor"] ?: map["entryMicSendBackgroundCircle"]) as Number?)?.toLong(),
             textEntryBackgroundColor = ((map["textEntryBackgroundColor"] ?: map["entryTextBackground"]) as Number?)?.toLong(),
             textEntryColor = ((map["textEntryColor"] ?: map["entryTextColor"]) as Number?)?.toLong(),
-            emojiHeaderColor = (map["emojiHeaderColor"] as Number?)?.toLong(),
-            emojiHeaderIconsColor = (map["emojiHeaderIconsColor"] as Number?)?.toLong(),
-            emojiPickerBgColor = (map["emojiPickerBgColor"] as Number?)?.toLong(),
+            // Previous legacy-only read: emojiHeaderColor = (map["emojiHeaderColor"] as Number?)?.toLong(),
+            emojiHeaderColor = EmojiPopupStyle.fromMap(map["emojiPopupStyle"]).let { style ->
+                if (style != null) style.header else (map["emojiHeaderColor"] as Number?)?.toLong()
+            },
+            // Previous legacy-only read: emojiHeaderIconsColor = (map["emojiHeaderIconsColor"] as Number?)?.toLong(),
+            emojiHeaderIconsColor = EmojiPopupStyle.fromMap(map["emojiPopupStyle"]).let { style ->
+                if (style != null) style.icons else (map["emojiHeaderIconsColor"] as Number?)?.toLong()
+            },
+            // Previous legacy-only read: emojiPickerBgColor = (map["emojiPickerBgColor"] as Number?)?.toLong(),
+            emojiPickerBgColor = EmojiPopupStyle.fromMap(map["emojiPopupStyle"]).let { style ->
+                if (style != null) style.background else (map["emojiPickerBgColor"] as Number?)?.toLong()
+            },
             hyperlinksColor = (map["hyperlinksColor"] as Number?)?.toLong(),
             infoBalloonsTextColor = (map["infoBalloonsTextColor"] as Number?)?.toLong(),
             infoBalloonsBgColor = ((map["infoBalloonsBgColor"] ?: map["infoBalloonsBackgroundColor"]) as Number?)?.toLong(),

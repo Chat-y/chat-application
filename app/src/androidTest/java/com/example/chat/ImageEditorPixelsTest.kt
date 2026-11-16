@@ -5,6 +5,7 @@ import android.graphics.Color
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.chat.ui.chats.detail.EditorStroke
 import com.example.chat.ui.chats.detail.renderEditedImage
+import com.example.chat.ui.chats.detail.withOwnedEditorBitmap
 import androidx.compose.ui.geometry.Offset
 import org.junit.Assert.*
 import org.junit.Test
@@ -45,6 +46,16 @@ class ImageEditorPixelsTest {
         assertEquals(0, Color.alpha(transparent.getPixel(50, 50)))
         assertEquals(Color.WHITE, flattened.getPixel(50, 50))
         assertEquals(0, Color.alpha(original.getPixel(50, 50)))
+    }
+
+    @Test fun failedDrawRecyclesAllocatedOutputAndPreservesOriginalFailure() {
+        var allocated: Bitmap? = null
+        val expected = IllegalStateException("synthetic draw failure")
+        val error = runCatching {
+            withOwnedEditorBitmap(20, 20) { allocated = it; throw expected }
+        }.exceptionOrNull()
+        assertSame(expected, error)
+        assertTrue(allocated!!.isRecycled)
     }
 
 }

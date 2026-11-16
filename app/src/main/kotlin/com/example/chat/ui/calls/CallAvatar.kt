@@ -52,5 +52,16 @@ fun parseCallAvatarColor(colorHex: String?): Color {
 }
 
 /** CALL-R1-07: the one caller-initials rule - first letter of the trimmed name, "U" when empty. */
-fun callInitials(name: String?): String =
-    name?.trim()?.takeIf { it.isNotEmpty() }?.substring(0, 1)?.uppercase() ?: "U"
+// Previous implementation retained: fun callInitials(name: String?): String =
+// Previous implementation retained:     name?.trim()?.takeIf { it.isNotEmpty() }?.substring(0, 1)?.uppercase() ?: "U"
+fun callInitials(name: String?): String {
+    val text = name?.trim().orEmpty()
+    if (text.isEmpty()) return "U"
+    // CALLS-R2-25: ICU character boundaries preserve surrogate pairs and combining clusters.
+    // android.icu is available on the app's minSdk 24.
+    val iterator = android.icu.text.BreakIterator.getCharacterInstance(java.util.Locale.ROOT)
+    iterator.setText(text)
+    val end = iterator.next()
+    return if (end == android.icu.text.BreakIterator.DONE) "U"
+        else text.substring(0, end).uppercase(java.util.Locale.ROOT)
+}

@@ -13,7 +13,8 @@ object AuthWorkspaceHistory {
     fun record(context:Context,workspace:String) {
         val clean=workspace.trim()
         if(clean.isBlank() || clean.length>128 || clean.any(Char::isISOControl)) return
-        val recent=(listOf(clean)+read(context)).distinct().take(5)
+        // Previous: val recent=(listOf(clean)+read(context)).distinct().take(5)
+        val recent=(listOf(clean)+read(context)).distinctBy {it.lowercase(java.util.Locale.ROOT)}.take(5)
         context.getSharedPreferences("chaty_auth_workspaces",Context.MODE_PRIVATE).edit().putString("recent",recent.joinToString("\n")).apply()
     }
 }

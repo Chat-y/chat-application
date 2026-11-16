@@ -79,6 +79,8 @@ fun MediaWorkspaceHost(
             is MediaDestination.Player -> ChatyAudioPlayerScreen(
                 coordinator = playerCoordinator,
                 onClose = { pop() },
+                // MV-R5-034: return to the existing workspace, never enqueue audio implicitly.
+                onBrowseMedia = { stack = listOf(MediaDestination.Workspace) },
             )
         }
     }

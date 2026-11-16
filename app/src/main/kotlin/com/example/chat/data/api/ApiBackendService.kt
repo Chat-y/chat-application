@@ -19,6 +19,7 @@ import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -532,7 +533,13 @@ class ApiBackendService(
                 val optIdx = if (list.any { it.id == normalized.id } || normalized.senderId != myId) -1
                 else list.indexOfFirst { m ->
                     m.deliveryState == DeliveryState.sending && m.id.startsWith("temp_") &&
-                        m.text == normalized.text && m.senderId == myId
+                        m.text == normalized.text && m.senderId == myId &&
+                        // Same-text attachments must not consume each other: type and attachment
+                        // payload must also match (Prior: sender + text only).
+                        m.type == normalized.type &&
+                        (m.attachment?.name ?: "") == (normalized.attachment?.name ?: "") &&
+                        (m.attachment?.size ?: "") == (normalized.attachment?.size ?: "") &&
+                        (m.attachment?.type ?: "") == (normalized.attachment?.type ?: "")
                 }
                 if (optIdx != -1) {
                     // Our own queued message came back from the server: it is sent (one tick).
@@ -686,9 +693,13 @@ class ApiBackendService(
                 val index = list.indexOfFirst { it.id == event.messageId && it.senderId == myId }
                 if (index < 0) return@synchronized
                 val current = list[index]
+                val incoming = when { event.allRead -> DeliveryState.read; event.allDelivered -> DeliveryState.delivered; else -> DeliveryState.sent }
+                // Monotonic: an out-of-order older receipt never lowers sent/delivered/read.
+                fun rank(d: DeliveryState) = when (d) { DeliveryState.sent -> 1; DeliveryState.delivered -> 2; DeliveryState.read -> 3; else -> 0 }
+                val nextState = if (rank(current.deliveryState) > rank(incoming) && rank(incoming) > 0) current.deliveryState else incoming
                 list[index] = current.copy(
-                    deliveryState = when { event.allRead -> DeliveryState.read; event.allDelivered -> DeliveryState.delivered; else -> DeliveryState.sent },
-                    readAt = if (event.allRead) current.readAt else null, // A member's timestamp is not the aggregate group-read time.
+                    deliveryState = nextState,
+                    readAt = if (nextState == DeliveryState.read) current.readAt else null, // A member's timestamp is not the aggregate group-read time.
                     recipientReceipts = current.recipientReceipts + (event.userId to event.times),
                 )
                 changed = true
@@ -952,7 +963,11 @@ class ApiBackendService(
             }
         }
         if (hadUnread) notifyChatListeners()
-        chatScope.launch { chat.markRoomRead(chatId) }
+        // Prior: chatScope.launch { chat.markRoomRead(chatId) }
+        // Owner captured before launch: a sign-out or account switch in between must not mark
+        // another account's room read.
+        val owner = authSnapshot()
+        chatScope.launch { if (authSnapshot() === owner) ownerChatClient(owner).markRoomRead(chatId) }
     }
 
     // ---- Push / background notification hooks (set by the locator) ----
@@ -973,13 +988,18 @@ class ApiBackendService(
         if (session.token == null) return
         realtime.connect()
         startBackgroundSync()
+        // Owner scope is captured here; every step re-checks it (account switch mid-flight is a no-op).
+        val owner = authSnapshot()
         chatScope.launch {
+            if (authSnapshot() !== owner) return@launch
             if (!roomId.isNullOrEmpty()) {
-                chat.markRoomDelivered(roomId)
+                ownerChatClient(owner).markRoomDelivered(roomId)
+                if (authSnapshot() !== owner) return@launch
                 dirtyRooms.add(roomId)
             }
             conversationsDirty = true
             loadConversationsIfNeeded(force = true)
+            if (authSnapshot() !== owner) return@launch
             if (!roomId.isNullOrEmpty() && roomId == activeConversationId) loadMessagesIfNeeded(roomId, force = true)
         }
     }
@@ -994,8 +1014,10 @@ class ApiBackendService(
         val key = userId + ":" + settings.toSortedMap().toString()
         if (key == lastPrivacySync) return
         lastPrivacySync = key
+        val owner = authSnapshot()
         chatScope.launch {
-            val ok = chat.updateChatSettings(settings)
+            if (authSnapshot() !== owner) { if (lastPrivacySync == key) lastPrivacySync = null; return@launch }
+            val ok = ownerChatClient(owner).updateChatSettings(settings)
             if (!ok && lastPrivacySync == key) lastPrivacySync = null // retry on the next change/tick
         }
     }
@@ -1199,6 +1221,16 @@ class ApiBackendService(
     @Volatile private var _chatScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + chatCoroutineExceptionHandler)
     private val chatScope: CoroutineScope get() = _chatScope
 
+    /** Detached scope for the bounded adopt race in adoptCodeOrAddedAccount:
+     *  must outlive resetSessionCoroutineScope(), which cancels chatScope
+     *  mid-adopt. Application-lifetime, same swallow-all handler. */
+    private val adoptStoreScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + chatCoroutineExceptionHandler)
+
+    /** Monotonic adopt-attempt counter: a login retry during a Keystore wedge
+     *  starts a newer attempt, and only the newest may flip the active account
+     *  key / mutate the live session (retry-during-wedge tear-down guard). */
+    private val adoptAttempt = java.util.concurrent.atomic.AtomicLong(0L)
+
     private fun resetSessionCoroutineScope() {
         val prev = _chatScope
         _chatScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + chatCoroutineExceptionHandler)
@@ -1213,9 +1245,23 @@ class ApiBackendService(
     private fun notifyChatListeners() {
         // Socket and polling callbacks run on worker threads. Compose observers must
         // be notified on the UI thread, just like Flutter's single event loop.
+        // Prior: listeners.forEach { it() } (one throwing listener blocked all later ones)
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            listeners.forEach { it() }
-        } else uiHandler.post { listeners.forEach { it() } }
+            fireChatListenersIsolated()
+        } else uiHandler.post { fireChatListenersIsolated() }
+    }
+
+    /** Chat client bound to a captured owner (same construction as the reader in the realtime handler). */
+    private fun ownerChatClient(owner: ApiAccountScope) = ApiChatClient(
+        baseUrl = { owner.baseUrl }, tenantId = { owner.tenantId }, token = { owner.token },
+        transport = ScopedCallHttpTransport(owner, ::withAuthScope, sendRequests))
+
+    private fun fireChatListenersIsolated() {
+        listeners.toList().forEach { l ->
+            try { l() }
+            catch (c: kotlinx.coroutines.CancellationException) { throw c }
+            catch (_: Exception) { /* isolated: later listeners still run */ }
+        }
     }
 
     private val _conversations = mutableListOf<Conversation>()
@@ -1745,6 +1791,29 @@ class ApiBackendService(
         applyLoadedMessages(chatId, remote, expected)
     }
 
+    /** Checked refresh for privacy-sensitive consumers. Does not adopt, refresh, or clear credentials. */
+    enum class CheckedMessagesOutcome { LOADED, AUTHENTICATION_REQUIRED, FORBIDDEN, UNAVAILABLE, OWNER_CHANGED }
+
+    suspend fun loadMessagesChecked(chatId: String, expected: ApiAccountScope): CheckedMessagesOutcome {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (authSnapshot() !== expected) return CheckedMessagesOutcome.OWNER_CHANGED
+        if (expected.userId.isNullOrBlank() || expected.token.isNullOrBlank()) return CheckedMessagesOutcome.AUTHENTICATION_REQUIRED
+        val reader = ApiChatClient(
+            baseUrl = { expected.baseUrl }, tenantId = { expected.tenantId }, token = { expected.token },
+            transport = ScopedCallHttpTransport(expected, ::withAuthScope, sendRequests),
+        )
+        val result = withContext(Dispatchers.IO) { reader.readMessagesChecked(chatId) }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (authSnapshot() !== expected) return CheckedMessagesOutcome.OWNER_CHANGED
+        return when (result) {
+            is ApiChatClient.MessagesReadResult.Success -> if (applyLoadedMessages(chatId, result.messages, expected))
+                CheckedMessagesOutcome.LOADED else CheckedMessagesOutcome.OWNER_CHANGED
+            ApiChatClient.MessagesReadResult.AuthenticationRequired -> CheckedMessagesOutcome.AUTHENTICATION_REQUIRED
+            ApiChatClient.MessagesReadResult.Forbidden -> CheckedMessagesOutcome.FORBIDDEN
+            ApiChatClient.MessagesReadResult.Unavailable -> CheckedMessagesOutcome.UNAVAILABLE
+        }
+    }
+
     private fun applyLoadedMessages(chatId: String, remote: List<ChatMessage>, expected: ApiAccountScope): Boolean {
         var gone: List<com.example.chat.data.local.AttachmentRef> = emptyList()
         var before: List<ChatMessage> = emptyList()
@@ -1950,6 +2019,23 @@ class ApiBackendService(
         val q = query.lowercase().trim()
         loadUsers(q)
         return com.example.chat.ui.chats.newchat.NewChatRules.filterUsers(users, q, session.currentUser?.id, includeSelf)
+    }
+
+    /** Fresh broad directory read for a captured owner. Never merges/falls back to another account's cache. */
+    suspend fun searchUsers(query: String, expected: ApiAccountScope, includeSelf: Boolean = false): List<UserProfile> {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (authSnapshot() !== expected) throw ApiScopeChangedException()
+        check(!expected.userId.isNullOrBlank() && !expected.token.isNullOrBlank()) { "Sign in to search people." }
+        val q = query.lowercase().trim() // Preserve the existing broad contains-search semantics.
+        val reader = ApiChatClient(
+            baseUrl = { expected.baseUrl }, tenantId = { expected.tenantId }, token = { expected.token },
+            transport = ScopedCallHttpTransport(expected, ::withAuthScope, sendRequests),
+        )
+        val fresh = withContext(Dispatchers.IO) { reader.listUsers(q) }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (authSnapshot() !== expected) throw ApiScopeChangedException()
+        checkNotNull(fresh) { "People search is unavailable. Try again." }
+        return com.example.chat.ui.chats.newchat.NewChatRules.filterUsers(fresh, q, expected.userId, includeSelf)
     }
 
     private val reactionLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
@@ -2235,6 +2321,7 @@ class ApiBackendService(
         val expected = authSnapshot()
         val remote = withContext(Dispatchers.IO) { chat.listMessages(chatId) } ?: return
         var changed = false
+        var gone: List<com.example.chat.data.local.AttachmentRef> = emptyList()
         val applied = withAuthScope(expected) {
             synchronized(chatLock) {
                 val current = _messages[chatId] ?: mutableListOf()
@@ -2244,6 +2331,8 @@ class ApiBackendService(
                 }.toMutableList()
                 val hasChanges = merged != current
                 if (hasChanges) {
+                    // Same invalidation as applyLoadedMessages.
+                    gone = com.example.chat.data.media.AttachmentRefs.refsGone(chatId, current.toList(), merged)
                     _messages[chatId] = merged
                     remote.lastOrNull()?.let { lastMsg ->
                         val idx = _conversations.indexOfFirst { it.id == chatId }
@@ -2267,6 +2356,7 @@ class ApiBackendService(
         if (applied && changed) {
             schedulePersistRoomMessages(chatId, expected)
             schedulePersistConversations(expected)
+            notifyGone(gone)
             notifyChatListeners()
         }
     }
@@ -2574,11 +2664,26 @@ class ApiBackendService(
                     type = runCatching { MessageType.valueOf(o.optString("type", "text")) }.getOrDefault(MessageType.text),
                     text = o.optString("text"),
                     attachment = att,
+                    // Prior: sticker-only restore. Now also restores the allowlisted envelope metadata
+                    // (view_once, forwarded, album, p2p) through the normal decoder, fail-closed for view_once.
                     metadata = runCatching {
-                        val content = org.json.JSONObject(o.getString("content"))
-                        com.example.chat.core.stickers.StickerMessagePolicy.parse(content.optString("type"),
+                        val rawContent = o.getString("content")
+                        // Malformed content that still carries a view_once marker fails closed (outside the parse).
+                        val viewOnceMarked = rawContent.contains("view_once", ignoreCase = true)
+                        runCatching {
+                        val content = org.json.JSONObject(rawContent)
+                        val sticker = com.example.chat.core.stickers.StickerMessagePolicy.parse(content.optString("type"),
                             listOf("chaty_sticker_version", "chaty_sticker_pack", "chaty_sticker_id")
                                 .associateWith { key -> if (content.has(key)) content.opt(key) else null })
+                        val envelopeKeys = setOf("view_once", "forwarded", "chaty_album_id", "chaty_album_v", "chaty_album_index",
+                            "chaty_album_count", "p2p_invite_ciphertext", "p2p_invite_group", "p2p_invite_epoch", "p2p_transfer_version")
+                        val decoded = runCatching {
+                            ChatMessage.fromApi(mapOf("id" to o.getString("temp_id"), "content" to rawContent)).metadata
+                        }.getOrDefault(emptyMap()).filterKeys { it in envelopeKeys }.toMutableMap()
+                        // A pending view-once item must never come back as a normal previewable one.
+                        if (viewOnceMarked && decoded["view_once"] == null) decoded["view_once"] = true
+                        sticker + decoded
+                        }.getOrElse { if (viewOnceMarked) mapOf<String, Any?>("view_once" to true) else emptyMap() }
                     }.getOrDefault(emptyMap()),
                     createdAt = runCatching { Instant.parse(o.optString("created_at")) }.getOrDefault(Instant.now()),
                     deliveryState = if (o.optBoolean("requires_reconciliation", false) || o.optBoolean("failed", false)) DeliveryState.failed else DeliveryState.sending,
@@ -3195,12 +3300,24 @@ class ApiBackendService(
     suspend fun unregisterDeviceToken(fcmToken: String) =
         withContext(Dispatchers.IO) { deviceTokens.unregisterDeviceToken(fcmToken) }
 
-    /** Dart initialize(): config restore + session restore (once). */
+    /** Dart initialize(): config restore + session restore (once).
+     *  Cold-start fix: invoked off the main thread by both callers (the
+     *  ServiceLocator bootstrap and the splash's IO route probe); a second
+     *  caller waits for the first to finish instead of racing a double restore. */
+    @Synchronized
     fun initialize() {
         if (initialized) return
         initialized = true
+        // A failure anywhere below must not latch initialized=true: callers
+        // (ServiceLocator cold start, splash routeToHome) swallow the error
+        // with runCatching and retry initialize() later; leave the flag false
+        // so the retry actually runs.
+        try {
         startCallScopeMonitoring()
         config.init()
+        // Validate the registry before restoring/publishing any identity. An
+        // unreadable registry must not masquerade as a fresh installation.
+        multiAccount.accounts()
         // Offline demo: if the persisted session is the demo, arm the offline
         // guard BEFORE restore() fires its transition listeners.
         try {
@@ -3276,6 +3393,10 @@ class ApiBackendService(
                 try { syncFcmTokenHook?.invoke() } catch (_: Exception) {
                 }
             }
+        }
+        } catch (t: Throwable) {
+            initialized = false
+            throw t
         }
     }
 
@@ -3813,6 +3934,12 @@ class ApiBackendService(
         runCatching { onBeforeAccountSwitch?.invoke(oldHash, targetMeta.accountHash) }
 
         // Atomic routing + credential adoption under authScopeLock with a single transition signal
+        // adoptForSwitch writes the encrypted credential store (blocking
+        // Keystore I/O); keep that off the caller (possibly main) thread. Wrap the
+        // WHOLE synchronized block, not just the store call: a suspension inside
+        // synchronized() would re-enter the monitor on a different thread and
+        // crash with IllegalMonitorStateException.
+        withContext(Dispatchers.IO) {
         synchronized(authScopeLock) {
             config.setRouting(
                 tenant = targetMeta.tenantId,
@@ -3840,6 +3967,7 @@ class ApiBackendService(
                 _tasks.clear()
             }
             notifyAuthScopeTransition()
+        }
         }
 
         multiAccount.markActive(targetAccountKey)
@@ -3901,16 +4029,35 @@ class ApiBackendService(
         webSocketTemplate: String, routingGeneration: Long, isDefaultTenant: Boolean,
     ): ApiRegisteredAccountMeta {
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        val oldHash = currentAccountHash()
-        persistAccountConversationSnapshot()
+        // Keystore-backed registry reads/writes stay off the calling thread:
+        // on a login tap this path runs on the main thread, and a slow or
+        // stuck Keystore there was an ANR kill right after the tap.
+        // The Keystore-bearing section is also BOUNDED: a wedged Keystore must
+        // not leave the login spinner running forever. It runs detached on
+        // adoptStoreScope (not chatScope - resetSessionCoroutineScope cancels
+        // chatScope mid-adopt) and the caller races it against a timeout. A
+        // blocking Keystore call cannot be interrupted cooperatively, hence
+        // the race; a late single adopt leaves the session adopted but chat
+        // plane unstarted until next launch, healed by restore.
+        val attempt = adoptAttempt.incrementAndGet()
+        val adoptStore = adoptStoreScope.async {
+        try {
+        val oldHash = withContext(Dispatchers.IO) { currentAccountHash() }
+        withContext(Dispatchers.IO) { persistAccountConversationSnapshot() }
         val routingSnapshot = ApiRoutingSnapshot(
             tenantId = targetTenant,
             baseUrl = baseUrl,
             webSocketTemplate = webSocketTemplate,
             generation = routingGeneration,
         )
-        val registered = multiAccount.registerAuthenticatedAccount(result, routingSnapshot, isDefaultTenant)
-            ?: throw IllegalStateException("This app installation supports two signed-in accounts. Remove an account before adding another.")
+        // Retry-during-wedge guard: only the newest attempt may proceed; a
+        // superseded attempt returns null and the caller reports it like a
+        // busy timeout (the newer attempt owns the adopt).
+        if (adoptAttempt.get() != attempt) return@async null
+        val registered = withContext(Dispatchers.IO) {
+            multiAccount.registerAuthenticatedAccount(result, routingSnapshot, isDefaultTenant) { adoptAttempt.get() == attempt }
+        } ?: throw IllegalStateException("This app installation supports two signed-in accounts. Remove an account before adding another.")
+        if (adoptAttempt.get() != attempt) return@async null
 
         realtime.disconnect()
         resetSessionCoroutineScope()
@@ -3918,6 +4065,12 @@ class ApiBackendService(
         DemoMode.active = false
         runCatching { onBeforeAccountSwitch?.invoke(oldHash, registered.accountHash) }
 
+        // adoptForSwitch writes the encrypted credential store (blocking
+        // Keystore I/O); keep that off the caller (possibly main) thread. Wrap the
+        // WHOLE synchronized block, not just the store call: a suspension inside
+        // synchronized() would re-enter the monitor on a different thread and
+        // crash with IllegalMonitorStateException.
+        withContext(Dispatchers.IO) {
         synchronized(authScopeLock) {
             config.setRouting(
                 tenant = registered.tenantId,
@@ -3943,8 +4096,17 @@ class ApiBackendService(
             }
             notifyAuthScopeTransition()
         }
+        }
 
         runCatching { onAfterAccountSwitch?.invoke(oldHash, registered.accountHash) }
+        registered
+        } catch (t: Throwable) {
+            android.util.Log.w("ChatyAuth", "adopt attempt failed (superseded=" + (adoptAttempt.get() != attempt) + "): " + t.javaClass.simpleName)
+            throw t
+        }
+        }
+        val registered = withTimeoutOrNull(ADOPT_KEYSTORE_TIMEOUT_MS) { adoptStore.await() }
+            ?: throw ApiDeviceStorageBusyException()
         afterAuthAdoptedAndSync()
         notifyChatListeners()
         return registered
@@ -3973,6 +4135,12 @@ class ApiBackendService(
                 resetSessionCoroutineScope()
                 syncRunning = false
                 runCatching { onBeforeAccountSwitch?.invoke(targetMeta.accountHash, remaining.accountHash) }
+                // adoptForSwitch writes the encrypted credential store (blocking
+                // Keystore I/O); keep that off the caller (possibly main) thread. Wrap the
+                // WHOLE synchronized block, not just the store call: a suspension inside
+                // synchronized() would re-enter the monitor on a different thread and
+                // crash with IllegalMonitorStateException.
+                withContext(Dispatchers.IO) {
                 synchronized(authScopeLock) {
                     config.setRouting(
                         tenant = remaining.tenantId,
@@ -3995,6 +4163,7 @@ class ApiBackendService(
                         _conversations.clear(); _users.clear(); _messages.clear(); _tasks.clear()
                     }
                     notifyAuthScopeTransition()
+                }
                 }
                 multiAccount.markActive(remaining.accountKey)
                 runCatching { onAfterAccountSwitch?.invoke(targetMeta.accountHash, remaining.accountHash) }
@@ -4141,5 +4310,9 @@ class ApiBackendService(
         const val TYPING_TTL_MS = 6_000L
         const val RESUME_STALE_MS = 60_000L
         const val INITIAL_LOGIN_SYNC_TIMEOUT_MS = 2_500L
+        /** Upper bound for the Keystore-bearing section of a login/register
+         *  adopt. Generous enough for a slow-but-alive Keystore on affected
+         *  devices; on expiry the user gets a retryable busy error. */
+        const val ADOPT_KEYSTORE_TIMEOUT_MS = 20_000L
     }
 }

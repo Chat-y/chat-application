@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="camera_background_preview_power_save">Background preview paused for battery saver. Your capture options are unchanged.</string>
+    <string name="camera_background_preview_thermal">Your phone is hot. Background preview paused while it cools. Your capture options are unchanged.</string>
+</resources>

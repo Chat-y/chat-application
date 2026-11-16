@@ -7,6 +7,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import com.example.chat.ui.kit.ChatyConfirmationDialog
 import com.example.chat.ui.kit.ChatyTextButton
 
@@ -62,19 +64,19 @@ object HomeRetentionPolicy {
 fun HomeRetentionPolicyDialog(onDismiss: () -> Unit) {
     ChatyConfirmationDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Workspace data on this device") },
+        title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_workspace_data_on_this_device)) },  // was: "Workspace data on this device"
         text = {
             Column {
-                Text("What the personal workspace stores on this device today. Nothing here deletes data.")
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_what_the_personal_workspace_stores_on_this_device_))  // was: "What the personal workspace stores on this device today. Nothing here deletes data."
                 HomeRetentionPolicy.statements().forEach { s ->
                     Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                        Text(s.area)
+                        Text(s.area, modifier = Modifier.semantics { heading() })
                         Text(s.stored)
                         Text(s.onSignOut)
                     }
                 }
             }
         },
-        confirmButton = { ChatyTextButton(onClick = onDismiss, label = "Close") },
+        confirmButton = { ChatyTextButton(onClick = onDismiss, label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ret_close)) },
     )
 }

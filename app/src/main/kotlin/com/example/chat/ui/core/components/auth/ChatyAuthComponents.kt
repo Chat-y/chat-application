@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.*
+import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -251,10 +252,44 @@ fun ChatySavedPasswordAction(theme:ThemeConfig,onClick:()->Unit,enabled:Boolean=
     }
 }
 
-/** The app's bundled launcher artwork, not a redrawn placeholder logo. */
+/** Shared message-only auth header, colored by the selected theme. */
 @Composable
 fun ChatyAppAuthIcon() {
-    androidx.compose.foundation.Image(
-        painter=androidx.compose.ui.res.painterResource(com.example.chat.R.drawable.ic_launcher),
-        contentDescription="Chaty",modifier=Modifier.size(ChatyUiTokens.space76).clip(ChatyUiTokens.cardShape))
+    val theme = com.example.chat.ui.theme.LocalThemeConfig.current
+    // Previous launcher artwork retained inactive:
+    // Image(painterResource(R.drawable.ic_launcher), contentDescription="Chaty", modifier=Modifier.size(ChatyUiTokens.space76))
+    androidx.compose.material3.Icon(
+        androidx.compose.material.icons.Icons.Rounded.Forum,
+        contentDescription="Chaty",
+        tint=Color(theme.accentColor), modifier=Modifier.size(ChatyUiTokens.space76))
+}
+
+/** Inline at ordinary widths; whole actions flow at narrow widths or large text.
+ * Keep the divider attached to the organization action so it cannot orphan. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun ChatyAuthRegistrationLinks(
+    theme: ThemeConfig,
+    onRegister: () -> Unit,
+    onRegisterOrganization: () -> Unit,
+    enabled: Boolean = true,
+    registerIsCurrent: Boolean = false,
+) {
+    val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        if (registerIsCurrent) {
+            Box(Modifier.align(Alignment.CenterVertically).padding(horizontal = ChatyUiTokens.space12)
+                .heightIn(min = ChatyUiTokens.tapTarget), contentAlignment = Alignment.Center) {
+                Text(authCopy("Register"), color = com.example.chat.ui.auth.authReadable(theme, theme.accentColor),
+                    fontSize = ChatyUiTokens.linkText, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            ChatyAuthLink(authCopy("Register"), theme, onRegister, enabled, Modifier.align(Alignment.CenterVertically))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(" | ", color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
+            ChatyAuthLink(authCopy("Register a New Organization"), theme, onRegisterOrganization, enabled,
+                Modifier.weight(1f, fill = false))
+        }
+    }
 }

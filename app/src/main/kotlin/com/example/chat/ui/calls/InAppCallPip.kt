@@ -1,5 +1,6 @@
 package com.example.chat.ui.calls
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -111,7 +112,10 @@ fun InAppCallPip(
                     onDragCancel = { isDragging = false },
                 )
             }
-            .clickable { showControls = !showControls },
+            .clickable(
+                onClickLabel = if (showControls) "Hide call controls" else "Show call controls",
+                role = Role.Button,
+            ) { showControls = !showControls },
     ) {
         if (session.isVideo && videoSurfaces != null && videoSurfaces.hasRemoteVideo) {
             androidx.compose.ui.viewinterop.AndroidView(

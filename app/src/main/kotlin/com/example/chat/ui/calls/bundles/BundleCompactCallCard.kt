@@ -5,6 +5,7 @@ package com.example.chat.ui.calls.bundles
 // back in without removing or implementing those controls. Deletion decision: parent.
 
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -113,7 +114,7 @@ fun BundleCompactCallCard(
                             .size(38.dp)
                             .clip(CircleShape)
                             .background(tokens.acceptColor)
-                            .clickable { onAccept() },
+                            .clickable(role = Role.Button) { onAccept() },
                         contentAlignment = Alignment.Center,
                     ) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio,
@@ -128,7 +129,7 @@ fun BundleCompactCallCard(
                             .size(38.dp)
                             .clip(CircleShape)
                             .background(tokens.declineColor)
-                            .clickable { onDecline() },
+                            .clickable(role = Role.Button) { onDecline() },
                         contentAlignment = Alignment.Center,
                     ) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callEnd,
@@ -173,7 +174,7 @@ private fun MiniCardAction(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onClick() },
+        modifier = Modifier.clickable(role = Role.Button) { onClick() },
     ) {
         Box(
             // CALL-R1-45: 40dp was under the 48dp platform minimum.

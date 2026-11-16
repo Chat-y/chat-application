@@ -99,6 +99,7 @@ fun ChatySettingsPage(
     onBack: (() -> Unit)? = null,
     trailingHeaderWidget: (@Composable () -> Unit)? = null,
     bottomBar: (@Composable () -> Unit)? = null,
+    titleModifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val colors = LocalAppColors.current
@@ -108,6 +109,7 @@ fun ChatySettingsPage(
             subtitle = subtitle,
             onBack = onBack,
             actions = { trailingHeaderWidget?.invoke() },
+            titleModifier = titleModifier,
         )
         LazyColumn(
             Modifier.weight(1f),
@@ -332,6 +334,8 @@ fun ChatyColorTile(
     icon: ImageVector? = null,
     subtitle: String? = null,
 ) {
+    val colors = LocalAppColors.current
+    val scrim = androidx.compose.material3.MaterialTheme.colorScheme.scrim
     ChatySettingsTile(
         icon = icon,
         iconColor = color,
@@ -341,10 +345,10 @@ fun ChatyColorTile(
         trailing = {
             Box(
                 Modifier
-                    .shadow(4.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.2f), spotColor = Color.Black.copy(alpha = 0.2f))
+                    .shadow(4.dp, CircleShape, ambientColor = scrim.copy(alpha = 0.2f), spotColor = scrim.copy(alpha = 0.2f))
                     .size(32.dp)
                     .background(color, CircleShape)
-                    .border(2.dp, Color.White, CircleShape),
+                    .border(2.dp, colors.borderSubtle, CircleShape),
             )
         },
     )
@@ -543,3 +547,7 @@ fun ChatyPreviewCard(title: String, content: @Composable () -> Unit) {
         Spacer(Modifier.height(14.dp))
     }
 }
+
+// Superseded source retained inactive:
+//                     .shadow(4.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.2f), spotColor = Color.Black.copy(alpha = 0.2f))
+//                     .border(2.dp, Color.White, CircleShape),

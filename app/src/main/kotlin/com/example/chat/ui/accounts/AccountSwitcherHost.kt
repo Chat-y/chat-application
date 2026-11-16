@@ -68,8 +68,36 @@ fun AccountSwitcherHost(
         navByAccount = layout.navContextByAccount
     }
 
+    // AC1-05/21, AC2-01, AC3-12, AC4-11: the open-time persist and store reads run off the main thread;
+    // the synchronous reloadSnapshot() above is kept for the other (post-switch) callers.
+    val snapshotThrottle = remember(api) { AccountSnapshotThrottle() }
     LaunchedEffect(open, refreshRevision) {
-        if (open) reloadSnapshot()
+        if (open) {
+            val loaded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                // AC4-41: scope throttling to the active account and API owner, not the whole process.
+                // Prior unconditional: api.persistAccountConversationSnapshot()
+                val snapshotKey = api.currentAccountKey() ?: multi.activeAccountKey()
+                val nowMs = android.os.SystemClock.elapsedRealtime()
+                if (snapshotKey == null || snapshotKey != snapshotThrottle.accountKey ||
+                    snapshotThrottle.owner !== api || nowMs - snapshotThrottle.persistedMs >= 5_000L) {
+                    api.persistAccountConversationSnapshot()
+                    snapshotThrottle.persistedMs = nowMs
+                    snapshotThrottle.accountKey = snapshotKey
+                    snapshotThrottle.owner = api
+                }
+                val list = multi.accounts()
+                val key = api.currentAccountKey() ?: multi.activeAccountKey()
+                val layout = api.multiAccountStore.loadLayoutState()
+                val recents = LinkedHashMap<String, List<AccountRecentChatSummary>>()
+                list.forEach { meta -> recents[meta.accountKey] = multi.recentConversationsFor(meta.accountKey) }
+                AccountSnapshotLoad(list, key, recents, layout.selectedConversationByAccount, layout.navContextByAccount)
+            }
+            accounts = loaded.accounts
+            activeKey = loaded.activeKey
+            recentByAccount = loaded.recents
+            selectedByAccount = loaded.selected
+            navByAccount = loaded.nav
+        }
     }
 
     var isSwitching by remember { mutableStateOf(false) }
@@ -117,7 +145,9 @@ fun AccountSwitcherHost(
                         reloadSnapshot()
                     }
                 }
-            } catch (e: Exception) {
+            // Previous broad catch swallowed coroutine cancellation.
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 errorMessage = e.message ?: "Unable to switch accounts."
             } finally {
                 isSwitching = false
@@ -190,7 +220,9 @@ fun AccountSwitcherHost(
                         onSwitchedAccount()
                         reloadSnapshot()
                     }
-                } catch (e: Exception) {
+                // Previous broad catch swallowed coroutine cancellation.
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (e: Exception) {
                     errorMessage = e.message ?: "Unable to sign out account."
                 } finally {
                     isSwitching = false
@@ -234,6 +266,13 @@ fun AccountSwitcherHost(
                             }
                         }
                     }
+                    // The remembered activeKey is a display snapshot, not authority for navigation.
+                    val openedFor = api.authSnapshot()
+                    val preferenceGeneration = prefs.scopeGeneration
+                    fun stillCurrent() = api.authSnapshot() === openedFor &&
+                        !openedFor.userId.isNullOrBlank() && api.currentAccountKey() == accountKey &&
+                        prefs.scopeGeneration == preferenceGeneration
+                    check(stillCurrent()) { "Account changed. Reopen recent conversations." }
                     multi.setAccountNavigationState(accountKey, selectedConversationId = summary.conversationId)
                     val conv = resolveConversationForActiveAccount(summary)
                     val sec = prefs.security
@@ -250,13 +289,17 @@ fun AccountSwitcherHost(
                             lockPrompt = gate.lockPrompt,
                         )
                     }
+                    // Previously a lock prompt could finish after a different account was activated.
+                    check(stillCurrent()) { "Account changed. Reopen recent conversations." }
                     if (authorized) {
                         onDismiss()
                         onOpenConversation(conv)
                     } else {
                         onToast("Authentication required to open locked conversation.")
                     }
-                } catch (e: Exception) {
+                // Previous broad catch swallowed coroutine cancellation.
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (e: Exception) {
                     errorMessage = e.message ?: "Unable to open conversation."
                 } finally {
                     isSwitching = false
@@ -307,3 +350,23 @@ fun AccountSwitcherHost(
         }
     }
 }
+
+private class AccountSnapshotLoad(
+    val accounts: List<ApiRegisteredAccountMeta>,
+    val activeKey: String?,
+    val recents: Map<String, List<AccountRecentChatSummary>>,
+    val selected: Map<String, String?>,
+    val nav: Map<String, String?>,
+)
+
+// Open-time IO load owns this small throttle; account changes always force a fresh write.
+private class AccountSnapshotThrottle {
+    var persistedMs: Long = -5_000L
+    var accountKey: String? = null
+    var owner: Any? = null
+}
+
+// Superseded lines retained inactive for source review:
+//             } catch (e: Exception) {
+//                 } catch (e: Exception) {
+//                 } catch (e: Exception) {

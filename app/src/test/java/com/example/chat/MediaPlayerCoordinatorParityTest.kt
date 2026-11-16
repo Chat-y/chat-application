@@ -92,7 +92,7 @@ class MediaPlayerCoordinatorParityTest {
         val coordinator: MediaPlayerCoordinator,
     )
 
-    private fun fixture(withPolicy: FakePolicy? = FakePolicy()): Fixture {
+    private fun fixture(withPolicy: FakePolicy? = FakePolicy(), accountGeneration: () -> Long = { 0L }): Fixture {
         val scope = TestScope(UnconfinedTestDispatcher())
         val player = FakePlayer()
         val island = DynamicIslandController(
@@ -107,6 +107,8 @@ class MediaPlayerCoordinatorParityTest {
                 scope = scope,
                 policyCoordinator = withPolicy,
                 islandController = island,
+                communicationArbiter = com.example.chat.core.audio.DefaultCommunicationMediaArbiter(),
+                accountGeneration = accountGeneration,
             ),
         )
     }
@@ -117,7 +119,8 @@ class MediaPlayerCoordinatorParityTest {
         f.coordinator.playTrack(track("a"))
         assertEquals(PlaybackStatus.error, f.coordinator.state.status)
         assertEquals(
-            "Cannot play audio while an active call owns the session.",
+            // Previous preflight-only message: "Cannot play audio while an active call owns the session."
+            "This audio could not play. Choose it again or try another file.",
             f.coordinator.state.errorMessage,
         )
         assertTrue(f.player.calls.isEmpty())
@@ -264,7 +267,7 @@ class MediaPlayerCoordinatorParityTest {
         assertEquals(PlaybackStatus.stopped, f.coordinator.state.status)
     }
 
-    @Test fun `interruption pauses and recovering resumes`() = runTest {
+    @Test fun `interruption pauses and recovery waits for explicit play`() = runTest {
         val policy = FakePolicy()
         val f = fixture(policy)
         f.coordinator.playTrack(track("a"))
@@ -275,7 +278,8 @@ class MediaPlayerCoordinatorParityTest {
         assertEquals(listOf("pause"), f.player.calls)
         policy.state = AudioSessionState.recovering
         policy.emit()
-        assertEquals(listOf("pause", "play"), f.player.calls)
+        // Previous recovery expectation: assertEquals(listOf("pause", "play"), f.player.calls)
+        assertEquals(listOf("pause"), f.player.calls)
     }
 
     @Test fun `interruption while not playing does not resume after`() = runTest {
@@ -288,7 +292,9 @@ class MediaPlayerCoordinatorParityTest {
         policy.emit()
         policy.state = AudioSessionState.recovering
         policy.emit()
-        assertTrue(f.player.calls.isEmpty())
+        // Native pause is required even while loading; no automatic play on recovery.
+        // Previous: assertTrue(f.player.calls.isEmpty())
+        assertEquals(listOf("pause"), f.player.calls)
     }
 
     @Test fun `seek delegates and setSpeed updates state`() = runTest {
@@ -296,7 +302,8 @@ class MediaPlayerCoordinatorParityTest {
         f.coordinator.seek(42.seconds)
         f.coordinator.setSpeed(1.5)
         assertTrue(f.player.calls.contains("seek:42000"))
-        assertTrue(f.player.calls.contains("setSpeed:1.5"))
+        // Previous immediate setter assertion: assertTrue(f.player.calls.contains("setSpeed:1.5"))
+        assertFalse(f.player.calls.contains("setSpeed:1.5")) // Idle speed changes never start native playback.
         assertEquals(1.5, f.coordinator.state.speed, 0.0)
     }
 
@@ -305,4 +312,27 @@ class MediaPlayerCoordinatorParityTest {
         f.coordinator.resume()
         assertTrue(f.player.calls.isEmpty())
     }
+    @Test fun `account change refuses old native resume receipt`() = runTest {
+        var generation = 1L
+        val f = fixture(accountGeneration = { generation })
+        f.coordinator.playTrack(track("old-account"))
+        f.player.calls.clear()
+        generation = 2L
+        f.coordinator.resume()
+        assertFalse(f.player.calls.contains("play"))
+        assertEquals(PlaybackStatus.paused, f.coordinator.state.status)
+        f.coordinator.dispose()
+    }
+
+    @Test fun `late automatic completion cannot rebind old queue after account switch`() = runTest {
+        var generation = 1L
+        val f = fixture(accountGeneration = { generation })
+        f.coordinator.playTrack(track("old-a"), listOf(track("old-a"), track("old-b")))
+        f.player.calls.clear()
+        generation = 2L
+        f.player.playerStateStream.emit(MediaPlayerState(MediaProcessingState.completed, false))
+        assertFalse(f.player.calls.any { it.startsWith("setFilePath") || it == "play" })
+        f.coordinator.dispose()
+    }
+
 }

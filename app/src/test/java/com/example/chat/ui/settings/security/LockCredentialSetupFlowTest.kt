@@ -44,12 +44,18 @@ fun main() = runBlocking {
     // Pattern
     val l6 = FakeLock(); val pt = LockCredentialSetupFlow("Pattern", 4, l6); pt.init()
     check(!pt.canContinuePattern); pt.handlePatternContinue(); check(pt.error == "Draw your pattern first.")
-    pt.onPatternComplete("0-1"); check(pt.error == "Connect at least 4 dots using each dot once.")
-    pt.onPatternComplete("0-1-2-5"); check(pt.canContinuePattern && pt.error == "")
+// Superseded source retained below per additive-only review rule.
+//     pt.onPatternComplete("0-1"); check(pt.error == "Connect at least 4 dots using each dot once.")
+//     pt.onPatternComplete("0-1-2-5"); check(pt.canContinuePattern && pt.error == "")
+    pt.onPatternComplete("0-1"); check(pt.error == "Use at least 5 different dots for a new pattern. Avoid simple letter shapes.")
+    pt.onPatternComplete("0-1-2-5-8"); check(pt.canContinuePattern && pt.error == "")
     check(pt.handlePatternContinue() == SetupOutcome.resetPad && pt.step == SetupStep.confirmNew && pt.firstPatternDrawn == null)
     pt.handlePatternContinue(); check(pt.error == "Draw the confirmation pattern first.")
-    pt.onPatternComplete("0-1-2-4"); check(pt.handlePatternContinue() == SetupOutcome.resetPad && pt.error == "Patterns do not match. Draw again to confirm.")
-    pt.onPatternComplete("0-1-2-5"); check(pt.handlePatternContinue() == SetupOutcome.saved && l6.saved == Triple("Pattern", "0-1-2-5", null))
+// Superseded source retained below per additive-only review rule.
+//     pt.onPatternComplete("0-1-2-4"); check(pt.handlePatternContinue() == SetupOutcome.resetPad && pt.error == "Patterns do not match. Draw again to confirm.")
+//     pt.onPatternComplete("0-1-2-5"); check(pt.handlePatternContinue() == SetupOutcome.saved && l6.saved == Triple("Pattern", "0-1-2-5", null))
+    pt.onPatternComplete("0-1-2-4-7"); check(pt.handlePatternContinue() == SetupOutcome.resetPad && pt.error == "Patterns do not match. Draw again to confirm.")
+    pt.onPatternComplete("0-1-2-5-8"); check(pt.handlePatternContinue() == SetupOutcome.saved && l6.saved == Triple("Pattern", "0-1-2-5-8", null))
     // Native
     val l7 = FakeLock().apply { bio = false }; val b = LockCredentialSetupFlow("Biometric", 4, l7); b.init()
     check(b.verifyNativeMethod() == SetupOutcome.none && b.error == "Biometric verification was cancelled or unavailable." && !b.busy)

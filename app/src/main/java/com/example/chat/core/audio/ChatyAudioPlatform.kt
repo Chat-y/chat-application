@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.Flow
  * AudioManager directly (see AndroidChatyAudioPlatform).
  */
 interface ChatyAudioPlatform {
+    /** Explicit lifecycle acquisition, separate from idle route queries/preferences. */
+    suspend fun beginCommunicationSession() {}
     suspend fun getCapabilities(useCase: AudioUseCase): AudioCapabilities
     suspend fun getCurrentRoute(useCase: AudioUseCase): AudioOutputRoute
     suspend fun setPreferredRoute(useCase: AudioUseCase, route: AudioOutputRoute): AudioCapabilities

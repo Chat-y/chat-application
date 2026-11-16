@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_preview_in_app_alert">Preview in-app alert</string>
+    <string name="privacy_in_app_alert_explanation">Shows a sample inside Chaty. This does not test Android lock-screen notifications.</string>
+    <string name="privacy_in_app_alert_requested">In-app alert requested. Android notification settings are not tested.</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="permissions_pick_one_contact">Pick one contact without full access</string>
+    <string name="permissions_pick_one_contact_detail">Preview one selected phone number here. No address-book-wide permission is needed.</string>
+    <string name="permissions_selected_contact">Selected contact</string>
+    <string name="permissions_contact_picker_local_only">Shown here only, not sent or saved by this screen. Close to clear it.</string>
+    <string name="permissions_contact_picker_unavailable">The contact picker is unavailable. No contacts were sent or saved.</string>
+    <string name="permissions_close_preview">Close</string>
+    <string name="permissions_access_changed">Previously allowed access is off</string>
+    <string name="permissions_unused_access_hint">Access changed since the last check. Android may remove permissions for unused apps, or you may have changed them. Review permissions and unused-app settings in Android.</string>
+</resources>

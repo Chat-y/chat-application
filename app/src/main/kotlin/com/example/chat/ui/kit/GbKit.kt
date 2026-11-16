@@ -70,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
@@ -163,10 +164,21 @@ fun ChatyColorPickerModal(
     onColorSelected: (Long) -> Unit,
     onDismiss: () -> Unit,
     backgroundContextColor: Long? = null,
+    namedPalette: List<Pair<String, Long>> = emptyList(),
+    recentColors: List<Long> = emptyList(),
 ) {
     val colors = LocalAppColors.current
     var color by remember { mutableStateOf(currentColor) }
     var hex by remember { mutableStateOf(ColorPickerLogic.toHex(currentColor)) }
+    val paletteStrings = androidx.compose.ui.platform.LocalContext.current.resources
+    @Composable fun DraftPaletteChip(label: String, value: Long) {
+        TextButton(onClick = { color = value; hex = ColorPickerLogic.toHex(value) },
+            modifier = Modifier.semantics { selected = color == value }) {
+            Box(Modifier.size(20.dp).background(Color(value), CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = colors.foreground)
+        }
+    }
     val ratio = backgroundContextColor?.let { ColorPickerLogic.contrastRatio(color, it) }
     val warn = ColorPickerLogic.hasContrastWarning(ratio)
     val statusColor = if (warn) colors.error else colors.success
@@ -176,6 +188,22 @@ fun ChatyColorPickerModal(
         applyEnabled = ColorPickerLogic.fromHex(hex) != null,
     ) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
+            // Optional palette rows only change the draft; the existing Apply callback is unchanged.
+            if (namedPalette.isNotEmpty()) {
+                Text(paletteStrings.getString(com.example.chat.R.string.conv_proposal_named_colours), color = colors.foreground)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    namedPalette.forEach { (label, value) -> DraftPaletteChip(label, value) }
+                }
+            }
+            if (recentColors.isNotEmpty()) {
+                Text(paletteStrings.getString(com.example.chat.R.string.conv_proposal_recent_colours), color = colors.foreground)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    recentColors.take(6).forEach { value ->
+                        DraftPaletteChip(paletteStrings.getString(com.example.chat.R.string.conv_proposal_recent_colour,
+                            ColorPickerLogic.toHex(value)), value)
+                    }
+                }
+            }
             Spacer(Modifier.height(16.dp))
             Row(
                 Modifier.fillMaxWidth()
@@ -253,7 +281,8 @@ fun ChatyColorPickerModal(
     }
 }
 
-private fun colorToArgb(c: Color): Long = (c.value shr 32).toLong() and 0xFFFFFFFFL
+// Prior packed shift only decoded sRGB colors: (c.value shr 32).toLong() and 0xFFFFFFFFL
+private fun colorToArgb(c: Color): Long = c.toArgb().toLong() and 0xFFFFFFFFL
 
 // ---- GB row helpers (declared locally in several Dart settings screens, identical look) ----
 
@@ -265,7 +294,9 @@ fun GbPanelCard(content: @Composable () -> Unit) {
     Column(
         Modifier.fillMaxWidth()
             .shadow(4.dp, shape, ambientColor = colors.shadow, spotColor = colors.shadow)
-            .background(if (config.isDark) Color(0xFF1E2124) else colors.surface, shape)
+            // Prior dark override ignored the selected theme's surface role.
+            // .background(if (config.isDark) Color(0xFF1E2124) else colors.surface, shape)
+            .background(colors.surface, shape)
             .border(0.9.dp, colors.borderSubtle, shape)
             .clip(shape),
     ) { content() }

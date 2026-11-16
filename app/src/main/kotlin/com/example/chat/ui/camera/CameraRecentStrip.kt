@@ -1,5 +1,7 @@
 package com.example.chat.ui.camera
 
+import com.example.chat.R
+import androidx.compose.ui.res.stringResource
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
@@ -77,6 +79,7 @@ fun CameraRecentStrip(
     onPick: (Uri) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val handleLabel = stringResource(if (open) R.string.camera_recent_hide else R.string.camera_recent_show)
     val density = LocalDensity.current
     val dragThresholdPx = with(density) { 24.dp.toPx() }
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -95,9 +98,11 @@ fun CameraRecentStrip(
                         onVerticalDrag = { _, amount -> dragY += amount },
                     )
                 }
-                .clickable { onToggle(!open) }
+                // CAM-R4-034 previous: .clickable { onToggle(!open) }
+                .cameraActionFocusRing().clickable { onToggle(!open) }
                 .semantics {
-                    contentDescription = if (open) "Hide recent photos" else "Show recent photos"
+                    // CAM-R4-004 prior: contentDescription = if (open) "Hide recent photos" else "Show recent photos"
+                    contentDescription = handleLabel
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -113,18 +118,21 @@ fun CameraRecentStrip(
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                // CAM-R4-030 previous spacing: modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             ) {
                 items(photos.size, key = { photos[it].toString() }) { i ->
                     val uri = photos[i]
                     coil.compose.AsyncImage(
                         model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current).data(uri).size(192).build(),
-                        contentDescription = "Recent photo ${i + 1}",
+                        // CAM-R4-004 prior: contentDescription = "Recent photo ${i + 1}",
+                        contentDescription = stringResource(R.string.camera_recent_photo, i + 1),
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable { onPick(uri) },
+                            // CAM-R4-034 previous: .clickable { onPick(uri) },
+                            .cameraActionFocusRing().clickable { onPick(uri) },
                     )
                 }
             }

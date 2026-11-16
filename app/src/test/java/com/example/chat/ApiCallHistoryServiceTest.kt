@@ -80,4 +80,20 @@ class ApiCallHistoryServiceTest {
     fun `negative duration clamps to zero`() {
         assertEquals(0L, ApiCallHistoryService.mapEntry(entry("outgoing", "answered", durationSec = -5), "me")!!.durationSeconds)
     }
+    @Test fun `terminal outcome survives direction mapping`() {
+        val cases = mapOf("declined" to com.example.chat.domain.models.CallOutcome.declined,
+            "failed" to com.example.chat.domain.models.CallOutcome.failed,
+            "cancelled" to com.example.chat.domain.models.CallOutcome.cancelled,
+            "busy" to com.example.chat.domain.models.CallOutcome.busy)
+        cases.forEach { (status, outcome) ->
+            val row = ApiCallHistoryService.mapEntry(entry("outgoing", status, durationSec = 0), "me")!!
+            assertEquals(CallDirection.outgoing, row.direction)
+            assertEquals(outcome, row.outcome)
+        }
+    }
+    @Test fun `answered zero duration is connected but failed zero remains unknown`() {
+        assertEquals(true, ApiCallHistoryService.mapEntry(entry("outgoing", "answered", durationSec = 0), "me")!!.wasConnected)
+        assertNull(ApiCallHistoryService.mapEntry(entry("outgoing", "failed", durationSec = 0), "me")!!.wasConnected)
+        assertNull(ApiCallHistoryService.mapEntry(entry("outgoing", "future_status", durationSec = 0), "me")!!.outcome)
+    }
 }

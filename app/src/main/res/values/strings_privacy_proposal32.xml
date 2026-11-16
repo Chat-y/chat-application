@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="privacy_private_media_file_count">
+        <item quantity="one">%1$d file currently in private chat media folders.</item>
+        <item quantity="other">%1$d files currently in private chat media folders.</item>
+    </plurals>
+</resources>

@@ -26,6 +26,7 @@ class HideMediaRepository(
     private val scanMedia: (File) -> Unit = {},
     private val debugLog: (String) -> Unit = {},
     private val now: () -> Long = { System.currentTimeMillis() },
+    private val additionalCacheDirs: () -> List<File> = { emptyList() },
 ) {
     enum class MediaKind(val folderName: String) { PHOTOS("Photos"), VIDEOS("Videos"), GIFS("GIFs") }
 
@@ -51,20 +52,35 @@ class HideMediaRepository(
     /** True when on-disk markers already match the preferences; sync can skip the write (HM3-26). */
     fun isInSync(state: MarkerState): Boolean {
         if (File(mediaRoot, MediaVisibilityMarkers.MARKER_FILE_NAME).exists()) return false
+        // for (kind in MediaKind.values()) {
+        //     if (markerFile(kind).exists() != stateValue(state, kind)) return false
+        // }
         for (kind in MediaKind.values()) {
-            if (markerFile(kind).exists() != stateValue(state, kind)) return false
+            val marker = markerFile(kind)
+            // A directory named .nomedia is not a valid marker, and missing type folders
+            // must be repaired even when the requested marker is off.
+            if (marker.parentFile?.isDirectory != true) return false
+            if (stateValue(state, kind)) {
+                if (!marker.isFile) return false
+            } else if (marker.exists()) return false
         }
         return true
     }
 
     /**
      * Idempotent marker write (HM3-25) with low-storage and read-only handling (HM3-27, HM3-28),
+     * Previous completion claim retained for review:
      * followed by one batched media-scanner pass per type folder so the system gallery
      * re-indexes existing files (HM1-09, HM3-15). Scan completion is confirmed through the
      * caller-provided callback's own completion hook (HM3-16).
+     * Actual contract: submits one scanner request per type after a marker change. The
+     * synchronous callback has no completion result; sync success does not prove gallery
+     * re-indexing or visibility of existing exported copies.
      */
     fun sync(state: MarkerState): Result<Unit> = runCatching {
         val startedAt = now()
+        // HM3-26: inspect marker types once, then avoid writes/scanner submissions if unchanged.
+        if (isInSync(state)) return@runCatching
         if (!mediaRoot.isDirectory) {
             val free = filesDir.usableSpace
             if (free in 1 until MIN_FREE_BYTES) throw IOException("Low storage for media markers")
@@ -75,6 +91,9 @@ class HideMediaRepository(
         }
         // Debug-only timing record for slow folders (HM3-29).
         if (debug) debugLog("hide-media marker sync took ${now() - startedAt} ms")
+    }.onFailure {
+        // HM5-04: stable, path-free key, not one unique log entry for every exception message.
+        logDebugOnce("hide-media marker sync failed")
     }
 
     /** Debug-only assertion: marker state must equal the three preferences after a change (HM3-45). */
@@ -89,13 +108,34 @@ class HideMediaRepository(
     fun driftReport(state: MarkerState): String? {
         val notes = mutableListOf<String>()
         if (!isInSync(state)) notes += "markers out of sync with preferences ($state)"
-        val cache = cacheDir
-        if (cache != null && cache.isDirectory &&
-            cache.walkTopDown().take(MAX_SCAN_FILES).any { it.isFile && it.extension.lowercase(Locale.US) in MEDIA_EXTENSIONS }
-        ) {
-            notes += "media files present in cache dir"
+//         val cache = cacheDir
+//         if (cache != null && cache.isDirectory &&
+//             cache.walkTopDown().take(MAX_SCAN_FILES).any { it.isFile && it.extension.lowercase(Locale.US) in MEDIA_EXTENSIONS }
+//         ) {
+//             notes += "media files present in cache dir"
+//         }
+        // Inspect app-owned internal and external cache roots only. This is a diagnostic,
+        // never a cache wipe, marker write or claim that gallery apps honor the marker.
+        val caches = runCatching { listOfNotNull(cacheDir) + additionalCacheDirs() }.getOrElse {
+            notes += "media cache inspection unavailable"
+            listOfNotNull(cacheDir)
         }
-        return if (notes.isEmpty()) null else notes.joinToString("; ")
+        for (cache in caches.distinct()) {
+            runCatching {
+                if (cache.isDirectory) {
+                    val markerPresent = File(cache, MediaVisibilityMarkers.MARKER_FILE_NAME).isFile
+                    val mediaPresent = cache.walkTopDown().take(MAX_SCAN_FILES).any {
+                        it.isFile && it.extension.lowercase(Locale.US) in MEDIA_EXTENSIONS
+                    }
+                    if (mediaPresent) {
+                        notes += "media files present in cache dir"
+                        if (!markerPresent) notes += "media cache has no .nomedia file"
+                    }
+                }
+            }.onFailure { notes += "media cache inspection unavailable" }
+        }
+        // return if (notes.isEmpty()) null else notes.joinToString("; ")
+        return if (notes.isEmpty()) null else notes.distinct().joinToString("; ")
     }
 
     /** Rate-limited debug log: each distinct message is logged once (HM5-04). */
@@ -123,7 +163,8 @@ class HideMediaRepository(
             val folder = File(mediaRoot, kind.folderName)
             if (!folder.isDirectory) continue
             count += folder.walkTopDown().take(MAX_SCAN_FILES)
-                .count { it.isFile && it.name != MediaVisibilityMarkers.MARKER_FILE_NAME }
+                // .count { it.isFile && it.name != MediaVisibilityMarkers.MARKER_FILE_NAME }
+                .count { it.isFile && it.extension.lowercase(Locale.US) in MEDIA_EXTENSIONS }
         }
         return count
     }

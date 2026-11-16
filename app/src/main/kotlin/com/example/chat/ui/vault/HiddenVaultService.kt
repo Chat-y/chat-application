@@ -239,6 +239,25 @@ class HiddenVaultService(
             val accepted = if (stored != null) verifyDecoy(pin, stored)
                 else legacy != null && MessageDigest.isEqual(legacy.toByteArray(Charsets.UTF_8), pin.toByteArray(Charsets.UTF_8))
             if (!accepted || generation != ownerGeneration) return@withLock false
+            if (stored == null && legacy != null) {
+                // Successful legacy proof authorizes an in-place verifier upgrade, never a PIN change.
+                val migrationSalt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+                try {
+                    val migrationHash = decoyHash(pin, migrationSalt)
+                    try {
+                        if (generation != ownerGeneration) return@withLock false
+                        // API <26 uses Android Base64 rather than java.util.Base64.
+                        // val encoder = java.util.Base64.getEncoder()
+                        // secureStorage.write("$decoyKey.hash", "v1:${encoder.encodeToString(migrationSalt)}:${encoder.encodeToString(migrationHash)}")
+                        val encodedSalt = android.util.Base64.encodeToString(migrationSalt, android.util.Base64.NO_WRAP)
+                        val encodedHash = android.util.Base64.encodeToString(migrationHash, android.util.Base64.NO_WRAP)
+                        secureStorage.write("$decoyKey.hash", "v1:$encodedSalt:$encodedHash")
+                        // Only remove the old plaintext after the salted verifier write succeeded.
+                        secureStorage.delete(decoyKey)
+                    } finally { migrationHash.fill(0) }
+                } finally { migrationSalt.fill(0) }
+                if (generation != ownerGeneration) return@withLock false
+            }
             _isUnlocked = true
             _isDecoyMode = true
         }
@@ -257,12 +276,17 @@ class HiddenVaultService(
 
     private suspend fun verifyDecoy(pin: String, encoded: String): Boolean {
         return try {
-            val parts = encoded.split(':')
+// Superseded source retained below per additive-only review rule.
+//             val parts = encoded.split(':')
+            val versioned = encoded.removePrefix("v1:")
+            val parts = versioned.split(':')
             if (parts.size != 2) return false
-            val decoder = java.util.Base64.getDecoder()
-            val salt = decoder.decode(parts[0])
+            // Prior java.util.Base64 decoder requires API26; this app supports API24.
+            // val decoder = java.util.Base64.getDecoder()
+            val salt = android.util.Base64.decode(parts[0], android.util.Base64.DEFAULT)
             try {
-                val expected = decoder.decode(parts[1])
+                // Prior: val expected = decoder.decode(parts[1])
+                val expected = android.util.Base64.decode(parts[1], android.util.Base64.DEFAULT)
                 try {
                     val candidate = decoyHash(pin, salt)
                     try { MessageDigest.isEqual(expected, candidate) }
@@ -295,9 +319,14 @@ class HiddenVaultService(
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val hash = decoyHash(decoyPin, salt)
         try {
-            val encoder = java.util.Base64.getEncoder()
+            // Prior: val encoder = java.util.Base64.getEncoder()
             check(generation == ownerGeneration && isUnlocked && !isDecoyMode) { "Session changed. Authenticate again" }
-            secureStorage.write("$key.hash", "${encoder.encodeToString(salt)}:${encoder.encodeToString(hash)}")
+// Superseded source retained below per additive-only review rule.
+//             secureStorage.write("$key.hash", "${encoder.encodeToString(salt)}:${encoder.encodeToString(hash)}")
+            // Prior active write used the API26 java.util.Base64 encoder.
+            val encodedSalt = android.util.Base64.encodeToString(salt, android.util.Base64.NO_WRAP)
+            val encodedHash = android.util.Base64.encodeToString(hash, android.util.Base64.NO_WRAP)
+            secureStorage.write("$key.hash", "v1:$encodedSalt:$encodedHash")
             secureStorage.delete(key) // Remove a legacy plaintext value only after the hash is saved.
         } finally { salt.fill(0); hash.fill(0) }
     }

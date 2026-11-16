@@ -124,9 +124,39 @@ class PreferenceGroupsParityTest {
         assertEquals(UniversalPreferences(), UniversalPreferences.fromMap(UniversalPreferences().toMap()))
     }
 
-    @Test fun `privacy toMap omits antiDisappearingMessages and hideOnlineStatus like Dart`() {
-        val m = PrivacyPreferences().toMap()
-        assertFalse(m.containsKey("antiDisappearingMessages"))
-        assertFalse(m.containsKey("hideOnlineStatus"))
+//     @Test fun `privacy toMap omits antiDisappearingMessages and hideOnlineStatus like Dart`() {
+//         val m = PrivacyPreferences().toMap()
+//         assertFalse(m.containsKey("antiDisappearingMessages"))
+//         assertFalse(m.containsKey("hideOnlineStatus"))
+//     }
+    @Test fun `privacy map persists both formerly omitted fields`() {
+        val original = PrivacyPreferences(antiDisappearingMessages = false, hideOnlineStatus = true)
+        assertEquals(false, original.toMap()["antiDisappearingMessages"])
+        assertEquals(true, original.toMap()["hideOnlineStatus"])
+        assertEquals(original, PrivacyPreferences.fromMap(original.toMap()))
+    }
+
+    @Test fun `every privacy field survives a nondefault roundtrip`() {
+        val defaults = PrivacyPreferences().toMap()
+        val fields = PrivacyPreferences::class.java.declaredFields
+            .filterNot { java.lang.reflect.Modifier.isStatic(it.modifiers) }.map { it.name }.toSet()
+        assertEquals(fields, defaults.keys)
+        // Flip every Boolean, replace every String and populate every List.
+        val varied = defaults.mapValues { (_, value) -> when (value) {
+            is Boolean -> !value
+            is String -> "roundtrip value"
+            is List<*> -> listOf("test-one", "test-two")
+            else -> error("Add coverage for a new privacy value type")
+        } }
+        val model = PrivacyPreferences.fromMap(varied)
+        assertEquals(varied, model.toMap())
+        assertEquals(model, PrivacyPreferences.fromMap(model.toMap()))
+    }
+
+    @Test fun `older privacy maps retain existing defaults`() {
+        val old = PrivacyPreferences().toMap() - setOf("antiDisappearingMessages", "hideOnlineStatus")
+        val restored = PrivacyPreferences.fromMap(old)
+        assertEquals(true, restored.antiDisappearingMessages)
+        assertEquals(false, restored.hideOnlineStatus)
     }
 }

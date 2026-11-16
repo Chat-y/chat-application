@@ -114,6 +114,8 @@ class CallHistoryService(
                 },
                 timestamp = startedAt,
                 durationSeconds = durationSeconds,
+                outcome = com.example.chat.domain.models.callOutcomeFromStatus(status),
+                wasConnected = connectedAt != null,
                 isEncrypted = true,
             )
         }

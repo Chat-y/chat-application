@@ -63,7 +63,11 @@ fun CreatePollDialog(onCancel: () -> Unit, onCreate: (PollDraft) -> Unit) {
         onDismissRequest = onCancel,
         title = { Text("Create poll") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                // Scroll removed (was Modifier.verticalScroll(rememberScrollState())):
+                // ChatyConfirmationDialog's body already scrolls; an inner unbounded scrollable
+                // is measured with infinite max height and throws at first composition.
+            ) {
                 OutlinedTextField(
                     value = question,
                     onValueChange = { if (it.length <= 240) question = it },

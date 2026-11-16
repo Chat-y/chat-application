@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="camera_low_battery_video_warning">Low battery. Video recording may stop. Charge your phone when possible.</string>
+</resources>

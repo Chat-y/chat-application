@@ -1,6 +1,9 @@
 package com.example.chat.ui.camera
 
+import com.example.chat.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
@@ -39,29 +42,44 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
     var expanded by remember { mutableStateOf(false) }
     val presets = remember(min,max) { zoomPresetsFor(min,max) }
     val showSlider = (expanded || forceSlider) && max > min
-    Column(Modifier.fillMaxWidth().padding(horizontal=20.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val tight = cameraControlsTight(configuration.screenWidthDp, configuration.screenHeightDp)
+    val presetsLabel = stringResource(R.string.camera_zoom_presets)
+    val zoomLabel = stringResource(R.string.camera_zoom)
+    val zoomState = stringResource(R.string.camera_zoom_ratio, proposed)
+    val zoomValueLabel = stringResource(R.string.camera_zoom_value, proposed)
+    // CAM-R1-058 prior fixed gutter: Column(Modifier.fillMaxWidth().padding(horizontal=20.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().padding(horizontal=(if (tight) 12 else 20).dp),horizontalAlignment=Alignment.CenterHorizontally) {
         if(!showSlider) {
             // Compact pill (reference idle): preset values in a dark pill, active yellow.
             Row(
                 Modifier
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color(0x99141414))
-                    .clickable(enabled=enabled){expanded=true}
-                    .padding(horizontal=8.dp,vertical=2.dp)
-                    .semantics{contentDescription="Zoom presets"},
+                    // CAM-R4-034 previous: .clickable(enabled=enabled){expanded=true}
+                    .cameraActionFocusRing().clickable(enabled=enabled){expanded=true}
+                    // CAM-R4-030 previous spacing: .padding(horizontal=8.dp,vertical=2.dp)
+                    .padding(horizontal=8.dp,vertical=4.dp)
+                    // CAM-R4-004 prior: .semantics{contentDescription="Zoom presets"},
+                    .semantics{contentDescription=presetsLabel},
                 verticalAlignment=Alignment.CenterVertically,
             ) {
                 presets.forEach { ratio ->
                     val active=abs(current-ratio)<.05f
+                    val presetLabel = stringResource(if(ratio%1f==0f) R.string.camera_zoom_preset_whole else R.string.camera_zoom_preset_fraction, ratio)
                     Text(
                         String.format(java.util.Locale.ROOT,if(ratio%1f==0f)"%.0fx" else "%.1fx",ratio),
                         color = if(active) Color(0xFFFFD54F) else Color.White,
                         fontSize = 12.sp,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable(enabled=enabled){ if(active) expanded=true else {proposed=ratio;onZoom(ratio)} }
-                            .padding(horizontal=10.dp,vertical=6.dp)
-                            .semantics{contentDescription=String.format(java.util.Locale.ROOT,if(ratio%1f==0f)"Zoom %.0fx" else "%.1fx",ratio);selected=active;role=Role.Button},
+                            // CAM-R4-034 previous: .clickable(enabled=enabled){ if(active) expanded=true else {proposed=ratio;onZoom(ratio)} }
+                            .cameraActionFocusRing().clickable(enabled=enabled){ if(active) expanded=true else {proposed=ratio;onZoom(ratio)} }
+                            // CAM-R1-058 previous preset padding: .padding(horizontal=10.dp,vertical=6.dp)
+                            // CAM-R4-030 previous spacing: .padding(horizontal=(if (tight) 6 else 10).dp,vertical=6.dp)
+                            .padding(horizontal=(if (tight) 8 else 12).dp,vertical=8.dp)
+                            // CAM-R4-004 prior: .semantics{contentDescription=String.format(java.util.Locale.ROOT,if(ratio%1f==0f)"Zoom %.0fx" else "%.1fx",ratio);selected=active;role=Role.Button},
+                            .semantics{contentDescription=presetLabel;selected=active;role=Role.Button},
                     )
                 }
             }
@@ -72,8 +90,10 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                 color = Color.White,
                 fontSize = 13.sp,
                 modifier = Modifier
-                    .clickable(enabled=enabled && !forceSlider){expanded=false}
-                    .semantics{contentDescription=String.format(java.util.Locale.ROOT,"Zoom value %.1fx",proposed)},
+                    // CAM-R4-034 previous: .clickable(enabled=enabled && !forceSlider){expanded=false}
+                    .cameraActionFocusRing().clickable(enabled=enabled && !forceSlider){expanded=false}
+                    // CAM-R4-004 prior: .semantics{contentDescription=String.format(java.util.Locale.ROOT,"Zoom value %.1fx",proposed)},
+                    .semantics{contentDescription=zoomValueLabel},
             )
             Spacer(Modifier.height(4.dp))
             BoxWithConstraints(
@@ -82,9 +102,13 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                     .height(44.dp)
                     .clip(RoundedCornerShape(22.dp))
                     .background(Color(0x99141414))
+                    .cameraActionFocusRing()
+                    .focusable(enabled = enabled)
                     .semantics {
-                        contentDescription = "Camera zoom"
-                        stateDescription = String.format(java.util.Locale.ROOT, "Zoom %.1fx", proposed)
+                        // CAM-R4-004 prior: contentDescription = "Camera zoom"
+                        contentDescription = zoomLabel
+                        // CAM-R4-004 prior: stateDescription = String.format(java.util.Locale.ROOT, "Zoom %.1fx", proposed)
+                        stateDescription = zoomState
                         progressBarRangeInfo = ProgressBarRangeInfo(proposed, min..max)
                         setProgress { requested ->
                             if (enabled) { proposed = clampCameraZoom(requested, min, max); onZoom(proposed); true } else false
@@ -115,6 +139,7 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                 Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad+(maxWidth-trackPad*2-14.dp)*f).size(14.dp).clip(CircleShape).background(Color(0xFFFFD54F)))
             }
         }
-        if(current>=4f) Text("High zoom loses detail; hold steady.",color=Color.White)
+        // CAM-R4-004 prior: if(current>=4f) Text("High zoom loses detail; hold steady.",color=Color.White)
+        if(current>=4f) Text(stringResource(R.string.camera_zoom_warning),color=Color.White)
     }
 }

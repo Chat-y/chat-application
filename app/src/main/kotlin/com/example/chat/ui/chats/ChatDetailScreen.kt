@@ -3,6 +3,7 @@ package com.example.chat.ui.chats
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
@@ -112,6 +113,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import com.example.chat.ui.kit.rememberChatyReduceMotion
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -233,6 +237,7 @@ fun ChatDetailScreen(
     showHeaderName: Boolean = true,
     showHeaderCalls: Boolean = true,
     showPresenceLine: Boolean = true,
+    headerAppearance: com.example.chat.ui.chats.detail.ConversationHeaderAppearance = com.example.chat.ui.chats.detail.ConversationHeaderAppearance(),
     headerBarColor: Long? = null,
     presencePillColor: Long? = null,
     presenceTextColor: Long? = null,
@@ -301,6 +306,10 @@ fun ChatDetailScreen(
     // Dart ChatDetailScreen.initialMessageId (chat_detail_screen.dart:65): deep-link
     // target from the starred-messages screen; jumped to once messages arrive.
     initialMessageId: String? = null,
+    // MV-R3-050: one-shot viewer-close anchor (data-only Int-counter consumption, like
+    // infoSearchRequest; no callback in either direction).
+    viewerAnchorId: String? = null,
+    viewerAnchorRequest: Int = 0,
     onAttachmentAction: (AttachmentAction) -> Unit = {},
     attachmentReviewImages: ((List<android.net.Uri>) -> Unit)? = null,
     attachmentDirectSendImages: ((List<android.net.Uri>) -> Unit)? = null,
@@ -321,6 +330,7 @@ fun ChatDetailScreen(
     entryStyle: String = "Stock",
     composerColors: ComposerColors? = null,
     composerTemplate: ComposerTemplate = ComposerTemplate(ComposerActionPlacement.integrated),
+    composerAppearance: com.example.chat.ui.chats.detail.ConversationComposerAppearance = com.example.chat.ui.chats.detail.ConversationComposerAppearance(),
     // Global conversation prefs (preferencesController.conversation): emoji picker
     // colors, composer bar bg, bubble prefs - Dart `conv` / `convPrefs` consumers.
     convPrefs: ConversationPreferences = ConversationPreferences(),
@@ -351,6 +361,8 @@ fun ChatDetailScreen(
     /** G1: Own-server GIF tab draft. Provider requests and sends remain disabled. */
     gifApiKey: String = "",
     onGifSend: ((com.example.chat.core.gif.GifResult) -> Unit)? = null,
+    dateChip: com.example.chat.ui.chats.detail.ConversationDateChip = com.example.chat.ui.chats.detail.ConversationDateChip.Default,
+    unreadChatCount: Int = 0,
 ) {
     androidx.compose.runtime.CompositionLocalProvider(
         com.example.chat.ui.chats.detail.LocalEmojiPack provides
@@ -367,6 +379,7 @@ fun ChatDetailScreen(
     val draftOwner = Triple(conversation.id, currentUserId, messageSessionIdentity)
     val currentDraftOwner by rememberUpdatedState(draftOwner)
     val currentActionMessages by rememberUpdatedState(messages)
+    val currentActionTasks by rememberUpdatedState(tasks)
     var draftRevision by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
     var recoverableDraft by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ConversationRecoverableDraft?>(null) }
     var recoveredViewOnceNeedsChoice by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
@@ -443,7 +456,7 @@ fun ChatDetailScreen(
     var quoteMessageId by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableStateOf<String?>(null) }
 
     var copySelectionMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
-    var taskMenuTarget by remember { mutableStateOf<Pair<ChatTask, Rect>?>(null) }
+    var taskMenuTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Pair<ChatTask, Rect>?>(null) }
     var contextMenuAnchor by remember { mutableStateOf<Rect?>(null) }
     var attachmentSheetOpen by remember { mutableStateOf(false) }
     var chatMenuOpen by remember { mutableStateOf(initialChatMenuOpen) }
@@ -748,6 +761,52 @@ fun ChatDetailScreen(
             pendingScrollTarget = null
         }
     }
+    // MV-R3-050: viewer-close anchor. Scroll the ORIGINAL opened message's row into view
+    // (instant under reduced motion, animated otherwise) and request INPUT focus on it.
+    // Input focus only: whether an accessibility service moves AT focus afterwards is
+    // platform/service behavior and is NOT claimed here.
+    val viewerAnchorReduceMotion = rememberChatyReduceMotion()
+    val viewerAnchorFocusRequesters = remember(conversation.id, currentUserId, messageSessionIdentity) { mutableMapOf<String, FocusRequester>() }
+    var viewerAnchorConsumed by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
+    LaunchedEffect(viewerAnchorId, viewerAnchorRequest, timelineRows, loadingMessages) {
+        if (viewerAnchorRequest == 0 || viewerAnchorRequest == viewerAnchorConsumed) return@LaunchedEffect
+        val target = viewerAnchorId ?: return@LaunchedEffect
+        // Same message validity the viewer required when it opened (not deleted or revoked).
+        val valid = messages.firstOrNull { it.id == target && !it.isDeletedForEveryone && !it.isDeletedForMe && !it.isRevokedBySender }
+        if (valid == null) {
+            // Absent or no longer valid once history finished loading: silent skip, no snackbar.
+            if (!loadingMessages) viewerAnchorConsumed = viewerAnchorRequest
+            return@LaunchedEffect
+        }
+        // rowIndex resolves the CONTAINING row when the message is a non-anchor album member.
+        val rowIndex = com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowIndex(timelineRows, valid.id)
+        if (rowIndex < 0) {
+            if (!loadingMessages) viewerAnchorConsumed = viewerAnchorRequest // Not in the loaded history: silent skip.
+            return@LaunchedEffect
+        }
+        // Bounded map that preserves instance identity: drop OTHER anchors' entries, but never
+        // replace this target's instance - a composed row may already have attached it, and the
+        // map is not snapshot state, so replacement would never re-attach the modifier.
+        viewerAnchorFocusRequesters.keys.retainAll(setOf(target))
+        val focusRequester = viewerAnchorFocusRequesters.getOrPut(target) { FocusRequester() }
+        if (viewerAnchorReduceMotion) listState.scrollToItem(rowIndex) else listState.animateScrollToItem(rowIndex)
+        // Bounded attempts: frame waits give the containing row's modifier attachment a chance to
+        // land before the request. Frame waits do NOT guarantee ordering; only the expected
+        // not-attached failure is caught, cancellation propagates, and the request stays
+        // unconsumed for a later retry when cancelled.
+        withFrameNanos { }
+        try {
+            focusRequester.requestFocus()
+        } catch (expected: IllegalStateException) {
+            withFrameNanos { }
+            try {
+                focusRequester.requestFocus()
+            } catch (expectedAgain: IllegalStateException) {
+                // Row still not attached (e.g. a concurrent scroll): focus skipped, scroll stands.
+            }
+        }
+        viewerAnchorConsumed = viewerAnchorRequest
+    }
     var previousCount by remember(conversation.id, messageSessionIdentity) { mutableIntStateOf(messages.size) }
     var openedAtLatest by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
     LaunchedEffect(conversation.id, messageSessionIdentity, messages.isNotEmpty()) {
@@ -835,8 +894,13 @@ fun ChatDetailScreen(
     // Dart call-site lookup (chat_detail_screen.dart:2966-2984): firstWhere with a
     // synthesized placeholder task in orElse, so a linked id missing from the tasks
     // list still yields a card with message-derived fields (dueAt = createdAt + 3d).
-    fun resolveTask(message: ChatMessage): ChatTask? = message.linkedTaskId?.let { id ->
-        tasks.firstOrNull { it.id == id }
+    fun currentTask(id: String): ChatTask? {
+        if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return null
+        return currentActionTasks.singleOrNull { it.id == id && it.sourceConversationId == conversation.id }
+    }
+    fun resolveTask(message: ChatMessage): ChatTask? = currentPermittedMessage(message.id,
+        com.example.chat.ui.chats.detail.SelectionAction.star)?.linkedTaskId?.let { id ->
+        currentTask(id)
         /* Legacy synthesized task intentionally disabled. No authoritative due date exists.
         tasks.firstOrNull { it.id == id } ?: ChatTask(
             id = id,
@@ -855,10 +919,11 @@ fun ChatDetailScreen(
 
     // Dart _toggleTaskStatus: lightImpact haptic + completed<->inbox flip (source :1200).
     fun toggleTask(task: ChatTask) {
+        val current = currentTask(task.id) ?: return
         ChatyHapticsPort.light(menuView)
         onUpdateTaskStatus(
-            task.id,
-            if (task.status == TaskStatus.completed) TaskStatus.inbox else TaskStatus.completed,
+            current.id,
+            if (current.status == TaskStatus.completed) TaskStatus.inbox else TaskStatus.completed,
         )
     }
 
@@ -1061,10 +1126,8 @@ fun ChatDetailScreen(
         val editTarget = editingMessage
         if (editTarget != null) {
             sending = true
-            handleComposerChanged("")
-            editingMessage = null
-            replyTarget = null
             val editClearedRevision = draftRevision
+            // Keep the persisted draft and edit banner until this callback confirms completion.
             scope.launch {
                 try {
                     if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
@@ -1074,10 +1137,19 @@ fun ChatDetailScreen(
                         "The original message changed. Review the restored edit before trying again."
                     }
                     onEditMessage(currentTarget.id, text)
+                    if (currentDraftOwner == submittedOwner && isMessageSessionCurrent() &&
+                        draftRevision == editClearedRevision && composerText == submittedDraft) {
+                        handleComposerChanged(""); editingMessage = null; replyTarget = null
+                    }
                 } catch (error: Exception) {
-                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    if (error is kotlinx.coroutines.CancellationException) {
+                        if (currentDraftOwner == submittedOwner && draftRevision != editClearedRevision) {
+                            recoverableDraft = ConversationRecoverableDraft(submittedDraft, ConversationRecoverableDraft.Kind.edit, editTarget.id)
+                        }
+                        throw error
+                    }
                     if (currentDraftOwner != submittedOwner) return@launch
-                    when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
+                    if (composerText != submittedDraft || draftRevision != editClearedRevision) when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
                         currentDraftOwner == submittedOwner, editClearedRevision, draftRevision, composerText)) {
                         com.example.chat.core.messages.ConversationDraftRecovery.Decision.restore -> {
                             val currentTarget = currentEditableMessage(editTarget.id)
@@ -1107,21 +1179,32 @@ fun ChatDetailScreen(
             return
         }
         sending = true
-        handleComposerChanged("")
-        replyTarget = null
         val clearedRevision = draftRevision
+        // Leave the current persisted draft intact through cancellation/process interruption.
         scope.launch {
+            var sendConfirmed = false
             try {
                 if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
                 onSend(text)
-                if (currentDraftOwner != submittedOwner) return@launch
+                sendConfirmed = true
+                if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
+                if (draftRevision == clearedRevision && composerText == submittedDraft) {
+                    handleComposerChanged(""); replyTarget = null
+                }
                 // Chaty #33: sending lands on the newest message even when the
                 // user was scrolled up reading history.
                 scrollToBottom()
             } catch (error: Exception) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (sendConfirmed) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    return@launch // Scroll failure must never recover an already-sent draft.
+                }
+                if (error is kotlinx.coroutines.CancellationException) {
+                    if (currentDraftOwner == submittedOwner && draftRevision != clearedRevision) recoverableDraft = ConversationRecoverableDraft(submittedDraft)
+                    throw error
+                }
                 if (currentDraftOwner != submittedOwner) return@launch
-                when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
+                if (composerText != submittedDraft || draftRevision != clearedRevision) when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
                     currentDraftOwner == submittedOwner, clearedRevision, draftRevision, composerText)) {
                     com.example.chat.core.messages.ConversationDraftRecovery.Decision.restore -> handleComposerChanged(submittedDraft)
                     com.example.chat.core.messages.ConversationDraftRecovery.Decision.keepSeparately -> recoverableDraft = ConversationRecoverableDraft(submittedDraft)
@@ -1184,6 +1267,19 @@ fun ChatDetailScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        val translucentHeaderWallpaper = headerAppearance.effective().alphaPercent < 100
+        // Opt-in only: one continuous wallpaper behind header and message region.
+        if (translucentHeaderWallpaper) {
+                ChatWallpaper(
+                    theme = theme,
+                    wallpaperType = wallpaperType,
+                    patternId = wallpaperOverride ?: theme.wallpaperId,
+                    profileColorHex = conversation.avatarColorHex,
+                    imagePath = wallpaperPath,
+                    profilePicWallpaper = wallpaperProfilePic,
+                    avatarUrl = wallpaperAvatarUrl,
+                )
+        }
         Column(Modifier.fillMaxSize()) {
             if (isSelectionMode && contextMenuMessage == null) {
                 SelectionHeader(theme, selectedMessages.size) { selectedIds = emptySet() }
@@ -1215,6 +1311,7 @@ fun ChatDetailScreen(
                     showHeaderAvatar = showHeaderAvatar,
                     showHeaderName = showHeaderName,
                     showPresenceLine = showPresenceLine,
+                    headerAppearance = headerAppearance, unreadChatCount = unreadChatCount,
                     showHeaderCalls = showHeaderCalls,
                     headerBarColor = headerBarColor,
                     presencePillColor = presencePillColor,
@@ -1249,7 +1346,8 @@ fun ChatDetailScreen(
                 )
             }
 
-            val localPinned = remember(messages) { com.example.chat.core.messages.LocalPinnedMessagePolicy.latest(messages) }
+            val localPinned = remember(messages) { com.example.chat.core.messages.LocalPinnedMessagePolicy.latest(
+                messages.filter { com.example.chat.ui.chats.detail.SelectionAction.copy in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(it)) }) }
             if (localPinned != null) {
                 Box(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth().background(Color(theme.cardColor))
@@ -1282,7 +1380,8 @@ fun ChatDetailScreen(
 
             var messageRegionTop by remember { mutableStateOf(0f) }
             Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { messageRegionTop = it.boundsInWindow().top }) {
-                ChatWallpaper(
+                // Original/default message-only wallpaper retained when opacity is100.
+                if (!translucentHeaderWallpaper) ChatWallpaper(
                     theme = theme,
                     wallpaperType = wallpaperType,
                     patternId = wallpaperOverride ?: theme.wallpaperId,
@@ -1316,7 +1415,12 @@ fun ChatDetailScreen(
                         key = { index, row -> timelineRowKeys.getOrNull(index) ?: "row_${row.anchor.id}_$index" },
                         contentType = { _, row -> if (row.messages.size > 1) "media-album" else row.anchor.type },
                     ) { rowIndex, row ->
-                        Column(Modifier.fillMaxWidth().listEntrance(conversationListAnimation, row.anchor.id)) {
+                        // MV-R3-050 prior: Column(Modifier.fillMaxWidth().listEntrance(conversationListAnimation, row.anchor.id)) {
+                        // MV-R3-050: anchor membership includes non-anchor album members, matching rowIndex.
+                        val viewerAnchor = viewerAnchorId
+                        Column(Modifier.fillMaxWidth().listEntrance(conversationListAnimation, row.anchor.id)
+                            // MV-R3-050: only the viewer-close anchor's containing row takes input focus.
+                            .then(if (viewerAnchor != null && row.messages.any { it.id == viewerAnchor }) Modifier.focusRequester(viewerAnchorFocusRequesters.getOrPut(viewerAnchor) { FocusRequester() }).focusable() else Modifier)) {
                         if (rowIndex == firstUnreadRowIndex && firstUnreadRowIndex >= 0) {
                             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                                 Text("Unread messages",
@@ -1330,8 +1434,9 @@ fun ChatDetailScreen(
                                 Text(com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.dayAt(timelineRows, rowIndex, timelineZone)
                                     .format(dayHeaderFormatter),
                                     color = Color(theme.secondaryTextColor), fontSize = 11.sp,
-                                    modifier = Modifier.background(Color(theme.cardColor), RoundedCornerShape(12.dp))
-                                        .padding(horizontal = 10.dp, vertical = 4.dp))
+                                    // Previous/default date shape12dp,padding10x4dp; no timeline key/order changes.
+                                    modifier = Modifier.background(Color(theme.cardColor), RoundedCornerShape(dateChip.radius.dp))
+                                        .padding(horizontal = dateChip.horizontal.dp, vertical = dateChip.vertical.dp))
                             }
                         }
                         val message = row.anchor
@@ -1352,6 +1457,7 @@ fun ChatDetailScreen(
                         val bubble: @Composable () -> Unit = { ChatMessageBubble(
                             message = if (localText != null) message.copy(text = localText) else message,
                             isMe = isMine,
+                            currentUserId = currentUserId,
                             theme = theme,
                             // Dart: poll messages ([POLL] prefix) open the poll sheet on bubble tap.
                             modifier = if (message.text.startsWith("[POLL] ")) {
@@ -1579,6 +1685,7 @@ fun ChatDetailScreen(
                     }
                 }
                 AnchoredMessageContextMenu(
+                    currentMessages = messages, sessionCurrent = currentDraftOwner == draftOwner && isMessageSessionCurrent(),
                     messageState = contextMenuMessageState, anchorRect = contextMenuAnchor, regionTop = messageRegionTop,
                     currentUserId = currentUserId, theme = theme, onAction = ::runAction,
                     onToggleReaction = ::toggleCurrentReaction, reactionTargetState = emojiReactionTargetState,
@@ -1754,12 +1861,14 @@ fun ChatDetailScreen(
                             strokeWidth = 1.dp.toPx(),
                         )
                     }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    // Previous/default outer composer padding:12dp horizontal,8dp vertical.
+                    .padding(horizontal = 12.dp, vertical = composerAppearance.verticalPaddingDp.dp),
             ) {
                 ChatEntryBar(
                     entryStyle = entryStyle,
                     colors = composerColors ?: ComposerColors.resolve(theme),
                     template = composerTemplate,
+                    appearance = composerAppearance,
                     theme = theme,
                     text = composerText,
                     onTextChange = ::handleComposerChanged,
@@ -1910,12 +2019,27 @@ fun ChatDetailScreen(
                 },
                 com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.isStarred) "Unstar" else "Star", standard) { runAction(tapped, MessageActionType.star) },
                 com.example.chat.ui.chats.detail.MessageMoreOption("Starred messages", true) { showStarredInChat = true },
-                com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.id in readAlertWatchedIds) "Stop Read Notification" else "Notify When Message Read", com.example.chat.ui.chats.detail.ReadAlertPolicy.canWatch(tapped, currentUserId, conversation.isDirect) || tapped.id in readAlertWatchedIds) { scope.launch {
-                    try {
-                        withContext(Dispatchers.IO) { if (tapped.id in readAlertController.watched) readAlertController.cancel(tapped.id) else readAlertController.watch(tapped.id) }
-                        readAlertWatchedIds = readAlertController.watched
-                    } catch (e: Exception) { snackbarHostState.showSnackbar(e.message ?: "Could not save read notification") }
-                } },
+                com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.id in readAlertWatchedIds) "Stop Read Notification" else "Notify When Message Read", com.example.chat.ui.chats.detail.ReadAlertPolicy.canWatch(tapped, currentUserId, conversation.isDirect) || tapped.id in readAlertWatchedIds) {
+                    val current = currentPermittedMessage(tapped.id, com.example.chat.ui.chats.detail.SelectionAction.star)
+                    if (current != null) {
+                        val cancelling = current.id in readAlertController.watched
+                        if (cancelling || com.example.chat.ui.chats.detail.ReadAlertPolicy.canWatch(current, currentUserId, conversation.isDirect)) scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    if (currentDraftOwner == draftOwner && isMessageSessionCurrent()) {
+                                        val live = currentPermittedMessage(current.id, com.example.chat.ui.chats.detail.SelectionAction.star)
+                                        if (live != null && (cancelling || com.example.chat.ui.chats.detail.ReadAlertPolicy.canWatch(live, currentUserId, conversation.isDirect))) {
+                                            if (cancelling) readAlertController.cancel(live.id) else readAlertController.watch(live.id)
+                                        }
+                                    }
+                                }
+                                if (currentDraftOwner == draftOwner && isMessageSessionCurrent()) readAlertWatchedIds = readAlertController.watched
+                            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel } catch (_: Exception) {
+                                if (currentDraftOwner == draftOwner && isMessageSessionCurrent()) snackbarHostState.showSnackbar("Could not save read notification")
+                            }
+                        }
+                    }
+                },
                 com.example.chat.ui.chats.detail.MessageMoreOption("Message info", true) { infoMessage = tapped },
             ),
             onDismiss = { singleTapMessage = null },
@@ -2038,7 +2162,7 @@ fun ChatDetailScreen(
 
     // Dart _showTaskContextMenu (chat_detail_screen.dart:1208-1254): section titled
     // with the task title, anchored at the chip rect, no reaction rail.
-    taskMenuTarget?.let { (menuTask, taskAnchor) ->
+    taskMenuTarget?.let { (selectedTask, taskAnchor) -> currentTask(selectedTask.id)?.let { menuTask ->
         val taskCompleted = menuTask.status == TaskStatus.completed
         AppContextMenu(
             onDismiss = { taskMenuTarget = null },
@@ -2061,14 +2185,14 @@ fun ChatDetailScreen(
                             ContextMenuItem(
                                 icon = Icons.Outlined.Edit,
                                 label = "Edit task",
-                                onTap = { onEditTask(menuTask) },
+                                onTap = { currentTask(menuTask.id)?.let(onEditTask) },
                             ),
                         )
                         add(
                             ContextMenuItem(
                                 icon = Icons.Rounded.OpenInNew,
                                 label = "Task details",
-                                onTap = { onOpenTaskDetails(menuTask) },
+                                onTap = { currentTask(menuTask.id)?.let(onOpenTaskDetails) },
                             ),
                         )
                         if (menuTask.sourceMessageId != null) {
@@ -2077,7 +2201,7 @@ fun ChatDetailScreen(
                                     icon = Icons.Outlined.ChatBubbleOutline,
                                     label = "Go to source message",
                                     // Dart _highlightMessage: highlight only, no scroll jump.
-                                    onTap = { menuTask.sourceMessageId?.let(::flashHighlight) },
+                                    onTap = { currentTask(menuTask.id)?.sourceMessageId?.let { id -> if (currentActionMessages.any { it.id == id }) flashHighlight(id) } },
                                 ),
                             )
                         }
@@ -2086,7 +2210,7 @@ fun ChatDetailScreen(
                                 icon = Icons.Rounded.DeleteOutline,
                                 label = "Delete task",
                                 isDestructive = true,
-                                onTap = { onDeleteTask(menuTask.id) },
+                                onTap = { currentTask(menuTask.id)?.let { onDeleteTask(it.id) } },
                             ),
                         )
                     },
@@ -2098,7 +2222,7 @@ fun ChatDetailScreen(
             destructiveColor = Color(theme.dangerColor),
             anchorRect = taskAnchor,
         )
-    }
+    } }
 
     if (attachmentSheetOpen) {
         // Default model: the attachment gallery sheet (opens half height; pulling up
@@ -2249,9 +2373,9 @@ fun ChatDetailScreen(
                     onClick = {
                         clearConfirmOpen = false
                         onClearConversation()
-                        openedViewOnceIds = emptySet()
-                        pendingBelowCount = 0
-                        scope.launch { snackbarHostState.showSnackbar("Conversation cleared") }
+                        // Unit callback starts async host work, not a confirmed clear.
+                        // Retain view-once consumed state until a future confirmed-result contract.
+                        scope.launch { snackbarHostState.showSnackbar("Clear requested. Check the chat for the result.") }
                     },
                 ) {
                     Text("Clear", color = Color(theme.dangerColor))
@@ -2283,8 +2407,10 @@ fun ChatDetailScreen(
 private val selectionCopyFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ConversationHeader(
+// Previously private; reused by the appearance preview with inert callbacks.
+internal fun ConversationHeader(
     theme: ThemeConfig,
     conversation: Conversation,
     presenceText: String?,
@@ -2314,19 +2440,70 @@ private fun ConversationHeader(
     onToggleSecureChannel: (() -> Unit)?,
     onBlockContact: (() -> Unit)?,
     onClearConversation: () -> Unit,
+    headerTrailingContent: (@Composable () -> Unit)? = null,
+    headerAppearance: com.example.chat.ui.chats.detail.ConversationHeaderAppearance = com.example.chat.ui.chats.detail.ConversationHeaderAppearance(),
+    unreadChatCount: Int = 0,
 ) {
+    val appearance = headerAppearance.effective()
+    val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val headerVerticalPadding = com.example.chat.ui.chats.detail.conversationHeaderVerticalPadding(appearance.compactLandscape, landscape)
+    val moveCallsToOverflow = com.example.chat.ui.chats.detail.conversationHeaderCallsInOverflow(showHeaderCalls, appearance.callsInOverflow)
+
+    val headerStrings = androidx.compose.ui.platform.LocalContext.current.resources
+    val systemAnimationsAllowed = if (appearance.statusMarqueeOnTap) com.example.chat.ui.kit.rememberSystemAnimationsAllowed() else false
+    var marqueeRequested by remember(presenceText, appearance.statusMarqueeOnTap) { mutableStateOf(false) }
+    val marqueeActive = com.example.chat.ui.chats.detail.conversationHeaderMarqueeActive(
+        appearance.statusMarqueeOnTap, marqueeRequested, systemAnimationsAllowed)
+
+    val avatarShape = if (appearance.roundedSquareAvatar) RoundedCornerShape(8.dp) else CircleShape
+    val chosenNameWeight = FontWeight(appearance.nameWeightValue())
+    /* Previous inline weight selection retained.
+    val chosenNameWeight = when (appearance.nameWeight) {
+        "regular" -> FontWeight.Normal
+        "medium" -> FontWeight.Medium
+        "bold" -> FontWeight.Bold
+        else -> FontWeight.W800
+    }
+    */
+    val readableBarColor = com.example.chat.ui.kit.opaqueConversationArgb(headerBarColor)
+    val readablePresenceBackground = com.example.chat.ui.kit.opaqueConversationArgb(presencePillColor)
+    val readablePresenceText = com.example.chat.ui.kit.opaqueConversationArgb(presenceTextColor)
+    val headerCanvas = readableBarColor ?: theme.surfaceColor
+    val translucent = appearance.alphaPercent < 100
+    val transparencyPlan = remember(headerCanvas,appearance.alphaPercent) { com.example.chat.ui.chats.detail.conversationHeaderTranslucency(headerCanvas,appearance.alphaPercent) }
+    val headerPrimaryColor = if (translucent) transparencyPlan.foreground else if (appearance.autoContrast) com.example.chat.ui.chats.detail.conversationHeaderContrastForeground(headerCanvas) else theme.primaryTextColor
+    val headerIconColor = if (translucent) transparencyPlan.foreground else appearance.iconsColor ?: headerPrimaryColor
+    val dividerColor = if (translucent) transparencyPlan.foreground else com.example.chat.ui.chats.detail.conversationHeaderContrastForeground(headerCanvas)
+
     Row(
+        // Default production64dp minimum:48dp interactive row +8dp above/below.
+        // Explicit compact landscape removes padding only. Content/large fonts may grow; targets stay48dp.
         modifier = Modifier
+            .testTag("conversation-header")
             .fillMaxWidth()
-            .background(Color(headerBarColor ?: theme.surfaceColor))
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            // Default remains opaque. Effective alpha can rise for worst-case wallpaper contrast.
+            .background(Color(headerCanvas).copy(alpha = if (translucent) transparencyPlan.percent / 100f else 1f))
+            .then(if (appearance.divider) Modifier.drawBehind {
+                val stroke = 1.dp.toPx()
+                drawLine(Color(dividerColor), androidx.compose.ui.geometry.Offset(0f, size.height - stroke / 2),
+                    androidx.compose.ui.geometry.Offset(size.width, size.height - stroke / 2), strokeWidth = stroke)
+            } else Modifier)
+            // Previous/default: .padding(horizontal = 8.dp, vertical = 8.dp)
+            .padding(horizontal = 8.dp, vertical = headerVerticalPadding.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
                 semanticLabel = "Back",
-                color = Color(theme.primaryTextColor),
+                color = Color(headerIconColor), // Previous/default:theme.primaryTextColor
             )
+        }
+        if (appearance.unreadChatBadge && unreadChatCount > 0) {
+            Text(com.example.chat.ui.chats.detail.conversationUnreadChatBadgeText(unreadChatCount),
+                color = Color(theme.onAccentColor),fontSize = (11 * theme.fontScale).sp,maxLines = 1,
+                modifier = Modifier.testTag("conversation-header-unread-chats").semantics {
+                    contentDescription = headerStrings.getString(com.example.chat.R.string.conv_proposal_unread_chat_count,unreadChatCount)
+                }.background(Color(theme.accentColor),RoundedCornerShape(12.dp)).padding(horizontal = 6.dp,vertical = 3.dp))
         }
         Row(
             Modifier
@@ -2340,11 +2517,13 @@ private fun ConversationHeader(
                 Box {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .then(Modifier.testTag("conversation-header-avatar"))
+                            // Previous: .size(38.dp)
+                            .size(appearance.avatarSizeDp.dp)
                             .background(
                                 conversation.avatarColorHex?.let { parseHexColor(it) }
                                     ?: Color(theme.accentColor),
-                                CircleShape,
+                                avatarShape, // Previous default shape:CircleShape
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -2370,14 +2549,18 @@ private fun ConversationHeader(
                 }
                 Spacer(Modifier.width(10.dp))
             }
-            Column(Modifier.weight(1f)) {
+            // Previous: Column(Modifier.weight(1f)) {
+            // Center only within the available title column; back/menu/call targets do not move.
+            Column(Modifier.weight(1f), horizontalAlignment = if (appearance.centeredTitle) Alignment.CenterHorizontally else Alignment.Start) {
                 if (showHeaderName) {
                     Text(
                         conversation.title,
-                        color = Color(theme.primaryTextColor),
+                        modifier = Modifier.testTag("conversation-header-name").then(if (appearance.centeredTitle) Modifier.fillMaxWidth() else Modifier),
+                        textAlign = if (appearance.centeredTitle) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start,
+                        color = Color(headerPrimaryColor), // Previous/default:theme.primaryTextColor
                         // R4: fixed header - system font scales up to 1.3x, then clamps.
                         fontSize = com.example.chat.ui.kit.clampedLabelSp((15.5 * theme.fontScale).toFloat()),
-                        fontWeight = FontWeight.W800,
+                        fontWeight = chosenNameWeight, // Previous/default:FontWeight.W800
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -2387,32 +2570,44 @@ private fun ConversationHeader(
                     Text(
                         presenceText,
                         color = Color(
-                            presenceTextColor
+                            if (translucent && readablePresenceBackground == null) transparencyPlan.foreground else readablePresenceText
                                 ?: if (presenceIsOnline) theme.successColor else theme.secondaryTextColor,
                         ),
                         fontSize = (10.5 * theme.fontScale).sp,
                         fontWeight = FontWeight.W500,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = if (presencePillColor == null) {
+                        // Previous status maximum: 1 line. Allow two lines at large font scales.
+                        // Previous/default: maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        maxLines = if (marqueeActive) 1 else 2,
+                        softWrap = !marqueeActive,
+                        overflow = if (marqueeActive) TextOverflow.Clip else TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("conversation-header-status")
+                            .then(if (appearance.statusMarqueeOnTap) Modifier.heightIn(min = 48.dp).clickable(
+                                onClickLabel = headerStrings.getString(if (marqueeActive) com.example.chat.R.string.conv_proposal_stop_status_motion else com.example.chat.R.string.conv_proposal_start_status_motion),
+                                role = androidx.compose.ui.semantics.Role.Button,
+                            ) { marqueeRequested = !marqueeRequested } else Modifier)
+                            .then(if (marqueeActive) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier)
+                            .then(if (readablePresenceBackground == null) {
                             Modifier
                         } else {
                             Modifier
                                 .padding(top = 2.dp)
-                                .background(Color(presencePillColor), RoundedCornerShape(999.dp))
+                                .background(Color(readablePresenceBackground), RoundedCornerShape(999.dp))
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
-                        },
+                        }),
                     )
                 }
             }
+            // Optional preview/layout slot. Existing production callers supply nothing.
+            headerTrailingContent?.invoke()
         }
-        if (showHeaderCalls) {
+        // Previous/default: if (showHeaderCalls)
+        if (showHeaderCalls && !moveCallsToOverflow) {
             val callTint = if (callsAllowed) {
-                Color(theme.primaryTextColor)
+                Color(headerIconColor) // Previous/default:theme.primaryTextColor
             } else {
-                Color(theme.secondaryTextColor)
+                Color(if (translucent) transparencyPlan.foreground else theme.secondaryTextColor)
             }
-            IconButton(onClick = { onStartCall(false) }) {
+            if (appearance.audioCallVisible) IconButton(onClick = { onStartCall(false) }, modifier = Modifier.testTag("conversation-header-audio")) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio,
                     semanticLabel = if (callsAllowed) {
                         "Voice call"
@@ -2422,7 +2617,7 @@ private fun ConversationHeader(
                     color = callTint,
                 )
             }
-            IconButton(onClick = { onStartCall(true) }) {
+            if (appearance.videoCallVisible) IconButton(onClick = { onStartCall(true) }, modifier = Modifier.testTag("conversation-header-video")) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideo,
                     semanticLabel = if (callsAllowed) {
                         "Video call"
@@ -2437,13 +2632,24 @@ private fun ConversationHeader(
             IconButton(modifier = Modifier.testTag("chat-options"), onClick = { onMenuOpenChange(true) }) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.moreOptions,
                     semanticLabel = "Chat options",
-                    color = Color(theme.primaryTextColor),
+                    color = Color(headerIconColor), // Previous/default:theme.primaryTextColor
                 )
             }
             var moreMenuPage by remember(menuOpen) { mutableStateOf(false) }
             DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = menuOpen, onDismissRequest = { onMenuOpenChange(false) }, rememberKey = "chat-header-menu") {
                 val menuIconTint = Color(theme.secondaryTextColor)
                 if (!moreMenuPage) {
+                    if (moveCallsToOverflow) {
+                        if (appearance.audioCallVisible) DropdownMenuItem(enabled = callsAllowed,
+                            leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = menuIconTint, size = 20.dp) },
+                            text = { Text(headerStrings.getString(com.example.chat.R.string.conv_proposal_voice_call)) },
+                            onClick = { onMenuOpenChange(false); onStartCall(false) })
+                        if (appearance.videoCallVisible) DropdownMenuItem(enabled = callsAllowed,
+                            leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideo, color = menuIconTint, size = 20.dp) },
+                            text = { Text(headerStrings.getString(com.example.chat.R.string.conv_proposal_video_call)) },
+                            onClick = { onMenuOpenChange(false); onStartCall(true) })
+                    }
+
                     if (connectionState != null) {
                         DropdownMenuItem(
                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.signal, color = menuIconTint, size = 20.dp) },
@@ -2562,6 +2768,8 @@ private fun ConversationHeader(
  *  State stays owned by ChatDetailScreen; actions and appearance are unchanged. */
 @Composable
 private fun AnchoredMessageContextMenu(
+    currentMessages: List<ChatMessage>,
+    sessionCurrent: Boolean,
     messageState: androidx.compose.runtime.MutableState<ChatMessage?>,
     anchorRect: Rect?,
     regionTop: Float,
@@ -2571,7 +2779,10 @@ private fun AnchoredMessageContextMenu(
     onToggleReaction: (String, String) -> Unit,
     reactionTargetState: androidx.compose.runtime.MutableState<ChatMessage?>,
 ) {
-    val menuMessage = messageState.value
+    val menuMessage = if (sessionCurrent) messageState.value?.let { captured ->
+        currentMessages.singleOrNull { it.id == captured.id && it.conversationId == captured.conversationId }
+            ?.takeIf { !it.isDeletedForEveryone && com.example.chat.ui.chats.detail.SelectionAction.star in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(it)) }
+    } else null
     var extraActions by remember(menuMessage?.id) { mutableStateOf(false) }
     if (menuMessage != null) {
         val available = MessageActionRegistry.getAvailableActions(
@@ -3025,3 +3236,3222 @@ private fun parseHexColor(hex: String): Color? {
         Color(value)
     }
 }
+
+// Superseded source retained inactive:
+//                                     modifier = Modifier.background(Color(theme.cardColor), RoundedCornerShape(12.dp))
+//                                         .padding(horizontal = 10.dp, vertical = 4.dp))
+//                     .padding(horizontal = 12.dp, vertical = 8.dp),
+//             IconButton(onClick = { onStartCall(false) }, modifier = Modifier.testTag("conversation-header-audio")) {
+//             IconButton(onClick = { onStartCall(true) }, modifier = Modifier.testTag("conversation-header-video")) {
+//                         DropdownMenuItem(enabled = callsAllowed,
+//                         DropdownMenuItem(enabled = callsAllowed,
+
+/* Previous bubble call retained.
+                            isMe = isMine,
+*/
+
+// Pre-screen-review source retained.
+// package com.example.chat.ui.chats
+//
+// import androidx.compose.ui.layout.onGloballyPositioned
+// import androidx.compose.ui.layout.boundsInWindow
+// import androidx.compose.foundation.focusGroup
+// import androidx.compose.foundation.basicMarquee
+// import androidx.compose.foundation.horizontalScroll
+// import androidx.compose.foundation.layout.Arrangement
+// import androidx.compose.foundation.layout.height
+// import androidx.compose.foundation.layout.widthIn
+//
+// import androidx.compose.foundation.rememberScrollState
+//
+// import androidx.compose.foundation.verticalScroll
+//
+// import com.example.chat.ReleaseFeatures
+// import com.example.chat.ui.effects.listEntrance
+//
+// import androidx.compose.animation.core.animateFloatAsState
+// import androidx.compose.foundation.clickable
+// import androidx.compose.foundation.background
+// import androidx.compose.foundation.border
+// import androidx.compose.foundation.gestures.Orientation
+// import androidx.compose.foundation.gestures.draggable
+// import androidx.compose.foundation.gestures.rememberDraggableState
+// import androidx.compose.foundation.gestures.detectTapGestures
+// import androidx.compose.foundation.layout.Box
+// import androidx.compose.foundation.layout.Column
+// import androidx.compose.foundation.layout.PaddingValues
+// import androidx.compose.foundation.layout.Row
+// import androidx.compose.foundation.layout.Spacer
+// import androidx.compose.foundation.layout.fillMaxSize
+// import androidx.compose.foundation.layout.fillMaxWidth
+// import androidx.compose.foundation.layout.imePadding
+// import androidx.compose.foundation.layout.offset
+// import androidx.compose.foundation.layout.padding
+// import androidx.compose.foundation.layout.size
+// import androidx.compose.foundation.layout.heightIn
+// import androidx.compose.foundation.layout.width
+// import androidx.compose.ui.platform.testTag
+// import androidx.compose.foundation.lazy.LazyColumn
+// import androidx.compose.foundation.lazy.items
+// import androidx.compose.foundation.lazy.itemsIndexed
+// import androidx.compose.foundation.lazy.rememberLazyListState
+// import androidx.compose.foundation.shape.CircleShape
+// import androidx.compose.foundation.shape.RoundedCornerShape
+// import androidx.compose.foundation.text.BasicTextField
+// import androidx.compose.material.icons.Icons
+// import androidx.compose.material.icons.rounded.ChevronLeft
+// import androidx.compose.material.icons.rounded.Call
+// import androidx.compose.material.icons.rounded.Check
+// import androidx.compose.material.icons.rounded.ChevronRight
+// import androidx.compose.material.icons.rounded.Close
+// import androidx.compose.material.icons.rounded.ContentCopy
+// import androidx.compose.material.icons.rounded.DeleteOutline
+// import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+// import androidx.compose.material.icons.automirrored.rounded.Forward
+// import androidx.compose.material.icons.outlined.Block
+// import androidx.compose.material.icons.outlined.DeleteOutline
+// import androidx.compose.material.icons.outlined.Image
+// import androidx.compose.material.icons.outlined.Notifications
+// import androidx.compose.material.icons.outlined.NotificationsOff
+// import androidx.compose.material.icons.outlined.Palette
+// import androidx.compose.material.icons.outlined.Person
+// import androidx.compose.material.icons.outlined.Search
+// import androidx.compose.material.icons.outlined.Edit
+// import androidx.compose.material.icons.rounded.Edit
+// import androidx.compose.material.icons.rounded.KeyboardArrowDown
+// import androidx.compose.material.icons.rounded.KeyboardArrowUp
+// import androidx.compose.material.icons.rounded.MoreVert
+// import androidx.compose.material.icons.outlined.ChatBubbleOutline
+// import androidx.compose.material.icons.outlined.CheckCircle
+// import androidx.compose.material.icons.rounded.OpenInNew
+// import androidx.compose.material.icons.rounded.Replay
+// import androidx.compose.material.icons.rounded.Reply
+// import androidx.compose.material.icons.rounded.VideoCameraFront
+// import androidx.compose.material.icons.rounded.StarBorder
+// import com.example.chat.ui.kit.ChatyConfirmationDialog as AlertDialog
+// import com.example.chat.ui.kit.ChatyDropdownMenu as DropdownMenu
+// import com.example.chat.ui.kit.ChatyDropdownMenuItem as DropdownMenuItem
+// import androidx.compose.material3.ExperimentalMaterial3Api
+// import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
+// import androidx.compose.material3.IconButton
+// import androidx.compose.material3.ModalBottomSheet
+// import androidx.compose.ui.semantics.clearAndSetSemantics
+// import androidx.compose.material3.Scaffold
+// import androidx.compose.material3.SnackbarHost
+// import androidx.compose.material3.SnackbarHostState
+// import androidx.compose.material3.TextButton
+// import androidx.compose.material3.Text
+// import androidx.compose.runtime.Composable
+// import androidx.compose.runtime.DisposableEffect
+// import androidx.compose.runtime.LaunchedEffect
+// import androidx.compose.runtime.derivedStateOf
+// import androidx.compose.runtime.getValue
+// import androidx.compose.runtime.mutableIntStateOf
+// import androidx.compose.runtime.mutableLongStateOf
+// import androidx.compose.runtime.mutableStateOf
+// import androidx.compose.runtime.remember
+// import androidx.compose.runtime.rememberCoroutineScope
+// import androidx.compose.runtime.rememberUpdatedState
+// import androidx.compose.runtime.setValue
+// import androidx.compose.ui.Alignment
+// import androidx.compose.ui.semantics.contentDescription
+// import androidx.compose.ui.semantics.stateDescription
+// import androidx.compose.ui.semantics.liveRegion
+// import androidx.compose.ui.semantics.semantics
+// import androidx.compose.ui.Modifier
+// import androidx.compose.ui.draw.drawBehind
+// import androidx.compose.ui.draw.alpha
+// import androidx.compose.ui.draw.clip
+// import androidx.compose.ui.draw.scale
+// import androidx.compose.ui.draw.shadow
+// import androidx.compose.ui.focus.FocusRequester
+// import androidx.compose.ui.focus.focusRequester
+// import androidx.compose.foundation.focusable
+// import com.example.chat.ui.kit.rememberChatyReduceMotion
+// import androidx.compose.runtime.withFrameNanos
+// import androidx.compose.ui.geometry.Offset
+// import androidx.compose.ui.geometry.Rect
+// import androidx.compose.ui.graphics.Color
+// import androidx.compose.ui.graphics.SolidColor
+// import androidx.compose.ui.input.pointer.pointerInput
+// import androidx.compose.ui.platform.LocalClipboardManager
+// import androidx.compose.ui.platform.LocalConfiguration
+// import androidx.compose.ui.platform.LocalDensity
+// import androidx.compose.ui.platform.LocalView
+// import androidx.compose.ui.text.AnnotatedString
+// import androidx.compose.ui.text.TextStyle
+// import androidx.compose.ui.text.font.FontWeight
+// import androidx.compose.ui.text.style.TextOverflow
+// import androidx.compose.ui.unit.dp
+// import androidx.compose.ui.unit.sp
+// import androidx.compose.ui.window.Dialog
+// import com.example.chat.core.templates.ComposerActionPlacement
+// import com.example.chat.core.templates.ComposerTemplate
+// import com.example.chat.core.theme.ThemeConfig
+// import com.example.chat.core.messages.ConversationRecoverableDraft
+// import com.example.chat.domain.models.ChatMessage
+// import com.example.chat.domain.models.ChatTask
+// import com.example.chat.domain.models.ConnectionHealthState
+// import com.example.chat.data.network.AppTrafficSnapshot
+// import com.example.chat.data.network.NetworkStatusMonitor
+// import com.example.chat.data.network.TransferItem
+// import com.example.chat.data.transfer.P2pFileTransferService
+// import com.example.chat.domain.models.Conversation
+// import com.example.chat.domain.models.ConversationPreferences
+// import com.example.chat.domain.models.DeliveryState
+// import com.example.chat.domain.models.MessageAttachment
+// import com.example.chat.domain.models.QuickReplyTemplate
+// import com.example.chat.domain.models.TaskStatus
+// import com.example.chat.ui.chats.detail.AttachmentAction
+// import com.example.chat.ui.chats.detail.QuickContactEntry
+// import com.example.chat.ui.chats.detail.QuickContactSidebar
+// import com.example.chat.ui.chats.detail.AttachmentSheetContent
+// import com.example.chat.ui.chats.detail.BubbleColorOverrides
+// import com.example.chat.ui.chats.detail.ChatCommandParser
+// import com.example.chat.ui.kit.AppContextMenu
+// import com.example.chat.ui.kit.ChatyHapticsPort
+// import com.example.chat.ui.kit.ContextMenuItem
+// import com.example.chat.ui.kit.ContextMenuSection
+// import com.example.chat.ui.kit.ReactionRail
+// import com.example.chat.ui.chats.detail.ChatCommandType
+// import com.example.chat.ui.chats.detail.ChatWallpaper
+// import com.example.chat.ui.chats.detail.ChatyEmojiComposerAction
+// import com.example.chat.ui.chats.detail.ChatEntryBar
+// import com.example.chat.ui.chats.detail.ChatyEmojiPickerSheet
+// import com.example.chat.ui.chats.detail.ComposerColors
+// import com.example.chat.ui.chats.detail.ConnectionDetailSheetContent
+// import com.example.chat.ui.chats.detail.ChatMessageBubble
+// import com.example.chat.ui.chats.detail.GlobalConnectionBanner
+// import com.example.chat.ui.chats.detail.MessageActionRegistry
+// import com.example.chat.ui.chats.detail.MessageActionType
+// import com.example.chat.ui.chats.detail.actionIcon
+// import androidx.compose.material3.HorizontalDivider
+// import com.example.chat.ui.chats.detail.RemoteImageSlot
+// import com.example.chat.ui.chats.detail.chatyRemoteImage
+// import com.example.chat.ui.theme.LocalThemeConfig
+// import java.time.Duration
+// import java.time.ZoneId
+// import java.time.format.DateTimeFormatter
+// import kotlinx.coroutines.Dispatchers
+// import kotlinx.coroutines.Job
+// import kotlinx.coroutines.delay
+// import kotlinx.coroutines.launch
+// import kotlinx.coroutines.withContext
+//
+// /** Full port of lib/features/chats/chat_detail_screen.dart's conversation
+//  *  surface: header (normal + multi-select + in-chat search with match
+//  *  navigation), wallpaper layer + per-chat picker, connection banner and
+//  *  health indicator, call buttons, message list with anchored long-press
+//  *  context menu and reaction rail, reply/edit banners, quick-replies
+//  *  overlay, drafts + typing publish, scroll-to-bottom FAB with unseen
+//  *  count, attachment sheet, emoji picker (composer + reaction modes over
+//  *  a Unicode v18 catalog), connection diagnostics dialog, and the stock
+//  *  integrated composer with send/mic morph.
+//  *
+//  *  The original signature (conversation, messages, currentUserId, onBack,
+//  *  onSend) is preserved so AppRoot compiles unchanged; every new behavior is
+//  *  an optional callback the integration owner wires to the shared backend /
+//  *  preferences seams. Defaults match the Dart fallbacks.
+//  *
+//  *  Known source-faithful simplifications pending owner seams:
+//  *  - Reply send drops the replyTo linkage until ApiBackendService.sendMessage
+//  *    gains reply params (reported gap); the banner UI is complete.
+//  *  - Star/pin/reactions/forward are dataStore-local in Dart; callbacks are
+//  *    provided here, wiring belongs to the owner (reported gap).
+//  *  - Presence line, voice recording, drafts, typing indicators, wallpaper,
+//  *    in-chat search and quick replies are preference/service features owned
+//  *    by other slices; presence renders when presenceText is supplied. */
+// @OptIn(ExperimentalMaterial3Api::class)
+// @Composable
+// fun ChatDetailScreen(
+//     conversation: Conversation,
+//     messages: List<ChatMessage>,
+//     currentUserId: String,
+//     localOverrideAccountKey: String = "",
+//     messageSessionIdentity: Any = currentUserId,
+//     isMessageSessionCurrent: () -> Boolean = { false },
+//     onBack: () -> Unit,
+//     onSend: suspend (String) -> Unit,
+//     resolveSenderName: (String) -> String = { senderId ->
+//         if (senderId == currentUserId) "You" else "Team Member"
+//     },
+//     resolveQuoteSender: (String) -> com.example.chat.domain.models.UserProfile? = { null },
+//     useScopedChatTheme: Boolean = false,
+//     presenceText: String? = null,
+//     presenceIsOnline: Boolean = false,
+//     showUnknownSenderSafety: Boolean = false,
+//     onContinueUnknownSender: () -> Unit = {},
+//     onReportUnknownSender: () -> Unit = {},
+//     peerTyping: Boolean = false,
+//     typingAvatarInitials: String = "",
+//     typingAvatarUrl: String? = null,
+//     typingAvatarColorHex: String? = null,
+//     showHeaderAvatar: Boolean = true,
+//     showHeaderName: Boolean = true,
+//     showHeaderCalls: Boolean = true,
+//     showPresenceLine: Boolean = true,
+//     headerAppearance: com.example.chat.ui.chats.detail.ConversationHeaderAppearance = com.example.chat.ui.chats.detail.ConversationHeaderAppearance(),
+//     headerBarColor: Long? = null,
+//     presencePillColor: Long? = null,
+//     presenceTextColor: Long? = null,
+//     callsAllowed: Boolean = true,
+//     onStartCall: (isVideo: Boolean) -> Unit = {},
+//     connectionState: ConnectionHealthState? = null,
+//     onProbeConnection: suspend () -> Unit = {},
+//     networkStatus: NetworkStatusMonitor.Status? = null,
+//     p2pTransferStates: List<P2pFileTransferService.TransferState> = emptyList(),
+//     liveTransfers: List<TransferItem> = emptyList(),
+//     appTraffic: AppTrafficSnapshot? = null,
+//     onRetryP2pTransfer: (String) -> Unit = {},
+//     onDraftChanged: (String) -> Unit = {},
+//     onTypingChanged: (Boolean) -> Unit = {},
+//     quickReplies: List<QuickReplyTemplate> = emptyList(),
+//     wallpaperType: String = "Pattern",
+//     wallpaperPatternId: String? = null,
+//     wallpaperPath: String? = null,
+//     wallpaperProfilePic: Boolean = false,
+//     wallpaperAvatarUrl: String? = null,
+//     onWallpaperSelected: ((String) -> Unit)? = null,
+//     onOpenAppearance: (() -> Unit)? = null,
+//     onToggleMute: (() -> Unit)? = null,
+//     ghostModeEnabled: Boolean = false,
+//     onToggleGhostMode: (() -> Unit)? = null,
+//     // Per-conversation end-to-end encryption (MLS plane). The host owns the
+//     // flag; when onToggleSecureChannel is null the menu item is hidden.
+//     secureChannelEnabled: Boolean = false,
+//     onToggleSecureChannel: (() -> Unit)? = null,
+//     onBlockContact: (() -> Unit)? = null,
+//     onReportMessage: (ChatMessage) -> Unit = {},
+//     onBlockMessageSender: (String) -> Unit = {},
+//     hideDateAndName: Boolean = false,
+//     showDeletedContent: Boolean = false,
+//     retainViewOnce: Boolean = false,
+//     disableDoubleTapReaction: Boolean = false,
+//     doubleTapReactionEmoji: String = "❤️",
+//     onDoubleTapReactionEmojiChanged: ((String) -> Unit)? = null,
+//     onReadAlertNotification: (ChatMessage) -> Unit = {},
+//     showGroupAvatar: Boolean = true,
+//     colorOverrides: BubbleColorOverrides? = null,
+//     remoteImage: RemoteImageSlot? = chatyRemoteImage,
+//     onEditMessage: suspend (messageId: String, newText: String) -> Unit = { _, _ -> },
+//     onCreateTask: (initialTitle: String?) -> Unit = {},
+//     onDeleteMessage: (messageId: String, forEveryone: Boolean) -> Unit = { _, _ -> },
+//     onToggleStar: (messageId: String) -> Unit = {},
+//     onTogglePin: (messageId: String) -> Unit = {},
+//     onToggleReaction: (messageId: String, emoji: String) -> Unit = { _, _ -> },
+//     onForward: (ChatMessage) -> Unit = {},
+//     onForwardSelection: ((List<ChatMessage>) -> Unit)? = null,
+//     onClearConversation: () -> Unit = {},
+//     onRetryMessage: (messageId: String) -> Unit = {},
+//     onOpenInfo: () -> Unit = {},
+//     // Chaty #29: group sender avatar quick view actions; null lambdas hide their
+//     // buttons. Host owns member navigation/call routing.
+//     groupMemberActions: com.example.chat.ui.chats.detail.GroupMemberQuickActions? = null,
+//     externalSearchRequest: Int = 0,
+//     onCreateTaskFromMessage: (ChatMessage) -> Unit = {},
+//     // Dart dataStore.tasks slice + task callbacks (chat_detail_screen.dart:2966-3058);
+//     // integration wires these to the tasks controller/detail/modal surfaces.
+//     tasks: List<ChatTask> = emptyList(),
+//     onOpenTaskDetails: (ChatTask) -> Unit = {},
+//     onEditTask: (ChatTask) -> Unit = {},
+//     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit = { _, _ -> },
+//     onDeleteTask: (taskId: String) -> Unit = {},
+//     // Dart ChatDetailScreen.initialMessageId (chat_detail_screen.dart:65): deep-link
+//     // target from the starred-messages screen; jumped to once messages arrive.
+//     initialMessageId: String? = null,
+//     // MV-R3-050: one-shot viewer-close anchor (data-only Int-counter consumption, like
+//     // infoSearchRequest; no callback in either direction).
+//     viewerAnchorId: String? = null,
+//     viewerAnchorRequest: Int = 0,
+//     onAttachmentAction: (AttachmentAction) -> Unit = {},
+//     attachmentReviewImages: ((List<android.net.Uri>) -> Unit)? = null,
+//     attachmentDirectSendImages: ((List<android.net.Uri>) -> Unit)? = null,
+//     onStickerSend: ((com.example.chat.core.stickers.StickerAsset) -> Unit)? = null,
+//     onCameraTap: () -> Unit = {},
+//     onVoiceTap: () -> Unit = {},
+//     onVoiceHoldStart: () -> Unit = {},
+//     onVoiceMove: (Offset) -> Unit = {},
+//     onVoiceHoldEnd: () -> Unit = {},
+//     onVideoHoldStart: ((Long) -> Unit)? = null,
+//     onVideoHoldMove: (Long, Float, Float) -> Unit = { _, _, _ -> },
+//     onVideoHoldEnd: (Long) -> Unit = {},
+//     onVideoHoldCancel: (Long) -> Unit = {},
+//     onGalleryTap: (() -> Unit)? = null,
+//     onAudioTap: (() -> Unit)? = null,
+//     onLocationTap: (() -> Unit)? = null,
+//     onContactTap: (() -> Unit)? = null,
+//     entryStyle: String = "Stock",
+//     composerColors: ComposerColors? = null,
+//     composerTemplate: ComposerTemplate = ComposerTemplate(ComposerActionPlacement.integrated),
+//     composerAppearance: com.example.chat.ui.chats.detail.ConversationComposerAppearance = com.example.chat.ui.chats.detail.ConversationComposerAppearance(),
+//     // Global conversation prefs (preferencesController.conversation): emoji picker
+//     // colors, composer bar bg, bubble prefs - Dart `conv` / `convPrefs` consumers.
+//     convPrefs: ConversationPreferences = ConversationPreferences(),
+//     disableSwipeToExit: Boolean = false,
+//     quickContacts: List<QuickContactEntry> = emptyList(),
+//     onOpenConversation: (String) -> Unit = {},
+//     homeAvatarShape: String = "circle",
+//     universalEmojiStyle: String = "Chaty Motion",
+//     translateOption: String = "Server + No outside apps",
+//     translationLanguage: String = "Show All",
+//     onMediaTap: (ChatMessage) -> Unit = {},
+//     onMediaTapWithBounds: ((ChatMessage, Rect) -> Unit)? = null,
+//     attachmentBinding: com.example.chat.ui.chats.detail.AttachmentConsumerBinding? = null,
+//     onVoicePlay: (MessageAttachment) -> Unit = {},
+//     voiceUrlResolver: (suspend (String) -> String)? = null,
+//     onViewOnceOpen: (ChatMessage) -> Unit = {},
+//     onPollTap: (ChatMessage) -> Unit = {},
+//     loadingMessages: Boolean = false,
+//     loadError: String? = null,
+//     onRetryLoad: () -> Unit = {},
+//     // Test-only hook for debug fixtures (MenuAlbumProofActivity): opens the header
+//     // overflow menu on first composition. Default keeps product behavior unchanged.
+//     initialChatMenuOpen: Boolean = false,
+//     // G10: @handles the current user answers to (without "@"), used by the
+//     // text-mention fallback. Empty list keeps the mention jump button hidden
+//     // unless structured message metadata marks a mention. Host wires this.
+//     currentUserMentionHandles: List<String> = emptyList(),
+//     /** G1: Own-server GIF tab draft. Provider requests and sends remain disabled. */
+//     gifApiKey: String = "",
+//     onGifSend: ((com.example.chat.core.gif.GifResult) -> Unit)? = null,
+//     dateChip: com.example.chat.ui.chats.detail.ConversationDateChip = com.example.chat.ui.chats.detail.ConversationDateChip.Default,
+//     unreadChatCount: Int = 0,
+// ) {
+//     androidx.compose.runtime.CompositionLocalProvider(
+//         com.example.chat.ui.chats.detail.LocalEmojiPack provides
+//             com.example.chat.ui.chats.detail.ChatyEmojiPack.normalize(universalEmojiStyle),
+//     ) {
+//     val theme = if (useScopedChatTheme) LocalThemeConfig.current else com.example.chat.ui.chats.bundles.messageBundleTheme(LocalThemeConfig.current)
+//     val scope = rememberCoroutineScope()
+//     val clipboard = LocalClipboardManager.current
+//     val snackbarHostState = remember { SnackbarHostState() }
+//
+//     // Dart initState: the composer restores the persisted draft.
+//     var composerText by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(conversation.draftText) }
+//     var sending by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+//     val draftOwner = Triple(conversation.id, currentUserId, messageSessionIdentity)
+//     val currentDraftOwner by rememberUpdatedState(draftOwner)
+//     val currentActionMessages by rememberUpdatedState(messages)
+//     var draftRevision by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
+//     var recoverableDraft by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ConversationRecoverableDraft?>(null) }
+//     var recoveredViewOnceNeedsChoice by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+//     var viewOnceTextTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     val viewOnceOwner = remember(conversation.id, currentUserId, messageSessionIdentity) { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
+//     viewOnceTextTarget?.let { target ->
+//         com.example.chat.ui.chats.detail.TemporaryViewOnceTextViewer(
+//             messageId = target.id,
+//             open = { com.example.chat.ServiceLocator.apiBackend.openViewOnceText(target, viewOnceOwner) },
+//             onDismiss = { viewOnceTextTarget = null },
+//         )
+//     }
+//     var scheduleDraft by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+//     var scheduling by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+//     val scheduleOwner = remember(conversation.id, currentUserId, messageSessionIdentity) { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
+//     scheduleDraft?.let { draft ->
+//         com.example.chat.ui.automation.ScheduleMessageSheet(
+//             conversations = listOf(conversation), initialConversationId = conversation.id,
+//             initialBody = draft, confirmEnabled = !scheduling,
+//             onDismiss = { if (!scheduling) scheduleDraft = null },
+//             onConfirm = { cid, body, at ->
+//                 if (!scheduling && currentDraftOwner == draftOwner && isMessageSessionCurrent()) {
+//                     val submittedOwner = draftOwner
+//                     scheduling = true
+//                     scope.launch {
+//                         try {
+//                             check(currentDraftOwner == submittedOwner && isMessageSessionCurrent()) { "Chat session changed." }
+//                             check(cid == conversation.id) { "Conversation changed." }
+//                             check(!secureChannelEnabled) { "Scheduling is unavailable in encrypted chats." }
+//                             check(com.example.chat.ServiceLocator.apiBackend.authSnapshot() === scheduleOwner) { "Account changed. Open this chat again." }
+//                             com.example.chat.ServiceLocator.scheduledMessageService.scheduleMessage(cid, body, at,
+//                                 expectedSession = com.example.chat.ServiceLocator.apiBackend.scheduledMessagesClient(scheduleOwner))
+//                             if (currentDraftOwner == submittedOwner && isMessageSessionCurrent()) {
+//                                 scheduleDraft = null
+//                                 snackbarHostState.showSnackbar("Schedule confirmed. Your draft was kept. Check Scheduled messages for its status.")
+//                             }
+//                         } catch (e: Exception) {
+//                             if (e is kotlinx.coroutines.CancellationException) throw e
+//                             if (currentDraftOwner == submittedOwner && isMessageSessionCurrent()) {
+//                                 snackbarHostState.showSnackbar("Scheduling was not confirmed. Your draft was kept. Check Scheduled messages before trying again.")
+//                             }
+//                         } finally {
+//                             if (currentDraftOwner == submittedOwner) scheduling = false
+//                         }
+//                     }
+//                 }
+//             })
+//     }
+//     var replyTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var editingMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var selectedIds by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Set<String>>(emptySet()) }
+//     val contextMenuMessageState = remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var contextMenuMessage by contextMenuMessageState
+//     var singleTapMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var avatarQuickViewSenderId by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+//     var infoMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var showStarredInChat by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+//     val shareContext = androidx.compose.ui.platform.LocalContext.current
+//     // Chaty #35 / GTranslate route: client-side online translation, no backend.
+//     val translatorStore = remember(shareContext) {
+//         com.example.chat.data.translate.TranslatorLanguageStore(shareContext)
+//     }
+//     val gTranslateClient = remember { com.example.chat.data.translate.GTranslateClient() }
+//     var translateMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var choosingTranslatorLanguage by remember { mutableStateOf(false) }
+//     var translatorTarget by remember { mutableStateOf(translatorStore.target()) }
+//     val localMessageStore = remember(localOverrideAccountKey, conversation.id) {
+//         com.example.chat.core.messages.LocalMessageOverrideStore(shareContext.applicationContext, localOverrideAccountKey, conversation.id)
+//     }
+//     var localMessageRevision by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableIntStateOf(0) }
+//     var localEditMessageId by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableStateOf<String?>(null) }
+//     var localEditText by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableStateOf("") }
+//     var choosingDoubleTapEmoji by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableStateOf(false) }
+//     var quoteMessageId by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableStateOf<String?>(null) }
+//
+//     var copySelectionMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var taskMenuTarget by remember { mutableStateOf<Pair<ChatTask, Rect>?>(null) }
+//     var contextMenuAnchor by remember { mutableStateOf<Rect?>(null) }
+//     var attachmentSheetOpen by remember { mutableStateOf(false) }
+//     var chatMenuOpen by remember { mutableStateOf(initialChatMenuOpen) }
+//     // View-once consumption persists per account (ViewOnceConsumedStore) so
+//     // leaving and reopening the chat keeps expired items expired. The in-OK
+//     // session sets start from the persisted ids; enforcement is local to this
+//     // device and the pre-existing host retainViewOnce flag can still retain
+//     // an opened in-session view.
+//     val viewOnceConsumedStore = remember(shareContext, localOverrideAccountKey) {
+//         com.example.chat.data.media.ViewOnceConsumedStore.android(shareContext, localOverrideAccountKey)
+//     }
+//     // Keyed by account + session identity: switching accounts or sessions
+//     // reloads that account's persisted consumed ids and drops the previous
+//     // in-memory view.
+//     // Initial load is guarded: a read failure yields Failed (unknown), which
+//     // must never be treated as an empty set. The sets start empty, the cards
+//     // stay locked, and any open attempt surfaces the storage error via the
+//     // controller's fail-closed isConsumed path below.
+//     val viewOnceConsumedRead = remember(localOverrideAccountKey, messageSessionIdentity) {
+//         viewOnceConsumedStore.readConsumed()
+//     }
+//     var openedViewOnceIds by remember(localOverrideAccountKey, messageSessionIdentity) {
+//         mutableStateOf((viewOnceConsumedRead as? com.example.chat.data.media.ViewOnceConsumedStore.ReadResult.Ok)?.ids.orEmpty())
+//     }
+//     var completedViewOnceIds by remember(localOverrideAccountKey, messageSessionIdentity) {
+//         mutableStateOf((viewOnceConsumedRead as? com.example.chat.data.media.ViewOnceConsumedStore.ReadResult.Ok)?.ids.orEmpty())
+//     }
+//     // GB/stock parity: the receiver sees the view-once explainer exactly once.
+//     val viewOnceNuxStore = remember(shareContext) {
+//         com.example.chat.data.media.ViewOnceNuxStore(shareContext)
+//     }
+//     // Keyed by account + session + conversation so a switch drops a pending
+//     // explainer instead of acting on a stale message from the previous
+//     // session. Each request carries a token; the confirm callback only acts
+//     // while its token is still the current pending request.
+//     var viewOnceNuxRequestCount by remember { mutableLongStateOf(0L) }
+//     var viewOnceNuxPending by remember(localOverrideAccountKey, messageSessionIdentity, conversation.id) {
+//         mutableStateOf<Pair<Long, ChatMessage>?>(null)
+//     }
+//     // One controller per account/session/conversation; the JVM-tested
+//     // ordering lives in ViewOnceOpenController. The controller captures the
+//     // identity tuple at creation and compares it against the CURRENT tuple
+//     // (rememberUpdatedState) before and after the durable-write suspension:
+//     // a controller surviving an account switch must not validate against
+//     // the newly valid session, and this coroutine is not cancelled when the
+//     // remember keys change.
+//     val currentViewOnceSession by rememberUpdatedState(
+//         Triple(localOverrideAccountKey, messageSessionIdentity, conversation.id)
+//     )
+//     val viewOnceOpenController = remember(localOverrideAccountKey, messageSessionIdentity, conversation.id) {
+//         com.example.chat.core.messages.ViewOnceOpenController(
+//             expectedSession = Triple(localOverrideAccountKey, messageSessionIdentity, conversation.id),
+//             currentSession = { currentViewOnceSession },
+//             // Captured at creation, NOT through rememberUpdatedState: the
+//             // original session's own validity check (live auth revocation).
+//             sessionStillValid = isMessageSessionCurrent,
+//             isConsumed = { id ->
+//                 when (val read = viewOnceConsumedStore.readConsumed()) {
+//                     is com.example.chat.data.media.ViewOnceConsumedStore.ReadResult.Ok -> read.ids.contains(id)
+//                     // Unknown is not empty: throw so the controller turns it
+//                     // into ConsumeFailed and the storage error shows.
+//                     com.example.chat.data.media.ViewOnceConsumedStore.ReadResult.Failed ->
+//                         throw IllegalStateException("view-once consumed store unreadable")
+//                 }
+//             },
+//             persistConsumed = { id ->
+//                 withContext(Dispatchers.IO) { viewOnceConsumedStore.markConsumed(id) }
+//             },
+//         )
+//     }
+//     var viewOnceOpenErrorId by remember(localOverrideAccountKey, messageSessionIdentity, conversation.id) {
+//         mutableStateOf<String?>(null)
+//     }
+//     fun openViewOnceMessage(m: ChatMessage) {
+//         val isVoice = m.attachment?.type == "audio" ||
+//             m.type == com.example.chat.domain.models.MessageType.audio
+//         scope.launch {
+//             when (val result = viewOnceOpenController.open(m.id, isVoice)) {
+//                 is com.example.chat.core.messages.ViewOnceOpenController.Result.RevealVoice -> {
+//                     openedViewOnceIds = openedViewOnceIds + m.id
+//                     onViewOnceOpen(m)
+//                 }
+//                 is com.example.chat.core.messages.ViewOnceOpenController.Result.RevealMedia -> {
+//                     openedViewOnceIds = openedViewOnceIds + m.id
+//                     onViewOnceOpen(m)
+//                 }
+//                 is com.example.chat.core.messages.ViewOnceOpenController.Result.ConsumeFailed -> {
+//                     // Fail-closed: nothing was revealed and the id stays out
+//                     // of the session-opened set, so the card stays locked and
+//                     // a later tap retries the durable write. Show a safe
+//                     // error instead of the viewer.
+//                     viewOnceOpenErrorId = result.id
+//                 }
+//                 is com.example.chat.core.messages.ViewOnceOpenController.Result.StaleSession,
+//                 is com.example.chat.core.messages.ViewOnceOpenController.Result.AlreadyConsumed,
+//                 is com.example.chat.core.messages.ViewOnceOpenController.Result.Busy -> Unit
+//             }
+//         }
+//     }
+//     var pendingBelowCount by remember { mutableIntStateOf(0) }
+//     var localPinMenu by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
+//     var searchOpen by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+//     var searchQuery by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf("") }
+//     var searchMatchIndex by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
+//     var highlightedMessageId by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+//     var wallpaperOverride by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(wallpaperPatternId) }
+//     var wallpaperPickerOpen by remember { mutableStateOf(false) }
+//     var clearConfirmOpen by remember { mutableStateOf(false) }
+//     var emojiComposerOpen by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
+//     val composerFocusRequester = remember { FocusRequester() }
+//     val composerKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+//     val composerFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
+//     val emojiReactionTargetState = remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+//     var emojiReactionTarget by emojiReactionTargetState
+//     var connectionSheetOpen by remember { mutableStateOf(false) }
+//     var connectionTesting by remember { mutableStateOf(false) }
+//     val menuView = LocalView.current
+//     val menuConfig = LocalConfiguration.current
+//     val menuDensity = LocalDensity.current
+//     var typingPublished by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+//     var lastTypingPublishedAt by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(0L) }
+//     var typingIdleJob by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Job?>(null) }
+//     // Typing is best-effort presence, never a reason to lose or block a local draft/send.
+//     // Each effect/callback captures its own room-bound publisher at composition time.
+//     fun publishTypingSafely(active: Boolean) {
+//         try {
+//             onTypingChanged(active)
+//         } catch (cancelled: kotlinx.coroutines.CancellationException) {
+//             throw cancelled
+//         } catch (_: Exception) {
+//             // No offline replay, message-content logging or per-keystroke failure snackbar.
+//         }
+//     }
+//
+//     val typingLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+//     DisposableEffect(conversation.id, currentUserId, messageSessionIdentity, typingLifecycle) {
+//         // Capture this room's account-bound callback, not the next room's callback at disposal.
+//         val stopTyping = {
+//             typingIdleJob?.cancel()
+//             typingIdleJob = null
+//             if (typingPublished) {
+//                 typingPublished = false
+//                 publishTypingSafely(false)
+//             }
+//         }
+//         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+//             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopTyping()
+//         }
+//         typingLifecycle.addObserver(observer)
+//         onDispose {
+//             typingLifecycle.removeObserver(observer)
+//             stopTyping()
+//         }
+//     }
+//     val searchFocusRequester = remember { FocusRequester() }
+//
+//     val listState = rememberLazyListState()
+//     val selectedMessages = remember(messages, selectedIds) { messages.filter { it.id in selectedIds } }
+//     val isSelectionMode = selectedMessages.isNotEmpty()
+//     val selectionActions = remember(selectedMessages) { com.example.chat.ui.chats.detail.SelectionActionPolicy.available(selectedMessages) }
+//     androidx.activity.compose.BackHandler(isSelectionMode) { selectedIds = emptySet() }
+//     val currentSelectionIds by rememberUpdatedState(selectedIds)
+//
+//     fun currentPermittedMessage(id: String, action: com.example.chat.ui.chats.detail.SelectionAction): ChatMessage? {
+//         if (id.isBlank() || currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return null
+//         val current = currentActionMessages.singleOrNull { it.id == id && it.conversationId == conversation.id } ?: return null
+//         return current.takeIf { action in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(it)) }
+//     }
+//
+//     fun currentEditableMessage(id: String): ChatMessage? =
+//         currentPermittedMessage(id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.takeIf { target ->
+//             target.senderId == currentUserId && MessageActionRegistry.getAvailableActions(target, true)
+//                 .any { it.type == MessageActionType.edit }
+//         }
+//
+//     fun toggleCurrentReaction(messageId: String, emoji: String) {
+//         if (!ReleaseFeatures.MESSAGE_REACTIONS || emoji.isBlank()) return
+//         currentPermittedMessage(messageId, com.example.chat.ui.chats.detail.SelectionAction.star)?.let { current ->
+//             onToggleReaction(current.id, emoji)
+//         }
+//     }
+//
+//     fun retryCurrentMessage(messageId: String) {
+//         if (messageId.isBlank() || currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+//         val current = currentActionMessages.singleOrNull { it.id == messageId && it.conversationId == conversation.id } ?: return
+//         if (current.senderId == currentUserId && current.deliveryState == DeliveryState.failed &&
+//             current.type != com.example.chat.domain.models.MessageType.system &&
+//             !current.isDeletedForMe && !current.isDeletedForEveryone && !current.isRevokedBySender) {
+//             onRetryMessage(current.id)
+//         }
+//     }
+//
+//     fun performSelectionAction(
+//         action: com.example.chat.ui.chats.detail.SelectionAction,
+//         block: (List<ChatMessage>) -> Unit,
+//     ) {
+//         if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+//         val ids = currentSelectionIds
+//         if (ids.isEmpty() || ids.any { it.isBlank() }) return
+//         val current = currentActionMessages.filter { it.id in ids && it.conversationId == conversation.id }
+//         // Missing/duplicated/cross-room identities must not turn a bulk action into a partial one.
+//         if (current.size != ids.size || current.map { it.id }.toSet().size != ids.size) return
+//         if (action !in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(current)) return
+//         block(current)
+//     }
+//
+//     // One projection owns both rendered rows and all scroll destinations.
+//     // Selection and menus do not change projection or tile geometry. Validated album
+//     // envelopes take priority; eligible adjacent single-image sends form display-only groups.
+//     // Memoized: this screen recomposes on every composer keystroke; the O(n)
+//     // album projection and cluster pass must run only when messages change.
+//     val timelineZone = java.time.ZoneId.systemDefault()
+//     val timelineRows = remember(messages, timelineZone) { com.example.chat.ui.chats.detail.mediaTimelineRows(messages, zone = timelineZone) }
+//     // Notify When Message Read + presence toasts (Bandi, 2026-11-14).
+//     com.example.chat.ui.chats.detail.ReadAlertCenter.init(shareContext.applicationContext)
+//     // Restore persisted watches for this account so they resume observing after a
+//     // restart without waiting for each chat to be opened (sync layer feeds them
+//     // via ReadAlertCenter.onMessages).
+//     LaunchedEffect(localOverrideAccountKey) { com.example.chat.ui.chats.detail.ReadAlertCenter.ensureWatching(localOverrideAccountKey) }
+//     val readAlertController = remember(localOverrideAccountKey, conversation.id) {
+//         com.example.chat.ui.chats.detail.ReadAlertCenter.forConversation(localOverrideAccountKey, conversation.id) { message ->
+//             scope.launch { snackbarHostState.showSnackbar("${conversation.title} read your message") }
+//             onReadAlertNotification(message)
+//         }
+//     }
+//     var readAlertWatchedIds by remember(localOverrideAccountKey, conversation.id) { mutableStateOf(readAlertController.watched) }
+//     LaunchedEffect(messages) {
+//         withContext(Dispatchers.IO) { readAlertController.onMessages(messages) }
+//         readAlertWatchedIds = readAlertController.watched
+//     }
+//     DisposableEffect(localOverrideAccountKey, conversation.id) {
+//         onDispose { com.example.chat.ui.chats.detail.ReadAlertCenter.clearScreenListener(localOverrideAccountKey, conversation.id) }
+//     }
+//     // Transition-guarded presence toasts: the initial snapshot (was == null) never toasts,
+//     // only a real false->true flip does. Typing toasts are direct-chat only.
+//     var lastPresenceOnline by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Boolean?>(null) }
+//     LaunchedEffect(presenceIsOnline) {
+//         val was = lastPresenceOnline
+//         lastPresenceOnline = presenceIsOnline
+//         if (presenceIsOnline && was == false && conversation.isDirect) {
+//             val event = com.example.chat.ui.chats.detail.PresenceEvent(conversation.id, conversation.title, com.example.chat.ui.chats.detail.PresenceEventType.online, java.time.Instant.now())
+//             com.example.chat.ui.chats.detail.PresenceFeed.forAccount(localOverrideAccountKey).record(event)
+//             com.example.chat.ui.chats.detail.PresenceToastPolicy.text(event)?.let { text -> scope.launch { snackbarHostState.showSnackbar(text) } }
+//         }
+//     }
+//     var lastPeerTyping by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Boolean?>(null) }
+//     LaunchedEffect(peerTyping) {
+//         val was = lastPeerTyping
+//         lastPeerTyping = peerTyping
+//         if (peerTyping && was == false && conversation.isDirect) {
+//             val event = com.example.chat.ui.chats.detail.PresenceEvent(conversation.id, conversation.title, com.example.chat.ui.chats.detail.PresenceEventType.typing, java.time.Instant.now())
+//             com.example.chat.ui.chats.detail.PresenceFeed.forAccount(localOverrideAccountKey).record(event)
+//             com.example.chat.ui.chats.detail.PresenceToastPolicy.text(event)?.let { text -> scope.launch { snackbarHostState.showSnackbar(text) } }
+//         }
+//     }
+//     val senderClusters = remember(timelineRows, timelineZone) { com.example.chat.ui.chats.detail.SenderClusterPolicy.forRows(timelineRows, timelineZone) }
+//
+//     // Freeze the entry unread count and then its concrete message ID. New arrivals/paging must not move this divider.
+//     val unreadAtOpen = remember(conversation.id, messageSessionIdentity) { conversation.unreadCount.coerceAtLeast(0) }
+//     var firstUnreadMessageId by remember(conversation.id, messageSessionIdentity) { mutableStateOf<String?>(null) }
+//     val firstUnreadRowIndex = remember(timelineRows, firstUnreadMessageId) {
+//         firstUnreadMessageId?.let { com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowIndex(timelineRows, it) } ?: -1
+//     }
+//
+//     // G3: hide the message list until the initial anchor is applied, so the
+//     // first frame never flashes the oldest page before the jump. Empty
+//     // conversations render immediately.
+//     var initialPositionSettled by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
+//
+//     // G10: messages that mention the current user. Structured metadata wins
+//     // (backend mention type pending); text fallback matches the host-passed
+//     // @handles. Own, deleted and revoked messages never count.
+//     val mentionPatterns = remember(currentUserMentionHandles) {
+//         currentUserMentionHandles.map { it.trim().removePrefix("@") }.filter { it.isNotEmpty() }.distinct()
+//             .map { handle -> Regex("(?<![\\p{L}\\p{N}_])@" + Regex.escape(handle) + "(?![\\p{L}\\p{N}_])", RegexOption.IGNORE_CASE) }
+//     }
+//     val mentionMessageIds = remember(messages, currentUserId, mentionPatterns) {
+//         messages.mapNotNull { m ->
+//             if (m.senderId == currentUserId || m.isDeletedForEveryone || m.isDeletedForMe || m.isRevokedBySender) return@mapNotNull null
+//             val metaMentions = (m.metadata["mentions"] as? List<*>)?.filterIsInstance<String>().orEmpty()
+//             val hit = currentUserId in metaMentions || mentionPatterns.any { it.containsMatchIn(m.text) }
+//             if (hit) m.id else null
+//         }
+//     }
+//
+//     fun selectionUnit(messageId: String): Set<String> =
+//         com.example.chat.ui.chats.detail.AlbumSelectionPolicy.unit(timelineRows, messageId)
+//     fun toggleSelectionUnit(messageId: String) {
+//         selectedIds = com.example.chat.ui.chats.detail.AlbumSelectionPolicy.toggle(timelineRows, selectedIds, messageId)
+//     }
+//     val dayHeaderLocale = LocalConfiguration.current.locales[0] ?: java.util.Locale.getDefault()
+//     val dayHeaderFormatter = remember(dayHeaderLocale) { DateTimeFormatter.ofPattern("d MMM yyyy", dayHeaderLocale) }
+//     var pendingScrollTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+//     LaunchedEffect(pendingScrollTarget, timelineRows, loadingMessages) {
+//         val target = pendingScrollTarget ?: return@LaunchedEffect
+//         val rowIndex = com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowIndex(timelineRows, target)
+//         if (rowIndex >= 0) {
+//             listState.animateScrollToItem(rowIndex)
+//             pendingScrollTarget = null
+//         } else if (!loadingMessages) {
+//             snackbarHostState.showSnackbar("That message is not in the loaded history.")
+//             pendingScrollTarget = null
+//         }
+//     }
+//     // MV-R3-050: viewer-close anchor. Scroll the ORIGINAL opened message's row into view
+//     // (instant under reduced motion, animated otherwise) and request INPUT focus on it.
+//     // Input focus only: whether an accessibility service moves AT focus afterwards is
+//     // platform/service behavior and is NOT claimed here.
+//     val viewerAnchorReduceMotion = rememberChatyReduceMotion()
+//     val viewerAnchorFocusRequesters = remember(conversation.id, currentUserId, messageSessionIdentity) { mutableMapOf<String, FocusRequester>() }
+//     var viewerAnchorConsumed by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
+//     LaunchedEffect(viewerAnchorId, viewerAnchorRequest, timelineRows, loadingMessages) {
+//         if (viewerAnchorRequest == 0 || viewerAnchorRequest == viewerAnchorConsumed) return@LaunchedEffect
+//         val target = viewerAnchorId ?: return@LaunchedEffect
+//         // Same message validity the viewer required when it opened (not deleted or revoked).
+//         val valid = messages.firstOrNull { it.id == target && !it.isDeletedForEveryone && !it.isDeletedForMe && !it.isRevokedBySender }
+//         if (valid == null) {
+//             // Absent or no longer valid once history finished loading: silent skip, no snackbar.
+//             if (!loadingMessages) viewerAnchorConsumed = viewerAnchorRequest
+//             return@LaunchedEffect
+//         }
+//         // rowIndex resolves the CONTAINING row when the message is a non-anchor album member.
+//         val rowIndex = com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowIndex(timelineRows, valid.id)
+//         if (rowIndex < 0) {
+//             if (!loadingMessages) viewerAnchorConsumed = viewerAnchorRequest // Not in the loaded history: silent skip.
+//             return@LaunchedEffect
+//         }
+//         // Bounded map that preserves instance identity: drop OTHER anchors' entries, but never
+//         // replace this target's instance - a composed row may already have attached it, and the
+//         // map is not snapshot state, so replacement would never re-attach the modifier.
+//         viewerAnchorFocusRequesters.keys.retainAll(setOf(target))
+//         val focusRequester = viewerAnchorFocusRequesters.getOrPut(target) { FocusRequester() }
+//         if (viewerAnchorReduceMotion) listState.scrollToItem(rowIndex) else listState.animateScrollToItem(rowIndex)
+//         // Bounded attempts: frame waits give the containing row's modifier attachment a chance to
+//         // land before the request. Frame waits do NOT guarantee ordering; only the expected
+//         // not-attached failure is caught, cancellation propagates, and the request stays
+//         // unconsumed for a later retry when cancelled.
+//         withFrameNanos { }
+//         try {
+//             focusRequester.requestFocus()
+//         } catch (expected: IllegalStateException) {
+//             withFrameNanos { }
+//             try {
+//                 focusRequester.requestFocus()
+//             } catch (expectedAgain: IllegalStateException) {
+//                 // Row still not attached (e.g. a concurrent scroll): focus skipped, scroll stands.
+//             }
+//         }
+//         viewerAnchorConsumed = viewerAnchorRequest
+//     }
+//     var previousCount by remember(conversation.id, messageSessionIdentity) { mutableIntStateOf(messages.size) }
+//     var openedAtLatest by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
+//     LaunchedEffect(conversation.id, messageSessionIdentity, messages.isNotEmpty()) {
+//         if (!openedAtLatest && messages.isNotEmpty()) {
+//             val incoming = messages.filter { it.senderId != currentUserId && !it.isDeletedForMe }
+//             firstUnreadMessageId = if (unreadAtOpen > 0) incoming.takeLast(unreadAtOpen).firstOrNull()?.id else null
+//             val targetId = initialMessageId ?: firstUnreadMessageId
+//             val requested = targetId?.let { com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowIndex(timelineRows, it) } ?: -1
+//             val anchor = if (requested >= 0) requested else com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.latestRowIndex(timelineRows)
+//             anchor?.let { listState.scrollToItem(it) }
+//             previousCount = messages.size // Initial history is not a new-message arrival.
+//             openedAtLatest = true
+//             initialPositionSettled = true
+//         }
+//     }
+//
+//     // Dart _isNearBottom: the list counts as pinned while the last item is
+//     // visible (with one item of slack for fractional last-row visibility).
+//     val isNearBottom by remember {
+//         derivedStateOf {
+//             val info = listState.layoutInfo
+//             val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+//             lastVisible >= info.totalItemsCount - 2
+//         }
+//     }
+//
+//     fun scrollToBottom(animate: Boolean = true) {
+//         if (messages.isEmpty()) return
+//         scope.launch {
+//             if (animate) {
+//                 listState.animateScrollToItem(timelineRows.lastIndex)
+//             } else {
+//                 listState.scrollToItem(timelineRows.lastIndex)
+//             }
+//         }
+//     }
+//
+//     // Compare identity/order, not list size: a history prepend is never a new arrival.
+//     var previousMessageIds by remember(conversation.id, currentUserId, messageSessionIdentity) {
+//         mutableStateOf(messages.map { it.id }.toSet())
+//     }
+//     val orderedMessageIds = messages.map { it.id }
+//     LaunchedEffect(orderedMessageIds) {
+//         val appended = com.example.chat.core.messages.ConversationArrivalPolicy.appendedIds(previousMessageIds, orderedMessageIds)
+//         previousMessageIds = orderedMessageIds.toSet()
+//         if (appended.isEmpty() || !initialPositionSettled) return@LaunchedEffect
+//         if (isNearBottom) {
+//             scrollToBottom()
+//             pendingBelowCount = 0
+//         } else {
+//             pendingBelowCount += appended.size
+//         }
+//     }
+//
+//     // Dart _performInChatSearch: case-insensitive substring over message
+//     // text in timeline order; first match auto-highlights.
+//     val searchMatchedIds = remember(messages, searchQuery) {
+//         val q = searchQuery.trim()
+//         if (q.isEmpty()) emptyList()
+//         else com.example.chat.ui.chats.detail.ConversationSearchPolicy.matchingIds(messages, q)
+//     }
+//
+//     var pendingSearchJump by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+//
+//     LaunchedEffect(searchMatchedIds) {
+//         searchMatchIndex = if (searchMatchedIds.isEmpty()) 0 else searchMatchIndex.coerceIn(1, searchMatchedIds.size)
+//         if (highlightedMessageId !in searchMatchedIds) highlightedMessageId = null
+//     }
+//
+//     var highlightClearJob by remember { mutableStateOf<Job?>(null) }
+//     fun flashHighlight(messageId: String, durationMs: Long = 1800L) {
+//         highlightClearJob?.cancel()
+//         highlightedMessageId = messageId
+//         highlightClearJob = scope.launch {
+//             delay(durationMs)
+//             if (highlightedMessageId == messageId) highlightedMessageId = null
+//         }
+//     }
+//
+//     fun highlightAndJump(messageId: String) {
+//         flashHighlight(messageId)
+//         pendingScrollTarget = messageId
+//     }
+//
+//     // Dart call-site lookup (chat_detail_screen.dart:2966-2984): firstWhere with a
+//     // synthesized placeholder task in orElse, so a linked id missing from the tasks
+//     // list still yields a card with message-derived fields (dueAt = createdAt + 3d).
+//     fun resolveTask(message: ChatMessage): ChatTask? = message.linkedTaskId?.let { id ->
+//         tasks.firstOrNull { it.id == id }
+//         /* Legacy synthesized task intentionally disabled. No authoritative due date exists.
+//         tasks.firstOrNull { it.id == id } ?: ChatTask(
+//             id = id,
+//             sourceConversationId = conversation.id,
+//             sourceMessageId = message.id,
+//             title = message.text,
+//             description = "",
+//             creatorId = message.senderId,
+//             assigneeIds = emptyList(),
+//             dueAt = message.createdAt.plus(Duration.ofDays(3)),
+//             createdAt = message.createdAt,
+//             updatedAt = message.createdAt,
+//         )
+//         */
+//     }
+//
+//     // Dart _toggleTaskStatus: lightImpact haptic + completed<->inbox flip (source :1200).
+//     fun toggleTask(task: ChatTask) {
+//         ChatyHapticsPort.light(menuView)
+//         onUpdateTaskStatus(
+//             task.id,
+//             if (task.status == TaskStatus.completed) TaskStatus.inbox else TaskStatus.completed,
+//         )
+//     }
+//
+//     fun performSearch(query: String) {
+//         searchQuery = query
+//         if (query.isBlank()) {
+//             pendingSearchJump = false
+//             searchMatchIndex = 0
+//             highlightedMessageId = null
+//         } else {
+//             // The memoized projection above is the only query scan; jump after it updates.
+//             pendingSearchJump = true
+//         }
+//     }
+//
+//     LaunchedEffect(searchQuery, searchMatchedIds, pendingSearchJump) {
+//         if (pendingSearchJump) {
+//             pendingSearchJump = false
+//             searchMatchIndex = if (searchMatchedIds.isEmpty()) 0 else 1
+//             searchMatchedIds.firstOrNull()?.let(::highlightAndJump)
+//         }
+//     }
+//
+//     fun jumpToMatch(index: Int) {
+//         if (searchMatchedIds.isEmpty()) return
+//         val clamped = index.coerceIn(1, searchMatchedIds.size)
+//         searchMatchIndex = clamped
+//         highlightAndJump(searchMatchedIds[clamped - 1])
+//     }
+//
+//     fun toggleSearch() {
+//         searchOpen = !searchOpen
+//         if (!searchOpen) {
+//             searchQuery = ""
+//             searchMatchIndex = 0
+//             highlightedMessageId = null
+//         }
+//     }
+//
+//     // Dart _highlightMessage/_jumpToMessage share one cancelable highlight timer
+//     // (_searchHighlightTimer): 1800ms for search flashes, 3s for the initial jump.
+//     // Dart initialMessageId flow (chat_detail_screen.dart:172, :205-210,
+//     // _jumpToMessage): once messages are present, jump to the target, highlight
+//     // it for 3s, and snackbar when the message no longer exists.
+//     var pendingInitialJump by remember { mutableStateOf(initialMessageId) }
+//     LaunchedEffect(pendingInitialJump, messages.isNotEmpty()) {
+//         val target = pendingInitialJump ?: return@LaunchedEffect
+//         if (messages.isEmpty()) return@LaunchedEffect
+//         pendingInitialJump = null
+//         val index = messages.indexOfFirst { it.id == target }
+//         if (index < 0) {
+//             snackbarHostState.showSnackbar("This message is no longer available.")
+//             return@LaunchedEffect
+//         }
+//         flashHighlight(target, durationMs = 3000L)
+//         pendingScrollTarget = target
+//     }
+//     LaunchedEffect(conversation.id, messageSessionIdentity, externalSearchRequest) {
+//         if (externalSearchRequest > 0 && isMessageSessionCurrent()) {
+//             searchOpen = true
+//             searchQuery = ""
+//             searchMatchIndex = 0
+//         }
+//     }
+//
+//     LaunchedEffect(searchOpen) {
+//         if (searchOpen) {
+//             androidx.compose.runtime.withFrameNanos { }
+//             runCatching { searchFocusRequester.requestFocus() }
+//         }
+//     }
+//
+//     // Dart _handleComposerChanged: persist draft, publish typing with a 5s
+//     // idle reset, and open the quick-reply overlay on '#'.
+//     fun handleComposerChanged(value: String) {
+//         if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+//         draftRevision += 1
+//         composerText = value
+//         if (value.isEmpty()) recoveredViewOnceNeedsChoice = false
+//         onDraftChanged(value)
+//         val shouldType = value.trim().isNotEmpty()
+//         val tick = android.os.SystemClock.elapsedRealtime()
+//         if (com.example.chat.data.api.TypingCadencePolicy.shouldPublish(shouldType, typingPublished, tick, lastTypingPublishedAt)) {
+//             typingPublished = true
+//             lastTypingPublishedAt = tick
+//             publishTypingSafely(true)
+//         }
+//         if (!shouldType && typingPublished) {
+//             typingPublished = false
+//             publishTypingSafely(false)
+//         }
+//         typingIdleJob?.cancel()
+//         if (shouldType) {
+//             typingIdleJob = scope.launch {
+//                 delay(com.example.chat.data.api.TypingCadencePolicy.IDLE_MS)
+//                 if (typingPublished) {
+//                     typingPublished = false
+//                     publishTypingSafely(false)
+//                 }
+//             }
+//         }
+//     }
+//
+//     val chatPaneWidthDp = com.example.chat.ui.kit.LocalChatPaneWidthDp.current
+//     // Dart _onMessageLongPress: a rect-less long press synthesizes a 100x40
+//     // anchor at screen center (logical px -> window px here).
+//     fun syntheticCenterRect(): Rect {
+//         val wPx = with(menuDensity) { (chatPaneWidthDp ?: 360f).dp.toPx() }
+//         val hPx = with(menuDensity) { 400.dp.toPx() }
+//         val rw = with(menuDensity) { 100.dp.toPx() }
+//         val rh = with(menuDensity) { 40.dp.toPx() }
+//         return Rect(
+//             wPx / 2f - rw / 2f,
+//             hPx / 2f - rh / 2f,
+//             wPx / 2f + rw / 2f,
+//             hPx / 2f + rh / 2f,
+//         )
+//     }
+//
+//     // Dart _onMessageLongPressWithRect: selection haptic, then the anchored
+//     // AppContextMenu with reaction rail (always; the api-branch detail
+//     // screen has no bottom-sheet branch).
+//     fun openMessageMenu(message: ChatMessage, rect: Rect?) {
+//         ChatyHapticsPort.selection(menuView)
+//         contextMenuMessage = message
+//         contextMenuAnchor = rect ?: syntheticCenterRect()
+//     }
+//
+//     fun runAction(selected: ChatMessage, type: MessageActionType) {
+//         if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+//         val message = currentActionMessages.singleOrNull { it.id == selected.id && it.conversationId == conversation.id } ?: return
+//         if (message.id.isBlank()) return
+//         // Recheck ownership-dependent menu eligibility at activation, not only when opening.
+//         val validActions = MessageActionRegistry.getAvailableActions(message, message.senderId == currentUserId)
+//         if (type !in setOf(MessageActionType.translate, MessageActionType.react) && validActions.none { it.type == type }) return
+//         // Anchored menus and the single-tap dialog share the same protected-content rules.
+//         val capabilities = com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(message))
+//         val required = when (type) {
+//             MessageActionType.copy -> com.example.chat.ui.chats.detail.SelectionAction.copy
+//             MessageActionType.forward -> com.example.chat.ui.chats.detail.SelectionAction.forward
+//             MessageActionType.star -> com.example.chat.ui.chats.detail.SelectionAction.star
+//             else -> null
+//         }
+//         if (required != null && required !in capabilities) return
+//         when (type) {
+//             MessageActionType.reply -> replyTarget = message
+//             MessageActionType.copy -> {
+//                 clipboard.setText(AnnotatedString(message.text))
+//                 scope.launch { snackbarHostState.showSnackbar("Message copied") }
+//             }
+//             MessageActionType.edit -> {
+//                 // Dart sets the editing id + text and keeps the reply target.
+//                 editingMessage = message
+//                 recoveredViewOnceNeedsChoice = false
+//                 handleComposerChanged(message.text)
+//             }
+//             MessageActionType.star -> onToggleStar(message.id)
+//             MessageActionType.pin -> onTogglePin(message.id)
+//             MessageActionType.forward -> {
+//                 val ids = selectionUnit(message.id)
+//                 val batch = messages.filter { it.id in ids }
+//                 if (batch.size > 1) {
+//                     if (onForwardSelection != null && com.example.chat.ui.chats.detail.SelectionAction.forward in
+//                         com.example.chat.ui.chats.detail.SelectionActionPolicy.available(batch)) onForwardSelection(batch)
+//                     else scope.launch { snackbarHostState.showSnackbar("Forwarding this group is not available here.") }
+//                 } else onForward(message)
+//             }
+//             MessageActionType.select -> selectedIds = selectedIds + selectionUnit(message.id)
+//             // Dart emits MessageActionType.info but _executeMessageAction has
+//             // no info case (default: break) - the row is a source no-op.
+//             MessageActionType.info -> infoMessage = message
+//             MessageActionType.task -> onCreateTaskFromMessage(message)
+//             MessageActionType.deleteForMe -> onDeleteMessage(message.id, false)
+//             MessageActionType.deleteForEveryone -> onDeleteMessage(message.id, true)
+//             MessageActionType.translate -> {
+//                 if (com.example.chat.ui.chats.detail.SelectionAction.copy in
+//                     com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(message))) {
+//                     translateMessage = message
+//                 }
+//             }
+//             MessageActionType.report -> if (message.senderId != currentUserId) onReportMessage(message)
+//             MessageActionType.blockUser -> if (message.senderId != currentUserId) onBlockMessageSender(message.senderId)
+//             else -> Unit
+//         }
+//     }
+//
+//     // Dart _sendMessage: edit branch restores the draft on failure; a
+//     // leading /task command routes to task creation instead of sending;
+//     // the reply target is cleared once the send starts.
+//     fun sendCurrent() {
+//         if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+//         val submittedDraft = composerText
+//         val text = submittedDraft.trim()
+//         if (text.isEmpty() || sending) return
+//         if (recoveredViewOnceNeedsChoice && editingMessage == null) {
+//             scope.launch { snackbarHostState.showSnackbar("Choose a send mode for the recovered view-once text first. Nothing was sent.") }
+//             return
+//         }
+//         val submittedOwner = draftOwner
+//         val editTarget = editingMessage
+//         if (editTarget != null) {
+//             sending = true
+//             handleComposerChanged("")
+//             editingMessage = null
+//             replyTarget = null
+//             val editClearedRevision = draftRevision
+//             scope.launch {
+//                 try {
+//                     if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
+//                     val currentTarget = currentEditableMessage(editTarget.id)
+//                         ?: throw IllegalStateException("The original message is no longer editable. Your edit is kept.")
+//                     check(currentTarget.text == editTarget.text && currentTarget.editedAt == editTarget.editedAt) {
+//                         "The original message changed. Review the restored edit before trying again."
+//                     }
+//                     onEditMessage(currentTarget.id, text)
+//                 } catch (error: Exception) {
+//                     if (error is kotlinx.coroutines.CancellationException) throw error
+//                     if (currentDraftOwner != submittedOwner) return@launch
+//                     when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
+//                         currentDraftOwner == submittedOwner, editClearedRevision, draftRevision, composerText)) {
+//                         com.example.chat.core.messages.ConversationDraftRecovery.Decision.restore -> {
+//                             val currentTarget = currentEditableMessage(editTarget.id)
+//                             if (currentTarget != null) {
+//                                 editingMessage = currentTarget
+//                                 handleComposerChanged(submittedDraft)
+//                             } else {
+//                                 recoverableDraft = ConversationRecoverableDraft(submittedDraft, ConversationRecoverableDraft.Kind.edit, editTarget.id)
+//                             }
+//                         }
+//                         com.example.chat.core.messages.ConversationDraftRecovery.Decision.keepSeparately -> recoverableDraft = ConversationRecoverableDraft(submittedDraft, ConversationRecoverableDraft.Kind.edit, editTarget.id)
+//                         com.example.chat.core.messages.ConversationDraftRecovery.Decision.ignore -> return@launch
+//                     }
+//                     snackbarHostState.showSnackbar(
+//                         error.message?.removePrefix("Exception: ") ?: "Could not edit message",
+//                     )
+//                 } finally {
+//                     if (currentDraftOwner == submittedOwner) sending = false
+//                 }
+//             }
+//             return
+//         }
+//         val command = ChatCommandParser.parse(text)
+//         if (command.type == ChatCommandType.task) {
+//             handleComposerChanged("")
+//             onCreateTask(command.argument.ifEmpty { null })
+//             return
+//         }
+//         sending = true
+//         handleComposerChanged("")
+//         replyTarget = null
+//         val clearedRevision = draftRevision
+//         scope.launch {
+//             try {
+//                 if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
+//                 onSend(text)
+//                 if (currentDraftOwner != submittedOwner) return@launch
+//                 // Chaty #33: sending lands on the newest message even when the
+//                 // user was scrolled up reading history.
+//                 scrollToBottom()
+//             } catch (error: Exception) {
+//                 if (error is kotlinx.coroutines.CancellationException) throw error
+//                 if (currentDraftOwner != submittedOwner) return@launch
+//                 when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
+//                     currentDraftOwner == submittedOwner, clearedRevision, draftRevision, composerText)) {
+//                     com.example.chat.core.messages.ConversationDraftRecovery.Decision.restore -> handleComposerChanged(submittedDraft)
+//                     com.example.chat.core.messages.ConversationDraftRecovery.Decision.keepSeparately -> recoverableDraft = ConversationRecoverableDraft(submittedDraft)
+//                     com.example.chat.core.messages.ConversationDraftRecovery.Decision.ignore -> return@launch
+//                 }
+//                 snackbarHostState.showSnackbar(
+//                     "Send was not confirmed. Draft kept; check the chat before sending again.",
+//                 )
+//             } finally {
+//                 if (currentDraftOwner == submittedOwner) sending = false
+//             }
+//         }
+//     }
+//
+//     // Dart chat_detail_screen.dart:2210-2292 - quick-contact rail shown when the
+//     // per-chat toggle is on AND the screen is at least 720dp wide; bg is the
+//     // custom color unless unset (0xFF000000), where it falls back to the surface
+//     // color at sidebarOpacity.
+//     val showQuickRail = convPrefs.enableQuickContactSidebar &&
+//         (com.example.chat.ui.kit.LocalChatPaneWidthDp.current ?: com.example.chat.ui.kit.rememberAdaptiveWindowSize().widthDp.toFloat()) >= 720f
+//     val railBg = if (convPrefs.quickContactBgColor != 0xFF000000L) {
+//         Color(convPrefs.quickContactBgColor)
+//     } else {
+//         Color(theme.surfaceColor).copy(alpha = convPrefs.sidebarOpacity.toFloat())
+//     }
+//     val railBottomAnchored = convPrefs.quickContactSidebarPosition == "Bottom"
+//
+//     // Dart :2295-2311 - drag-to-pop: a rightward fling past 300 px/s pops unless
+//     // universal.disableSwipeToExit is on. onDragStopped receives px/s.
+//     val swipeExitModifier = if (disableSwipeToExit) {
+//         Modifier
+//     } else {
+//         Modifier.draggable(
+//             state = rememberDraggableState { },
+//             orientation = Orientation.Horizontal,
+//             onDragStopped = { velocity ->
+//                 if (velocity > 300f) onBack()
+//             },
+//         )
+//     }
+//
+//     Row(Modifier.fillMaxSize().then(swipeExitModifier)) {
+//         // Dart :2287-2292 - rail side comes from convPrefs.sidebarPosition;
+//         // quickContactSidebarPosition only anchors contacts top/bottom.
+//         if (showQuickRail && convPrefs.sidebarPosition == "Left") {
+//             QuickContactSidebar(
+//                 theme = theme,
+//                 contacts = quickContacts,
+//                 backgroundColor = railBg,
+//                 textColor = Color(convPrefs.quickContactTextColor),
+//                 bottomAnchored = railBottomAnchored,
+//                 avatarShape = homeAvatarShape,
+//                 onOpen = { onOpenConversation(it.id) },
+//             )
+//         }
+//         Box(Modifier.weight(1f)) {
+//     Scaffold(
+//         modifier = Modifier.testTag("chat-screen-root"),
+//         containerColor = Color(theme.backgroundColor),
+//         snackbarHost = { SnackbarHost(snackbarHostState) },
+//     ) { padding ->
+//         Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
+//         val translucentHeaderWallpaper = headerAppearance.effective().alphaPercent < 100
+//         // Opt-in only: one continuous wallpaper behind header and message region.
+//         if (translucentHeaderWallpaper) {
+//                 ChatWallpaper(
+//                     theme = theme,
+//                     wallpaperType = wallpaperType,
+//                     patternId = wallpaperOverride ?: theme.wallpaperId,
+//                     profileColorHex = conversation.avatarColorHex,
+//                     imagePath = wallpaperPath,
+//                     profilePicWallpaper = wallpaperProfilePic,
+//                     avatarUrl = wallpaperAvatarUrl,
+//                 )
+//         }
+//         Column(Modifier.fillMaxSize()) {
+//             if (isSelectionMode && contextMenuMessage == null) {
+//                 SelectionHeader(theme, selectedMessages.size) { selectedIds = emptySet() }
+//             } else if (searchOpen) {
+//                 SearchHeader(
+//                     theme = theme,
+//                     query = searchQuery,
+//                     onQueryChange = ::performSearch,
+//                     matchIndex = searchMatchIndex,
+//                     matchCount = searchMatchedIds.size,
+//                     onPrevious = { jumpToMatch(searchMatchIndex - 1) },
+//                     onNext = { jumpToMatch(searchMatchIndex + 1) },
+//                     onClose = {
+//                         if (searchQuery.isNotEmpty()) {
+//                             performSearch("")
+//                         } else {
+//                             toggleSearch()
+//                         }
+//                     },
+//                     onBack = ::toggleSearch,
+//                     focusRequester = searchFocusRequester,
+//                 )
+//             } else {
+//                 ConversationHeader(
+//                     theme = theme,
+//                     conversation = conversation,
+//                     presenceText = presenceText,
+//                     presenceIsOnline = presenceIsOnline,
+//                     showHeaderAvatar = showHeaderAvatar,
+//                     showHeaderName = showHeaderName,
+//                     showPresenceLine = showPresenceLine,
+//                     headerAppearance = headerAppearance, unreadChatCount = unreadChatCount,
+//                     showHeaderCalls = showHeaderCalls,
+//                     headerBarColor = headerBarColor,
+//                     presencePillColor = presencePillColor,
+//                     presenceTextColor = presenceTextColor,
+//                     callsAllowed = callsAllowed,
+//                     onStartCall = onStartCall,
+//                     connectionState = connectionState,
+//                     onConnectionDetailsTap = { connectionSheetOpen = true },
+//                     onBack = onBack,
+//                     onOpenInfo = onOpenInfo,
+//                     menuOpen = chatMenuOpen,
+//                     onMenuOpenChange = { chatMenuOpen = it },
+//                     onSearch = {
+//                         chatMenuOpen = false
+//                         toggleSearch()
+//                     },
+//                     onOpenWallpaperPicker = {
+//                         chatMenuOpen = false
+//                         wallpaperPickerOpen = true
+//                     },
+//                     onOpenAppearance = onOpenAppearance,
+//                     onToggleMute = onToggleMute,
+//                     ghostModeEnabled = ghostModeEnabled,
+//                     onToggleGhostMode = onToggleGhostMode,
+//                     secureChannelEnabled = secureChannelEnabled,
+//                     onToggleSecureChannel = onToggleSecureChannel,
+//                     onBlockContact = onBlockContact,
+//                     onClearConversation = {
+//                         chatMenuOpen = false
+//                         clearConfirmOpen = true
+//                     },
+//                 )
+//             }
+//
+//             val localPinned = remember(messages) { com.example.chat.core.messages.LocalPinnedMessagePolicy.latest(messages) }
+//             if (localPinned != null) {
+//                 Box(Modifier.fillMaxWidth()) {
+//                     Row(Modifier.fillMaxWidth().background(Color(theme.cardColor))
+//                         .clickable { localPinMenu = true }.padding(horizontal = 16.dp, vertical = 8.dp),
+//                         verticalAlignment = Alignment.CenterVertically) {
+//                         Column(Modifier.weight(1f)) {
+//                             Text("Pinned on this device", color = Color(theme.accentColor), fontSize = 11.sp)
+//                             Text(localPinned.text.ifBlank { localPinned.attachment?.name ?: "Message" },
+//                                 color = Color(theme.primaryTextColor), maxLines = 1,
+//                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+//                         }
+//                     }
+//                     androidx.compose.material3.DropdownMenu(expanded = localPinMenu,
+//                         onDismissRequest = { localPinMenu = false }) {
+//                         androidx.compose.material3.DropdownMenuItem(text = { Text("Go to message") }, onClick = {
+//                             localPinMenu = false
+//                             if (isMessageSessionCurrent() && messages.any { it.id == localPinned.id }) {
+//                                 flashHighlight(localPinned.id, durationMs = 2500L); pendingScrollTarget = localPinned.id
+//                             }
+//                         })
+//                         androidx.compose.material3.DropdownMenuItem(text = { Text("Unpin on this device") }, onClick = {
+//                             localPinMenu = false
+//                             if (isMessageSessionCurrent() && messages.any { it.id == localPinned.id && it.isPinned }) onTogglePin(localPinned.id)
+//                         })
+//                     }
+//                 }
+//             }
+//
+//             // No strip banner in chats: the header signal icon is the only Connection Health tap target.
+//
+//             var messageRegionTop by remember { mutableStateOf(0f) }
+//             Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { messageRegionTop = it.boundsInWindow().top }) {
+//                 // Original/default message-only wallpaper retained when opacity is100.
+//                 if (!translucentHeaderWallpaper) ChatWallpaper(
+//                     theme = theme,
+//                     wallpaperType = wallpaperType,
+//                     patternId = wallpaperOverride ?: theme.wallpaperId,
+//                     profileColorHex = conversation.avatarColorHex,
+//                     imagePath = wallpaperPath,
+//                     profilePicWallpaper = wallpaperProfilePic,
+//                     avatarUrl = wallpaperAvatarUrl,
+//                 )
+//                 // Compact album geometry stays stable while selecting; effects still use each real message ID.
+//                 val timelineRowKeys = remember(timelineRows) {
+//                     com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowKeys(timelineRows)
+//                 }
+//                 // "Conversation Animation" setting (Navigation & Effects): the
+//                 // model, persistence and picker row existed but nothing read
+//                 // the value. Same engine and semantics as the home list's
+//                 // animation (controller read in composition; "Standard" is a
+//                 // no-op modifier). Read directly from the locator because this
+//                 // screen's prefs arrive via ChatDetailHost parameters.
+//                 val conversationListAnimation =
+//                     com.example.chat.ServiceLocator.preferencesController.effects.conversationListAnimation
+//                 LazyColumn(
+//                     state = listState,
+//                     modifier = Modifier.fillMaxSize().testTag("chat-message-list")
+//                         // G3: the anchor jump happens while the list is still
+//                         // invisible; no flash of the oldest page on open.
+//                         .alpha(if (initialPositionSettled || messages.isEmpty()) 1f else 0f),
+//                     contentPadding = PaddingValues(vertical = 8.dp),
+//                 ) {
+//                     itemsIndexed(
+//                         timelineRows,
+//                         key = { index, row -> timelineRowKeys.getOrNull(index) ?: "row_${row.anchor.id}_$index" },
+//                         contentType = { _, row -> if (row.messages.size > 1) "media-album" else row.anchor.type },
+//                     ) { rowIndex, row ->
+//                         // MV-R3-050 prior: Column(Modifier.fillMaxWidth().listEntrance(conversationListAnimation, row.anchor.id)) {
+//                         // MV-R3-050: anchor membership includes non-anchor album members, matching rowIndex.
+//                         val viewerAnchor = viewerAnchorId
+//                         Column(Modifier.fillMaxWidth().listEntrance(conversationListAnimation, row.anchor.id)
+//                             // MV-R3-050: only the viewer-close anchor's containing row takes input focus.
+//                             .then(if (viewerAnchor != null && row.messages.any { it.id == viewerAnchor }) Modifier.focusRequester(viewerAnchorFocusRequesters.getOrPut(viewerAnchor) { FocusRequester() }).focusable() else Modifier)) {
+//                         if (rowIndex == firstUnreadRowIndex && firstUnreadRowIndex >= 0) {
+//                             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+//                                 Text("Unread messages",
+//                                     color = Color(theme.accentColor), fontSize = 11.sp,
+//                                     modifier = Modifier.background(Color(theme.cardColor), RoundedCornerShape(12.dp))
+//                                         .padding(horizontal = 10.dp, vertical = 4.dp))
+//                             }
+//                         }
+//                         if (com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.startsDay(timelineRows, rowIndex, timelineZone)) {
+//                             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+//                                 Text(com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.dayAt(timelineRows, rowIndex, timelineZone)
+//                                     .format(dayHeaderFormatter),
+//                                     color = Color(theme.secondaryTextColor), fontSize = 11.sp,
+//                                     // Previous/default date shape12dp,padding10x4dp; no timeline key/order changes.
+//                                     modifier = Modifier.background(Color(theme.cardColor), RoundedCornerShape(dateChip.radius.dp))
+//                                         .padding(horizontal = dateChip.horizontal.dp, vertical = dateChip.vertical.dp))
+//                             }
+//                         }
+//                         val message = row.anchor
+//                         val isMine = message.senderId == currentUserId
+//                         val isHighlighted = message.id in selectedIds ||
+//                             contextMenuMessage?.id == message.id ||
+//                             highlightedMessageId == message.id
+//                         val highlightColor = if (message.id in selectedIds) {
+//                             Color(0x447F7F7F)
+//                         } else if (contextMenuMessage?.id == message.id) {
+//                             Color(theme.accentColor).copy(alpha = if (theme.isDark) 0.24f else 0.16f)
+//                         } else {
+//                             Color.Transparent
+//                         }
+//                         val localText = remember(message, localOverrideAccountKey, conversation.id, localMessageRevision) { localMessageStore.text(message) }
+//                         if (localText != null) Text("Modified locally - only on this device", color = Color(theme.secondaryTextColor), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 16.dp))
+//                         if (message.id in readAlertWatchedIds) Text("You'll be notified when this is read", color = Color(theme.secondaryTextColor), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 16.dp))
+//                         val bubble: @Composable () -> Unit = { ChatMessageBubble(
+//                             message = if (localText != null) message.copy(text = localText) else message,
+//                             isMe = isMine,
+//                             currentUserId = currentUserId,
+//                             theme = theme,
+//                             // Dart: poll messages ([POLL] prefix) open the poll sheet on bubble tap.
+//                             modifier = if (message.text.startsWith("[POLL] ")) {
+//                                 Modifier.pointerInput(message.id) {
+//                                     detectTapGestures(onTap = { onPollTap(message) })
+//                                 }
+//                             } else {
+//                                 Modifier
+//                             },
+//                             senderName = if (conversation.isGroup && !isMine) {
+//                                 resolveSenderName(message.senderId)
+//                             } else {
+//                                 null
+//                             },
+//                             showGroupAvatar = showGroupAvatar,
+//                             onAvatarTap = if (conversation.isGroup && !isMine) {
+//                                 { avatarQuickViewSenderId = message.senderId }
+//                             } else {
+//                                 null
+//                             },
+//                             senderCluster = senderClusters.getOrNull(rowIndex) ?: com.example.chat.ui.chats.detail.SenderClusterPosition.SINGLE,
+//                             isSenderAdmin = conversation.isGroup &&
+//                                 conversation.adminIds.contains(message.senderId),
+//                             makeTextSelectable = convPrefs.makeTextSelectable,
+//             enableAnimatedEmojis = convPrefs.enableAnimatedEmojis,
+//             emojiStyle = universalEmojiStyle,
+//                             groupAdminIcon = convPrefs.groupAdminIcon,
+//                             hideAdminNameIcon = convPrefs.hideAdminNameIcon,
+//                             voicePlayButtonColor = convPrefs.voiceNotePlayButtonColor?.let(::Color),
+//                             voicePlayingBarColor = convPrefs.voiceNotePlayingBarColor?.let(::Color),
+//                             voicePlaybackSpeed = convPrefs.voicePlaybackSpeed,
+//                             voiceUrlResolver = voiceUrlResolver,
+//                             attachmentBinding = attachmentBinding,
+//                             p2pTransferState = p2pTransferStates.firstOrNull { transfer ->
+//                                 transfer.transferId == message.attachment?.id ||
+//                                     transfer.transferId == message.attachment?.url?.substringAfterLast('/')
+//                             },
+//                             isSelected = isHighlighted,
+//                             showDeletedContent = showDeletedContent,
+//                             retainViewOnce = retainViewOnce,
+//                             viewOnceOpened = openedViewOnceIds.contains(message.id),
+//                             viewOncePlaybackCompleted = completedViewOnceIds.contains(message.id),
+//                             colorOverrides = colorOverrides,
+//                             remoteImage = remoteImage,
+//                             onLongPress = { openMessageMenu(message, null) },
+//                             onLongPressWithRect = { rect -> openMessageMenu(message, rect) },
+//                             onBubbleTap = { rect ->
+//                                 if (isSelectionMode) toggleSelectionUnit(message.id)
+//                                 else if (!convPrefs.disableMoreOptionsFromBubble) singleTapMessage = message
+//                             },
+//                             mediaContent = if (row.messages.size > 1) ({
+//                                 com.example.chat.ui.chats.detail.CompactAlbumPreview(row.messages, attachmentBinding, remoteImage, voiceUrlResolver,
+//                                     onOpen = { item, rect -> if (isSelectionMode) toggleSelectionUnit(item.id) else if (rect != null && onMediaTapWithBounds != null) onMediaTapWithBounds(item, rect) else onMediaTap(item) },
+//                                     onMenu = { item, rect -> openMessageMenu(item, rect) },
+//                                     onReply = { item -> replyTarget = item },
+//                                     onReact = if (disableDoubleTapReaction || !ReleaseFeatures.MESSAGE_REACTIONS) null else ({ item ->
+//                                         toggleCurrentReaction(item.id, doubleTapReactionEmoji)
+//                                     }))
+//                             }) else null,
+//                             onSwipeReply = if (row.messages.size > 1) null else ({ replyTarget = message }),
+//                             onDoubleTap = if (disableDoubleTapReaction || !ReleaseFeatures.MESSAGE_REACTIONS || row.messages.size > 1 || com.example.chat.ui.chats.detail.SelectionAction.star !in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(message))) {
+//                                 null
+//                             } else {
+//                                 { toggleCurrentReaction(message.id, doubleTapReactionEmoji) }
+//                             },
+//                             onReactionTap = { emoji -> toggleCurrentReaction(message.id, emoji) },
+//                             onMediaTapWithBounds = { rect -> onMediaTapWithBounds?.invoke(message, rect) ?: onMediaTap(message) },
+//                             onMediaTap = if (message.attachment == null) {
+//                                 null
+//                             } else {
+//                                 { onMediaTap(message) }
+//                             },
+//                             onVoicePlay = { attachment -> onVoicePlay(attachment) },
+//                             onViewOnceOpen = {
+//                                 if (com.example.chat.core.messages.ViewOnceTextPolicy.text(message)) {
+//                                     viewOnceTextTarget = message
+//                                 } else if (viewOnceNuxStore.needsReceiverNux()) {
+//                                     viewOnceNuxPending = (++viewOnceNuxRequestCount) to message
+//                                 } else {
+//                                     openViewOnceMessage(message)
+//                                 }
+//                             },
+//                             onVoicePlaybackCompleted = {
+//                                 if (!isMine && isMessageSessionCurrent()) scope.launch {
+//                                     com.example.chat.ServiceLocator.apiBackend.acknowledgeAudioPlayed(message.id, conversation.id, viewOnceOwner)
+//                                 }
+//                             },
+//                             onViewOncePlaybackCompleted = {
+//                                 completedViewOnceIds = completedViewOnceIds + message.id
+//                                 scope.launch {
+//                                     viewOnceOpenController.consumeAfterPlayback(message.id)
+//                                 }
+//                             },
+//                             onRetry = if (isMine && message.deliveryState == DeliveryState.failed) {
+//                                 { retryCurrentMessage(message.id) }
+//                             } else {
+//                                 null
+//                             },
+//                             task = resolveTask(message),
+//                             onTaskTap = {
+//                                 val currentTask = resolveTask(message)
+//                                 if (currentTask != null) onOpenTaskDetails(currentTask)
+//                                 else scope.launch { snackbarHostState.showSnackbar("Task details are not available in the loaded data.") }
+//                             },
+//                             onTaskToggle = { resolveTask(message)?.let(::toggleTask) },
+//                             onTaskMenu = { rect ->
+//                                 resolveTask(message)?.let { taskMenuTarget = it to rect }
+//                             },
+//                         ) }
+//                         if (isSelectionMode) {
+//                             Box(Modifier.fillMaxWidth().background(highlightColor)) {
+//                                 bubble()
+//                                 Box(Modifier.matchParentSize().pointerInput(message.id, selectedIds) {
+//                                     detectTapGestures(onTap = {
+//                                         toggleSelectionUnit(message.id)
+//                                     })
+//                                 })
+//                             }
+//                         } else if (contextMenuMessage?.id == message.id) {
+//                             Box(Modifier.fillMaxWidth().background(highlightColor)) {
+//                                 bubble()
+//                             }
+//                         } else {
+//                             bubble()
+//                         }
+//                         }
+//                     }
+//                 }
+//
+//                 ChatMessagesStateOverlay(
+//                     theme = theme,
+//                     messagesEmpty = messages.isEmpty(),
+//                     loadingMessages = loadingMessages,
+//                     loadError = loadError,
+//                     onRetryLoad = onRetryLoad,
+//                 )
+//
+//                 // G10: mention jump button (Telegram-style). Visible while any
+//                 // loaded message mentions the current user; each tap moves to
+//                 // the next mention oldest-to-newest and flashes it.
+//                 var mentionCursor by remember(conversation.id, messageSessionIdentity) { mutableIntStateOf(0) }
+//                 if (mentionMessageIds.isNotEmpty()) {
+//                     Box(
+//                         Modifier
+//                             .align(Alignment.BottomEnd)
+//                             .padding(end = 14.dp, bottom = 72.dp)
+//                             .size(48.dp).testTag("chat-mention-jump")
+//                             .background(Color(theme.cardColor), CircleShape)
+//                             .border(1.dp, Color(theme.surfaceColor), CircleShape)
+//                             .clickable(
+//                                 role = androidx.compose.ui.semantics.Role.Button,
+//                                 onClickLabel = "Jump to next mention",
+//                             ) {
+//                                 val targetId = mentionMessageIds[mentionCursor % mentionMessageIds.size]
+//                                 mentionCursor = (mentionCursor + 1) % mentionMessageIds.size
+//                                 flashHighlight(targetId)
+//                                 pendingScrollTarget = targetId
+//                             },
+//                         contentAlignment = Alignment.Center,
+//                     ) {
+//                         Text("@", color = Color(theme.accentColor), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+//                         Box(
+//                             Modifier
+//                                 .align(Alignment.TopCenter)
+//                                 .offset(y = (-20).dp)
+//                                 .background(Color(theme.accentColor), CircleShape)
+//                                 .padding(horizontal = 5.dp, vertical = 1.dp),
+//                         ) {
+//                             Text(
+//                                 "${mentionMessageIds.size}",
+//                                 color = Color(theme.onAccentColor),
+//                                 fontSize = 10.sp,
+//                                 fontWeight = FontWeight.Bold,
+//                             )
+//                         }
+//                     }
+//                 }
+//
+//                 // Scroll-to-bottom FAB with unseen-count badge.
+//                 val fabVisible = !isNearBottom && messages.isNotEmpty()
+//                 val fabReduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
+//                 val fabScale by animateFloatAsState(if (fabVisible) 1f else 0.4f, animationSpec = if (fabReduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.spring(), label = "fabScale")
+//                 val fabAlpha by animateFloatAsState(if (fabVisible) 1f else 0f, animationSpec = if (fabReduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.spring(), label = "fabAlpha")
+//                 Box(
+//                     Modifier
+//                         .align(Alignment.BottomEnd)
+//                         .padding(end = 14.dp, bottom = 12.dp)
+//                         .size(48.dp).testTag("chat-scroll-to-latest")
+//                         .scale(fabScale)
+//                         .alpha(fabAlpha)
+//                         .background(Color(theme.cardColor), CircleShape)
+//                         .border(1.dp, Color(theme.surfaceColor), CircleShape)
+//                         .clickable(
+//                             enabled = fabVisible,
+//                             role = androidx.compose.ui.semantics.Role.Button,
+//                             onClickLabel = "Scroll to latest messages",
+//                         ) {
+//                             scrollToBottom()
+//                             pendingBelowCount = 0
+//                         }
+//                         .then(if (!fabVisible) Modifier.clearAndSetSemantics { } else Modifier),
+//                     contentAlignment = Alignment.Center,
+//                 ) {
+//                     Icon(
+//                         Icons.Rounded.KeyboardArrowDown,
+//                         contentDescription = "Scroll to bottom",
+//                         tint = Color(theme.primaryTextColor),
+//                         modifier = Modifier.size(27.dp),
+//                     )
+//                     if (pendingBelowCount > 0) {
+//                         Box(
+//                             Modifier
+//                                 .align(Alignment.TopCenter)
+//                                 .offset(y = (-20).dp)
+//                                 .background(Color(theme.accentColor), CircleShape)
+//                                 .padding(horizontal = 5.dp, vertical = 1.dp),
+//                         ) {
+//                             Text(
+//                                 "$pendingBelowCount",
+//                                 color = Color(theme.onAccentColor),
+//                                 fontSize = 10.sp,
+//                                 fontWeight = FontWeight.Bold,
+//                             )
+//                         }
+//                     }
+//                 }
+//                 AnchoredMessageContextMenu(
+//                     messageState = contextMenuMessageState, anchorRect = contextMenuAnchor, regionTop = messageRegionTop,
+//                     currentUserId = currentUserId, theme = theme, onAction = ::runAction,
+//                     onToggleReaction = ::toggleCurrentReaction, reactionTargetState = emojiReactionTargetState,
+//                 )
+//             }
+//
+//             if (showUnknownSenderSafety && !isSelectionMode) {
+//                 Column(Modifier.fillMaxWidth().background(Color(theme.cardColor)).padding(horizontal = 12.dp, vertical = 8.dp)) {
+//                     Text("New sender", color = Color(theme.primaryTextColor), fontWeight = FontWeight.SemiBold)
+//                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+//                         TextButton(onClick = onContinueUnknownSender, modifier = Modifier.heightIn(min = 48.dp)) { Text("Continue") }
+//                         TextButton(onClick = onReportUnknownSender, modifier = Modifier.heightIn(min = 48.dp)) { Text("Report") }
+//                         if (onBlockContact != null) {
+//                             TextButton(onClick = onBlockContact, modifier = Modifier.heightIn(min = 48.dp)) { Text("Block") }
+//                         }
+//                     }
+//                 }
+//             }
+//
+//             if (peerTyping && !isSelectionMode) {
+//                 com.example.chat.ui.chats.detail.PeerTypingIndicator(
+//                     initials = typingAvatarInitials,
+//                     avatarUrl = typingAvatarUrl,
+//                     avatarColorHex = typingAvatarColorHex,
+//                     theme = theme,
+//                     modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+//                 )
+//             }
+//
+//             // Quick replies overlay (Dart _showQuickReplyOverlay section).
+//             if (!isSelectionMode && composerText.contains("#") && quickReplies.isNotEmpty()) {
+//                 QuickReplyOverlay(
+//                     theme = theme,
+//                     replies = quickReplies,
+//                     onPick = { reply -> handleComposerChanged(reply.content) },
+//                 )
+//             }
+//
+//             // Edit banner (Dart _editingMessageId section).
+//             editingMessage?.let { editing ->
+//                 BannerRow(
+//                     theme = theme,
+//                     icon = {
+//                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = null,
+//                             color = Color(theme.accentColor), modifier = Modifier.size(18.dp))
+//                     },
+//                     title = "Editing message",
+//                     closeLabel = "Cancel editing message",
+//                     titleColor = Color(theme.accentColor),
+//                     subtitle = editing.text,
+//                     onClose = {
+//                         editingMessage = null
+//                         handleComposerChanged("")
+//                     },
+//                 )
+//             }
+//
+//             recoverableDraft?.let { failed ->
+//                 fun eligibleEditTarget(): ChatMessage? = failed.editMessageId?.let(::currentEditableMessage)
+//                 val canRestoreEdit = failed.kind != ConversationRecoverableDraft.Kind.edit || eligibleEditTarget() != null
+//                 val recoveryLabel = when (failed.kind) {
+//                     ConversationRecoverableDraft.Kind.edit -> "Restore failed edit"
+//                     ConversationRecoverableDraft.Kind.viewOnce -> "Restore failed view-once text (choose send mode again)"
+//                     ConversationRecoverableDraft.Kind.message -> "Restore failed message"
+//                 }
+//                 TextButton(
+//                     enabled = composerText.isEmpty() && editingMessage == null && canRestoreEdit,
+//                     onClick = {
+//                         if (currentDraftOwner != draftOwner || !isMessageSessionCurrent() || composerText.isNotEmpty() || editingMessage != null) return@TextButton
+//                         if (failed.kind == ConversationRecoverableDraft.Kind.edit) {
+//                             val target = eligibleEditTarget() ?: return@TextButton
+//                             editingMessage = target
+//                             replyTarget = null
+//                         }
+//                         handleComposerChanged(failed.text)
+//                         recoveredViewOnceNeedsChoice = failed.kind == ConversationRecoverableDraft.Kind.viewOnce
+//                         recoverableDraft = null
+//                     },
+//                 ) {
+//                     Text(when {
+//                         !canRestoreEdit -> "Failed edit kept. Original message is no longer editable."
+//                         editingMessage != null -> "Failed draft kept. Finish or cancel the current edit before restoring it."
+//                         composerText.isNotEmpty() -> "Failed draft kept. Clear this draft before restoring it."
+//                         else -> recoveryLabel
+//                     })
+//                 }
+//             }
+//             if (recoveredViewOnceNeedsChoice && composerText.isNotEmpty()) {
+//                 Text("Recovered view-once text: choose Send as view once again, or explicitly use regular send.",
+//                     color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 16.dp))
+//                 TextButton(onClick = {
+//                     if (currentDraftOwner == draftOwner && isMessageSessionCurrent() && editingMessage == null) {
+//                         recoveredViewOnceNeedsChoice = false
+//                     }
+//                 }) { Text("Use regular send for recovered text") }
+//             }
+//             // Reply banner (Dart _replyTarget section).
+//             replyTarget?.let { target ->
+//                 BannerRow(
+//                     theme = theme,
+//                     icon = {
+//                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.reply, semanticLabel = null,
+//                             color = Color(theme.accentColor), modifier = Modifier.size(18.dp))
+//                     },
+//                     title = "Replying to ${resolveSenderName(target.senderId)}",
+//                     closeLabel = "Cancel reply",
+//                     titleColor = Color(theme.accentColor),
+//                     subtitle = target.text,
+//                     onClose = { replyTarget = null },
+//                 )
+//             }
+//
+//             if (isSelectionMode) {
+//                     Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+//                 SelectionActions(
+//                     theme = theme,
+//                     selectedCount = selectedMessages.size,
+//                     actions = if (onForwardSelection != null || selectedMessages.size == 1) selectionActions
+//                         else selectionActions - com.example.chat.ui.chats.detail.SelectionAction.forward,
+//                     onCopy = {
+//                         performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.copy) { current ->
+//                             val msgs = current.joinToString("\n") { m ->
+//                                 if (hideDateAndName) m.text else {
+//                                     val timeStr = selectionCopyFormatter.format(m.createdAt.atZone(ZoneId.systemDefault()))
+//                                     "[$timeStr, ${resolveSenderName(m.senderId)}]: ${m.text}"
+//                                 }
+//                             }
+//                             clipboard.setText(AnnotatedString(msgs))
+//                             selectedIds = emptySet()
+//                             scope.launch { snackbarHostState.showSnackbar("Messages copied") }
+//                         }
+//                     },
+//                     onForward = {
+//                         performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.forward) { current ->
+//                             if (onForwardSelection != null) {
+//                                 onForwardSelection(current)
+//                                 selectedIds = emptySet()
+//                             } else if (current.size == 1) {
+//                                 onForward(current.single())
+//                                 selectedIds = emptySet()
+//                             }
+//                         }
+//                     },
+//                     onStar = {
+//                         performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.star) { current ->
+//                             current.forEach { onToggleStar(it.id) }
+//                             selectedIds = emptySet()
+//                         }
+//                     },
+//                     onDelete = {
+//                         performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.delete) { current ->
+//                             current.forEach { onDeleteMessage(it.id, false) }
+//                             selectedIds = emptySet()
+//                         }
+//                     },
+//                 )
+//                     }
+//             } else {
+//             // Dart composer bar container (chat_detail_screen.dart:3233): bg =
+//             // conv.uiEntryBackgroundColor ?: surfaceColor, top border cardColor.
+//             val composerBarBg = if (useScopedChatTheme) Color(theme.surfaceColor) else
+//                 convPrefs.uiEntryBackgroundColor?.let(::Color) ?: Color(theme.surfaceColor)
+//             Box(Modifier.fillMaxWidth()) {
+//             Box(
+//                 Modifier
+//                     .fillMaxWidth()
+//                     .background(composerBarBg)
+//                     .drawBehind {
+//                         drawLine(
+//                             color = Color(theme.cardColor),
+//                             start = androidx.compose.ui.geometry.Offset(0f, 0f),
+//                             end = androidx.compose.ui.geometry.Offset(size.width, 0f),
+//                             strokeWidth = 1.dp.toPx(),
+//                         )
+//                     }
+//                     // Previous/default outer composer padding:12dp horizontal,8dp vertical.
+//                     .padding(horizontal = 12.dp, vertical = composerAppearance.verticalPaddingDp.dp),
+//             ) {
+//                 ChatEntryBar(
+//                     entryStyle = entryStyle,
+//                     colors = composerColors ?: ComposerColors.resolve(theme),
+//                     template = composerTemplate,
+//                     appearance = composerAppearance,
+//                     theme = theme,
+//                     text = composerText,
+//                     onTextChange = ::handleComposerChanged,
+//                     emojiPickerOpen = emojiComposerOpen,
+//                     onEmoji = {
+//                         if (emojiComposerOpen) {
+//                             emojiComposerOpen = false
+//                             scope.launch {
+//                                 kotlinx.coroutines.yield()
+//                                 runCatching { composerFocusRequester.requestFocus() }
+//                                 composerKeyboard?.show()
+//                             }
+//                         } else {
+//                             composerFocusManager.clearFocus()
+//                             composerKeyboard?.hide()
+//                             emojiComposerOpen = true
+//                         }
+//                     },
+//                     textFocusRequester = composerFocusRequester,
+//                     onTextInputFocused = { emojiComposerOpen = false },
+//                     onAttach = { attachmentSheetOpen = true },
+//                     onCamera = onCameraTap,
+//                     onGallery = onGalleryTap,
+//                     onAudio = onAudioTap,
+//                     onLocation = onLocationTap,
+//                     onContact = onContactTap,
+//                     onVoice = onVoiceTap,
+//                     onVoiceHoldStart = onVoiceHoldStart,
+//                     onVoiceMove = onVoiceMove,
+//                     onVoiceHoldEnd = onVoiceHoldEnd,
+//                     onVideoHoldStart = onVideoHoldStart,
+//                     onVideoHoldMove = onVideoHoldMove,
+//                     onVideoHoldEnd = onVideoHoldEnd,
+//                     onVideoHoldCancel = onVideoHoldCancel,
+//                     onSend = ::sendCurrent,
+//                     onSendViewOnce = {
+//                         val submittedDraft = composerText
+//                         val plain = submittedDraft.trim()
+//                         if (currentDraftOwner == draftOwner && isMessageSessionCurrent() && !sending && plain.isNotEmpty() && editingMessage == null) {
+//                             if (!conversation.isDirect || secureChannelEnabled) scope.launch {
+//                                 snackbarHostState.showSnackbar("View-once text requires a regular direct chat. Nothing was sent.")
+//                             } else {
+//                                 val submittedOwner = draftOwner
+//                                 sending = true
+//                                 scope.launch {
+//                                     var clearedRevision: Int? = null
+//                                     try {
+//                                         check(currentDraftOwner == submittedOwner && isMessageSessionCurrent()) { "Chat session changed." }
+//                                         check(com.example.chat.ServiceLocator.apiBackend.supportsViewOnceText(viewOnceOwner)) {
+//                                             "View-once text is unavailable on this server. Nothing was sent."
+//                                         }
+//                                         // Capability validation can suspend; recheck owner and unchanged draft before clearing.
+//                                         check(currentDraftOwner == submittedOwner && isMessageSessionCurrent()) { "Chat session changed." }
+//                                         check(composerText.trim() == plain) { "Draft changed. Choose Send as view once again." }
+//                                         handleComposerChanged("")
+//                                         clearedRevision = draftRevision
+//                                         com.example.chat.ServiceLocator.apiBackend.sendViewOnceText(conversation.id, plain, viewOnceOwner)
+//                                     } catch (e: Exception) {
+//                                         if (e is kotlinx.coroutines.CancellationException) throw e
+//                                         if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
+//                                         val revision = clearedRevision
+//                                         if (revision != null) {
+//                                             recoverableDraft = ConversationRecoverableDraft(submittedDraft, ConversationRecoverableDraft.Kind.viewOnce)
+//                                             snackbarHostState.showSnackbar("View-once send was not confirmed. Text kept separately; check the chat before choosing a send mode again.")
+//                                         } else {
+//                                             snackbarHostState.showSnackbar("View-once text could not be started. Your draft was not cleared.")
+//                                         }
+//                                     } finally {
+//                                         if (currentDraftOwner == submittedOwner) sending = false
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     },
+//                     onScheduleSend = {
+//                         if (recoveredViewOnceNeedsChoice) {
+//                             scope.launch { snackbarHostState.showSnackbar("Choose regular send for this recovered text before scheduling it. Nothing was scheduled.") }
+//                         } else if (!sending && editingMessage == null && composerText.isNotBlank()) {
+//                             if (secureChannelEnabled) scope.launch { snackbarHostState.showSnackbar("Scheduling is unavailable in encrypted chats.") }
+//                             else scheduleDraft = composerText.trim()
+//                         }
+//                     },
+//                 )
+//             }
+//
+//             }
+//
+//             // GB-style emoji panel: docked under the message box at half height;
+//             // the composer stays on top and picks append into it directly.
+//             if (emojiComposerOpen) {
+//                 androidx.activity.compose.BackHandler { emojiComposerOpen = false }
+//                 ChatyEmojiPickerSheet(
+//                     theme = theme,
+//                     reactionMode = false,
+//                     composerMode = true,
+//                     onStickerSend = onStickerSend?.let { send -> { sticker -> if (isMessageSessionCurrent()) send(sticker) } },
+//                     gifApiKey = gifApiKey,
+//                     onGifSend = onGifSend?.let { send -> { gif -> if (isMessageSessionCurrent()) send(gif) } },
+//                     stickerSessionKey = messageSessionIdentity,
+//                     headerColor = convPrefs.emojiHeaderColor?.let(::Color),
+//                     headerIconsColor = convPrefs.emojiHeaderIconsColor?.let(::Color),
+//                     backgroundColor = convPrefs.emojiPickerBgColor?.let(::Color),
+//                     onEmojiPicked = { emoji ->
+//                         if (emoji.isNotEmpty()) handleComposerChanged(composerText + emoji)
+//                     },
+//                     onComposerDone = { emojiComposerOpen = false },
+//                 )
+//             }
+//         }
+//
+//             }
+//
+//         }
+//     }
+//
+//     singleTapMessage?.let { selected -> messages.firstOrNull { it.id == selected.id } }?.let { tapped ->
+//         val available = com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(tapped))
+//         val standard = com.example.chat.ui.chats.detail.SelectionAction.star in available
+//         val textAllowed = com.example.chat.ui.chats.detail.SelectionAction.copy in available
+//         com.example.chat.ui.chats.detail.MessageMoreOptionsDialog(
+//             options = listOf(
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Modify Chat", localOverrideAccountKey.isNotBlank() && isMessageSessionCurrent() && com.example.chat.core.messages.LocalMessageOverridePolicy.editable(tapped)) {
+//                     localEditMessageId = tapped.id
+//                     localEditText = localMessageStore.text(tapped) ?: tapped.text
+//                 },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Copy", textAllowed) { runAction(tapped, MessageActionType.copy) },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Copy Selection", textAllowed) {
+//                     currentPermittedMessage(tapped.id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.let { copySelectionMessage = it }
+//                 },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Translate", textAllowed) { runAction(tapped, MessageActionType.translate) },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Change Translator Language", true) { choosingTranslatorLanguage = true },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("interaction", ReleaseFeatures.MESSAGE_REACTIONS && standard) { emojiReactionTarget = tapped },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Double Tap Reaction", ReleaseFeatures.MESSAGE_REACTIONS && onDoubleTapReactionEmojiChanged != null) { choosingDoubleTapEmoji = true },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Image quote", textAllowed) {
+//                     currentPermittedMessage(tapped.id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.let { quoteMessageId = it.id }
+//                 },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Share", textAllowed) {
+//                     currentPermittedMessage(tapped.id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.let { current ->
+//                         val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+//                             type = "text/plain"
+//                             putExtra(android.content.Intent.EXTRA_TEXT, current.text)
+//                         }
+//                         try { shareContext.startActivity(android.content.Intent.createChooser(intent, "Share message")) }
+//                         catch (_: android.content.ActivityNotFoundException) {
+//                             scope.launch { snackbarHostState.showSnackbar("No app is available to share this message.") }
+//                         }
+//                     }
+//                 },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.isStarred) "Unstar" else "Star", standard) { runAction(tapped, MessageActionType.star) },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Starred messages", true) { showStarredInChat = true },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.id in readAlertWatchedIds) "Stop Read Notification" else "Notify When Message Read", com.example.chat.ui.chats.detail.ReadAlertPolicy.canWatch(tapped, currentUserId, conversation.isDirect) || tapped.id in readAlertWatchedIds) { scope.launch {
+//                     try {
+//                         withContext(Dispatchers.IO) { if (tapped.id in readAlertController.watched) readAlertController.cancel(tapped.id) else readAlertController.watch(tapped.id) }
+//                         readAlertWatchedIds = readAlertController.watched
+//                     } catch (e: Exception) { snackbarHostState.showSnackbar(e.message ?: "Could not save read notification") }
+//                 } },
+//                 com.example.chat.ui.chats.detail.MessageMoreOption("Message info", true) { infoMessage = tapped },
+//             ),
+//             onDismiss = { singleTapMessage = null },
+//         )
+//     }
+//     avatarQuickViewSenderId?.let { senderId ->
+//         com.example.chat.ui.chats.detail.GroupMemberQuickViewDialog(
+//             senderId = senderId,
+//             senderName = resolveSenderName(senderId),
+//             actions = groupMemberActions ?: com.example.chat.ui.chats.detail.GroupMemberQuickActions(),
+//             onDismiss = { avatarQuickViewSenderId = null },
+//         )
+//     }
+//     viewOnceOpenErrorId?.let {
+//         androidx.compose.material3.AlertDialog(
+//             onDismissRequest = { viewOnceOpenErrorId = null },
+//             confirmButton = {
+//                 androidx.compose.material3.TextButton(onClick = { viewOnceOpenErrorId = null }) { Text("OK") }
+//             },
+//             title = { Text("Couldn't open view-once message") },
+//             text = { Text("The message could not be saved as viewed on this device, so it was not opened and nothing was revealed. Try again.") },
+//         )
+//     }
+//     viewOnceNuxPending?.let { (requestToken, pending) ->
+//         androidx.compose.material3.AlertDialog(
+//             onDismissRequest = { viewOnceNuxPending = null },
+//             confirmButton = {
+//                 androidx.compose.material3.TextButton(onClick = {
+//                     // Stale-callback guard: act only while this dialog is the
+//                     // current pending request token (account, session or
+//                     // conversation may have changed while it was visible).
+//                     if (viewOnceNuxPending?.first == requestToken) {
+//                         viewOnceNuxStore.markReceiverSeen()
+//                         viewOnceNuxPending = null
+//                         openViewOnceMessage(pending)
+//                     }
+//                 }) { Text("Open") }
+//             },
+//             dismissButton = {
+//                 androidx.compose.material3.TextButton(onClick = { viewOnceNuxPending = null }) { Text("Not now") }
+//             },
+//             title = { Text("View once message") },
+//             text = {
+//                 Text(
+//                     // Honest while the pre-existing anti-view-once retention
+//                     // flag is on (default): opened photos/videos stay visible.
+//                     if (retainViewOnce) {
+//                         "This photo, video or voice message is marked as view once. The view-once retention setting is on for this device, so opened photos and videos stay visible in this chat; voice messages still play only once."
+//                     } else {
+//                         "This photo, video or voice message disappears from the chat on this device after you have seen or played it once."
+//                     },
+//                 )
+//             },
+//         )
+//     }
+//     translateMessage?.let { target ->
+//         // Only known online server choices may offer the external provider approval dialog.
+//         val onlineTranslationAllowed = when (translateOption.trim().lowercase(java.util.Locale.ROOT)) {
+//             "server", "server + no outside apps", "server + in-outside apps" -> true
+//             else -> false
+//         }
+//         if (!onlineTranslationAllowed) {
+//             com.example.chat.ui.kit.ChatyConfirmationDialog(
+//                 onDismissRequest = { translateMessage = null },
+//                 title = { Text("Translation unavailable") },
+//                 text = { Text("Your translation setting does not allow this online provider. Nothing was sent. On-device translation is not available here.") },
+//                 confirmButton = { TextButton(onClick = { translateMessage = null }) { Text("Close") } },
+//             )
+//         } else {
+//             val language = com.example.chat.core.translate.ChatTranslationPolicy.languages
+//                 .firstOrNull { it.code == translatorTarget }
+//                 ?: com.example.chat.core.translate.ChatTranslationPolicy.languages.first()
+//             com.example.chat.ui.chats.detail.MessageTranslateDialog(
+//                 sourceText = target.text,
+//                 targetLanguage = language,
+//                 client = gTranslateClient,
+//                 isSourceEligible = {
+//                     val current = currentActionMessages.singleOrNull { it.id == target.id && it.conversationId == conversation.id }
+//                     currentDraftOwner == draftOwner && isMessageSessionCurrent() &&
+//                         current != null && current.text == target.text &&
+//                         com.example.chat.ui.chats.detail.SelectionAction.copy in
+//                             com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(current)) &&
+//                         com.example.chat.ui.chats.detail.ConversationSearchPolicy.matchingIds(listOf(current), current.text).isNotEmpty()
+//                 },
+//                 onDismiss = { translateMessage = null },
+//             )
+//         }
+//     }
+//     if (choosingTranslatorLanguage) {
+//         com.example.chat.ui.chats.detail.TranslatorLanguageDialog(
+//             current = translatorTarget,
+//             onPick = { picked ->
+//                 translatorTarget = picked.code
+//                 translatorStore.setTarget(picked.code)
+//             },
+//             onDismiss = { choosingTranslatorLanguage = false },
+//         )
+//     }
+//     quoteMessageId?.let { id -> messages.firstOrNull { it.id == id } }
+//         ?.takeIf { com.example.chat.ui.chats.detail.SelectionAction.copy in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(it)) }?.let { target ->
+//         com.example.chat.ui.chats.detail.MessageQuoteDialog(target, resolveQuoteSender(target.senderId), resolveSenderName(target.senderId),
+//             currentMessage = { currentPermittedMessage(target.id, com.example.chat.ui.chats.detail.SelectionAction.copy) }, onClose = { quoteMessageId = null })
+//     }
+//     localEditMessageId?.let { id -> messages.firstOrNull { it.id == id } }
+//         ?.takeIf { com.example.chat.core.messages.LocalMessageOverridePolicy.editable(it) }?.let { target ->
+//         com.example.chat.ui.chats.detail.LocalMessageEditDialog(
+//             value = localEditText, onValueChanged = { if (it.length <= 12000) localEditText = it },
+//             onDismiss = { localEditMessageId = null },
+//             onRestore = { if (isMessageSessionCurrent()) { localMessageStore.reset(target.id); localMessageRevision++ }; localEditMessageId = null },
+//             onSave = { if (isMessageSessionCurrent() && localMessageStore.save(target, localEditText)) localMessageRevision++; localEditMessageId = null },
+//         )
+//     }
+//     com.example.chat.ui.chats.detail.MessageDetailDialogs(
+//         messages = messages, showStarred = showStarredInChat,
+//         copyMessageId = copySelectionMessage?.id, infoMessageId = infoMessage?.id,
+//         onCloseStarred = { showStarredInChat = false },
+//         onCloseCopy = { copySelectionMessage = null }, onCloseInfo = { infoMessage = null },
+//         onJumpToMessage = { id -> highlightedMessageId = id; pendingScrollTarget = id; showStarredInChat = false },
+//     )
+//
+//     // Dart _showTaskContextMenu (chat_detail_screen.dart:1208-1254): section titled
+//     // with the task title, anchored at the chip rect, no reaction rail.
+//     taskMenuTarget?.let { (menuTask, taskAnchor) ->
+//         val taskCompleted = menuTask.status == TaskStatus.completed
+//         AppContextMenu(
+//             onDismiss = { taskMenuTarget = null },
+//             sections = listOf(
+//                 ContextMenuSection(
+//                     title = menuTask.title,
+//                     items = buildList {
+//                         add(
+//                             ContextMenuItem(
+//                                 icon = if (taskCompleted) {
+//                                     Icons.Rounded.Replay
+//                                 } else {
+//                                     Icons.Outlined.CheckCircle
+//                                 },
+//                                 label = if (taskCompleted) "Reopen task" else "Mark completed",
+//                                 onTap = { toggleTask(menuTask) },
+//                             ),
+//                         )
+//                         add(
+//                             ContextMenuItem(
+//                                 icon = Icons.Outlined.Edit,
+//                                 label = "Edit task",
+//                                 onTap = { onEditTask(menuTask) },
+//                             ),
+//                         )
+//                         add(
+//                             ContextMenuItem(
+//                                 icon = Icons.Rounded.OpenInNew,
+//                                 label = "Task details",
+//                                 onTap = { onOpenTaskDetails(menuTask) },
+//                             ),
+//                         )
+//                         if (menuTask.sourceMessageId != null) {
+//                             add(
+//                                 ContextMenuItem(
+//                                     icon = Icons.Outlined.ChatBubbleOutline,
+//                                     label = "Go to source message",
+//                                     // Dart _highlightMessage: highlight only, no scroll jump.
+//                                     onTap = { menuTask.sourceMessageId?.let(::flashHighlight) },
+//                                 ),
+//                             )
+//                         }
+//                         add(
+//                             ContextMenuItem(
+//                                 icon = Icons.Rounded.DeleteOutline,
+//                                 label = "Delete task",
+//                                 isDestructive = true,
+//                                 onTap = { onDeleteTask(menuTask.id) },
+//                             ),
+//                         )
+//                     },
+//                 ),
+//             ),
+//             backgroundColor = Color(theme.surfaceColor),
+//             primaryTextColor = Color(theme.primaryTextColor),
+//             secondaryTextColor = Color(theme.secondaryTextColor),
+//             destructiveColor = Color(theme.dangerColor),
+//             anchorRect = taskAnchor,
+//         )
+//     }
+//
+//     if (attachmentSheetOpen) {
+//         // Default model: the attachment gallery sheet (opens half height; pulling up
+//         // grows it toward full height). The tile picker stays available behind the
+//         // Settings "New Attachment Picker UI" option (conversation.newAttachmentPickerUi).
+//         val attachmentSheetState = androidx.compose.material3.rememberModalBottomSheetState(
+//             skipPartiallyExpanded = convPrefs.newAttachmentPickerUi,
+//         )
+//         ModalBottomSheet(
+//             sheetState = attachmentSheetState,
+//             tonalElevation = 0.dp, dragHandle = null, shape = com.example.chat.ui.kit.ChatyModalShape,
+//             onDismissRequest = { attachmentSheetOpen = false },
+//             containerColor = Color.Transparent,
+//         ) {
+//             if (convPrefs.newAttachmentPickerUi) {
+//                 AttachmentSheetContent(
+//                     theme = theme,
+//                     onAction = { action ->
+//                         attachmentSheetOpen = false
+//                         onAttachmentAction(action)
+//                     },
+//                 )
+//             } else {
+//                 com.example.chat.ui.chats.detail.AttachmentGalleryViewport(attachmentSheetState) {
+//                     com.example.chat.ui.chats.detail.AttachmentGallerySheet(
+//                         theme = theme,
+//                         // The wrapper follows the actual visible viewport, not targetValue.
+//                         heightFraction = 1.0f,
+//                         onAction = { action ->
+//                             attachmentSheetOpen = false
+//                             onAttachmentAction(action)
+//                         },
+//                         onCamera = {
+//                             attachmentSheetOpen = false
+//                             onCameraTap()
+//                         },
+//                         onReviewImages = attachmentReviewImages?.let { review ->
+//                             { uris ->
+//                                 attachmentSheetOpen = false
+//                                 review(uris)
+//                             }
+//                         },
+//                         onDirectSendImages = attachmentDirectSendImages?.let { send ->
+//                             { uris ->
+//                                 attachmentSheetOpen = false
+//                                 send(uris)
+//                             }
+//                         },
+//                     )
+//                 }
+//             }
+//         }
+//     }
+//
+//     // Per-chat wallpaper picker (Dart _openWallpaperPicker options).
+//     if (wallpaperPickerOpen) {
+//         ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp, shape = com.example.chat.ui.kit.ChatyModalShape,
+//             onDismissRequest = { wallpaperPickerOpen = false },
+//             containerColor = Color.Transparent,
+//         ) {
+//             WallpaperPickerSheet(
+//                 theme = theme,
+//                 currentId = wallpaperOverride ?: theme.wallpaperId,
+//                 onSelect = { id ->
+//                     wallpaperOverride = id
+//                     wallpaperPickerOpen = false
+//                     onWallpaperSelected?.invoke(id)
+//                 },
+//             )
+//         }
+//     }
+//
+//     if (choosingDoubleTapEmoji && ReleaseFeatures.MESSAGE_REACTIONS && onDoubleTapReactionEmojiChanged != null) {
+//         ModalBottomSheet(onDismissRequest = { choosingDoubleTapEmoji = false }, containerColor = Color.Transparent) {
+//             Column {
+//                 Text("Choose the default double-tap reaction for conversations")
+//                 if (disableDoubleTapReaction) Text("Double-tap reactions are disabled in Conversation settings. Choosing an emoji does not turn them on.")
+//                 ChatyEmojiPickerSheet(theme = theme, reactionMode = true, composerMode = false,
+//                     onEmojiPicked = { emoji ->
+//                         if (emoji.isNotEmpty()) onDoubleTapReactionEmojiChanged(emoji)
+//                         choosingDoubleTapEmoji = false
+//                     })
+//             }
+//         }
+//     }
+//
+//     // Reaction emoji picker (Dart ChatyEmojiPicker.show reactionMode).
+//     emojiReactionTarget?.let { selected -> messages.firstOrNull { it.id == selected.id } }
+//         ?.takeIf { ReleaseFeatures.MESSAGE_REACTIONS && com.example.chat.ui.chats.detail.SelectionAction.star in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(it)) }?.let { target ->
+//         ModalBottomSheet(tonalElevation = 0.dp, dragHandle = null, shape = com.example.chat.ui.kit.ChatyModalShape,
+//             onDismissRequest = { emojiReactionTarget = null },
+//             containerColor = Color.Transparent,
+//         ) {
+//             ChatyEmojiPickerSheet(
+//                 theme = theme,
+//                 reactionMode = true,
+//                 composerMode = false,
+//                 headerColor = convPrefs.emojiHeaderColor?.let(::Color),
+//                 headerIconsColor = convPrefs.emojiHeaderIconsColor?.let(::Color),
+//                 backgroundColor = convPrefs.emojiPickerBgColor?.let(::Color),
+//                 onEmojiPicked = { emoji ->
+//                     toggleCurrentReaction(target.id, emoji)
+//                     emojiReactionTarget = null
+//                 },
+//             )
+//         }
+//     }
+//
+//     // Connection diagnostics dialog (Dart ConnectionDetailSheet.show).
+//     if (connectionSheetOpen) {
+//         connectionState?.let { state ->
+//             Dialog(onDismissRequest = { connectionSheetOpen = false }) {
+//                 ConnectionDetailSheetContent(
+//                     state = state,
+//                     theme = theme,
+//                     testing = connectionTesting,
+//                     onRunTest = {
+//                         if (!connectionTesting) {
+//                             connectionTesting = true
+//                             scope.launch {
+//                                 try {
+//                                     onProbeConnection()
+//                                 } finally {
+//                                     connectionTesting = false
+//                                 }
+//                             }
+//                         }
+//                     },
+//                     onDismiss = { connectionSheetOpen = false },
+//                     networkStatus = networkStatus,
+//                     p2pTransferStates = p2pTransferStates,
+//                     liveTransfers = liveTransfers,
+//                     appTraffic = appTraffic,
+//                     onRetryP2pTransfer = onRetryP2pTransfer,
+//                 )
+//             }
+//         }
+//     }
+//
+//     // Clear conversation confirmation (Dart _clearConversation).
+//     if (clearConfirmOpen) {
+//         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+//             onDismissRequest = { clearConfirmOpen = false },
+//             title = { Text("Clear conversation?") },
+//             text = { Text("All messages will be removed from this chat for you.") },
+//             confirmButton = {
+//                 TextButton(
+//                     onClick = {
+//                         clearConfirmOpen = false
+//                         onClearConversation()
+//                         openedViewOnceIds = emptySet()
+//                         pendingBelowCount = 0
+//                         scope.launch { snackbarHostState.showSnackbar("Conversation cleared") }
+//                     },
+//                 ) {
+//                     Text("Clear", color = Color(theme.dangerColor))
+//                 }
+//             },
+//             dismissButton = {
+//                 TextButton(onClick = { clearConfirmOpen = false }) {
+//                     Text("Cancel")
+//                 }
+//             },
+//         )
+//     }
+//         } // Box(weight 1f) around Scaffold
+//         if (showQuickRail && convPrefs.sidebarPosition == "Right") {
+//             QuickContactSidebar(
+//                 theme = theme,
+//                 contacts = quickContacts,
+//                 backgroundColor = railBg,
+//                 textColor = Color(convPrefs.quickContactTextColor),
+//                 bottomAnchored = railBottomAnchored,
+//                 avatarShape = homeAvatarShape,
+//                 onOpen = { onOpenConversation(it.id) },
+//             )
+//         }
+//     } // Row(quick rail + chat)
+//     } // Selected emoji pack applies to picker, reactions and the message subtree.
+// }
+//
+// private val selectionCopyFormatter: DateTimeFormatter =
+//     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+//
+// @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+// @Composable
+// // Previously private; reused by the appearance preview with inert callbacks.
+// internal fun ConversationHeader(
+//     theme: ThemeConfig,
+//     conversation: Conversation,
+//     presenceText: String?,
+//     presenceIsOnline: Boolean,
+//     showHeaderAvatar: Boolean,
+//     showHeaderName: Boolean,
+//     showPresenceLine: Boolean,
+//     showHeaderCalls: Boolean,
+//     headerBarColor: Long?,
+//     presencePillColor: Long?,
+//     presenceTextColor: Long?,
+//     callsAllowed: Boolean,
+//     onStartCall: (Boolean) -> Unit,
+//     connectionState: ConnectionHealthState?,
+//     onConnectionDetailsTap: () -> Unit,
+//     onBack: () -> Unit,
+//     onOpenInfo: () -> Unit,
+//     menuOpen: Boolean,
+//     onMenuOpenChange: (Boolean) -> Unit,
+//     onSearch: () -> Unit,
+//     onOpenWallpaperPicker: () -> Unit,
+//     onOpenAppearance: (() -> Unit)?,
+//     onToggleMute: (() -> Unit)?,
+//     ghostModeEnabled: Boolean,
+//     onToggleGhostMode: (() -> Unit)?,
+//     secureChannelEnabled: Boolean,
+//     onToggleSecureChannel: (() -> Unit)?,
+//     onBlockContact: (() -> Unit)?,
+//     onClearConversation: () -> Unit,
+//     headerTrailingContent: (@Composable () -> Unit)? = null,
+//     headerAppearance: com.example.chat.ui.chats.detail.ConversationHeaderAppearance = com.example.chat.ui.chats.detail.ConversationHeaderAppearance(),
+//     unreadChatCount: Int = 0,
+// ) {
+//     val appearance = headerAppearance.effective()
+//     val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+//     val headerVerticalPadding = com.example.chat.ui.chats.detail.conversationHeaderVerticalPadding(appearance.compactLandscape, landscape)
+//     val moveCallsToOverflow = com.example.chat.ui.chats.detail.conversationHeaderCallsInOverflow(showHeaderCalls, appearance.callsInOverflow)
+//
+//     val headerStrings = androidx.compose.ui.platform.LocalContext.current.resources
+//     val systemAnimationsAllowed = if (appearance.statusMarqueeOnTap) com.example.chat.ui.kit.rememberSystemAnimationsAllowed() else false
+//     var marqueeRequested by remember(presenceText, appearance.statusMarqueeOnTap) { mutableStateOf(false) }
+//     val marqueeActive = com.example.chat.ui.chats.detail.conversationHeaderMarqueeActive(
+//         appearance.statusMarqueeOnTap, marqueeRequested, systemAnimationsAllowed)
+//
+//     val avatarShape = if (appearance.roundedSquareAvatar) RoundedCornerShape(8.dp) else CircleShape
+//     val chosenNameWeight = FontWeight(appearance.nameWeightValue())
+//     /* Previous inline weight selection retained.
+//     val chosenNameWeight = when (appearance.nameWeight) {
+//         "regular" -> FontWeight.Normal
+//         "medium" -> FontWeight.Medium
+//         "bold" -> FontWeight.Bold
+//         else -> FontWeight.W800
+//     }
+//     */
+//     val readableBarColor = com.example.chat.ui.kit.opaqueConversationArgb(headerBarColor)
+//     val readablePresenceBackground = com.example.chat.ui.kit.opaqueConversationArgb(presencePillColor)
+//     val readablePresenceText = com.example.chat.ui.kit.opaqueConversationArgb(presenceTextColor)
+//     val headerCanvas = readableBarColor ?: theme.surfaceColor
+//     val translucent = appearance.alphaPercent < 100
+//     val transparencyPlan = remember(headerCanvas,appearance.alphaPercent) { com.example.chat.ui.chats.detail.conversationHeaderTranslucency(headerCanvas,appearance.alphaPercent) }
+//     val headerPrimaryColor = if (translucent) transparencyPlan.foreground else if (appearance.autoContrast) com.example.chat.ui.chats.detail.conversationHeaderContrastForeground(headerCanvas) else theme.primaryTextColor
+//     val headerIconColor = if (translucent) transparencyPlan.foreground else appearance.iconsColor ?: headerPrimaryColor
+//     val dividerColor = if (translucent) transparencyPlan.foreground else com.example.chat.ui.chats.detail.conversationHeaderContrastForeground(headerCanvas)
+//
+//     Row(
+//         // Default production64dp minimum:48dp interactive row +8dp above/below.
+//         // Explicit compact landscape removes padding only. Content/large fonts may grow; targets stay48dp.
+//         modifier = Modifier
+//             .testTag("conversation-header")
+//             .fillMaxWidth()
+//             // Default remains opaque. Effective alpha can rise for worst-case wallpaper contrast.
+//             .background(Color(headerCanvas).copy(alpha = if (translucent) transparencyPlan.percent / 100f else 1f))
+//             .then(if (appearance.divider) Modifier.drawBehind {
+//                 val stroke = 1.dp.toPx()
+//                 drawLine(Color(dividerColor), androidx.compose.ui.geometry.Offset(0f, size.height - stroke / 2),
+//                     androidx.compose.ui.geometry.Offset(size.width, size.height - stroke / 2), strokeWidth = stroke)
+//             } else Modifier)
+//             // Previous/default: .padding(horizontal = 8.dp, vertical = 8.dp)
+//             .padding(horizontal = 8.dp, vertical = headerVerticalPadding.dp),
+//         verticalAlignment = Alignment.CenterVertically,
+//     ) {
+//         IconButton(onClick = onBack) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
+//                 semanticLabel = "Back",
+//                 color = Color(headerIconColor), // Previous/default:theme.primaryTextColor
+//             )
+//         }
+//         if (appearance.unreadChatBadge && unreadChatCount > 0) {
+//             Text(com.example.chat.ui.chats.detail.conversationUnreadChatBadgeText(unreadChatCount),
+//                 color = Color(theme.onAccentColor),fontSize = (11 * theme.fontScale).sp,maxLines = 1,
+//                 modifier = Modifier.testTag("conversation-header-unread-chats").semantics {
+//                     contentDescription = headerStrings.getString(com.example.chat.R.string.conv_proposal_unread_chat_count,unreadChatCount)
+//                 }.background(Color(theme.accentColor),RoundedCornerShape(12.dp)).padding(horizontal = 6.dp,vertical = 3.dp))
+//         }
+//         Row(
+//             Modifier
+//                 .weight(1f)
+//                 .clip(RoundedCornerShape(12.dp))
+//                 .heightIn(min = 48.dp)
+//                 .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Open conversation info", onClick = onOpenInfo),
+//             verticalAlignment = Alignment.CenterVertically,
+//         ) {
+//             if (showHeaderAvatar) {
+//                 Box {
+//                     Box(
+//                         modifier = Modifier
+//                             .then(Modifier.testTag("conversation-header-avatar"))
+//                             // Previous: .size(38.dp)
+//                             .size(appearance.avatarSizeDp.dp)
+//                             .background(
+//                                 conversation.avatarColorHex?.let { parseHexColor(it) }
+//                                     ?: Color(theme.accentColor),
+//                                 avatarShape, // Previous default shape:CircleShape
+//                             ),
+//                         contentAlignment = Alignment.Center,
+//                     ) {
+//                         Text(
+//                             conversation.avatarInitials
+//                                 ?: conversation.title.take(2).uppercase(),
+//                             color = Color(theme.onAccentColor),
+//                             fontSize = 14.sp,
+//                             fontWeight = FontWeight.Bold,
+//                         )
+//                     }
+//                     if (conversation.isDirect && presenceIsOnline) {
+//                         Box(
+//                             Modifier
+//                                 .align(Alignment.BottomEnd)
+//                                 .offset(x = 1.dp, y = 1.dp)
+//                                 .size(11.dp)
+//                                 .background(Color(theme.surfaceColor), CircleShape)
+//                                 .padding(2.dp)
+//                                 .background(Color(theme.successColor), CircleShape),
+//                         )
+//                     }
+//                 }
+//                 Spacer(Modifier.width(10.dp))
+//             }
+//             // Previous: Column(Modifier.weight(1f)) {
+//             // Center only within the available title column; back/menu/call targets do not move.
+//             Column(Modifier.weight(1f), horizontalAlignment = if (appearance.centeredTitle) Alignment.CenterHorizontally else Alignment.Start) {
+//                 if (showHeaderName) {
+//                     Text(
+//                         conversation.title,
+//                         modifier = Modifier.testTag("conversation-header-name").then(if (appearance.centeredTitle) Modifier.fillMaxWidth() else Modifier),
+//                         textAlign = if (appearance.centeredTitle) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start,
+//                         color = Color(headerPrimaryColor), // Previous/default:theme.primaryTextColor
+//                         // R4: fixed header - system font scales up to 1.3x, then clamps.
+//                         fontSize = com.example.chat.ui.kit.clampedLabelSp((15.5 * theme.fontScale).toFloat()),
+//                         fontWeight = chosenNameWeight, // Previous/default:FontWeight.W800
+//                         maxLines = 1,
+//                         overflow = TextOverflow.Ellipsis,
+//                     )
+//                 }
+//                 if (showPresenceLine && presenceText != null) {
+//                     // Dart: pill only when a background color is set (8x2 padding, top margin 2, fully rounded).
+//                     Text(
+//                         presenceText,
+//                         color = Color(
+//                             if (translucent && readablePresenceBackground == null) transparencyPlan.foreground else readablePresenceText
+//                                 ?: if (presenceIsOnline) theme.successColor else theme.secondaryTextColor,
+//                         ),
+//                         fontSize = (10.5 * theme.fontScale).sp,
+//                         fontWeight = FontWeight.W500,
+//                         // Previous status maximum: 1 line. Allow two lines at large font scales.
+//                         // Previous/default: maxLines = 2, overflow = TextOverflow.Ellipsis,
+//                         maxLines = if (marqueeActive) 1 else 2,
+//                         softWrap = !marqueeActive,
+//                         overflow = if (marqueeActive) TextOverflow.Clip else TextOverflow.Ellipsis,
+//                         modifier = Modifier.testTag("conversation-header-status")
+//                             .then(if (appearance.statusMarqueeOnTap) Modifier.heightIn(min = 48.dp).clickable(
+//                                 onClickLabel = headerStrings.getString(if (marqueeActive) com.example.chat.R.string.conv_proposal_stop_status_motion else com.example.chat.R.string.conv_proposal_start_status_motion),
+//                                 role = androidx.compose.ui.semantics.Role.Button,
+//                             ) { marqueeRequested = !marqueeRequested } else Modifier)
+//                             .then(if (marqueeActive) Modifier.basicMarquee(iterations = Int.MAX_VALUE) else Modifier)
+//                             .then(if (readablePresenceBackground == null) {
+//                             Modifier
+//                         } else {
+//                             Modifier
+//                                 .padding(top = 2.dp)
+//                                 .background(Color(readablePresenceBackground), RoundedCornerShape(999.dp))
+//                                 .padding(horizontal = 8.dp, vertical = 2.dp)
+//                         }),
+//                     )
+//                 }
+//             }
+//             // Optional preview/layout slot. Existing production callers supply nothing.
+//             headerTrailingContent?.invoke()
+//         }
+//         // Previous/default: if (showHeaderCalls)
+//         if (showHeaderCalls && !moveCallsToOverflow) {
+//             val callTint = if (callsAllowed) {
+//                 Color(headerIconColor) // Previous/default:theme.primaryTextColor
+//             } else {
+//                 Color(if (translucent) transparencyPlan.foreground else theme.secondaryTextColor)
+//             }
+//             if (appearance.audioCallVisible) IconButton(onClick = { onStartCall(false) }, modifier = Modifier.testTag("conversation-header-audio")) {
+//                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio,
+//                     semanticLabel = if (callsAllowed) {
+//                         "Voice call"
+//                     } else {
+//                         "Voice call unavailable"
+//                     },
+//                     color = callTint,
+//                 )
+//             }
+//             if (appearance.videoCallVisible) IconButton(onClick = { onStartCall(true) }, modifier = Modifier.testTag("conversation-header-video")) {
+//                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideo,
+//                     semanticLabel = if (callsAllowed) {
+//                         "Video call"
+//                     } else {
+//                         "Video call unavailable"
+//                     },
+//                     color = callTint,
+//                 )
+//             }
+//         }
+//         Box {
+//             IconButton(modifier = Modifier.testTag("chat-options"), onClick = { onMenuOpenChange(true) }) {
+//                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.moreOptions,
+//                     semanticLabel = "Chat options",
+//                     color = Color(headerIconColor), // Previous/default:theme.primaryTextColor
+//                 )
+//             }
+//             var moreMenuPage by remember(menuOpen) { mutableStateOf(false) }
+//             DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = menuOpen, onDismissRequest = { onMenuOpenChange(false) }, rememberKey = "chat-header-menu") {
+//                 val menuIconTint = Color(theme.secondaryTextColor)
+//                 if (!moreMenuPage) {
+//                     if (moveCallsToOverflow) {
+//                         if (appearance.audioCallVisible) DropdownMenuItem(enabled = callsAllowed,
+//                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = menuIconTint, size = 20.dp) },
+//                             text = { Text(headerStrings.getString(com.example.chat.R.string.conv_proposal_voice_call)) },
+//                             onClick = { onMenuOpenChange(false); onStartCall(false) })
+//                         if (appearance.videoCallVisible) DropdownMenuItem(enabled = callsAllowed,
+//                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideo, color = menuIconTint, size = 20.dp) },
+//                             text = { Text(headerStrings.getString(com.example.chat.R.string.conv_proposal_video_call)) },
+//                             onClick = { onMenuOpenChange(false); onStartCall(true) })
+//                     }
+//
+//                     if (connectionState != null) {
+//                         DropdownMenuItem(
+//                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.signal, color = menuIconTint, size = 20.dp) },
+//                             text = { Text("Connection health") },
+//                             onClick = { onMenuOpenChange(false); onConnectionDetailsTap() },
+//                         )
+//                     }
+//                     DropdownMenuItem(
+//                         leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null, color = menuIconTint, modifier = Modifier.size(20.dp)) },
+//                         text = {
+//                             Text(
+//                                 if (conversation.isGroup) "View group info" else "View contact info",
+//                             )
+//                         },
+//                         onClick = {
+//                             onMenuOpenChange(false)
+//                             onOpenInfo()
+//                         },
+//                     )
+//                     DropdownMenuItem(
+//                         leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = null, color = menuIconTint, modifier = Modifier.size(20.dp)) },
+//                         text = { Text("Search") },
+//                         onClick = onSearch,
+//                     )
+//                     if (onToggleGhostMode != null) {
+//                         DropdownMenuItem(
+//                             modifier = Modifier.testTag("chat-ghost-toggle"),
+//                             leadingIcon = { com.example.chat.ui.icons.ChatyGhostIcon(menuIconTint) },
+//                             text = { Text(if (ghostModeEnabled) "Turn off Ghost mode" else "Turn on Ghost mode") },
+//                             onClick = { onMenuOpenChange(false); onToggleGhostMode() },
+//                         )
+//                     }
+//                     if (onToggleSecureChannel != null) {
+//                         DropdownMenuItem(
+//                             modifier = Modifier.testTag("chat-secure-toggle"),
+//                             leadingIcon = {
+//                                 com.example.chat.ui.icons.ChatyIcon(
+//                                     if (secureChannelEnabled) com.example.chat.ui.icons.ChatyIconId.lock else com.example.chat.ui.icons.ChatyIconId.unlock,
+//                                     semanticLabel = null,
+//                                     color = menuIconTint,
+//                                     modifier = Modifier.size(20.dp),
+//                                 )
+//                             },
+//                             text = { Text(if (secureChannelEnabled) "Turn off experimental secure routing" else "Request experimental secure routing") },
+//                             onClick = { onMenuOpenChange(false); onToggleSecureChannel() },
+//                         )
+//                     }
+//                     if (onToggleMute != null) {
+//                         DropdownMenuItem(
+//                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(if (conversation.isMuted) com.example.chat.ui.icons.ChatyIconId.unmute else com.example.chat.ui.icons.ChatyIconId.mute, color = menuIconTint, size = 20.dp) },
+//                             text = {
+//                                 Text(
+//                                     if (conversation.isMuted) {
+//                                         "Unmute notifications"
+//                                     } else {
+//                                         "Mute notifications"
+//                                     },
+//                                 )
+//                             },
+//                             onClick = {
+//                                 onMenuOpenChange(false)
+//                                 onToggleMute()
+//                             },
+//                         )
+//                     }
+//                     DropdownMenuItem(
+//                         leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.gallery, semanticLabel = null, color = menuIconTint, modifier = Modifier.size(20.dp)) },
+//                         text = { Text("Chat wallpaper") },
+//                         onClick = onOpenWallpaperPicker,
+//                     )
+//                     if (onOpenAppearance != null) {
+//                         DropdownMenuItem(
+//                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.palette, color = menuIconTint, size = 20.dp) },
+//                             text = { Text("Chat theme") },
+//                             onClick = {
+//                                 onMenuOpenChange(false)
+//                                 onOpenAppearance()
+//                             },
+//                         )
+//                     }
+//                     HorizontalDivider(thickness = 0.8.dp, color = menuIconTint.copy(alpha = 0.15f))
+//                     DropdownMenuItem(
+//                         text = { Text("More") },
+//                         trailingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = menuIconTint, modifier = Modifier.size(20.dp)) },
+//                         onClick = { moreMenuPage = true },
+//                     )
+//                 } else {
+//                     DropdownMenuItem(
+//                         leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = null, color = menuIconTint, modifier = Modifier.size(20.dp)) },
+//                         text = { Text("Back") },
+//                         onClick = { moreMenuPage = false },
+//                     )
+//                     HorizontalDivider(thickness = 0.8.dp, color = menuIconTint.copy(alpha = 0.15f))
+//                     DropdownMenuItem(
+//                         leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.deleteOutline, semanticLabel = null, color = Color(theme.dangerColor), modifier = Modifier.size(20.dp)) },
+//                         text = { Text("Clear conversation", color = Color(theme.dangerColor)) },
+//                         onClick = onClearConversation,
+//                     )
+//                     if (conversation.isDirect && onBlockContact != null) {
+//                         DropdownMenuItem(
+//                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.block, color = Color(theme.dangerColor), size = 20.dp) },
+//                             text = { Text("Block contact", color = Color(theme.dangerColor)) },
+//                             onClick = {
+//                                 onMenuOpenChange(false)
+//                                 onBlockContact()
+//                             },
+//                         )
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+//
+// /** The production message menu, split out to bound generated Compose register pressure.
+//  *  State stays owned by ChatDetailScreen; actions and appearance are unchanged. */
+// @Composable
+// private fun AnchoredMessageContextMenu(
+//     messageState: androidx.compose.runtime.MutableState<ChatMessage?>,
+//     anchorRect: Rect?,
+//     regionTop: Float,
+//     currentUserId: String,
+//     theme: ThemeConfig,
+//     onAction: (ChatMessage, MessageActionType) -> Unit,
+//     onToggleReaction: (String, String) -> Unit,
+//     reactionTargetState: androidx.compose.runtime.MutableState<ChatMessage?>,
+// ) {
+//     val menuMessage = messageState.value
+//     var extraActions by remember(menuMessage?.id) { mutableStateOf(false) }
+//     if (menuMessage != null) {
+//         val available = MessageActionRegistry.getAvailableActions(
+//             message = menuMessage, isMe = menuMessage.senderId == currentUserId,
+//         )
+//         val order = listOf(
+//             MessageActionType.reply,
+//             MessageActionType.select,
+//             MessageActionType.forward,
+//             MessageActionType.copy,
+//             MessageActionType.edit,
+//             MessageActionType.deleteForMe,
+//             MessageActionType.info,
+//             MessageActionType.report,
+//             MessageActionType.blockUser,
+//         )
+//         val primary = order.mapNotNull { type -> available.firstOrNull { it.type == type } }
+//         val secondary = available.filter { it.type !in order }
+//         val actions = if (extraActions) secondary else primary
+//         androidx.activity.compose.BackHandler { messageState.value = null }
+//         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+//             val colors = com.example.chat.ui.theme.LocalAppColors.current
+//             val density = androidx.compose.ui.platform.LocalDensity.current.density
+//             val surface = androidx.compose.ui.graphics.lerp(colors.surface, colors.primary, 0.035f)
+//             Box(
+//                 Modifier.fillMaxSize()
+//                     .background(colors.foreground.copy(alpha = 0.25f))
+//                     .clickable { messageState.value = null },
+//             )
+//
+//             // Adjust anchorRect relative to message region top
+//             val adjustedAnchor = anchorRect?.let {
+//                 Rect(
+//                     left = it.left,
+//                     top = (it.top - regionTop).coerceAtLeast(0f),
+//                     right = it.right,
+//                     bottom = (it.bottom - regionTop).coerceAtLeast(0f),
+//                 )
+//             }
+//
+//             val placement = com.example.chat.ui.chats.detail.MessageInteractionAnchorPolicy.computePlacement(
+//                 bubbleBounds = adjustedAnchor,
+//                 viewportWidthDp = maxWidth,
+//                 viewportHeightDp = maxHeight,
+//                 density = density,
+//                 isOutgoing = menuMessage.senderId == currentUserId,
+//             )
+//
+//             // 1. WhatsApp/Telegram-style Reaction Rail (Anchored above bubble or fallback below)
+//             if (ReleaseFeatures.MESSAGE_REACTIONS) {
+//                 Row(
+//                     Modifier
+//                         .offset(x = placement.reactionRailLeftDp, y = placement.reactionRailTopDp)
+//                         .widthIn(max = placement.reactionRailMaxWidthDp)
+//                         .heightIn(max = placement.reactionRailMaxHeightDp)
+//                         .clip(CircleShape)
+//                         .background(surface, CircleShape)
+//                         .padding(horizontal = 6.dp, vertical = 2.dp)
+//                         .shadow(elevation = 6.dp, shape = CircleShape)
+//                         .horizontalScroll(rememberScrollState()),
+//                     horizontalArrangement = Arrangement.spacedBy(4.dp),
+//                     verticalAlignment = Alignment.CenterVertically,
+//                 ) {
+//                     listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { emoji ->
+//                         Box(
+//                             Modifier.size(42.dp).clickable {
+//                                 onToggleReaction(menuMessage.id, emoji)
+//                                 messageState.value = null
+//                             },
+//                             contentAlignment = Alignment.Center,
+//                         ) {
+//                             com.example.chat.ui.chats.detail.AnimatedEmojiView(
+//                                 unicode = emoji,
+//                                 size = 22f,
+//                                 animate = false,
+//                                 mode = com.example.chat.ui.chats.detail.EmojiDisplayMode.reaction,
+//                             )
+//                         }
+//                     }
+//                     IconButton(
+//                         onClick = {
+//                             reactionTargetState.value = menuMessage
+//                             messageState.value = null
+//                         },
+//                         modifier = Modifier.size(40.dp),
+//                     ) {
+//                         com.example.chat.ui.icons.ChatyIcon(
+//                             com.example.chat.ui.icons.ChatyIconId.add,
+//                             color = colors.foreground,
+//                             semanticLabel = "More reactions",
+//                         )
+//                     }
+//                 }
+//             }
+//
+//             // 2. Contextual Action Menu (Anchored below bubble)
+//             Column(
+//                 Modifier
+//                     .offset(x = placement.menuLeftDp, y = placement.menuTopDp)
+//                     .widthIn(max = placement.menuMaxWidthDp)
+//                     .heightIn(max = placement.menuMaxHeightDp)
+//                     .shadow(elevation = 12.dp, shape = com.example.chat.ui.kit.ChatyModalShape)
+//                     .clip(com.example.chat.ui.kit.ChatyModalShape)
+//                     .background(surface),
+//             ) {
+//                 Text(
+//                     "Message options",
+//                     Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+//                     fontWeight = FontWeight.Bold,
+//                     color = colors.foreground,
+//                 )
+//                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+//                     if (extraActions) {
+//                         com.example.chat.ui.kit.ChatyDropdownMenuItem(
+//                             text = { Text("Back") },
+//                             onClick = { extraActions = false },
+//                         )
+//                     }
+//                     actions.forEach { act ->
+//                         com.example.chat.ui.kit.ChatyDropdownMenuItem(
+//                             text = {
+//                                 Text(
+//                                     if (act.type == MessageActionType.deleteForMe) "Delete for me" else act.label,
+//                                     color = if (act.isDestructive) Color(theme.dangerColor) else colors.foreground,
+//                                 )
+//                             },
+//                             leadingIcon = {
+//                                 com.example.chat.ui.icons.ChatyIcon(
+//                                     com.example.chat.ui.chats.detail.actionIconId(act, menuMessage),
+//                                     color = if (act.isDestructive) Color(theme.dangerColor) else colors.foreground,
+//                                 )
+//                             },
+//                             onClick = {
+//                                 messageState.value = null
+//                                 onAction(menuMessage, act.type)
+//                             },
+//                         )
+//                     }
+//                 }
+//                 if (!extraActions && secondary.isNotEmpty()) {
+//                     com.example.chat.ui.kit.ChatyDropdownMenuItem(
+//                         text = { Text("More") },
+//                         trailingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight) },
+//                         onClick = { extraActions = true },
+//                     )
+//                 }
+//                 androidx.compose.material3.Button(
+//                     onClick = { messageState.value = null },
+//                     shape = CircleShape,
+//                     modifier = Modifier.padding(10.dp).fillMaxWidth().heightIn(min = 44.dp),
+//                 ) {
+//                     Text("Close")
+//                 }
+//             }
+//         }
+//     }
+// }
+//
+//
+// @Composable
+// private fun SelectionHeader(theme: ThemeConfig, count: Int, onCancel: () -> Unit) {
+//     Row(Modifier.fillMaxWidth().background(Color(theme.surfaceColor)).focusGroup(), verticalAlignment = Alignment.CenterVertically) {
+//         IconButton(onClick = onCancel, modifier = Modifier.size(48.dp)) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Cancel selection", color = Color(theme.primaryTextColor))
+//         }
+//         Text("$count selected", modifier = Modifier.semantics { stateDescription = "$count selected messages" }, color = Color(theme.primaryTextColor), fontWeight = FontWeight.W700, fontSize = 16.sp)
+//     }
+// }
+//
+// @Composable
+// private fun SelectionActions(
+//     theme: ThemeConfig,
+//     selectedCount: Int,
+//     actions: Set<com.example.chat.ui.chats.detail.SelectionAction>,
+//     onCopy: () -> Unit,
+//     onForward: () -> Unit,
+//     onStar: () -> Unit,
+//     onDelete: () -> Unit,
+// ) {
+//     Row(Modifier.background(Color(theme.surfaceColor), RoundedCornerShape(14.dp))
+//         .horizontalScroll(rememberScrollState()).focusGroup().padding(vertical = 4.dp),
+//         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
+//         verticalAlignment = Alignment.CenterVertically) {
+//         if (com.example.chat.ui.chats.detail.SelectionAction.forward in actions) SelectionActionButton(theme, "Forward", "Forward $selectedCount selected messages", onForward) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.forward, semanticLabel = null, color = Color(theme.primaryTextColor))
+//         }
+//         if (com.example.chat.ui.chats.detail.SelectionAction.copy in actions) SelectionActionButton(theme, "Copy", "Copy $selectedCount selected messages", onCopy) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.copy, semanticLabel = null, color = Color(theme.primaryTextColor))
+//         }
+//         if (com.example.chat.ui.chats.detail.SelectionAction.delete in actions) SelectionActionButton(theme, "Delete", "Delete $selectedCount selected messages", onDelete) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.deleteOutline, semanticLabel = null, color = Color(theme.primaryTextColor))
+//         }
+//         if (com.example.chat.ui.chats.detail.SelectionAction.star in actions) SelectionActionButton(theme, "Star", "Star $selectedCount selected messages", onStar) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, semanticLabel = null, color = Color(theme.primaryTextColor))
+//         }
+//     }
+// }
+//
+// @Composable
+// private fun SelectionActionButton(theme: ThemeConfig, label: String, actionLabel: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
+//     TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp)
+//         .semantics(mergeDescendants = true) { contentDescription = actionLabel }) {
+//         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+//             icon()
+//             Text(label, color = Color(theme.primaryTextColor), fontSize = 11.sp)
+//         }
+//     }
+// }
+//
+// @Composable
+// private fun BannerRow(
+//     theme: ThemeConfig,
+//     icon: @Composable () -> Unit,
+//     title: String,
+//     closeLabel: String,
+//     titleColor: Color,
+//     subtitle: String,
+//     onClose: () -> Unit,
+// ) {
+//     Row(
+//         Modifier
+//             .fillMaxWidth()
+//             .background(Color(theme.cardColor))
+//             .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }
+//             .padding(horizontal = 16.dp, vertical = 8.dp),
+//         verticalAlignment = Alignment.CenterVertically,
+//     ) {
+//         icon()
+//         Spacer(Modifier.width(9.dp))
+//         Column(Modifier.weight(1f)) {
+//             Text(title, color = titleColor, fontSize = 11.5.sp, fontWeight = FontWeight.W700)
+//             Text(
+//                 subtitle,
+//                 color = Color(theme.secondaryTextColor),
+//                 fontSize = 11.5.sp,
+//                 maxLines = 2,
+//                 overflow = TextOverflow.Ellipsis,
+//             )
+//         }
+//         IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = closeLabel,
+//                 color = Color(theme.primaryTextColor), modifier = Modifier.size(18.dp))
+//         }
+//     }
+// }
+//
+// /** In-chat search app bar (Dart _isInChatSearchOpen AppBar): back, query
+//  *  field, "i of N" match counter, previous/next match, close-or-clear. */
+// @Composable
+// private fun SearchHeader(
+//     theme: ThemeConfig,
+//     query: String,
+//     onQueryChange: (String) -> Unit,
+//     matchIndex: Int,
+//     matchCount: Int,
+//     onPrevious: () -> Unit,
+//     onNext: () -> Unit,
+//     onClose: () -> Unit,
+//     onBack: () -> Unit,
+//     focusRequester: FocusRequester,
+// ) {
+//     Row(
+//         modifier = Modifier
+//             .fillMaxWidth()
+//             .background(Color(theme.surfaceColor))
+//             .padding(horizontal = 4.dp, vertical = 8.dp),
+//         verticalAlignment = Alignment.CenterVertically,
+//     ) {
+//         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
+//                 semanticLabel = "Back",
+//                 color = Color(theme.primaryTextColor),
+//             )
+//         }
+//         Box(Modifier.weight(1f)) {
+//             if (query.isEmpty()) {
+//                 Text(
+//                     "Search loaded history",
+//                     color = Color(theme.secondaryTextColor),
+//                     fontSize = (15.5 * theme.fontScale).sp,
+//                 )
+//             }
+//             BasicTextField(
+//                 value = query,
+//                 onValueChange = onQueryChange,
+//                 textStyle = TextStyle(
+//                     color = Color(theme.primaryTextColor),
+//                     fontSize = (15.5 * theme.fontScale).sp,
+//                 ),
+//                 cursorBrush = SolidColor(Color(theme.accentColor)),
+//                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).semantics {
+//                     contentDescription = "Search messages in loaded history"
+//                 },
+//                 singleLine = true,
+//             )
+//         }
+//         if (query.isNotBlank() && matchCount == 0) Text("No matches", color = Color(theme.secondaryTextColor), fontSize = 12.sp,
+//             modifier = Modifier.semantics { stateDescription = "No matches in loaded history" })
+//         if (matchCount > 0) {
+//             Text(
+//                 "${matchIndex.coerceIn(1, matchCount)} of $matchCount",
+//                 color = Color(theme.secondaryTextColor),
+//                 fontSize = 12.5.sp,
+//                 fontWeight = FontWeight.W600,
+//                 modifier = Modifier.padding(horizontal = 6.dp).semantics {
+//                     stateDescription = "Match ${matchIndex.coerceIn(1, matchCount)} of $matchCount in loaded history"
+//                 },
+//             )
+//             IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
+//                 Icon(
+//                     Icons.Rounded.KeyboardArrowUp,
+//                     contentDescription = "Previous match",
+//                     tint = Color(theme.primaryTextColor),
+//                     modifier = Modifier.size(22.dp),
+//                 )
+//             }
+//             IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) {
+//                 Icon(
+//                     Icons.Rounded.KeyboardArrowDown,
+//                     contentDescription = "Next match",
+//                     tint = Color(theme.primaryTextColor),
+//                     modifier = Modifier.size(22.dp),
+//                 )
+//             }
+//         }
+//         IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
+//             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
+//                 semanticLabel = if (query.isEmpty()) "Close search" else "Clear search",
+//                 color = Color(theme.primaryTextColor),
+//             )
+//         }
+//     }
+// }
+//
+// /** Quick replies overlay (Dart _showQuickReplyOverlay block): opened by '#'
+//  *  in the composer, lists the automation quick replies, tap fills the
+//  *  composer with the reply content. */
+// @Composable
+// private fun QuickReplyOverlay(
+//     theme: ThemeConfig,
+//     replies: List<QuickReplyTemplate>,
+//     onPick: (QuickReplyTemplate) -> Unit,
+// ) {
+//     Column(
+//         Modifier
+//             .fillMaxWidth()
+//             .padding(horizontal = 12.dp, vertical = 4.dp)
+//             .heightIn(max = 180.dp)
+//             .background(Color(theme.cardColor), RoundedCornerShape(14.dp))
+//             .border(1.dp, Color(theme.surfaceColor), RoundedCornerShape(14.dp)),
+//     ) {
+//         LazyColumn {
+//             items(replies.size) { index ->
+//                 val reply = replies[index]
+//                 Column(
+//                     Modifier
+//                         .fillMaxWidth()
+//                         .pointerInput(reply.shortcut) {
+//                             detectTapGestures(onTap = { onPick(reply) })
+//                         }
+//                         .padding(horizontal = 14.dp, vertical = 8.dp),
+//                 ) {
+//                     Text(
+//                         "${reply.shortcut} — ${reply.title}",
+//                         color = Color(theme.primaryTextColor),
+//                         fontWeight = FontWeight.W700,
+//                         fontSize = 12.5.sp,
+//                     )
+//                     Text(
+//                         reply.content,
+//                         color = Color(theme.secondaryTextColor),
+//                         fontSize = 12.sp,
+//                         maxLines = 1,
+//                         overflow = TextOverflow.Ellipsis,
+//                     )
+//                 }
+//             }
+//         }
+//     }
+// }
+//
+// /** Per-chat wallpaper picker (Dart _openWallpaperPicker): fixed pattern
+//  *  options with a check on the current selection. */
+// @Composable
+// private fun WallpaperPickerSheet(
+//     theme: ThemeConfig,
+//     currentId: String,
+//     onSelect: (String) -> Unit,
+// ) {
+//     val options = listOf(
+//         "none" to "Plain",
+//         "subtle_dots" to "Subtle Dots",
+//         "geometric" to "Geometric",
+//         "gradient_mesh" to "Gradient Mesh",
+//         "constellation" to "Constellation",
+//     )
+//     Column(
+//         Modifier
+//             .fillMaxWidth()
+//             .background(
+//                 Color(theme.surfaceColor),
+//                 com.example.chat.ui.kit.ChatyModalShape,
+//             )
+//             .padding(vertical = 14.dp),
+//     ) {
+//         Text(
+//             "Chat wallpaper",
+//             color = Color(theme.primaryTextColor),
+//             fontWeight = FontWeight.W800,
+//             fontSize = 15.sp,
+//             modifier = Modifier
+//                 .align(Alignment.CenterHorizontally)
+//                 .padding(bottom = 4.dp),
+//         )
+//         options.forEach { (id, label) ->
+//             Row(
+//                 Modifier
+//                     .fillMaxWidth()
+//                     .pointerInput(id) { detectTapGestures(onTap = { onSelect(id) }) }
+//                     .padding(horizontal = 18.dp, vertical = 12.dp),
+//                 verticalAlignment = Alignment.CenterVertically,
+//             ) {
+//                 Text(
+//                     label,
+//                     color = Color(theme.primaryTextColor),
+//                     modifier = Modifier.weight(1f),
+//                 )
+//                 if (currentId == id) {
+//                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check,
+//                         semanticLabel = null,
+//                         color = Color(theme.accentColor),
+//                     )
+//                 }
+//             }
+//         }
+//         Box(Modifier.padding(bottom = 8.dp))
+//     }
+// }
+//
+// /** Stock integrated composer (Dart _Composer._buildInputRow, default
+//  *  template: integrated placement, 24dp corners, send/mic morph, camera
+//  *  shortcut shown). Voice capture and the emoji picker are owner seams. */
+// @Composable
+// /** Parse the Dart colorHex formats ('0xFF6366F1', '#6366F1') into a Color. */
+// private fun parseHexColor(hex: String): Color? {
+//     val cleaned = hex.removePrefix("0x").removePrefix("0X").removePrefix("#")
+//     val value = cleaned.toLongOrNull(16) ?: return null
+//     return if (cleaned.length <= 6) {
+//         Color(0xFF000000L or value)
+//     } else {
+//         Color(value)
+//     }
+// }
+//
+// // Superseded source retained inactive:
+// //                                     modifier = Modifier.background(Color(theme.cardColor), RoundedCornerShape(12.dp))
+// //                                         .padding(horizontal = 10.dp, vertical = 4.dp))
+// //                     .padding(horizontal = 12.dp, vertical = 8.dp),
+// //             IconButton(onClick = { onStartCall(false) }, modifier = Modifier.testTag("conversation-header-audio")) {
+// //             IconButton(onClick = { onStartCall(true) }, modifier = Modifier.testTag("conversation-header-video")) {
+// //                         DropdownMenuItem(enabled = callsAllowed,
+// //                         DropdownMenuItem(enabled = callsAllowed,
+//
+// /* Previous bubble call retained.
+//                             isMe = isMine,
+// */

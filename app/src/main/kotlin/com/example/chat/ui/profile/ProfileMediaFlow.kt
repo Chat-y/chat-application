@@ -38,12 +38,32 @@ class ProfileMediaFlowState internal constructor(
 @Composable
 fun rememberProfileMediaFlow(
     service: () -> ProfileMediaService,
+    isCurrent: () -> Boolean = { true },
 ): ProfileMediaFlowState {
+    val currentCheck = androidx.compose.runtime.rememberUpdatedState(isCurrent)
     val waiter = remember { mutableStateOf<CompletableDeferred<File?>?>(null) }
-    val picker = rememberProfileMediaPicker(
-        onResult = { file ->
-            waiter.value?.complete(file)
+    val delivered = remember { mutableStateOf<File?>(null) }
+    val busy = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val retired = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            retired.set(true)
+            waiter.value?.cancel()
             waiter.value = null
+            delivered.value?.delete()
+            delivered.value = null
+        }
+    }
+    val picker = rememberProfileMediaPicker(
+        isCurrent = { !retired.get() && currentCheck.value() },
+        onResult = { file ->
+            val pending = waiter.value
+            waiter.value = null
+            if (retired.get() || !currentCheck.value() || pending == null) file?.delete()
+            else {
+                delivered.value = file
+                if (!pending.complete(file)) { delivered.value = null; file?.delete() }
+            }
         },
         onError = { message ->
             waiter.value?.completeExceptionally(Exception(message))
@@ -52,18 +72,73 @@ fun rememberProfileMediaFlow(
     )
 
     suspend fun run(source: ProfileMediaSource, isAvatar: Boolean): String {
+        check(!retired.get() && currentCheck.value()) { "Account changed. Reopen profile settings." }
+        check(busy.compareAndSet(false, true)) { "A profile photo operation is already in progress." }
         val deferred = CompletableDeferred<File?>()
         waiter.value = deferred
-        picker.launch(source, isAvatar, if (isAvatar) 512 else 1280)
-        val file = deferred.await() ?: throw ProfileMediaCancelledException()
+        var claimedFile: File? = null
         try {
-            val bytes = file.readBytes()
-            // Dart: avatar 512/q88 -> avatars, banner 1280/q85 -> banners.
-            return if (isAvatar) service().uploadAvatar(bytes) else service().uploadBanner(bytes)
+            picker.launch(source, isAvatar, if (isAvatar) 512 else 1280)
+            val file = deferred.await() ?: throw ProfileMediaCancelledException()
+            claimedFile = file
+            delivered.value = null
+            check(!retired.get() && currentCheck.value()) { "Account changed. Reopen profile settings." }
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.readBytes() }
+            check(!retired.get() && currentCheck.value()) { "Account changed. Reopen profile settings." }
+            val result = if (isAvatar) service().uploadAvatar(bytes) else service().uploadBanner(bytes)
+            check(!retired.get() && currentCheck.value()) { "Account changed. Reopen profile settings." }
+            return result
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            // Native results have no launch identity. A cancelled host must not accept another request.
+            retired.set(true)
+            throw cancelled
         } finally {
-            file.delete()
+            claimedFile?.delete()
+            delivered.value?.delete()
+            delivered.value = null
+            if (waiter.value === deferred) waiter.value = null
+            if (!deferred.isCompleted) { retired.set(true); deferred.cancel() }
+            busy.set(false)
         }
     }
+
+    // Previous single-waiter flow retained inactive:
+    //     val currentCheck = androidx.compose.runtime.rememberUpdatedState(isCurrent)
+    //     val waiter = remember { mutableStateOf<CompletableDeferred<File?>?>(null) }
+    //     androidx.compose.runtime.DisposableEffect(Unit) {
+    //         onDispose { waiter.value?.cancel(); waiter.value = null }
+    //     }
+    //     val picker = rememberProfileMediaPicker(
+    //         isCurrent = { currentCheck.value() },
+    //         onResult = { file ->
+    //             waiter.value?.complete(file)
+    //             waiter.value = null
+    //         },
+    //         onError = { message ->
+    //             waiter.value?.completeExceptionally(Exception(message))
+    //             waiter.value = null
+    //         },
+    //     )
+    //
+    //     suspend fun run(source: ProfileMediaSource, isAvatar: Boolean): String {
+    //         check(currentCheck.value()) { "Account changed. Reopen profile settings." }
+    //         val deferred = CompletableDeferred<File?>()
+    //         waiter.value = deferred
+    //         picker.launch(source, isAvatar, if (isAvatar) 512 else 1280)
+    //         val file = deferred.await() ?: throw ProfileMediaCancelledException()
+    //         try {
+    //             // val bytes = file.readBytes()  (main-thread read, replaced below)
+    //             // P3-29: file read off the main thread (the flow is driven from a UI coroutine).
+    //             val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.readBytes() }
+    //             // Dart: avatar 512/q88 -> avatars, banner 1280/q85 -> banners.
+    //             check(currentCheck.value()) { "Account changed. Reopen profile settings." }
+    //             val result = if (isAvatar) service().uploadAvatar(bytes) else service().uploadBanner(bytes)
+    //             check(currentCheck.value()) { "Account changed. Reopen profile settings." }
+    //             return result
+    //         } finally {
+    //             file.delete()
+    //         }
+    //     }
 
     // Cheap value object; run() only touches remember-stable picker/waiter.
     return ProfileMediaFlowState(
@@ -162,3 +237,44 @@ fun rememberProfileAvatarDraftFlow(isCurrent: () -> Boolean): ProfileAvatarDraft
         discard = ::discard,
     )
 }
+
+// Superseded unguarded picker flow retained inactive for audit:
+// @Composable
+// fun rememberProfileMediaFlow(
+//     service: () -> ProfileMediaService,
+// ): ProfileMediaFlowState {
+//     val waiter = remember { mutableStateOf<CompletableDeferred<File?>?>(null) }
+//     val picker = rememberProfileMediaPicker(
+//         onResult = { file ->
+//             waiter.value?.complete(file)
+//             waiter.value = null
+//         },
+//         onError = { message ->
+//             waiter.value?.completeExceptionally(Exception(message))
+//             waiter.value = null
+//         },
+//     )
+//
+//     suspend fun run(source: ProfileMediaSource, isAvatar: Boolean): String {
+//         val deferred = CompletableDeferred<File?>()
+//         waiter.value = deferred
+//         picker.launch(source, isAvatar, if (isAvatar) 512 else 1280)
+//         val file = deferred.await() ?: throw ProfileMediaCancelledException()
+//         try {
+//             // val bytes = file.readBytes()  (main-thread read, replaced below)
+//             // P3-29: file read off the main thread (the flow is driven from a UI coroutine).
+//             val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.readBytes() }
+//             // Dart: avatar 512/q88 -> avatars, banner 1280/q85 -> banners.
+//             return if (isAvatar) service().uploadAvatar(bytes) else service().uploadBanner(bytes)
+//         } finally {
+//             file.delete()
+//         }
+//     }
+//
+//     // Cheap value object; run() only touches remember-stable picker/waiter.
+//     return ProfileMediaFlowState(
+//         avatar = { source -> run(source, true) },
+//         banner = { source -> run(source, false) },
+//     )
+// }
+//

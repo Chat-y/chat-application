@@ -125,19 +125,33 @@ fun CustomFilePickerScreen(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val isDark = isSystemInDarkTheme()
+    val isDark = com.example.chat.ui.theme.LocalThemeConfig.current.isDark // Previous: isSystemInDarkTheme()
     val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     val searchKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     var tick by remember { mutableIntStateOf(0) }
     DisposableEffect(libraryService) {
-        val listener: () -> Unit = { tick++ }
+        // Previous listener updated Compose state directly on the notifying thread.
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        var attached = true
+        val listener: () -> Unit = {
+            val refresh = { if (attached) tick++ }
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) refresh() else main.post { refresh() }
+        }
         libraryService.addListener(listener)
-        onDispose { libraryService.removeListener(listener) }
+        onDispose { attached = false; libraryService.removeListener(listener) }
     }
     @Suppress("UNUSED_EXPRESSION") tick
 
     var searchText by remember(libraryService) { mutableStateOf(boundedPickerText(libraryService.searchQuery)) }
+    // FIL-R3-131: text echoes immediately; expensive library filtering waits for a quiet query.
+    // New keystrokes cancel this effect, so an older pending query cannot publish later.
+    LaunchedEffect(libraryService, searchText) {
+        if (searchText != libraryService.searchQuery) {
+            if (searchText.isNotEmpty()) kotlinx.coroutines.delay(250L)
+            if (searchText != libraryService.searchQuery) libraryService.setSearchQuery(searchText)
+        }
+    }
     var selectedPaths by remember(libraryService) { mutableStateOf<Set<String>>(emptySet()) }
     var isGridView by remember { mutableStateOf(true) }
     val listScrollState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -147,6 +161,10 @@ fun CustomFilePickerScreen(
 
     var refreshError by remember(libraryService) { mutableStateOf<String?>(null) }
     var refreshAttempt by remember { mutableIntStateOf(0) }
+    var thumbnailRetry by remember(libraryService) { mutableIntStateOf(0) }
+    val failedThumbnails = remember(libraryService, refreshAttempt, thumbnailRetry) {
+        androidx.compose.runtime.mutableStateMapOf<PickerThumbnailVersion, Boolean>()
+    }
     var importing by remember(libraryService) { mutableStateOf(false) }
     var importProgress by remember(libraryService) { mutableStateOf("") }
     var importStopping by remember(libraryService) { mutableStateOf(false) }
@@ -169,7 +187,22 @@ fun CustomFilePickerScreen(
     var browseOrder by remember(libraryService) { mutableStateOf(MediaBrowseOrder.Newest) }
     var sortExpanded by remember { mutableStateOf(false) }
     var detailsFile by remember(libraryService) { mutableStateOf<MediaFileDescriptor?>(null) }
-    val visibleFiles = remember(libraryService, tick, browseOrder) { orderMediaFiles(libraryService.filteredFiles, browseOrder) }
+    // FIL-R3-132: index follows descriptor snapshots, not each typed query/category tick.
+    val searchIndex = remember(allFiles) { PickerSearchIndex(allFiles) }
+    // Previous repeated-normalization path retained:
+    // val visibleFiles = remember(libraryService, tick, browseOrder) { orderMediaFiles(libraryService.filteredFiles, browseOrder) }
+    val visibleFiles = remember(searchIndex, libraryService.searchQuery, libraryService.activeCategoryFilter, browseOrder) {
+        orderMediaFiles(searchIndex.filter(libraryService.searchQuery, libraryService.activeCategoryFilter), browseOrder)
+    }
+    // FIL-R3-139: use the proposal's predictable-first-result alternative for both views.
+    // Selection, sort and service filter semantics are unchanged; no animated scroll.
+    // Separate effects: an unattached inactive view must not suspend the active view's reset.
+    LaunchedEffect(libraryService, libraryService.searchQuery, libraryService.activeCategoryFilter) {
+        if (visibleFiles.isNotEmpty()) listScrollState.scrollToItem(0)
+    }
+    LaunchedEffect(libraryService, libraryService.searchQuery, libraryService.activeCategoryFilter) {
+        if (visibleFiles.isNotEmpty()) gridScrollState.scrollToItem(0)
+    }
     LaunchedEffect(libraryService, initialCategory, refreshAttempt) {
         refreshError = null
         try {
@@ -408,11 +441,15 @@ fun CustomFilePickerScreen(
                         onValueChange = {
                             val bounded = boundedPickerText(it)
                             searchText = bounded
-                            libraryService.setSearchQuery(bounded)
+                            // FIL-R3-131 previous per-keystroke filter: libraryService.setSearchQuery(bounded)
                         },
                         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).then(Modifier.focusRequester(searchFocus)),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { searchKeyboard?.hide() }),
+                        // FIL-R3-131 original: keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { searchKeyboard?.hide() }),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
+                            if (searchText != libraryService.searchQuery) libraryService.setSearchQuery(searchText)
+                            searchKeyboard?.hide()
+                        }),
                         label = { Text("Search files") },
                         placeholder = { Text("Search files, documents, photos...") },
                         leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = null, modifier = Modifier.size(20.dp)) },
@@ -454,6 +491,9 @@ fun CustomFilePickerScreen(
                         TextButton(onClick = { importNotice = null }) { Text("Dismiss notice") }
                     }
                 }
+                if (failedThumbnails.isNotEmpty()) TextButton(
+                    onClick = { thumbnailRetry++ }, modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text("Retry thumbnails") }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${visibleFiles.size} ${if (searchText.isNotBlank()) "matches" else "files"} · ${libraryService.activeCategoryFilter?.name ?: "All categories"}",
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
@@ -515,6 +555,7 @@ fun CustomFilePickerScreen(
                             items(items.size, key = { items[it].path }) { index ->
                                 val item = items[index]
                                 GridItem(
+                                    failedThumbnails = failedThumbnails,
                                     item = item,
                                     isSelected = selectedPaths.contains(item.path),
                                     showCheck = isSelectionMode || selectedPaths.contains(item.path),
@@ -542,6 +583,7 @@ fun CustomFilePickerScreen(
                             items(items.size, key = { items[it].path }) { index ->
                                 val item = items[index]
                                 ListItemRow(
+                                    failedThumbnails = failedThumbnails,
                                     item = item,
                                     isSelected = selectedPaths.contains(item.path),
                                     showCheck = isSelectionMode || selectedPaths.contains(item.path),
@@ -612,7 +654,7 @@ fun CustomFilePickerScreen(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
                         .size(width = 40.dp, height = 4.dp)
-                        .background(Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp)),
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f) /* Previous: Color.Gray.copy(alpha = 0.4f) */, RoundedCornerShape(2.dp)),
                 )
                 Spacer(Modifier.height(16.dp))
                 Row(Modifier.semantics(mergeDescendants = true) {
@@ -649,7 +691,7 @@ fun CustomFilePickerScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {
-                            ItemPreview(f, previewDp = 72)
+                            ItemPreview(f, failedThumbnails, previewDp = 72)
                             Spacer(Modifier.height(4.dp))
                             Text(pickerFileLabel(f.name), maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.bodyLarge.copy(textDirection = androidx.compose.ui.text.style.TextDirection.ContentOrLtr), fontWeight = FontWeight.W600)
@@ -683,7 +725,7 @@ fun CustomFilePickerScreen(
                 Row {
                     OutlinedButton(
                         onClick = { summaryFiles = null },
-                        modifier = Modifier.weight(1f).height(48.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp) /* Previous fixed height(48.dp) */,
                         shape = RoundedCornerShape(14.dp),
                     ) { Text("Cancel") }
                     Spacer(Modifier.width(12.dp))
@@ -747,7 +789,7 @@ fun CustomFilePickerScreen(
                                 } finally { delivering = false }
                             }
                         },
-                        modifier = Modifier.weight(1f).height(48.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp) /* Previous fixed height(48.dp) */,
                         shape = RoundedCornerShape(14.dp),
                     ) { Text(if (delivering) "Preparing" else if (isWorkspaceMode) "Share ${files.size} files" else "Send ${files.size} files") }
                 }
@@ -805,9 +847,19 @@ private fun FilterPills(isDark: Boolean, active: MediaCategory?, onSelect: (Medi
     }
 }
 
+/** FIL-R3-140: immutable display-only row strings, no file/service policy. */
+private data class PickerRowMetadata(val sizeLabel: String, val extensionLabel: String)
+
+@Composable
+private fun rememberPickerRowMetadata(item: MediaFileDescriptor): PickerRowMetadata {
+    val localeTags = androidx.compose.ui.platform.LocalConfiguration.current.locales.toLanguageTags()
+    return remember(item, localeTags) { PickerRowMetadata(item.humanReadableSize, item.extension.uppercase()) }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GridItem(
+    failedThumbnails: MutableMap<PickerThumbnailVersion, Boolean>,
     item: MediaFileDescriptor,
     isSelected: Boolean,
     showCheck: Boolean,
@@ -818,6 +870,7 @@ private fun GridItem(
     onLongPress: () -> Unit,
     onDetails: () -> Unit,
 ) {
+    val metadata = rememberPickerRowMetadata(item)
     Box(
         modifier = modifier
             .springInteractiveScale(0.97f)
@@ -827,14 +880,15 @@ private fun GridItem(
                 onLongClick = onLongPress, onLongClickLabel = if (isSelected) "Deselect file" else "Select file",
                 role = if (selectsOnTap) Role.Checkbox else Role.Button)
             .semantics(mergeDescendants = true) {
-                contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${item.humanReadableSize}"
+                // FIL-R3-140 previous: contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${item.humanReadableSize}"
+                contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${metadata.sizeLabel}"
                 selected = isSelected
                 stateDescription = if (isSelected) "Selected" else "Not selected"
             }
             .shadow(
                 8.dp, RoundedCornerShape(14.dp),
-                ambientColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
-                spotColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
+                ambientColor = MaterialTheme.colorScheme.scrim.copy(alpha = if (isDark) 0.2f else 0.04f) /* Previous black shadow */,
+                spotColor = MaterialTheme.colorScheme.scrim.copy(alpha = if (isDark) 0.2f else 0.04f) /* Previous black shadow */,
             )
             .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surface)
@@ -850,7 +904,7 @@ private fun GridItem(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Box(Modifier.heightIn(min = 96.dp), contentAlignment = Alignment.Center) { ItemPreview(item, previewDp = 96) }
+            Box(Modifier.heightIn(min = 96.dp), contentAlignment = Alignment.Center) { ItemPreview(item, failedThumbnails, previewDp = 96) }
             Spacer(Modifier.height(4.dp))
             Text(
                 pickerFileLabel(item.name),
@@ -863,7 +917,8 @@ private fun GridItem(
             Text(item.mimeType, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
-                item.humanReadableSize,
+                // FIL-R3-140 previous: item.humanReadableSize,
+                metadata.sizeLabel,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -877,14 +932,14 @@ private fun GridItem(
                     .size(22.dp)
                     .background(
                         if (isSelected) MaterialTheme.colorScheme.primary
-                        else Color.Black.copy(alpha = 0.4f),
+                        else MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f) /* Previous black scrim */,
                         CircleShape,
                     )
-                    .border(1.5.dp, Color.White, CircleShape),
+                    .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape) /* Previous white border */,
                 contentAlignment = Alignment.Center,
             ) {
                 if (isSelected) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, color = Color.White, modifier = Modifier.size(14.dp))
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp) /* Previous white check */)
                 }
             }
         }
@@ -894,6 +949,7 @@ private fun GridItem(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ListItemRow(
+    failedThumbnails: MutableMap<PickerThumbnailVersion, Boolean>,
     item: MediaFileDescriptor,
     isSelected: Boolean,
     showCheck: Boolean,
@@ -903,6 +959,7 @@ private fun ListItemRow(
     onLongPress: () -> Unit,
     onDetails: () -> Unit,
 ) {
+    val metadata = rememberPickerRowMetadata(item)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -913,7 +970,8 @@ private fun ListItemRow(
                 onLongClick = onLongPress, onLongClickLabel = if (isSelected) "Deselect file" else "Select file",
                 role = if (selectsOnTap) Role.Checkbox else Role.Button)
             .semantics(mergeDescendants = true) {
-                contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${item.humanReadableSize}"
+                // FIL-R3-140 previous: contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${item.humanReadableSize}"
+                contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${metadata.sizeLabel}"
                 selected = isSelected
                 stateDescription = if (isSelected) "Selected" else "Not selected"
             }
@@ -928,7 +986,7 @@ private fun ListItemRow(
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { ItemPreview(item, previewDp = 44) }
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { ItemPreview(item, failedThumbnails, previewDp = 44) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(pickerFileLabel(item.name), maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -936,7 +994,8 @@ private fun ListItemRow(
                     textDirection = androidx.compose.ui.text.style.TextDirection.ContentOrLtr))
             Spacer(Modifier.height(2.dp))
             Text(
-                "${item.humanReadableSize} • ${item.extension.uppercase()}",
+                // FIL-R3-140 previous: "${item.humanReadableSize} • ${item.extension.uppercase()}",
+                "${metadata.sizeLabel} • ${metadata.extensionLabel}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -953,24 +1012,31 @@ private fun ListItemRow(
                     .border(
                         1.5.dp,
                         if (isSelected) MaterialTheme.colorScheme.primary
-                        else (if (isDark) Color.White.copy(alpha = 0.38f) else Color.Black.copy(alpha = 0.38f)),
+                        else MaterialTheme.colorScheme.outline /* Previous system light/dark fixed border */,
                         CircleShape,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
                 if (isSelected) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, color = Color.White, modifier = Modifier.size(14.dp))
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp) /* Previous white check */)
                 }
             }
         }
     }
 }
 
+/** FIL-R3-137: descriptor-version key, not a content hash or persistent cache. */
+private data class PickerThumbnailVersion(val path: String, val sizeBytes: Long, val modifiedAt: java.time.Instant)
+private fun thumbnailVersion(item: MediaFileDescriptor) = PickerThumbnailVersion(item.path, item.sizeBytes, item.modifiedAt)
+
 @Composable
-private fun ItemPreview(item: MediaFileDescriptor, previewDp: Int = 48) {
+// FIL-R3-137 previous: private fun ItemPreview(item: MediaFileDescriptor, previewDp: Int = 48) {
+private fun ItemPreview(item: MediaFileDescriptor, failedThumbnails: MutableMap<PickerThumbnailVersion, Boolean>, previewDp: Int = 48) {
     // Previously this queried item.exists during every composition and always requested 48dp.
     // Coil now checks availability asynchronously; failures keep the category fallback.
-    if (item.category == MediaCategory.image) {
+    val version = thumbnailVersion(item)
+    // FIL-R3-137 previous image condition: if (item.category == MediaCategory.image) {
+    if (item.category == MediaCategory.image && failedThumbnails[version] != true) {
         val pixels = with(androidx.compose.ui.platform.LocalDensity.current) { previewDp.dp.roundToPx() }.coerceIn(32, 512)
         coil.compose.SubcomposeAsyncImage(
             model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
@@ -979,6 +1045,7 @@ private fun ItemPreview(item: MediaFileDescriptor, previewDp: Int = 48) {
             modifier = Modifier.size(previewDp.dp).clip(RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop,
             loading = { CategoryIcon(item.category) },
+            onError = { failedThumbnails[version] = true },
             error = { CategoryIcon(item.category) },
         )
         return
@@ -1013,7 +1080,7 @@ private fun FloatingActionDock(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(16.dp, RoundedCornerShape(22.dp), ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.25f))
+            .shadow(16.dp, RoundedCornerShape(22.dp), ambientColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f) /* Previous black shadow */, spotColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f) /* Previous black shadow */)
             .clip(RoundedCornerShape(22.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
             .border(
@@ -1039,7 +1106,7 @@ private fun FloatingActionDock(
 @Composable
 private fun EmptyState(isDark: Boolean, onBrowse: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -1065,3 +1132,8 @@ private fun EmptyState(isDark: Boolean, onBrowse: () -> Unit) {
         }
     }
 }
+
+// FIL-R3-137 prior thumbnail call statements retained inactive.
+// ItemPreview(f, previewDp = 72)
+// Box(Modifier.heightIn(min = 96.dp), contentAlignment = Alignment.Center) { ItemPreview(item, previewDp = 96) }
+// Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { ItemPreview(item, previewDp = 44) }

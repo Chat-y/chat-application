@@ -33,10 +33,13 @@ class PrivacyPublicationPolicy {
         PrivacyPublication.recording -> preferences.recordingIndicators
         PrivacyPublication.statusView -> !preferences.hideViewStatus
         PrivacyPublication.presence ->
-            !(preferences.hideLastSeenAudience == "Nobody" &&
-                preferences.hideOnlineAudience == "Same as Last Seen")
+//             !(preferences.hideLastSeenAudience == "Nobody" &&
+//                 preferences.hideOnlineAudience == "Same as Last Seen")
+            !(PrivacyAudienceValue.parse(preferences.hideLastSeenAudience) == PrivacyAudienceValue.NOBODY &&
+                PrivacyOnlineValue.parse(preferences.hideOnlineAudience) == PrivacyOnlineValue.SAME_AS_LAST_SEEN)
         PrivacyPublication.lastSeen ->
             !preferences.freezeLastSeen &&
-                preferences.hideLastSeenAudience != "Nobody"
+//                 preferences.hideLastSeenAudience != "Nobody"
+                PrivacyAudienceValue.parse(preferences.hideLastSeenAudience) != PrivacyAudienceValue.NOBODY
     }
 }

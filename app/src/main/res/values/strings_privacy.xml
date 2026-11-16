@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_delivery_tip">Message delays? Check your connection and Android battery restrictions. Resetting privacy choices does not repair message delivery.</string>
+    <string name="privacy_dismiss_tip">Dismiss tip</string>
+</resources>

@@ -1,5 +1,7 @@
 package com.example.chat.ui.camera
 
+import com.example.chat.R
+import androidx.compose.ui.res.stringResource
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -32,7 +34,8 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
     val scope=rememberCoroutineScope()
     var bitmap by remember(path){mutableStateOf<Bitmap?>(null)}
     var quad by remember(path){mutableStateOf(PaperQuad.inset)}
-    var note by remember(path){mutableStateOf("Finding paper edges…")}
+    // CAM-R4-004 prior: var note by remember(path){mutableStateOf("Finding paper edges…")}
+    var note by remember(path){mutableStateOf(R.string.camera_doc_finding)}
     var busy by remember(path){mutableStateOf(false)}
     val ownedPreview = remember(path) { java.util.concurrent.atomic.AtomicReference<Bitmap?>(null) }
     DisposableEffect(path) { onDispose { ownedPreview.getAndSet(null)?.recycle() } }
@@ -49,21 +52,31 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
             pending=null
             quad=result.second?:PaperQuad.inset
             // Original null proposal copy: "Paper edges not found. Drag all four corners around the paper."
-            note=if(result.second==null) "Paper edges not found. Move closer and retake, or drag all four corners around the paper." else "Suggested paper edges. Check and adjust all four corners."
+            // CAM-R4-004 prior: note=if(result.second==null) "Paper edges not found. Move closer and retake, or drag all four corners around the paper." else "Suggested paper edges. Check and adjust all four corners."
+            note=if(result.second==null) R.string.camera_doc_not_found else R.string.camera_doc_suggested
         } catch(cancelled:kotlinx.coroutines.CancellationException) { throw cancelled }
         // Original raw exception could expose a local path: note=e.message?:"Could not read image. Original kept."
-        catch(_:Exception) { note="Could not read this image. Retake it or choose another image. Original kept." }
-        catch(e:OutOfMemoryError) { note="Not enough memory to open this image. Original kept." }
+        // CAM-R4-004 prior: catch(_:Exception) { note="Could not read this image. Retake it or choose another image. Original kept." }
+        catch(_:Exception) { note=R.string.camera_doc_read_error }
+        // CAM-R4-004 prior: catch(e:OutOfMemoryError) { note="Not enough memory to open this image. Original kept." }
+        catch(e:OutOfMemoryError) { note=R.string.camera_doc_open_memory }
         finally { pending?.recycle() }
     }
     Column(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)) {
-        Text("Document · adjust paper corners",color=Color.White)
+        // CAM-R4-004 prior: Text("Document · adjust paper corners",color=Color.White)
+        Text(stringResource(R.string.camera_doc_title),color=Color.White)
         // Original: Text(note,color=Color.LightGray)
         Text(if (bitmap != null && quad.areaFraction < MIN_PAPER_AREA_FRACTION)
-            "Move closer and retake, or expand the corners. Paper must fill at least 5% of the image."
-            else note, color=Color.LightGray)
+            // CAM-R4-004 prior: "Move closer and retake, or expand the corners. Paper must fill at least 5% of the image."
+            stringResource(R.string.camera_doc_min_area)
+            // CAM-R4-004 prior: else note, color=Color.LightGray)
+            else stringResource(note), color=Color.LightGray)
         val image=bitmap
-        if(image!=null) Canvas(Modifier.fillMaxWidth().weight(1f).semantics { contentDescription = "Adjust paper corners" }.pointerInput(image,busy){
+        // CAM-R4-034 previous gesture-only Canvas modifier:
+        // if(image!=null) Canvas(Modifier.fillMaxWidth().weight(1f).semantics { contentDescription = "Adjust paper corners" }.pointerInput(image,busy){
+        if(image!=null) Canvas(Modifier.fillMaxWidth().weight(1f)
+            .paperCornerAccessibility(quad, enabled = !busy, onQuadChange = { quad = it })
+            .pointerInput(image,busy){
             // Original pointerInput(image) stayed draggable during an in-flight crop.
             if (busy) return@pointerInput
             var selected=-1
@@ -79,8 +92,9 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
             for(i in 0..3){drawLine(color,pts[i],pts[(i+1)%4],3.dp.toPx());drawCircle(color,9.dp.toPx(),pts[i]);drawCircle(Color.Black,9.dp.toPx(),pts[i],style=Stroke(1.dp.toPx()))}
         } else Spacer(Modifier.weight(1f))
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-            Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onRetake,enabled=!busy){Text("Retake")}
-            Button(shape = com.example.chat.ui.kit.ChatyActionShape, enabled=image!=null&&quad.isValid()&&!busy,onClick=cropClick@{
+            // CAM-R4-004 prior: Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onRetake,enabled=!busy){Text("Retake")}
+            Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onRetake,enabled=!busy){Text(stringResource(R.string.camera_doc_retake))}
+            Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, enabled=image!=null&&quad.isValid()&&!busy,onClick=cropClick@{
                 // Original onClick set busy but read mutable quad from the worker later.
                 if (busy) return@cropClick
                 val confirmedQuad = quad
@@ -90,9 +104,16 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
                 try{val result=withContext(Dispatchers.IO){InlineDocumentProcessor.crop(path,confirmedQuad,File(context.cacheDir,"paper_crops")).also{produced=it}};onCropped(result);produced=null}
                 catch(cancelled:kotlinx.coroutines.CancellationException){throw cancelled}
                 // Original: catch(e:Exception){note=e.message?:"Crop failed. Original kept."}
-                catch(_:Exception){note="Could not crop this image. Check the corners and device storage, then try again. Original kept."}
-                catch(e:OutOfMemoryError){note="Not enough memory to crop this full-resolution image. Original kept."}finally{produced?.let{File(it).delete()};busy=false}
-            }}){Text(if(busy)"Cropping…" else "Crop paper")}
+                // CAM-R4-004 prior: catch(_:Exception){note="Could not crop this image. Check the corners and device storage, then try again. Original kept."}
+                catch(_:Exception){note=R.string.camera_doc_crop_error}
+                // CAM-R4-004 prior: catch(e:OutOfMemoryError){note="Not enough memory to crop this full-resolution image. Original kept."}finally{produced?.let{File(it).delete()};busy=false}
+                catch(e:OutOfMemoryError){note=R.string.camera_doc_crop_memory}finally{produced?.let{File(it).delete()};busy=false}
+            // CAM-R4-004 prior: }}){Text(if(busy)"Cropping…" else "Crop paper")}
+            }}){Text(if(busy)stringResource(R.string.camera_doc_cropping) else stringResource(R.string.camera_doc_crop))}
         }
     }
 }
+
+// CAM-R4-034 prior UI modifier lines retained inactive:
+//             Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onRetake,enabled=!busy){Text("Retake")}
+//             Button(shape = com.example.chat.ui.kit.ChatyActionShape, enabled=image!=null&&quad.isValid()&&!busy,onClick=cropClick@{

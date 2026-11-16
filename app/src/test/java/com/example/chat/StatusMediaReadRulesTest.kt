@@ -73,4 +73,34 @@ class StatusMediaReadRulesTest {
         assertEquals("😀.jpg", StatusMediaReadRules.displayName("😀.jpg"))
     }
 
+    @org.junit.Test fun knownSizeReadsIntoExactPayload() {
+        val bytes = ByteArray(150_000) { (it % 127).toByte() }
+        assertArrayEquals(bytes, StatusMediaReadRules.readKnownSize(ByteArrayInputStream(bytes), bytes.size.toLong(), 200_000) {})
+    }
+    @org.junit.Test fun knownEmptySizeRequiresActualEof() {
+        assertTrue(StatusMediaReadRules.readKnownSize(ByteArrayInputStream(byteArrayOf()), 0, 3) {}.isEmpty())
+    }
+    @org.junit.Test(expected = IllegalStateException::class) fun declaredSizeCannotExceedCap() {
+        StatusMediaReadRules.readKnownSize(ByteArrayInputStream(byteArrayOf()), 4, 3) {}
+    }
+    @org.junit.Test(expected = IllegalStateException::class) fun staleLargerMetadataCannotProducePaddedPayload() {
+        StatusMediaReadRules.readKnownSize(ByteArrayInputStream(byteArrayOf(1)), 3, 3) {}
+    }
+    @org.junit.Test(expected = IllegalStateException::class) fun staleSmallerMetadataCannotTruncatePayload() {
+        StatusMediaReadRules.readKnownSize(ByteArrayInputStream(byteArrayOf(1, 2, 3)), 2, 3) {}
+    }
+    @org.junit.Test(expected = java.util.concurrent.CancellationException::class) fun knownSizeChecksCancellationBeforeAllocation() {
+        StatusMediaReadRules.readKnownSize(ByteArrayInputStream(byteArrayOf(1)), 1, 3) {
+            throw java.util.concurrent.CancellationException()
+        }
+    }
+    @org.junit.Test fun knownSizeZeroBulkReadForcesProgress() {
+        val source = ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        val input = object : java.io.InputStream() {
+            override fun read(): Int = source.read()
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int = 0
+        }
+        assertArrayEquals(byteArrayOf(1, 2, 3), StatusMediaReadRules.readKnownSize(input, 3, 3) {})
+    }
+
 }

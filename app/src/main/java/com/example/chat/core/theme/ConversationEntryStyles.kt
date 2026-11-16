@@ -3,6 +3,9 @@ package com.example.chat.core.theme
 /** Stable saved ids with legacy read support. Labels may change without changing saved layouts. */
 data class EntryStyleOption(val id: String, val label: String, val legacyName: String, val family: String)
 
+/** Actual composer dispatch is exhaustive over these non-alias targets. */
+enum class ConversationEntryLayout { stock, reference_two, yowa, wamod, hangouts, simple, aran_v2, mood, hangouts_v2, dribble, dribble_v2, allo, rounded, old_stock, rc_telegram, rc_ios, rc_line, concept, instagram, ios14, messenger, rc_mess, telegram_modern, ios_clean, hangouts_minimal, simple_pill, flat_floating, classic_3d, compact_bubble }
+
 object ConversationEntryStyles {
     val options: List<EntryStyleOption> = listOf(
         EntryStyleOption("stock", "Classic (recommended)", "Stock", "Classic"),
@@ -42,5 +45,12 @@ object ConversationEntryStyles {
         it.id == raw.trim() || it.legacyName == raw.trim()
     } ?: options.first()
 
+    /** Two existing visually identical paths are explicitly declared aliases, not new layouts. */
+    val layoutAliases: Map<String,String> = mapOf("wanh" to "aran_v2","rc_google" to "yowa")
+    fun rendererLayout(raw: String): ConversationEntryLayout {
+        val id = resolve(raw).id
+        val canonical = layoutAliases[id] ?: id
+        return ConversationEntryLayout.entries.firstOrNull { it.name == canonical } ?: ConversationEntryLayout.stock
+    }
     fun layoutName(raw: String): String = resolve(raw).legacyName
 }

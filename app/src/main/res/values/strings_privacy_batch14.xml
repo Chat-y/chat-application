@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_open_connection_settings">Open connection settings</string>
+    <string name="privacy_connection_settings_unavailable">Connection settings are unavailable. Open Android settings to check your network.</string>
+    <string name="privacy_request_precise_location">Request precise location</string>
+</resources>

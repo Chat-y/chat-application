@@ -93,7 +93,8 @@ private fun CallTypePill(isVideo: Boolean) {
         Text(
             if (isVideo) "Incoming Video Call" else "Incoming Voice Call",
             color = Color(theme.accentColor),
-            fontSize = 13.sp,
+// Previous implementation retained:             fontSize = 13.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -109,7 +110,8 @@ private fun CallerName(session: ChatyCallSession, align: TextAlign = TextAlign.C
             session.remoteDisplayName,
             textAlign = align,
             color = Color(theme.primaryTextColor),
-            fontSize = 26.sp,
+// Previous implementation retained:             fontSize = 26.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
             fontWeight = FontWeight.ExtraBold,
             letterSpacing = (-0.5).sp,
         )
@@ -169,7 +171,8 @@ private fun RoundAction(
         Text(
             label,
             color = Color(theme.secondaryTextColor),
-            fontSize = 13.sp,
+// Previous implementation retained:             fontSize = 13.sp,
+            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -326,7 +329,8 @@ private fun EdgeIncomingCall(data: IncomingCallData) {
                 ) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callEnd, semanticLabel = null)
                     Spacer(Modifier.width(6.dp))
-                    Text("Decline", fontWeight = FontWeight.Bold)
+// Previous implementation retained:                     Text("Decline", fontWeight = FontWeight.Bold)
+                    Text("Decline", fontWeight = FontWeight.Bold, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
                 }
                 Spacer(Modifier.width(12.dp))
                 Button(
@@ -343,7 +347,8 @@ private fun EdgeIncomingCall(data: IncomingCallData) {
                         contentDescription = null,
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text("Answer", fontWeight = FontWeight.Bold)
+// Previous implementation retained:                     Text("Answer", fontWeight = FontWeight.Bold)
+                    Text("Answer", fontWeight = FontWeight.Bold, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control)
                 }
             }
         }

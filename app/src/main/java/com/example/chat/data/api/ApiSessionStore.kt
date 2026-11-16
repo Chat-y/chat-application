@@ -44,6 +44,15 @@ class ApiSessionStorageException(
     cause,
 )
 
+/** The device's Keystore-backed secure storage did not answer within the
+ *  bounded wait during sign-in. Retryable and additive-only: nothing was
+ *  deleted, and a late completion lands the account fully adopted (the next
+ *  launch restores it). Extends IllegalStateException so existing fail-closed
+ *  catch sites keep working. */
+class ApiDeviceStorageBusyException : IllegalStateException(
+    "Device security storage is busy, try again.",
+)
+
 fun apiUserToJson(user: ApiUserProfile): String = JSONObject()
     .put("id", user.id)
     .put("username", user.username)

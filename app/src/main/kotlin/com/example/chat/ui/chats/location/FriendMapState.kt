@@ -28,6 +28,9 @@ enum class FriendMapVisibilityPreview(val label: String, val description: String
 data class FriendMapOwnPin(
     val coordinate: LocationCoordinate,
     val precise: Boolean,
+    // MAP-R1-007/008: measured accuracy and acquisition time, local only, never sent.
+    val accuracyMeters: Double? = null,
+    val acquiredAtElapsedMs: Long? = null,
 )
 
 /** Copy anchors kept in one place so the not-connected story stays honest and consistent. */

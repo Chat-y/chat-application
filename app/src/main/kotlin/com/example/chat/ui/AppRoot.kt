@@ -1,5 +1,7 @@
 package com.example.chat.ui
 
+import kotlinx.coroutines.ensureActive
+
 import com.example.chat.ui.split.forAccount
 
 import com.example.chat.ReleaseFeatures
@@ -41,6 +43,7 @@ import com.example.chat.ui.auth.WelcomeScreen
 import com.example.chat.ui.theme.ChatyTheme
 import com.example.chat.ui.theme.LocalThemeConfig
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Lock
@@ -83,17 +86,31 @@ private class AuthNavigationState {
 @Composable
 fun AppRoot() {
     val themeController = remember { ServiceLocator.themeController }
+    var rootAccountRevision by remember { mutableIntStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val delivery = RootMainDelivery()
+        val listener: (com.example.chat.data.api.ApiAccountScope) -> Unit = {
+            delivery.dispatch { rootAccountRevision++ }
+        }
+        ServiceLocator.apiBackend.addAuthScopeListener(listener)
+        onDispose { delivery.close(); ServiceLocator.apiBackend.removeAuthScopeListener(listener) }
+    }
+    val rootAccount = rootAccountRevision.let { ServiceLocator.apiBackend.authSnapshot() }
     var themeRevision by remember { mutableIntStateOf(0) }
     androidx.compose.runtime.DisposableEffect(themeController) {
-        val listener: () -> Unit = { themeRevision++ }
+        // val listener: () -> Unit = { themeRevision++ }
+        val delivery = RootMainDelivery()
+        val listener: () -> Unit = { delivery.dispatch { themeRevision++ } }
         themeController.addListener(listener)
-        onDispose { themeController.removeListener(listener) }
+        onDispose { delivery.close(); themeController.removeListener(listener) }
     }
     // themeRevision re-reads the controller's current theme on every mutation.
     androidx.compose.runtime.DisposableEffect(Unit) {
-        val prefsListener: () -> Unit = { themeRevision++ }
+        // val prefsListener: () -> Unit = { themeRevision++ }
+        val delivery = RootMainDelivery()
+        val prefsListener: () -> Unit = { delivery.dispatch { themeRevision++ } }
         ServiceLocator.preferencesController.addListener(prefsListener)
-        onDispose { ServiceLocator.preferencesController.removeListener(prefsListener) }
+        onDispose { delivery.close(); ServiceLocator.preferencesController.removeListener(prefsListener) }
     }
     @Suppress("UNUSED_EXPRESSION") themeRevision
     // Follow-system must be LIVE, not birth-only: SyncChatySystemTheme was dead code
@@ -229,13 +246,33 @@ fun AppRoot() {
                 pendingCall[0] = null
             }
             androidx.compose.runtime.DisposableEffect(callPermLauncher) {
+                val callPermissionAttached = java.util.concurrent.atomic.AtomicBoolean(true)
                 com.example.chat.data.services.CallPermissionGate.requester = { perms ->
-                    val d = kotlinx.coroutines.CompletableDeferred<Map<String, Boolean>>()
-                    pendingCall[0] = d
-                    callPermLauncher.launch(perms.toTypedArray())
-                    d.await()
+                    // val d = kotlinx.coroutines.CompletableDeferred<Map<String, Boolean>>()
+                    // pendingCall[0] = d
+                    // callPermLauncher.launch(perms.toTypedArray())
+                    // d.await()
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                        if (!callPermissionAttached.get() || pendingCall[0] != null) emptyMap()
+                        else {
+                            val d = kotlinx.coroutines.CompletableDeferred<Map<String, Boolean>>()
+                            pendingCall[0] = d
+                            try {
+                                callPermLauncher.launch(perms.toTypedArray())
+                                // Keep the slot occupied if this caller cancels: an old
+                                // native result must never fulfill a later request.
+                                d.await()
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (_: Exception) {
+                                if (pendingCall[0] === d) pendingCall[0] = null
+                                d.complete(emptyMap())
+                                emptyMap()
+                            }
+                        }
+                    }
                 }
                 onDispose {
+                    callPermissionAttached.set(false)
                     com.example.chat.data.services.CallPermissionGate.requester = null
                     pendingCall[0]?.complete(emptyMap())
                     pendingCall[0] = null
@@ -245,21 +282,58 @@ fun AppRoot() {
         androidx.compose.runtime.LaunchedEffect(Unit) { try { ServiceLocator.startBadgeSync() } catch (_: Exception) {} }
         // Message notification tapped: open that chat once signed in and unlocked.
         val notificationRoomId by com.example.chat.notifications.ChatyNotifications.pendingRoomId.collectAsState()
-        androidx.compose.runtime.LaunchedEffect(notificationRoomId, ServiceLocator.apiBackend.isAuthenticated, lockRequired) {
+        // androidx.compose.runtime.LaunchedEffect(notificationRoomId, ServiceLocator.apiBackend.isAuthenticated, lockRequired) {
+        //     val roomId = notificationRoomId ?: return@LaunchedEffect
+        //     val api = ServiceLocator.apiBackend
+        //     if (!api.isAuthenticated || lockRequired) return@LaunchedEffect
+        //     var conversation = api.conversations.firstOrNull { it.id == roomId }
+        //     if (conversation == null) {
+        //         try { api.loadConversations() } catch (_: Exception) {}
+        //         conversation = api.conversations.firstOrNull { it.id == roomId }
+        //     }
+        //     com.example.chat.notifications.ChatyNotifications.consumeOpenRoom()
+        //     if (conversation != null) {
+        //         api.setActiveConversation(conversation.id)
+        //         selectedInitialMessageId = null
+        //         selectedConversation = conversation
+        //         route = AuthRoute.ChatDetail
+        //     }
+        // }
+        //
+        androidx.compose.runtime.LaunchedEffect(notificationRoomId, rootAccount, lockRequired, route) {
             val roomId = notificationRoomId ?: return@LaunchedEffect
             val api = ServiceLocator.apiBackend
-            if (!api.isAuthenticated || lockRequired) return@LaunchedEffect
+            val owner = api.authSnapshot()
+            val routeAtStart = route
+            fun mayOpen() = api.authSnapshot() === owner && api.isAuthenticated &&
+                !ServiceLocator.appLock.lockRequired.value && route == routeAtStart &&
+                route in listOf(AuthRoute.Home, AuthRoute.ChatDetail) &&
+                com.example.chat.notifications.ChatyNotifications.pendingRoomId.value == roomId
+            if (!mayOpen()) return@LaunchedEffect
             var conversation = api.conversations.firstOrNull { it.id == roomId }
             if (conversation == null) {
-                try { api.loadConversations() } catch (_: Exception) {}
+                try { api.loadConversations() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { return@LaunchedEffect }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!mayOpen()) return@LaunchedEffect
                 conversation = api.conversations.firstOrNull { it.id == roomId }
             }
-            com.example.chat.notifications.ChatyNotifications.consumeOpenRoom()
-            if (conversation != null) {
-                api.setActiveConversation(conversation.id)
-                selectedInitialMessageId = null
-                selectedConversation = conversation
-                route = AuthRoute.ChatDetail
+            if (!mayOpen()) return@LaunchedEffect
+            val target = conversation
+            // setActiveConversation starts asynchronous work and has no expected-scope
+            // overload. Do not call it under the short synchronous auth-scope lock.
+            // This is a pre/post-suspend gate, not atomic scoped activation.
+            if (mayOpen()) {
+                if (mayOpen()) {
+                    com.example.chat.notifications.ChatyNotifications.consumeOpenRoom()
+                    if (target != null) {
+                        api.setActiveConversation(target.id)
+                        selectedInitialMessageId = null
+                        selectedConversation = target
+                        route = AuthRoute.ChatDetail
+                    }
+                }
             }
         }
         androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -319,7 +393,33 @@ fun AppRoot() {
         // with WelcomeScreen (pushAndRemoveUntil).
         androidx.compose.runtime.DisposableEffect(Unit) {
             var wasAuthenticated = ServiceLocator.apiBackend.isAuthenticated
-            val signOutListener: () -> Unit = {
+            // val signOutListener: () -> Unit = {
+            //     val authenticated = ServiceLocator.apiBackend.isAuthenticated
+            //     if (wasAuthenticated && !authenticated) {
+            //         pendingSettingsDestination = null
+            //         ServiceLocator.notifications.clearAll()
+            //         com.example.chat.notifications.ChatyNotifications.clearForSignOut(appContext)
+            //     }
+            //     wasAuthenticated = authenticated
+            //     if (!authenticated &&
+            //         (route == AuthRoute.Home || route == AuthRoute.ChatDetail || route == AuthRoute.Security ||
+            //             route == AuthRoute.LockedChats ||
+            //             route == AuthRoute.HiddenVault || route == AuthRoute.MessageManagement || route == AuthRoute.LinkedDevices ||
+            //             route == AuthRoute.NewChat || route == AuthRoute.GlobalSearch || route == AuthRoute.Notifications)
+            //     ) {
+            //         ServiceLocator.appLock.onSignedOut()
+            //         ServiceLocator.lockBiometrics.stopAuthentication()
+            //         promptPending = false
+            //         if(ServiceLocator.apiBackend.reauthenticationOrigin!=null) {
+            //             reauthRoute=route;reauthRoom=selectedConversation?.id;reauthNotice=true
+            //         } else {reauthRoute=null;reauthRoom=null}
+            //         selectedConversation = null
+            //         route = if(reauthNotice) AuthRoute.Login else AuthRoute.Welcome
+            //     }
+            // }
+            //
+            val signOutDelivery = RootMainDelivery()
+            val signOutListener: () -> Unit = { signOutDelivery.dispatch {
                 val authenticated = ServiceLocator.apiBackend.isAuthenticated
                 if (wasAuthenticated && !authenticated) {
                     pendingSettingsDestination = null
@@ -342,19 +442,26 @@ fun AppRoot() {
                     selectedConversation = null
                     route = if(reauthNotice) AuthRoute.Login else AuthRoute.Welcome
                 }
-            }
+            } }
             ServiceLocator.apiBackend.addListener(signOutListener)
-            onDispose { ServiceLocator.apiBackend.removeListener(signOutListener) }
+            onDispose { signOutDelivery.close(); ServiceLocator.apiBackend.removeListener(signOutListener) }
         }
         // Dart _handleSecurityPreferenceChanged: disabling app lock clears pending lock state.
         androidx.compose.runtime.DisposableEffect(Unit) {
-            val prefListener: () -> Unit = {
+            // val prefListener: () -> Unit = {
+            //     if (!ServiceLocator.preferencesController.security.isAppLockEnabled) {
+            //         ServiceLocator.appLock.onLockDisabled()
+            //     }
+            // }
+            //
+            val prefDelivery = RootMainDelivery()
+            val prefListener: () -> Unit = { prefDelivery.dispatch {
                 if (!ServiceLocator.preferencesController.security.isAppLockEnabled) {
                     ServiceLocator.appLock.onLockDisabled()
                 }
-            }
+            } }
             ServiceLocator.preferencesController.addListener(prefListener)
-            onDispose { ServiceLocator.preferencesController.removeListener(prefListener) }
+            onDispose { prefDelivery.close(); ServiceLocator.preferencesController.removeListener(prefListener) }
         }
         // Setup remains available in Settings; never solicit App Lock on signed-in startup.
         androidx.compose.runtime.LaunchedEffect(route, promptPending) {
@@ -407,7 +514,8 @@ fun AppRoot() {
         }
         var v2Workspace by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf(ServiceLocator.apiBackend.config.tenantId)}
         val v2Owner=ServiceLocator.apiBackend.authSnapshot()
-        val v2Flow = remember(v2Owner,v2Workspace) { if(com.example.chat.ReleaseFeatures.AUTH_V2_CONTRACTS) ServiceLocator.apiBackend.authV2Flow(v2Owner,v2Workspace) else null }
+        var useLegacyAuth by remember(v2Workspace) { mutableStateOf(false) }
+        val v2Flow = remember(v2Owner,v2Workspace,useLegacyAuth) { if(com.example.chat.ReleaseFeatures.AUTH_V2_CONTRACTS && !useLegacyAuth) ServiceLocator.apiBackend.authV2Flow(v2Owner,v2Workspace) else null }
         val authV2Link by com.example.chat.ui.auth.v2.AuthV2LinkRouter.links.collectAsState()
         var authLinkNotice by remember { mutableStateOf<String?>(null) }
         androidx.compose.runtime.LaunchedEffect(authV2Link, v2Flow, lockRequired) {
@@ -447,7 +555,7 @@ fun AppRoot() {
         }
         val loginScreen: @Composable () -> Unit = {
             if (v2Flow != null) com.example.chat.ui.auth.v2.AuthV2Host(v2Flow,false,v2Workspace,
-                onBack={route=AuthRoute.Welcome},onSignedIn={ServiceLocator.appLock.onSignedIn();afterAuthentication()},onWorkspace={v2Workspace=it},active=route==AuthRoute.Login)
+                onBack={route=AuthRoute.Welcome},onSignedIn={ServiceLocator.appLock.onSignedIn();afterAuthentication()},onWorkspace={v2Workspace=it},active=route==AuthRoute.Login,onUseExistingForms={useLegacyAuth=true})
             else LoginScreen(
                 active = route == AuthRoute.Login,
                 checkWorkspace = { workspace ->
@@ -493,7 +601,7 @@ fun AppRoot() {
         }
         val registerScreen: @Composable () -> Unit = {
             if (v2Flow != null) com.example.chat.ui.auth.v2.AuthV2Host(v2Flow,true,v2Workspace,
-                onBack={route=registerOrigin},onSignedIn={ServiceLocator.appLock.onSignedIn();afterAuthentication()},onWorkspace={v2Workspace=it},active=route==AuthRoute.Register)
+                onBack={route=registerOrigin},onSignedIn={ServiceLocator.appLock.onSignedIn();afterAuthentication()},onWorkspace={v2Workspace=it},active=route==AuthRoute.Register,onUseExistingForms={useLegacyAuth=true})
             else com.example.chat.ui.auth.RegisterScreen(
                 active = route == AuthRoute.Register,
                 onBack = { route = registerOrigin },
@@ -672,16 +780,44 @@ fun AppRoot() {
         // A's in-progress text, B never sees it. Bundle-safe string maps only. Keyed "<account>|<taskId|new>".
         var editorDrafts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
         GlobalRouteLayers {
+        // Keep the Starred concealment decision across route exits for this exact auth owner.
+        // No token is copied or credential/session state mutated here.
+        val starredSessionOwner = ServiceLocator.apiBackend.authSnapshot()
+        var starAuthenticationRequired by remember(starredSessionOwner) { mutableStateOf(false) }
         when (route) {
             AuthRoute.Splash -> SplashScreen(
                 routeToHome = {
                     // Mirrors splash_screen.dart: backend.initialize() best-effort,
                     // then route on authentication state.
+                    // Cold-start fix: initialize()/restore() do blocking Keystore and
+                    // encrypted-preferences I/O (session + multi-account registry).
+                    // That work must never run on the main thread: a slow or stuck
+                    // Keystore there froze every updated install on the splash, and
+                    // the 20 s splash timeout could not fire because the timeout
+                    // itself needs the main thread. Dispatchers.IO keeps the first
+                    // frame responsive and lets the timeout genuinely bound the wait.
                     try {
-                        ServiceLocator.apiBackend.initialize()
-                        ServiceLocator.sessionManager.restore()
-                    } catch (_: Exception) {
+                        // Detached probe: awaiting it is cancellable even if a
+                        // Keystore call blocks. A timeout must reach the Retry UI.
+                        // withContext(IO) would still wait for blocked work to exit.
+                        ServiceLocator.appScope.async(kotlinx.coroutines.Dispatchers.IO) {
+                            ServiceLocator.apiBackend.initialize()
+                            // If the cold-start bootstrap's initialize() failed,
+                            // its post-init tail never ran; run it after this
+                            // successful retry (idempotent - runs once overall).
+                            ServiceLocator.runApiBackendPostInitTail()
+                            ServiceLocator.sessionManager.restore()
+                        }.await()
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        // Previously ignored: keep Splash visible with Retry instead
+                        // of treating an unreadable secure session as signed out.
                         // Authentication remains the source of truth.
+                        throw com.example.chat.data.api.ApiSessionStorageException(
+                            com.example.chat.data.api.ApiSessionStorageFailure.SECURE_STORAGE_UNAVAILABLE,
+                            failure,
+                        )
                     }
                     // Facade precedence (backend_service.dart): a live REST
                     // (ApiBackendService) session also counts as authenticated.
@@ -743,9 +879,11 @@ fun AppRoot() {
                 // Observe ApiBackendService chat state (listener -> recompose).
                 var chatRevision by remember { androidx.compose.runtime.mutableIntStateOf(0) }
                 androidx.compose.runtime.DisposableEffect(Unit) {
-                    val listener: () -> Unit = { chatRevision++ }
+                    // val listener: () -> Unit = { chatRevision++ }
+                    val delivery = RootMainDelivery()
+                    val listener: () -> Unit = { delivery.dispatch { chatRevision++ } }
                     ServiceLocator.apiBackend.addListener(listener)
-                    onDispose { ServiceLocator.apiBackend.removeListener(listener) }
+                    onDispose { delivery.close(); ServiceLocator.apiBackend.removeListener(listener) }
                 }
                 @Suppress("UNUSED_EXPRESSION") chatRevision
                 // Auth invalidation: recompose Home synchronously on ANY account
@@ -754,9 +892,11 @@ fun AppRoot() {
                 // depending on chat-plane load timing.
                 var authRevision by remember { androidx.compose.runtime.mutableIntStateOf(0) }
                 androidx.compose.runtime.DisposableEffect(Unit) {
-                    val authListener: (com.example.chat.data.api.ApiAccountScope) -> Unit = { authRevision++ }
+                    // val authListener: (com.example.chat.data.api.ApiAccountScope) -> Unit = { authRevision++ }
+                    val delivery = RootMainDelivery()
+                    val authListener: (com.example.chat.data.api.ApiAccountScope) -> Unit = { delivery.dispatch { authRevision++ } }
                     ServiceLocator.apiBackend.addAuthScopeListener(authListener)
-                    onDispose { ServiceLocator.apiBackend.removeAuthScopeListener(authListener) }
+                    onDispose { delivery.close(); ServiceLocator.apiBackend.removeAuthScopeListener(authListener) }
                 }
                 @Suppress("UNUSED_EXPRESSION") authRevision
                 // chats destination content
@@ -776,11 +916,13 @@ fun AppRoot() {
                 var shellRev by remember { mutableIntStateOf(0) }
                 val shellCtx = androidx.compose.ui.platform.LocalContext.current
                 androidx.compose.runtime.DisposableEffect(Unit) {
-                    val l: () -> Unit = { shellRev++ }
+                    // val l: () -> Unit = { shellRev++ }
+                    val delivery = RootMainDelivery()
+                    val l: () -> Unit = { delivery.dispatch { shellRev++ } }
                     ServiceLocator.preferencesController.addListener(l)
                     ServiceLocator.templateController.addListener(l)
                     ServiceLocator.appearanceVariantController.addListener(l)
-                    onDispose {
+                    onDispose { delivery.close();
                         ServiceLocator.preferencesController.removeListener(l)
                         ServiceLocator.templateController.removeListener(l)
                         ServiceLocator.appearanceVariantController.removeListener(l)
@@ -941,8 +1083,12 @@ fun AppRoot() {
                 val tasksDestinationContent: @Composable () -> Unit = {
                 val controller = ServiceLocator.tasksController
                 var tasksRevision by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-                val tasksAccountKey = ServiceLocator.apiBackend.currentUser?.id ?: ""
-                fun editorDraftKey(taskId: String?) = tasksAccountKey + "|" + (taskId ?: "new")
+                // val tasksAccountKey = ServiceLocator.apiBackend.currentUser?.id ?: ""
+                val tasksOwner = ServiceLocator.apiBackend.authSnapshot()
+                // Stable nonsecret tuple; no session token in saved state.
+                val tasksAccountKey = org.json.JSONArray(listOf(tasksOwner.baseUrl.trimEnd('/'), tasksOwner.tenantId, tasksOwner.userId.orEmpty())).toString()
+                // fun editorDraftKey(taskId: String?) = tasksAccountKey + "|" + (taskId ?: "new")
+                fun editorDraftKey(taskId: String?) = org.json.JSONArray(listOf(tasksAccountKey, taskId != null, taskId.orEmpty())).toString()
                 fun storeEditorDraft(taskId: String?, d: com.example.chat.ui.tasks.TaskDraftValues) {
                     editorDrafts = editorDrafts + (editorDraftKey(taskId) to com.example.chat.ui.tasks.TaskDraftCodec.encode(d))
                 }
@@ -968,12 +1114,14 @@ fun AppRoot() {
                 val detailTask = detailTaskId?.let { id -> tasksSnapshot.firstOrNull { it.id == id } }
                 val editorResolved = editorTaskId?.let { id -> tasksSnapshot.firstOrNull { it.id == id } }
                 if (editorResolved != null) lastResolvedEditorByAccount = lastResolvedEditorByAccount + (tasksAccountKey to editorResolved)
-                val editorTask = editorResolved ?: lastResolvedEditorByAccount[tasksAccountKey]
+                // val editorTask = editorResolved ?: lastResolvedEditorByAccount[tasksAccountKey]
+                val cachedEditor = lastResolvedEditorByAccount[tasksAccountKey]?.takeIf { editorTaskId != null && it.id == editorTaskId }
+                val editorTask = editorResolved ?: cachedEditor
                 // Non-destructive settle: a restore target confirmed gone AFTER a
                 // current-account load (and never resolved here, so no draft exists)
                 // closes with a notice instead of vanishing; never flashes create flow.
-                androidx.compose.runtime.LaunchedEffect(tasksLoaded, editorTaskId, editorResolved == null && lastResolvedEditorByAccount[tasksAccountKey] == null) {
-                    if (tasksLoaded && editorTaskId != null && editorResolved == null && lastResolvedEditorByAccount[tasksAccountKey] == null) {
+                androidx.compose.runtime.LaunchedEffect(tasksLoaded, editorTaskId, editorResolved == null && cachedEditor == null) {
+                    if (tasksLoaded && editorTaskId != null && editorResolved == null && cachedEditor == null) {
                         setEditorState(false, null)
                         settingsNotice = "This task is no longer available."
                     }
@@ -989,9 +1137,11 @@ fun AppRoot() {
                     }
                 }
                 androidx.compose.runtime.DisposableEffect(controller) {
-                    val l: () -> Unit = { tasksRevision++ }
+                    // val l: () -> Unit = { tasksRevision++ }
+                    val delivery = RootMainDelivery()
+                    val l: () -> Unit = { delivery.dispatch { tasksRevision++ } }
                     controller.addListener(l)
-                    onDispose { controller.removeListener(l) }
+                    onDispose { delivery.close(); controller.removeListener(l) }
                 }
                 androidx.compose.runtime.LaunchedEffect(Unit) { controller.loadTasks() }
                 val taskUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
@@ -1377,7 +1527,8 @@ fun AppRoot() {
                                             onStartCall = { contact, isVideo ->
                                                 val name = contact.displayName.trim()
                                                 ServiceLocator.callPresentationController.showFullScreen()
-                                                callScope.launch {
+// Previous implementation retained:                                                 callScope.launch {
+                                                run {
                                                     try {
                                                         ServiceLocator.callSignaling.initiateCall(
                                                             contact.id,
@@ -1581,7 +1732,7 @@ fun AppRoot() {
                                     "/settings/universal_appearance" -> pushedUniversalAppearance = true
                                     "/settings/customization" -> pushedComponentStyles = true
                                     "/settings/app_icon" -> pushedAppIcon = true
-                
+
                                     else -> settingsNotice = def.canonicalRoute
                                 }
                             },
@@ -1641,14 +1792,54 @@ fun AppRoot() {
                     // Dart main_navigation_shell Quick Actions "Theme Studio" -> ThemeStudioScreen(prefs, ThemeController).
                     androidx.activity.compose.BackHandler { pushedThemeStudio = false }
                     val tsContext = androidx.compose.ui.platform.LocalContext.current
+                    // var tsJsonWaiter by remember { mutableStateOf<kotlinx.coroutines.CompletableDeferred<String?>?>(null) }
+                    // val tsJsonLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    //     androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+                    // ) { uri ->
+                    //     val text = try {
+                    //         uri?.let { tsContext.contentResolver.openInputStream(it)?.bufferedReader()?.use { r -> r.readText() } }
+                    //     } catch (_: Exception) { null }
+                    //     tsJsonWaiter?.complete(text); tsJsonWaiter = null
+                    // }
+                    //
                     var tsJsonWaiter by remember { mutableStateOf<kotlinx.coroutines.CompletableDeferred<String?>?>(null) }
+                    var tsJsonBusy by remember { mutableStateOf(false) }
+                    val tsScope = androidx.compose.runtime.rememberCoroutineScope()
+                    val tsAttached = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
+                    androidx.compose.runtime.DisposableEffect(Unit) {
+                        tsAttached.set(true)
+                        onDispose { tsAttached.set(false); tsJsonWaiter?.complete(null); tsJsonWaiter = null }
+                    }
                     val tsJsonLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
                     ) { uri ->
-                        val text = try {
-                            uri?.let { tsContext.contentResolver.openInputStream(it)?.bufferedReader()?.use { r -> r.readText() } }
-                        } catch (_: Exception) { null }
-                        tsJsonWaiter?.complete(text); tsJsonWaiter = null
+                        val pending = tsJsonWaiter
+                        tsScope.launch {
+                            try {
+                                val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    uri?.let { selected -> tsContext.contentResolver.openInputStream(selected)?.use { input ->
+                                        val output = java.io.ByteArrayOutputStream()
+                                        val buffer = ByteArray(8192)
+                                        var total = 0
+                                        while (true) {
+                                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                            val count = input.read(buffer)
+                                            if (count < 0) break
+                                            total += count
+                                            require(total <= 1_048_576) { "Theme file is too large." }
+                                            output.write(buffer, 0, count)
+                                        }
+                                        output.toString("UTF-8")
+                                    } }
+                                }
+                                if (tsAttached.get()) pending?.complete(text)
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { pending?.complete(null); throw cancelled }
+                            catch (_: Exception) { pending?.complete(null) }
+                            finally {
+                                if (tsJsonWaiter === pending) tsJsonWaiter = null
+                                tsJsonBusy = false
+                            }
+                        }
                     }
                     Box(Modifier.fillMaxSize()) {
                         com.example.chat.ui.settings.studio.ThemeStudioScreen(
@@ -1657,10 +1848,23 @@ fun AppRoot() {
                             onBack = { pushedThemeStudio = false },
                             onOpenComponentStyles = { pushedThemeStudio = false; pushedComponentStyles = true },
                             pickThemeJson = {
-                                val d = kotlinx.coroutines.CompletableDeferred<String?>()
-                                tsJsonWaiter = d
-                                tsJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
-                                d.await()
+                                // val d = kotlinx.coroutines.CompletableDeferred<String?>()
+                                // tsJsonWaiter = d
+                                // tsJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                // d.await()
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                                    if (!tsAttached.get() || tsJsonBusy) null
+                                    else {
+                                        val d = kotlinx.coroutines.CompletableDeferred<String?>()
+                                        tsJsonBusy = true; tsJsonWaiter = d
+                                        try {
+                                            tsJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                            // Cancellation keeps the slot reserved until its native result.
+                                            d.await()
+                                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                        catch (_: Exception) { tsJsonBusy = false; tsJsonWaiter = null; d.complete(null); null }
+                                    }
+                                }
                             },
                             saveThemeJson = { json ->
                                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -1698,9 +1902,12 @@ fun AppRoot() {
                     }
                 }
                 ChatyPushedPage(pushedAccount) {
-                    val acct = ServiceLocator.apiBackend.currentUser
+                    val accountApi = ServiceLocator.apiBackend
+                    val accountOwner = accountApi.authSnapshot()
+                    val acct = accountApi.currentUser
+                    fun requireAccountOwner() { check(accountApi.authSnapshot() === accountOwner) { "Account changed. Reopen account settings." } }
                     androidx.activity.compose.BackHandler { pushedAccount = false }
-                    if (acct != null) Box(Modifier.fillMaxSize()) {
+                    if (acct != null) androidx.compose.runtime.key(accountOwner) { Box(Modifier.fillMaxSize()) {
                         com.example.chat.ui.settings.account.AccountSettingsScreen(
                             user = com.example.chat.ui.settings.account.AccountUserInfo(
                                 id = acct.id, displayName = acct.displayName, username = acct.username,
@@ -1719,42 +1926,63 @@ fun AppRoot() {
                             checkOrganization = { ws -> ServiceLocator.apiBackend.checkOrganization(ws) },
                             updateRegistrationSupport = { id, allow -> ServiceLocator.apiBackend.updateOrganizationRegistrationSupport(id, allow) },
                             updateProfile = { name, about, username, avatarUrl ->
-                                ServiceLocator.apiBackend.updateProfile(displayName = name, about = about, username = username, avatarUrl = avatarUrl)
+                                requireAccountOwner()
+                                accountApi.updateProfile(displayName = name, about = about, username = username, avatarUrl = avatarUrl, expectedScope = accountOwner)
+                                requireAccountOwner()
                             },
-                            uploadProfilePhoto = { filename, bytes -> ServiceLocator.apiBackend.uploadProfilePhoto(filename, bytes) },
+                            uploadProfilePhoto = { filename, bytes ->
+                                requireAccountOwner()
+                                val url = accountApi.uploadProfilePhoto(filename, bytes, expectedScope = accountOwner)
+                                requireAccountOwner()
+                                url
+                            },
                             // Dart: api.deleteUser(id), then purgeLocalDataForDeletedAccount(id), then logout.
                             deleteAccountData = { id ->
-                                ServiceLocator.apiBackend.deleteUser(id)
+                                requireAccountOwner()
+                                check(id == accountOwner.userId) { "Account changed. Reopen account settings." }
+                                accountApi.deleteUser(id, expectedScope = accountOwner)
+                                requireAccountOwner()
                                 ServiceLocator.purgeLocalDataForDeletedAccount(id)
+                                requireAccountOwner()
                             },
-                            logout = { ServiceLocator.apiBackend.signOut() },
+                            logout = { requireAccountOwner();accountApi.signOut() },
                         )
-                    }
+                    } }
                 }
                 ChatyPushedPage(pushedEditProfile) {
-                    val editUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
-                    if (editUser != null) {
+                    val editApi = ServiceLocator.apiBackend
+                    val editOwner = editApi.authSnapshot()
+                    fun editIsCurrent() = editApi.authSnapshot() === editOwner
+                    fun requireEditOwner() { check(editIsCurrent()) { "Account changed. Reopen profile settings." } }
+                    val editUser = editApi.currentUser?.let { toDomainUser(it) }
+                    if (editUser != null) androidx.compose.runtime.key(editOwner) {
                         // Dart ProfileMediaService._pickCompressUpload: bounded pick -> crop dialog -> compress -> upload.
                         val editFlow = com.example.chat.ui.profile.rememberProfileMediaFlow(
+                            isCurrent = ::editIsCurrent,
                             service = {
+                                requireEditOwner()
                                 com.example.chat.data.services.ProfileMediaService(
                                     storage = ServiceLocator.storageClient,
-                                    currentUserId = { ServiceLocator.apiBackend.currentUser?.id ?: ServiceLocator.sessionManager.currentUserId() },
-                                    imageCompressor = { b, sq, q -> com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q) },
+                                    currentUserId = { requireEditOwner(); editOwner.userId },
+                                    imageCompressor = { b, sq, q ->
+                                        requireEditOwner()
+                                        com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q).also { requireEditOwner() }
+                                    },
                                 )
                             },
                         )
                         Box(Modifier.fillMaxSize()) {
                             com.example.chat.ui.profile.ProfileEditScreen(
                                 user = editUser,
-                                onBack = { pushedEditProfile = false },
+                                onBack = { if (editIsCurrent()) pushedEditProfile = false },
+                                isCurrentPreview = ::editIsCurrent,
                                 // Dart ProfileMediaService.uploadAvatar/uploadBanner (Supabase storage 'profile-media').
                                 onPickAvatar = { source ->
-                                    try { editFlow.avatar(com.example.chat.data.services.ProfileMediaSource.valueOf(source.name)) }
+                                    try { requireEditOwner(); editFlow.avatar(com.example.chat.data.services.ProfileMediaSource.valueOf(source.name)).also { requireEditOwner() } }
                                     catch (_: com.example.chat.data.services.ProfileMediaCancelledException) { null }
                                 },
                                 onPickBanner = { source ->
-                                    try { editFlow.banner(com.example.chat.data.services.ProfileMediaSource.valueOf(source.name)) }
+                                    try { requireEditOwner(); editFlow.banner(com.example.chat.data.services.ProfileMediaSource.valueOf(source.name)).also { requireEditOwner() } }
                                     catch (_: com.example.chat.data.services.ProfileMediaCancelledException) { null }
                                 },
                                 onSave = { name, username, about, avatarUrl, bannerUrl ->
@@ -1763,20 +1991,27 @@ fun AppRoot() {
                                     // predate the profile plane. banner_url rides the plane too
                                     // (backend gap pass 2026-11-08) - it was uploaded but never
                                     // sent before.
-                                    ServiceLocator.apiBackend.updateProfile(
+                                    requireEditOwner()
+                                    editApi.updateProfile(
                                         displayName = name, about = about, username = username,
                                         avatarUrl = avatarUrl ?: editUser.avatarUrl,
                                         bannerUrl = bannerUrl ?: editUser.bannerUrl,
+                                        expectedScope = editOwner,
                                     )
+                                    requireEditOwner()
                                 },
                                 // Live username availability (research 5.1). Servers predating
                                 // the profile plane answer "available" and the save surfaces any
                                 // conflict as a 409 instead.
                                 checkUsernameAvailable = { candidate ->
                                     try {
-                                        val r = ServiceLocator.apiBackend.usernameAvailability(candidate)
+                                        requireEditOwner()
+                                        val r = editApi.usernameAvailability(candidate)
+                                        requireEditOwner()
                                         r.valid && r.available
-                                    } catch (_: Exception) {
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                    catch (_: Exception) {
+                                        requireEditOwner()
                                         true
                                     }
                                 },
@@ -1961,6 +2196,20 @@ fun AppRoot() {
                             plane.contacts() to plane.inbox()
                         }
                     },
+                    loadOutgoingRequests = {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            ServiceLocator.apiBackend.contactsPlane(lookupOwner).outgoing()
+                        }
+                    },
+                    validateRecipients = { ids ->
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val api = ServiceLocator.apiBackend
+                            check(api.authSnapshot() === lookupOwner)
+                            val blocked = api.contactsPlane(lookupOwner).blocks().map { it.userId }.toSet()
+                            check(api.authSnapshot() === lookupOwner)
+                            ids.isNotEmpty() && ids.all { it.isNotBlank() && it != lookupOwner.userId && it !in blocked }
+                        }
+                    },
                     sendContactRequest = { username ->
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             ServiceLocator.apiBackend.contactsPlane(lookupOwner).sendRequest(username)
@@ -1981,10 +2230,12 @@ fun AppRoot() {
                 val searchVault = ServiceLocator.hiddenVaultController
                 var searchPrivacyRevision by remember { mutableIntStateOf(0) }
                 androidx.compose.runtime.DisposableEffect(prefsS, searchVault) {
-                    val changed: () -> Unit = { searchPrivacyRevision++ }
+                    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                    var attached = true
+                    val changed: () -> Unit = { handler.post { if (attached) searchPrivacyRevision++ }; Unit }
                     prefsS.addListener(changed)
                     searchVault.addListener(changed)
-                    onDispose { prefsS.removeListener(changed); searchVault.removeListener(changed) }
+                    onDispose { attached=false;prefsS.removeListener(changed); searchVault.removeListener(changed) }
                 }
                 @Suppress("UNUSED_EXPRESSION") searchPrivacyRevision
                 val searchSnackbar = androidx.compose.runtime.remember { androidx.compose.material3.SnackbarHostState() }
@@ -2001,13 +2252,19 @@ fun AppRoot() {
                     conversations = ServiceLocator.apiBackend.conversations,
                     searchUsers = { q ->
                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
-                        val found = searchApi.searchUsers(q)
+                        val found = searchApi.searchUsers(q, expected = searchAccount)
                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
                         found
                     },
                     openDirectConversation = { u ->
                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
-                        val found = searchApi.createOrGetDirectConversation(u.id)
+                        check(prefsS.preferencesReady && !searchVault.registryLoading && searchVault.registryError == null && !searchVault.isDecoyMode)
+                        check(u.id.isNotBlank() && u.id != searchAccount.userId)
+                        check(!com.example.chat.ui.search.SearchRecipientRules.hasProtectedDirect(u.id, searchApi.conversations) {
+                            prefsS.isConversationHidden(it) || prefsS.isConversationProtected(it) || searchVault.isConversationLocked(it)
+                        })
+                        val found = searchApi.createOrGetDirectConversation(u.id, expectedScope = searchAccount)
+                        check(com.example.chat.ui.search.SearchRecipientRules.validDirectRoom(found, searchAccount.userId, u.id))
                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
                         found
                     },
@@ -2039,9 +2296,11 @@ fun AppRoot() {
                 val lockSvc = ServiceLocator.localLockService
                 var lockedRev by remember { androidx.compose.runtime.mutableIntStateOf(0) }
                 androidx.compose.runtime.DisposableEffect(prefsL) {
-                    val l: () -> Unit = { lockedRev++ }
+                    // val l: () -> Unit = { lockedRev++ }
+                    val delivery = RootMainDelivery()
+                    val l: () -> Unit = { delivery.dispatch { lockedRev++ } }
                     prefsL.addListener(l)
-                    onDispose { prefsL.removeListener(l) }
+                    onDispose { delivery.close(); prefsL.removeListener(l) }
                 }
                 @Suppress("UNUSED_EXPRESSION") lockedRev
                 val lockedIds = prefsL.security.lockedConversationIds
@@ -2085,9 +2344,11 @@ fun AppRoot() {
                 androidx.compose.runtime.LaunchedEffect(Unit) { ServiceLocator.hiddenVaultService.loadVaultRegistry() }
                 var vaultConvRev by remember { androidx.compose.runtime.mutableIntStateOf(0) }
                 androidx.compose.runtime.DisposableEffect(Unit) {
-                    val l: () -> Unit = { vaultConvRev++ }
+                    // val l: () -> Unit = { vaultConvRev++ }
+                    val delivery = RootMainDelivery()
+                    val l: () -> Unit = { delivery.dispatch { vaultConvRev++ } }
                     ServiceLocator.apiBackend.addListener(l)
-                    onDispose { ServiceLocator.apiBackend.removeListener(l) }
+                    onDispose { delivery.close(); ServiceLocator.apiBackend.removeListener(l) }
                 }
                 @Suppress("UNUSED_EXPRESSION") vaultConvRev
                 com.example.chat.ui.vault.HiddenVaultScreen(
@@ -2104,6 +2365,74 @@ fun AppRoot() {
                 )
             }
             AuthRoute.MessageManagement -> MessageManagementHost(onBack = { navigation.goBack() })
+            AuthRoute.LinkedDevices -> {
+                val linkedApi = ServiceLocator.apiBackend
+                val linkedOwner = linkedApi.authSnapshot()
+                fun linkedIsCurrent() = linkedApi.authSnapshot() === linkedOwner
+                fun requireLinkedOwner() { check(linkedIsCurrent()) { "Account changed. Reopen linked devices." } }
+                androidx.compose.runtime.key(linkedOwner) {
+                    val rel = ServiceLocator.contactRelationships
+                    val meL = linkedApi.currentUser
+                    var devices by remember { mutableStateOf<List<com.example.chat.data.services.LinkedDevice>>(emptyList()) }
+                    var loadingDevices by remember { mutableStateOf(false) }
+                    var devicesError by remember { mutableStateOf<String?>(null) }
+                    suspend fun reloadDevices() {
+                        requireLinkedOwner()
+                        loadingDevices = true
+                        try {
+                            val loaded = rel.linkedDevices()
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            requireLinkedOwner()
+                            devices = loaded
+                            devicesError = null
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            if (linkedIsCurrent()) devicesError = "Could not load devices. Check your connection and try again."
+                        } finally { loadingDevices = false }
+                    }
+                    androidx.compose.runtime.LaunchedEffect(linkedOwner) { reloadDevices() }
+                    com.example.chat.ui.chats.linked_devices.LinkedDevicesQrScreen(
+                        currentUserDisplayName = meL?.displayName ?: "",
+                        currentUserUsername = meL?.username ?: "",
+                        devices = devices,
+                        loadingDevices = loadingDevices,
+                        devicesError = devicesError,
+                        initialIndex = if (linkedDevicesOnly) 0 else 1,
+                        qrOnly = !linkedDevicesOnly,
+                        devicesOnly = linkedDevicesOnly,
+                        onRefreshDevices = { reloadDevices() },
+                        onRevokeDevice = { d ->
+                            requireLinkedOwner()
+                            rel.revokeDevice(d.id)
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            requireLinkedOwner()
+                            reloadDevices()
+                        },
+                        searchUsersRemote = { q ->
+                            requireLinkedOwner()
+                            val users = linkedApi.searchUsers(q, expected = linkedOwner)
+                            requireLinkedOwner()
+                            users
+                        },
+                        openDirectConversation = { u ->
+                            requireLinkedOwner()
+                            val conversation = linkedApi.createOrGetDirectConversation(u.id, expectedScope = linkedOwner)
+                            requireLinkedOwner()
+                            conversation
+                        },
+                        onOpenConversation = { conversation ->
+                            if (linkedIsCurrent()) {
+                                linkedApi.setActiveConversation(conversation.id)
+                                selectedConversation = conversation
+                                route = AuthRoute.ChatDetail
+                            }
+                        },
+                        onBack = { if (linkedIsCurrent()) navigation.goBack() },
+                    )
+                }
+            }
+            /* Previous unscoped LinkedDevices host retained:
             AuthRoute.LinkedDevices -> {
                 val repoL = ServiceLocator.conversationsRepository
                 val rel = ServiceLocator.contactRelationships
@@ -2142,45 +2471,132 @@ fun AppRoot() {
                     onBack = { navigation.goBack() },
                 )
             }
+            */
             AuthRoute.Starred -> {
+                val starApi = ServiceLocator.apiBackend
+                val starPrefs = ServiceLocator.preferencesController
+                val starVault = ServiceLocator.hiddenVaultController
+                val starOwner = starredSessionOwner
                 var starRevision by remember { androidx.compose.runtime.mutableIntStateOf(0) }
                 val starScope = androidx.compose.runtime.rememberCoroutineScope()
-                androidx.compose.runtime.DisposableEffect(Unit) {
-                    val listener: () -> Unit = { starRevision++ }
-                    ServiceLocator.apiBackend.addListener(listener)
-                    onDispose { ServiceLocator.apiBackend.removeListener(listener) }
+                // Previous source retained (superseded below):
+                // androidx.compose.runtime.DisposableEffect(Unit) {
+                    // val listener: () -> Unit = { starRevision++ }
+                    // ServiceLocator.apiBackend.addListener(listener)
+                    // onDispose { ServiceLocator.apiBackend.removeListener(listener) }
+                androidx.compose.runtime.DisposableEffect(starApi, starPrefs, starVault) {
+                    val listener: () -> Unit = { starScope.launch { starRevision++ } }
+                    starApi.addListener(listener)
+                    starPrefs.addListener(listener)
+                    starVault.addListener(listener)
+                    onDispose {
+                        starApi.removeListener(listener)
+                        starPrefs.removeListener(listener)
+                        starVault.removeListener(listener)
+                    }
                 }
                 @Suppress("UNUSED_EXPRESSION") starRevision
+                fun canShowStarred(id: String): Boolean =
+                    com.example.chat.ui.chats.starred.StarredAccessRules.mayShow(
+                        sameOwner = starApi.authSnapshot() === starOwner,
+                        authenticated = starApi.isAuthenticated && !starAuthenticationRequired,
+                        hidden = starPrefs.isConversationHidden(id),
+                        protectedConversation = starPrefs.isConversationProtected(id),
+                        registryLoading = starVault.registryLoading,
+                        registryFailed = starVault.registryError != null,
+                        vaultLocked = starVault.isConversationLocked(id),
+                    )
+                val visibleStarredConversations = remember(starOwner, starRevision, starAuthenticationRequired) {
+                    starApi.conversations.filter { canShowStarred(it.id) }
+                }
+                suspend fun refreshStarred(ids: List<String>?): List<String> {
+                    val failed = mutableListOf<String>()
+                    val targets = visibleStarredConversations.filter { ids == null || it.id in ids }
+                    for (c in targets) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        if (!canShowStarred(c.id)) continue
+                        try {
+                            when (starApi.loadMessagesChecked(c.id, starOwner)) {
+                                com.example.chat.data.api.ApiBackendService.CheckedMessagesOutcome.LOADED -> Unit
+                                com.example.chat.data.api.ApiBackendService.CheckedMessagesOutcome.AUTHENTICATION_REQUIRED -> {
+                                    if (starApi.authSnapshot() === starOwner) starAuthenticationRequired = true
+                                    return emptyList()
+                                }
+                                com.example.chat.data.api.ApiBackendService.CheckedMessagesOutcome.OWNER_CHANGED -> return emptyList()
+                                else -> failed += c.id
+                            }
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+                        } catch (_: Exception) { if (canShowStarred(c.id)) failed += c.id }
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        if (starApi.authSnapshot() !== starOwner) return emptyList()
+                    }
+                    return failed
+                }
                 androidx.activity.compose.BackHandler { navigation.goBack() }
+                androidx.compose.runtime.key(starOwner) {
                 com.example.chat.ui.chats.starred.StarredMessagesScreen(
-                    conversations = ServiceLocator.apiBackend.conversations,
+                    // Previous source retained (superseded below):
+                    // conversations = ServiceLocator.apiBackend.conversations,
+                    queryStateKey = starOwner,
+                    authenticationRequired = starAuthenticationRequired || !starApi.isAuthenticated,
+                    savedQueryStateKey = listOf(starOwner.userId.orEmpty(), starOwner.tenantId, starOwner.baseUrl)
+                        .joinToString(":") { "${it.length}:$it" },
+                    conversations = visibleStarredConversations,
                     messagesRevision = starRevision,
-                    messagesFor = { id -> ServiceLocator.apiBackend.getMessages(id) },
-                    // Dart _loadConversations: ensureConversationLoaded for every conversation (Future.wait).
-                    onRefresh = {
-                        var ok = true
-                        for (c in ServiceLocator.apiBackend.conversations) {
-                            try { ServiceLocator.apiBackend.loadMessages(c.id) } catch (_: Exception) { ok = false }
-                        }
-                        ok
-                    },
-                    // Dart toggleStarMessage -> _backend.setMessageState('starred', !isStarred): the
-                    // ChatyBackendService (Supabase RPC set_message_user_state) rail. A custom-backend
-                    // session has no Supabase auth, so this may fail at runtime; the api branch has the same rail.
-                    onToggleStar = { cid, mid ->
-                        val m = ServiceLocator.apiBackend.getMessages(cid).firstOrNull { it.id == mid }
-                        if (m != null) ServiceLocator.apiBackend.setMessageLocalState(cid, mid, "starred", !m.isStarred)
+                    // Previous source retained (superseded below):
+                    // messagesFor = { id -> ServiceLocator.apiBackend.getMessages(id) },
+                    // // Dart _loadConversations: ensureConversationLoaded for every conversation (Future.wait).
+                    // onRefresh = {
+                        // var ok = true
+                        // for (c in ServiceLocator.apiBackend.conversations) {
+                            // try { ServiceLocator.apiBackend.loadMessages(c.id) } catch (_: Exception) { ok = false }
+                        // }
+                        // ok
+                    // },
+                    // // Dart toggleStarMessage -> _backend.setMessageState('starred', !isStarred): the
+                    // // ChatyBackendService (Supabase RPC set_message_user_state) rail. A custom-backend
+                    // // session has no Supabase auth, so this may fail at runtime; the api branch has the same rail.
+                    // onToggleStar = { cid, mid ->
+                        // val m = ServiceLocator.apiBackend.getMessages(cid).firstOrNull { it.id == mid }
+                        // if (m != null) ServiceLocator.apiBackend.setMessageLocalState(cid, mid, "starred", !m.isStarred)
+                    messagesFor = { id -> if (canShowStarred(id)) starApi.getMessages(id) else emptyList() },
+                    onRefresh = { refreshStarred(null).isEmpty() },
+                    refreshFailures = { ids -> refreshStarred(ids) },
+                    onToggleStar = { _, _ -> }, // Rich local acknowledgment below is authoritative.
+                    toggleStarLocally = { cid, mid ->
+                        var updated = false
+                        starApi.withAuthScope(starOwner) {
+                            if (canShowStarred(cid)) {
+                                val m = starApi.getMessages(cid).firstOrNull { it.id == mid && it.isStarred && !it.isDeletedForMe }
+                                if (m != null) {
+                                    starApi.setMessageLocalState(cid, mid, "starred", false)
+                                    updated = canShowStarred(cid) && starApi.getMessages(cid).firstOrNull { it.id == mid }?.isStarred == false
+                                }
+                            }
+                        } && updated
                     },
                     onOpenConversation = { cid, mid ->
-                        ServiceLocator.apiBackend.conversations.firstOrNull { it.id == cid }?.let { c ->
-                            ServiceLocator.apiBackend.setActiveConversation(c.id)
-                            selectedConversation = c
-                            selectedInitialMessageId = mid
-                            route = AuthRoute.ChatDetail
+                        // Previous source retained (superseded below):
+                        // ServiceLocator.apiBackend.conversations.firstOrNull { it.id == cid }?.let { c ->
+                            // ServiceLocator.apiBackend.setActiveConversation(c.id)
+                            // selectedConversation = c
+                            // selectedInitialMessageId = mid
+                            // route = AuthRoute.ChatDetail
+                        if (canShowStarred(cid)) starApi.conversations.firstOrNull { it.id == cid }?.let { c ->
+                            val m = mid?.let { id -> starApi.getMessages(cid).firstOrNull { it.id == id && it.isStarred && !it.isDeletedForMe } }
+                            if (mid == null || m != null) {
+                                starApi.setActiveConversation(c.id)
+                                selectedConversation = c
+                                selectedInitialMessageId = m?.takeUnless { it.isDeletedForEveryone }?.id
+                                route = AuthRoute.ChatDetail
+                            }
                         }
                     },
-                    onBack = { navigation.goBack() },
+                    // Previous source retained (superseded below):
+                    // onBack = { navigation.goBack() },
+                    onBack = { if (starApi.authSnapshot() === starOwner) navigation.goBack() },
                 )
+                }
             }
             AuthRoute.ChatDetail -> run {
                 val conversation = selectedConversation
@@ -2293,34 +2709,83 @@ internal class RootProfilePhoto(
 )
 
 @androidx.compose.runtime.Composable
+// private fun rememberRootProfilePhoto(): RootProfilePhoto {
+//     val flow = com.example.chat.ui.profile.rememberProfileMediaFlow(
+//         service = {
+//             com.example.chat.data.services.ProfileMediaService(
+//                 storage = ServiceLocator.storageClient,
+//                 currentUserId = { ServiceLocator.apiBackend.currentUser?.id ?: ServiceLocator.sessionManager.currentUserId() },
+//                 imageCompressor = { b, sq, q -> com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q) },
+//             )
+//         },
+//     )
+//     fun dataSource(s: com.example.chat.ui.settings.ProfileMediaSource) =
+//         com.example.chat.data.services.ProfileMediaSource.valueOf(s.name)
+//     return RootProfilePhoto(
+//         avatar = { source ->
+//             val url = flow.avatar(dataSource(source))
+//             val me = ServiceLocator.apiBackend.currentUser ?: throw Exception("Not authenticated")
+//             ServiceLocator.apiBackend.updateProfile(
+//                 displayName = me.displayName, about = me.about, username = me.username, avatarUrl = url,
+//             )
+//         },
+//         banner = { source ->
+//             // The banner URL used to be uploaded but never sent (the backend
+//             // had no field for it); PUT /profile/me accepts banner_url now.
+//             val url = flow.banner(dataSource(source))
+//             val me = ServiceLocator.apiBackend.currentUser ?: throw Exception("Not authenticated")
+//             ServiceLocator.apiBackend.updateProfile(
+//                 displayName = me.displayName, about = me.about, username = me.username,
+//                 avatarUrl = me.avatarUrl, bannerUrl = url,
+//             )
+//         },
+//     )
+// }
+//
 private fun rememberRootProfilePhoto(): RootProfilePhoto {
-    val flow = com.example.chat.ui.profile.rememberProfileMediaFlow(
+    val api = ServiceLocator.apiBackend
+    val owner = api.authSnapshot()
+    fun requireOwner() { check(api.authSnapshot() === owner && !owner.userId.isNullOrBlank()) { "Account changed; reopen profile photo." } }
+    val storage = remember(owner) {
+        com.example.chat.data.api.ApiMediaStorageClient(
+            baseUrl = { requireOwner(); owner.baseUrl.trimEnd('/').replace(Regex("/api/v[0-9]+$"), "") },
+            tenantId = { requireOwner(); owner.tenantId },
+            token = { requireOwner(); owner.token },
+        )
+    }
+    val flow = androidx.compose.runtime.key(owner) { com.example.chat.ui.profile.rememberProfileMediaFlow(
         service = {
             com.example.chat.data.services.ProfileMediaService(
-                storage = ServiceLocator.storageClient,
-                currentUserId = { ServiceLocator.apiBackend.currentUser?.id ?: ServiceLocator.sessionManager.currentUserId() },
+                storage = storage,
+                currentUserId = { requireOwner(); owner.userId },
                 imageCompressor = { b, sq, q -> com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q) },
             )
         },
-    )
+        // Previously relied only on keyed disposal and guarded storage/upload callbacks.
+        isCurrent = { api.authSnapshot() === owner && !owner.userId.isNullOrBlank() },
+    ) }
     fun dataSource(s: com.example.chat.ui.settings.ProfileMediaSource) =
         com.example.chat.data.services.ProfileMediaSource.valueOf(s.name)
     return RootProfilePhoto(
         avatar = { source ->
+            requireOwner()
             val url = flow.avatar(dataSource(source))
-            val me = ServiceLocator.apiBackend.currentUser ?: throw Exception("Not authenticated")
+            requireOwner()
+            val me = api.currentUser ?: throw Exception("Not authenticated")
             ServiceLocator.apiBackend.updateProfile(
-                displayName = me.displayName, about = me.about, username = me.username, avatarUrl = url,
+                displayName = me.displayName, about = me.about, username = me.username, avatarUrl = url, expectedScope = owner,
             )
         },
         banner = { source ->
             // The banner URL used to be uploaded but never sent (the backend
             // had no field for it); PUT /profile/me accepts banner_url now.
+            requireOwner()
             val url = flow.banner(dataSource(source))
-            val me = ServiceLocator.apiBackend.currentUser ?: throw Exception("Not authenticated")
+            requireOwner()
+            val me = api.currentUser ?: throw Exception("Not authenticated")
             ServiceLocator.apiBackend.updateProfile(
                 displayName = me.displayName, about = me.about, username = me.username,
-                avatarUrl = me.avatarUrl, bannerUrl = url,
+                avatarUrl = me.avatarUrl, bannerUrl = url, expectedScope = owner,
             )
         },
     )
@@ -2384,4 +2849,77 @@ private fun ChatyPushedPage(visible: Boolean, content: @Composable () -> Unit) {
         // Pushed pages own their touches; see PushedPageTouchGuard.
         com.example.chat.ui.kit.PushedPageTouchGuard { content() }
     }
+}
+
+// Superseded account-screen source retained inactive:
+//                     val acct = ServiceLocator.apiBackend.currentUser
+//                     if (acct != null) Box(Modifier.fillMaxSize()) {
+//                                 ServiceLocator.apiBackend.updateProfile(displayName = name, about = about, username = username, avatarUrl = avatarUrl)
+//                             uploadProfilePhoto = { filename, bytes -> ServiceLocator.apiBackend.uploadProfilePhoto(filename, bytes) },
+//                                 ServiceLocator.apiBackend.deleteUser(id)
+//                             logout = { ServiceLocator.apiBackend.signOut() },
+//                     }
+
+// Superseded Settings > Edit Profile host retained inactive for audit:
+//                 ChatyPushedPage(pushedEditProfile) {
+//                     val editUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
+//                     if (editUser != null) {
+//                         // Dart ProfileMediaService._pickCompressUpload: bounded pick -> crop dialog -> compress -> upload.
+//                         val editFlow = com.example.chat.ui.profile.rememberProfileMediaFlow(
+//                             service = {
+//                                 com.example.chat.data.services.ProfileMediaService(
+//                                     storage = ServiceLocator.storageClient,
+//                                     currentUserId = { ServiceLocator.apiBackend.currentUser?.id ?: ServiceLocator.sessionManager.currentUserId() },
+//                                     imageCompressor = { b, sq, q -> com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q) },
+//                                 )
+//                             },
+//                         )
+//                         Box(Modifier.fillMaxSize()) {
+//                             com.example.chat.ui.profile.ProfileEditScreen(
+//                                 user = editUser,
+//                                 onBack = { pushedEditProfile = false },
+//                                 // Dart ProfileMediaService.uploadAvatar/uploadBanner (Supabase storage 'profile-media').
+//                                 onPickAvatar = { source ->
+//                                     try { editFlow.avatar(com.example.chat.data.services.ProfileMediaSource.valueOf(source.name)) }
+//                                     catch (_: com.example.chat.data.services.ProfileMediaCancelledException) { null }
+//                                 },
+//                                 onPickBanner = { source ->
+//                                     try { editFlow.banner(com.example.chat.data.services.ProfileMediaSource.valueOf(source.name)) }
+//                                     catch (_: com.example.chat.data.services.ProfileMediaCancelledException) { null }
+//                                 },
+//                                 onSave = { name, username, about, avatarUrl, bannerUrl ->
+//                                     // PUT /profile/me (research 5.1) so username changes persist;
+//                                     // the client falls back to the legacy route on servers that
+//                                     // predate the profile plane. banner_url rides the plane too
+//                                     // (backend gap pass 2026-11-08) - it was uploaded but never
+//                                     // sent before.
+//                                     ServiceLocator.apiBackend.updateProfile(
+//                                         displayName = name, about = about, username = username,
+//                                         avatarUrl = avatarUrl ?: editUser.avatarUrl,
+//                                         bannerUrl = bannerUrl ?: editUser.bannerUrl,
+//                                     )
+//                                 },
+//                                 // Live username availability (research 5.1). Servers predating
+//                                 // the profile plane answer "available" and the save surfaces any
+//                                 // conflict as a 409 instead.
+//                                 checkUsernameAvailable = { candidate ->
+//                                     try {
+//                                         val r = ServiceLocator.apiBackend.usernameAvailability(candidate)
+//                                         r.valid && r.available
+//                                     } catch (_: Exception) {
+//                                         true
+//                                     }
+//                                 },
+//                             )
+//                         }
+//                     }
+//                 }
+
+/** Listener producers may hold backend locks. Always enqueue UI delivery, and
+ * retire queued writes when the observing composition leaves. */
+private class RootMainDelivery {
+    private val attached = java.util.concurrent.atomic.AtomicBoolean(true)
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    fun dispatch(block: () -> Unit) { handler.post { if (attached.get()) block() } }
+    fun close() { attached.set(false) }
 }

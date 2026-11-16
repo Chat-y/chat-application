@@ -4,6 +4,31 @@ import java.io.InputStream
 
 /** IO boundary only: input ownership/closure stays with the caller; no file paths or metadata are trusted. */
 internal object StatusMediaReadRules {
+    /** Metadata is only an allocation hint, never permission to truncate or trust content.
+     *  A size mismatch fails before upload. Accurate known-size files need only the final payload array. */
+    fun readKnownSize(input: InputStream, expectedBytes: Long, maxBytes: Long, checkCancellation: () -> Unit): ByteArray {
+        require(maxBytes in 1..Int.MAX_VALUE.toLong())
+        check(expectedBytes in 0..maxBytes) { "Selected media exceeds the storage limit." }
+        checkCancellation()
+        val bytes = ByteArray(expectedBytes.toInt())
+        var offset = 0
+        while (offset < bytes.size) {
+            checkCancellation()
+            val count = input.read(bytes, offset, minOf(64 * 1024, bytes.size - offset))
+            check(count >= 0) { "Selected media changed size. Select it again." }
+            if (count == 0) {
+                checkCancellation()
+                val next = input.read()
+                check(next >= 0) { "Selected media changed size. Select it again." }
+                bytes[offset++] = next.toByte()
+            } else offset += count
+        }
+        checkCancellation()
+        check(input.read() < 0) { "Selected media changed size. Select it again." }
+        checkCancellation()
+        return bytes
+    }
+
     fun read(input: InputStream, maxBytes: Long, checkCancellation: () -> Unit): ByteArray {
         require(maxBytes in 1..Int.MAX_VALUE.toLong())
         // Fixed chunks avoid ByteArrayOutputStream's geometric backing-array growth.

@@ -124,6 +124,12 @@ class AutoReplyRuleEngine(
         notifyListeners()
     }
 
+    /** AUT-061: resolve the rule by stable ID at mutation time; unknown IDs are ignored. */
+    fun toggleRuleById(id: String, enabled: Boolean) = toggleRule(rules.indexOfFirst { it.id == id }, enabled)
+
+    /** AUT-061: delete by stable ID resolved at mutation time. */
+    fun deleteRuleById(id: String) = deleteRule(rules.indexOfFirst { it.id == id })
+
     /** Deletes a rule at [index]. */
     fun deleteRule(index: Int) {
         if (index < 0 || index >= rules.size) return

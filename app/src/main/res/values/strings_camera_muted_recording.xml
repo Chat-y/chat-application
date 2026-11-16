@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="camera_recording_muted_label">Muted</string>
+    <string name="camera_recording_muted_state">%1$s. Microphone audio is off.</string>
+</resources>

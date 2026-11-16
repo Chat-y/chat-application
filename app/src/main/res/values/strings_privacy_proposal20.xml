@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_allow_notifications">Allow notifications</string>
+    <string name="privacy_allow_media">Allow photos and videos</string>
+    <string name="privacy_allow_location">Allow location</string>
+    <string name="privacy_allow_camera">Allow camera</string>
+    <string name="privacy_allow_microphone">Allow microphone</string>
+    <string name="privacy_allow_contacts">Allow contacts</string>
+</resources>

@@ -201,7 +201,7 @@ private fun SettingsTile(icon: ImageVector, tint: Color, title: String, subtitle
 private fun stripSpoofChars(s: String): String =
     s.filterNot { it in '\u200B'..'\u200F' || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\uFEFF' }
 
-private enum class SettingsSheet { EditProfile, Reset, ConfirmResetAll, ConfirmResetPrivacy, Export, About }
+private enum class SettingsSheet { EditProfile, Reset, ConfirmResetAll, ConfirmResetPrivacy, ConfirmResetTheme, Export, About }
 
 /**
  * Port of lib/features/settings/settings_screen.dart. Navigation goes through [onNavigate]; the search
@@ -234,6 +234,21 @@ fun SettingsScreen(
     @Suppress("UNUSED_VARIABLE") val tick = themeTick
     val theme = themeController.globalTheme
     var sheet by remember { mutableStateOf<SettingsSheet?>(null) }
+    // SET-R1-032: static index, built once per composition instead of per search tap
+    val searchIndex = remember { buildSettingsSearchIndex() }
+    var resetTyped by remember { mutableStateOf("") }
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    // SET-R1-060: real version instead of a hardcoded string
+    val appVersionText = remember {
+        try {
+            val info = if (android.os.Build.VERSION.SDK_INT >= 33) appContext.packageManager.getPackageInfo(appContext.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+            else @Suppress("DEPRECATION") appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+            val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+            // SET-R2-018: flag debuggable builds for support
+            val debug = if ((appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) "-debug" else ""
+            "${info.versionName ?: "Unknown"}$debug (Build $code)"
+        } catch (e: Exception) { "Unknown" }
+    }
     val accent = Color(theme.accentColor)
     val primaryText = Color(theme.primaryTextColor)
     val secondaryText = Color(theme.secondaryTextColor)
@@ -251,7 +266,7 @@ fun SettingsScreen(
                 // SET-R1-001: only show Back when there is somewhere to go back to.
                 if (onBack != null) IconButton(onClick = { onBack.invoke() }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", modifier = Modifier.size(22.dp), color = primaryText) } else Spacer(Modifier.size(48.dp))
                 Row {
-                    IconButton(onClick = { onOpenSearch(buildSettingsSearchIndex()) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = "Search settings", modifier = Modifier.size(22.dp), color = primaryText) }
+                    IconButton(onClick = { onOpenSearch(searchIndex) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = "Search settings", modifier = Modifier.size(22.dp), color = primaryText) }
                     IconButton(onClick = { sheet = SettingsSheet.Export }) { Icon(Icons.Rounded.IosShare, "Export chats", Modifier.size(22.dp), tint = primaryText) }
                     IconButton(onClick = { sheet = SettingsSheet.EditProfile }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit profile", modifier = Modifier.size(22.dp), color = primaryText) }
                 }
@@ -275,8 +290,8 @@ fun SettingsScreen(
                 Spacer(Modifier.height(10.dp))
                 Box(
                     Modifier.size(86.dp)
-                        .shadow(8.dp, CircleShape, ambientColor = accent.copy(alpha = 0.25f), spotColor = accent.copy(alpha = 0.25f))
-                        .border(2.5.dp, accent, CircleShape),
+                        // SET-R1-057: tinted shadow dropped (was .shadow(8.dp, CircleShape, ambientColor = accent.copy(alpha = 0.25f), spotColor = accent.copy(alpha = 0.25f))); ring 2dp, subtler
+                        .border(2.dp, accent.copy(alpha = 0.6f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(Modifier.size(80.dp).background(colors.surfaceSecondary, CircleShape), contentAlignment = Alignment.Center) {
@@ -391,7 +406,7 @@ fun SettingsScreen(
             ) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.logout, semanticLabel = null, modifier = Modifier.size(18.dp), color = colors.error)
                 Spacer(Modifier.width(8.dp))
-                Text("Log Out of Chaty", color = colors.error, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_log_out_of_chaty), color = colors.error, fontWeight = FontWeight.Bold, fontSize = 14.5.sp) // was: "Log Out of Chaty"
             }
             Spacer(Modifier.height(90.dp))
         }
@@ -408,21 +423,22 @@ fun SettingsScreen(
                 shape = com.example.chat.ui.kit.ChatyModalShape,
             ) {
                 Column(Modifier.fillMaxWidth().semantics { paneTitle = "Edit profile details" }.imePadding().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp)) {
-                    Text("Edit Profile Details", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.foreground)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_edit_profile_details), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.foreground) // was: "Edit Profile Details"
                     Spacer(Modifier.height(16.dp))
-                    OutlinedTextField(name, { if (it.length <= 50) name = it }, Modifier.fillMaxWidth(), label = { Text("Display Name") },
+                    OutlinedTextField(name, { if (it.length <= 50) name = it }, Modifier.fillMaxWidth(), label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_display_name)) }, // was: "Display Name"
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
-                        isError = name.isBlank(), supportingText = { Text(if (name.isBlank()) "Name can't be empty" else "${name.length}/50") }, singleLine = true)
+                        isError = stripSpoofChars(name).isBlank(), supportingText = { Text(if (stripSpoofChars(name).isBlank()) "Name can't be empty" else "${name.length}/50") }, singleLine = true)
                     Spacer(Modifier.height(14.dp))
-                    OutlinedTextField(about, { if (it.length <= 140) about = it }, Modifier.fillMaxWidth(), label = { Text("Bio / About Status") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), supportingText = { Text("${about.length}/140") })
+                    OutlinedTextField(about, { if (it.length <= 140) about = it }, Modifier.fillMaxWidth(), label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_bio_about_status)) }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), supportingText = { Text("${about.length}/140") }) // was: "Bio / About Status"
                     Spacer(Modifier.height(20.dp))
                     Button(
-                        onClick = { onSaveProfile(stripSpoofChars(name).trim(), stripSpoofChars(about).trim()); sheet = null },
-                        enabled = name.isNotBlank(),
+                        // Prior validation used raw name before spoof-control removal.
+                        onClick = { val cleanedName = stripSpoofChars(name).trim(); if (cleanedName.isNotEmpty()) { onSaveProfile(cleanedName, stripSpoofChars(about).trim()); sheet = null } },
+                        enabled = stripSpoofChars(name).isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
-                    ) { Text("Save Profile", fontWeight = FontWeight.Bold) }
+                    ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_save_profile), fontWeight = FontWeight.Bold) } // was: "Save Profile"
                 }
             }
         }
@@ -434,7 +450,7 @@ fun SettingsScreen(
                 ContextMenuSection(
                     items = listOf(
                         ContextMenuItem("Reset Theme to Default B&W", icon = Icons.Rounded.Restore, subtitle = "Restore default monochrome theme", onTap = {
-                            sheet = null; themeController.resetToDefaults(); toast("Theme reset to default.")
+                            sheet = SettingsSheet.ConfirmResetTheme
                         }),
                         ContextMenuItem("Reset Privacy Options", icon = Icons.Outlined.Shield, subtitle = "Reset last seen and stealth toggles", onTap = {
                             sheet = SettingsSheet.ConfirmResetPrivacy
@@ -452,43 +468,61 @@ fun SettingsScreen(
                 ),
             ),
         )
-        SettingsSheet.ConfirmResetAll -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+        SettingsSheet.ConfirmResetTheme -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { sheet = null },
+            title = { Text("Reset theme?") },
+            text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_the_theme_returns_to_the_default_monochr)) }, // was: "The theme returns to the default monochrome look."
+            dismissButton = { TextButton(onClick = { sheet = null }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel)) } }, // was: "Cancel"
+            confirmButton = { TextButton(onClick = { themeController.resetToDefaults(); sheet = null; toast("Theme reset to default.") }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset), color = colors.error) } }, // was: "Reset"
+        )
+        SettingsSheet.ConfirmResetAll -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+            onDismissRequest = { sheet = null; resetTyped = "" },
             title = { Text("Reset all preferences?") },
-            text = { Text("This restores every setting and the theme to factory defaults. This cannot be undone.") },
-            dismissButton = { TextButton(onClick = { sheet = null }) { Text("Cancel") } },
+            text = {
+                Column {
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_this_restores_every_setting_and_the_them)) // was: "This restores every setting and the theme to factory defaults. This cannot be undone. Type RESET to confirm."
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(resetTyped, { resetTyped = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_type_reset)) }) // was: "Type RESET"
+                }
+            },
+            dismissButton = { TextButton(onClick = { sheet = null; resetTyped = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel)) } }, // was: "Cancel"
             confirmButton = {
-                TextButton(onClick = {
-                    preferences.resetAll(); themeController.resetToDefaults(); sheet = null
+                TextButton(enabled = resetTyped.trim() == "RESET", onClick = {
+                    preferences.resetAll(); themeController.resetToDefaults(); sheet = null; resetTyped = ""
                     toast("All preferences reset to factory defaults.")
-                }) { Text("Reset", color = colors.error) }
+                }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset), color = colors.error) } // was: "Reset"
             },
         )
         SettingsSheet.ConfirmResetPrivacy -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { sheet = null },
             title = { Text("Reset privacy options?") },
-            text = { Text("Last seen, read receipts and stealth options will return to their defaults.") },
-            dismissButton = { TextButton(onClick = { sheet = null }) { Text("Cancel") } },
-            confirmButton = { TextButton(onClick = { preferences.resetPrivacy(); sheet = null; toast("Privacy settings reset.") }) { Text("Reset", color = colors.error) } },
+            text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_last_seen_read_receipts_and_stealth_opti)) }, // was: "Last seen, read receipts and stealth options will return to their defaults."
+            dismissButton = { TextButton(onClick = { sheet = null }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel)) } }, // was: "Cancel"
+            confirmButton = { TextButton(onClick = { preferences.resetPrivacy(); sheet = null; toast("Privacy settings reset.") }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset), color = colors.error) } }, // was: "Reset"
         )
         SettingsSheet.Export -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { sheet = null },
-            title = { Text("Backup & Export") },
-            text = { Text("Chat export is coming soon. Nothing has been exported or backed up by this screen yet.") },
-            dismissButton = { TextButton(onClick = { sheet = null }) { Text("Close") } },
+            title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_backup_export)) }, // was: "Backup & Export"
+            text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_chat_export_is_coming_soon_nothing_has_b)) }, // was: "Chat export is coming soon. Nothing has been exported or backed up by this screen yet."
+            dismissButton = { TextButton(onClick = { sheet = null }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_close)) } }, // was: "Close"
             // SET-R1-003: no false success. Export is disabled until it exists.
-            confirmButton = { Button(onClick = {}, enabled = false) { Text("Export JSON (coming soon)") } },
+            confirmButton = { Button(onClick = {}, enabled = false) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_export_json_coming_soon)) } }, // was: "Export JSON (coming soon)"
         )
         SettingsSheet.About -> ChatyAboutDialog(
             applicationName = "Chaty",
-            applicationVersion = "1.0.0 (Build 2026)",
+            applicationVersion = appVersionText,
             applicationLegalese = "\u00A9 2026 LOGY BYTE. All rights reserved.",
             onDismiss = { sheet = null },
             licenses = licenses,
         ) {
             Spacer(Modifier.height(12.dp))
-            Text("Deeply customizable instant messaging application. Standard chats use HTTPS transport encryption and are not end-to-end encrypted in this version.")
+            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_deeply_customizable_instant_messaging_ap)) // was: "Deeply customizable instant messaging application. Standard chats use HTTPS transport encryption and are not end-to-end encrypted in this version."
         }
         null -> Unit
     }
 }
+
+// Superseded source retained inactive:
+//                         isError = name.isBlank(), supportingText = { Text(if (name.isBlank()) "Name can't be empty" else "${name.length}/50") }, singleLine = true)
+//                         onClick = { onSaveProfile(stripSpoofChars(name).trim(), stripSpoofChars(about).trim()); sheet = null },
+//                         enabled = name.isNotBlank(),

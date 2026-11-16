@@ -21,12 +21,13 @@ import com.example.chat.ui.theme.ChatyTheme
 
 /** Source fixtures only. These are real shared renderers, not rendered/screenshot-tested evidence. */
 @Composable
-private fun ConversationRendererFixture(dark: Boolean = false, rtl: Boolean = false) {
+private fun ConversationRendererFixture(dark: Boolean = false, rtl: Boolean = false,
+    style: com.example.chat.core.theme.BubbleStyleId = com.example.chat.core.theme.BubbleStyleId.rounded) {
     val theme = if (dark) ThemePresets.monochromeDark else ThemePresets.monochromeLight
     ChatyTheme(config = theme) {
         CompositionLocalProvider(LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
             Column(Modifier.padding(16.dp)) {
-                ChatyBubbleContainer(styleId = com.example.chat.core.theme.BubbleStyleId.rounded,
+                ChatyBubbleContainer(styleId = style,
                     isMe = false, fillColor = Color(theme.incomingBubbleColor), accentColor = Color(theme.accentColor)) {
                     androidx.compose.material3.Text("Sample conversation", color = Color(theme.incomingTextColor))
                 }
@@ -49,3 +50,13 @@ private fun ConversationRendererFixture(dark: Boolean = false, rtl: Boolean = fa
 
 @Preview(name = "Conversation 200 percent", widthDp = 320, fontScale = 2f, showBackground = true)
 @Composable private fun ConversationLargeTextFixture() = ConversationRendererFixture()
+
+// Four additional source style fixtures. Not rendered or accepted as screenshot evidence.
+@Preview(name = "Bubble stock", widthDp = 360, showBackground = true)
+@Composable private fun BubbleStockFixture() = ConversationRendererFixture(style = com.example.chat.core.theme.BubbleStyleId.stock)
+@Preview(name = "Bubble rounded", widthDp = 360, showBackground = true)
+@Composable private fun BubbleRoundedFixture() = ConversationRendererFixture(style = com.example.chat.core.theme.BubbleStyleId.rounded)
+@Preview(name = "Bubble transparent", widthDp = 360, showBackground = true)
+@Composable private fun BubbleTransparentFixture() = ConversationRendererFixture(style = com.example.chat.core.theme.BubbleStyleId.transparent)
+@Preview(name = "Bubble crayon 200 percent", widthDp = 320, fontScale = 2f, showBackground = true)
+@Composable private fun BubbleCrayonFixture() = ConversationRendererFixture(style = com.example.chat.core.theme.BubbleStyleId.samyadeepCrayonAlt)

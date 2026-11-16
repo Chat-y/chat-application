@@ -130,7 +130,9 @@ class LockCredentialSetupFlow(
                     return if (ok) {
                         step = SetupStep.enterNew; error = ""; changed(); SetupOutcome.clearText
                     } else {
-                        error = "Current password is incorrect."; changed(); SetupOutcome.none
+// Superseded source retained below per additive-only review rule.
+//                         error = "Current password is incorrect."; changed(); SetupOutcome.none
+                        error = "Current password is incorrect."; changed(); SetupOutcome.clearText
                     }
                 }
                 SetupStep.enterNew -> {
@@ -185,10 +187,14 @@ class LockCredentialSetupFlow(
             // Historical verifier accepts normalized legacy node encodings.
             val legacy = pattern.split('-').filter { it.isNotEmpty() }.map { it.toIntOrNull() }
             legacy.size >= 4 && legacy.all { it != null && it in 0..8 } && legacy.toSet().size == legacy.size
-        } else nodes.size in 4..9 && nodes.all { it.length == 1 && it[0] in '0'..'8' } && nodes.toSet().size == nodes.size
+// Superseded source retained below per additive-only review rule.
+//         } else nodes.size in 4..9 && nodes.all { it.length == 1 && it[0] in '0'..'8' } && nodes.toSet().size == nodes.size
+        } else nodes.size in 5..9 && nodes.all { it.length == 1 && it[0] in '0'..'8' } && nodes.toSet().size == nodes.size
         if (!valid) {
             if (step == SetupStep.confirmNew) confirmPatternDrawn = null else firstPatternDrawn = null
-            error = "Connect at least 4 dots using each dot once."
+// Superseded source retained below per additive-only review rule.
+//             error = "Connect at least 4 dots using each dot once."
+            error = if (step == SetupStep.enterCurrent) "Connect at least 4 dots using each dot once." else "Use at least 5 different dots for a new pattern. Avoid simple letter shapes."
             changed(); return
         }
         error = ""
@@ -266,7 +272,9 @@ class LockCredentialSetupFlow(
         SetupStep.enterCurrent -> "Please authenticate with your existing $method to continue."
         SetupStep.enterNew -> when {
             isPin -> "Choose a $pinLength-digit PIN code."
-            isPattern -> "Draw an unlock pattern connecting at least 4 dots."
+// Superseded source retained below per additive-only review rule.
+//             isPattern -> "Draw an unlock pattern connecting at least 4 dots."
+            isPattern -> "Connect at least 5 different dots. Avoid simple letter shapes."
             isPassword -> "Enter a password (min 8 characters). Spaces are preserved."
             else -> "Choose your credential."
         }

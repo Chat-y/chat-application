@@ -14,6 +14,10 @@ class MessageOutboxRetryWorker(context: Context, params: WorkerParameters) : Cor
         if (!hash.matches(Regex("[a-f0-9]{64}"))) return Result.failure()
         return try {
             ServiceLocator.ensurePushReady(applicationContext)
+            // Cold process: restore the session before reading apiBackend state;
+            // an uninitialized backend makes the retry read fail and
+            // Result.success() would kill the retry chain.
+            runCatching { ServiceLocator.apiBackend.initialize() }
             if (ServiceLocator.apiBackend.retryActiveOutboxFromWorker(hash) && runAttemptCount < 6) Result.retry() else Result.success()
         } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
         catch (_: Exception) { if (runAttemptCount < 6) Result.retry() else Result.failure() }

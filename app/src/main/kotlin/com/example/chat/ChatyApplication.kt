@@ -23,6 +23,10 @@ class ChatyApplication : Application() {
         else ServiceLocator.appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runIntegrityDiagnostics() }
         UniffiMlsEngine.install()
         ServiceLocator.init(this)
+        // MV-R5-011: app-owned stale pending exports only; never published gallery media.
+        ServiceLocator.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.example.chat.ui.media.sweepStalePendingGalleryRows(this@ChatyApplication)
+        }
         // Dynamic Island: restore the island engine when the
         // user left it on and the required permissions are still granted. The accessibility
         // service alone survives reboot; this restarts the keep-alive foreground service.
@@ -106,6 +110,34 @@ class ChatyApplication : Application() {
                         ServiceLocator.contactRelationships.registerCurrentDevice()
                     } catch (_: Exception) {
                     }
+                }
+            } else {
+                // Cold-start race: onStart can fire before ServiceLocator's
+                // off-main apiBackend.initialize() restores the session, in
+                // which case the resume sync above is skipped and nothing
+                // re-triggered it. Remember the skip; onBackendInitialized()
+                // runs it once init lands (re-checking auth, so a signed-out
+                // skip is harmless).
+                pendingResumeSync.set(true)
+            }
+        }
+    }
+
+    /** See onStart: a resume sync skipped because off-main init had not
+     *  finished is replayed here, once, when init completes. */
+    private val pendingResumeSync = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Called by ServiceLocator after the off-main apiBackend.initialize() lands. */
+    internal fun onBackendInitialized() {
+        if (!pendingResumeSync.getAndSet(false)) return
+        val backend = ServiceLocator.apiBackend
+        if (backend.isAuthenticated && !backend.isDemoSession) {
+            backend.onAppResumed()
+            try { ServiceLocator.callLifecycle.onAppResumed() } catch (e: Exception) { android.util.Log.w("ChatyApplication", "call resume sync failed: $e") }
+            ServiceLocator.appScope.launch {
+                try {
+                    ServiceLocator.contactRelationships.registerCurrentDevice()
+                } catch (_: Exception) {
                 }
             }
         }

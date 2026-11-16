@@ -71,7 +71,9 @@ fun ProPricingScreen(
 
             // Title and subtitle.
             Text(
-                "Easily Build Better Chats\nwith Chaty Pro",
+                // SUB-R1-059: manual line break dropped so the title wraps naturally.
+                // "Easily Build Better Chats\nwith Chaty Pro",
+                "Easily Build Better Chats with Chaty Pro",
                 color = colors.foreground,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.ExtraBold,
@@ -117,11 +119,14 @@ fun ProPricingScreen(
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 "Save 50%",
-                                color = colors.onError,
+                                // SUB-R1-041: promo badge uses theme accent (was error red; approval relayed by Main at 10:29 AM, not seen directly).
+                                // color = colors.onError,
+                                color = colors.onPrimary,
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 modifier = Modifier
-                                    .background(colors.error, RoundedCornerShape(8.dp))
+                                    // .background(colors.error, RoundedCornerShape(8.dp))
+                                    .background(colors.primary, RoundedCornerShape(8.dp))
                                     .padding(horizontal = 8.dp, vertical = 3.dp),
                             )
                         },
@@ -183,7 +188,8 @@ fun ProPricingScreen(
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = colors.primary,
-                        contentColor = Color.White,
+                        // Prior fixed foreground: contentColor = Color.White,
+                        contentColor = colors.onPrimary,
                     ),
                 ) {
                     Text("Get Started", fontWeight = FontWeight.Bold, fontSize = 15.sp)

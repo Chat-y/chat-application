@@ -128,7 +128,9 @@ fun NotificationsInboxScreen(
                 .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+    // Previous source retained:
+    //             IconButton(onClick = onBack) {
+            IconButton(modifier = Modifier.size(48.dp), onClick = onBack) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = stringResource(R.string.social_activity_back))
             }
             Column(Modifier.weight(1f)) {
@@ -141,7 +143,9 @@ fun NotificationsInboxScreen(
                 )
             }
             if (entries.isNotEmpty()) {
-                IconButton(onClick = { clearCandidates = entries.map { it.id } }) {
+                // Previous source retained (superseded below):
+                // IconButton(onClick = { clearCandidates = entries.map { it.id } }) {
+                IconButton(modifier = Modifier.size(48.dp), onClick = { clearCandidates = entries.map { it.id } }) {
                     Icon(Icons.Outlined.DeleteSweep, contentDescription = stringResource(R.string.social_activity_clear_action))
                 }
             }
@@ -272,7 +276,9 @@ private fun NotificationActivityRow(
                 entry.body,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = if (expanded) Int.MAX_VALUE else 4,
+    // Previous source retained:
+    //                 maxLines = if (expanded) Int.MAX_VALUE else 4,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

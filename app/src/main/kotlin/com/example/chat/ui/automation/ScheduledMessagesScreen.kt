@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -268,8 +269,10 @@ fun ScheduledMessagesScreen(
                                     "Delivery: ${msg.scheduledAt.withZoneSameInstant(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    // AUT-053: the date text wraps; Cancel keeps its own 48dp region.
+                                    modifier = Modifier.weight(1f),
                                 )
-                                Spacer(Modifier.weight(1f))
+                                // Spacer(Modifier.weight(1f))
                                 if (isPending) {
                                     TextButton(
                                         onClick = {
@@ -283,6 +286,7 @@ fun ScheduledMessagesScreen(
                                                 }
                                             }
                                         },
+                                        modifier = Modifier.heightIn(min = 48.dp),
                                     ) {
                                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
                                             semanticLabel = null,

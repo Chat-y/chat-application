@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,7 +85,8 @@ fun ChatyStoryTile(
 
     @Composable
     fun avatar(size: Double, shape: String) {
-        Box {
+        // The visible name below identifies this tile; initials are decorative.
+        Box(Modifier.clearAndSetSemantics { }) {
             HomeAvatar(initials = initials, color = avatarColor, size = size.toFloat(), shape = shape, url = avatarUrl)
             if (online) {
                 Box(Modifier.align(Alignment.BottomEnd).offset(x = 1.dp, y = 1.dp)) {
@@ -166,7 +168,7 @@ fun ChatyStoryTile(
                     color = Color(0x8CFFFFFF),
                     fontSize = 26.sp,
                     fontWeight = FontWeight.W800,
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier.align(Alignment.Center).clearAndSetSemantics { },
                 )
                 Box(Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = 6.dp)) {
                     ring(36.0, 2.0, 1.5, accent) { avatar(29.0, "circle") }
@@ -239,7 +241,8 @@ fun StoryStrip(
                 look = look,
                 initials = contact.avatarInitials,
                 avatarColor = parseAvatarColorHex(contact.avatarColorHex, Color(theme.accentColor)),
-                name = contact.displayName.split(' ').first(),
+                // Previous: name = contact.displayName.split(' ').first(),
+                name = contact.displayName.trimStart().split(' ').first(),
                 online = online,
                 avatarSize = if (storyCompact) storiesAvatar * 0.82 else storiesAvatar,
                 baseWidth = storyTileWidth,

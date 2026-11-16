@@ -82,6 +82,7 @@ class MultiAccountRegistryCoordinator(
         authResult: ApiAuthResult,
         routing: ApiRoutingSnapshot,
         isDefaultTenant: Boolean,
+        isCurrent: () -> Boolean = { true },
     ): ApiRegisteredAccountMeta? = synchronized(lock) {
         val userJson = apiUserToJson(authResult.user)
         if (DemoMode.isDemoRestSession(authResult.token, userJson)) return@synchronized null
@@ -133,11 +134,16 @@ class MultiAccountRegistryCoordinator(
 
         if (existingIdx >= 0) current[existingIdx] = meta else current.add(0, meta)
         store.saveRegistry(current)
-        store.saveActiveAccountKey(key)
+        // Retry-during-wedge guard: a superseded adopt still persists registry
+        // and credentials (account data owned by the attempt), but only the
+        // newest attempt may flip the active account key and layout.
+        if (isCurrent()) {
+            store.saveActiveAccountKey(key)
 
-        val layout = store.loadLayoutState()
-        if (key !in layout.orderedAccountKeys) {
-            store.saveLayoutState(layout.copy(orderedAccountKeys = listOf(key) + layout.orderedAccountKeys))
+            val layout = store.loadLayoutState()
+            if (key !in layout.orderedAccountKeys) {
+                store.saveLayoutState(layout.copy(orderedAccountKeys = listOf(key) + layout.orderedAccountKeys))
+            }
         }
         meta
     }
@@ -213,6 +219,9 @@ class MultiAccountRegistryCoordinator(
         return when (val result = refreshCall(meta.baseUrl, meta.tenantId, refreshToken)) {
             is ApiAuthClient.RefreshResult.Ok -> {
                 synchronized(lock) {
+                    // The network reply cannot revive a removed account or overwrite a newer login/rotation.
+                    val stillRegistered = store.loadRegistry().any { it.accountKey == accountKey }
+                    if (!stillRegistered || store.loadCredentials(meta.accountHash) != creds) return false
                     val rotated = result.refreshToken ?: refreshToken
                     val newExp = JwtExpiryDecoder.decodeExpiryEpochMs(result.accessToken)
                     store.saveCredentials(
@@ -229,7 +238,10 @@ class MultiAccountRegistryCoordinator(
                 true
             }
             ApiAuthClient.RefreshResult.Rejected -> {
-                markSessionExpired(accountKey, true)
+                // Prior: markSessionExpired(accountKey, true) without rechecking the attempted credentials.
+                synchronized(lock) {
+                    if (store.loadCredentials(meta.accountHash) == creds) markSessionExpired(accountKey, true)
+                }
                 false
             }
             ApiAuthClient.RefreshResult.Unavailable -> !meta.sessionExpired

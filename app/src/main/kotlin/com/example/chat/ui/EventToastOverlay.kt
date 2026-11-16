@@ -66,8 +66,21 @@ fun ChatyEventToastOverlay(
     notificationService: ChatyNotificationService,
     preferences: ChatyPreferencesController,
     concealWhileLocked: Boolean,
+    suppressMessageContent: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    var preferencesTick by remember(preferences) { androidx.compose.runtime.mutableIntStateOf(0) }
+    DisposableEffect(preferences) {
+        val listener: () -> Unit = { preferencesTick++ }
+        preferences.addListener(listener)
+        onDispose { preferences.removeListener(listener) }
+    }
+    @Suppress("UNUSED_EXPRESSION") preferencesTick
+    val routeSuppressed = suppressMessageContent || MessageOverlayPrivacy.suppressed
+    val concealProtected = com.example.chat.ui.settings.security.ProtectedToastPolicy.conceal(
+        concealWhileLocked || routeSuppressed, preferences.security.hideLockNotificationContent,
+        preferences.security.lockedConversationIds.isNotEmpty(),
+    )
     var visible by remember { mutableStateOf<ChatyEventNotification?>(null) }
     var lastId by remember { mutableStateOf<String?>(null) }
     var tick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
@@ -82,7 +95,9 @@ fun ChatyEventToastOverlay(
         // Dart _onNotificationChanged gate.
         lastId = latest.id
         if (preferences.notification.enableGlobalNotifications &&
-            !preferences.universal.disableHeadsUpNotification
+// Superseded source retained below per additive-only review rule.
+//             !preferences.universal.disableHeadsUpNotification
+            !preferences.universal.disableHeadsUpNotification && !routeSuppressed
         ) {
             visible = latest
             // Dart _onNotificationChanged: DynamicIslandController.postPayload(chatMessage), masked while locked.
@@ -92,7 +107,9 @@ fun ChatyEventToastOverlay(
                     id = latest.id,
                     type = com.example.chat.ui.island.IslandPayloadType.chatMessage,
                     title = latest.title,
-                    message = if (concealWhileLocked) "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" else latest.body,
+// Superseded source retained below per additive-only review rule.
+//                     message = if (concealWhileLocked) "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" else latest.body,
+                    message = if (concealProtected) "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" else latest.body,
                     timestamp = latest.timestamp,
                     accentColor = Color(latest.colorArgb.toInt()),
                     senderInitials = latest.avatarInitials,
@@ -100,6 +117,15 @@ fun ChatyEventToastOverlay(
                     iconData = com.example.chat.ui.island.IslandIconMapper.map(latest.icon),
                 ),
             )
+        }
+    }
+    LaunchedEffect(concealProtected, routeSuppressed) {
+        if (concealProtected) {
+            visible?.id?.let { ServiceLocator.dynamicIslandController.removePayload(it) }
+            visible = null
+            ServiceLocator.dynamicIslandController.removePayloadsWhere {
+                it.type == com.example.chat.ui.island.IslandPayloadType.chatMessage
+            }
         }
     }
     val seconds = preferences.gbInt("event_toast_duration_seconds", 3).coerceIn(2, 8)
@@ -127,14 +153,18 @@ fun ChatyEventToastOverlay(
             else -> Alignment.TopCenter
         }
         AnimatedVisibility(
-            visible = n != null,
+// Superseded source retained below per additive-only review rule.
+//             visible = n != null,
+            visible = n != null && !routeSuppressed,
             modifier = Modifier.align(if (islandMode) Alignment.TopCenter else align),
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
             val shown = n ?: return@AnimatedVisibility
             val colors = LocalAppColors.current
-            val body = if (concealWhileLocked) "••••••" else shown.body
+// Superseded source retained below per additive-only review rule.
+//             val body = if (concealWhileLocked) "••••••" else shown.body
+            val body = if (concealProtected) "••••••" else shown.body
             if (islandMode) {
                 // Dart _buildDynamicIsland: the real DynamicIslandOverlayHost is mounted below.
             } else {
@@ -199,7 +229,9 @@ fun ChatyEventToastOverlay(
         // shown only while heads-up is enabled and the island preference is on.
         if (n != null && preferences.gbBool("dynamic_island_notifications", false) &&
             preferences.notification.enableGlobalNotifications &&
-            !preferences.universal.disableHeadsUpNotification
+// Superseded source retained below per additive-only review rule.
+//             !preferences.universal.disableHeadsUpNotification
+            !preferences.universal.disableHeadsUpNotification && !routeSuppressed
         ) {
             val density = androidx.compose.ui.platform.LocalDensity.current
             val config = androidx.compose.ui.platform.LocalConfiguration.current

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_v2_contract_unavailable">This workspace sign-in setup could not be loaded. Retry or use the existing sign-in and registration forms.</string>
+    <string name="auth_v2_retry">Retry</string>
+    <string name="auth_v2_existing_forms">Use existing forms</string>
+    <string name="auth_age_setup_draft">Age requirements have not been configured for this workspace. This draft does not collect an age confirmation.</string>
+    <string name="auth_phone_verification_optional">Optional: request a code only if you want to verify this number. If SMS verification is unavailable, you can continue with an unverified contact number.</string>
+</resources>

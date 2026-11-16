@@ -19,6 +19,10 @@ class ChatyNotificationActionReceiver : BroadcastReceiver() {
         val reply = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ChatyNotificationPolicy.KEY_REPLY_TEXT)
         val pending = goAsync()
         scope.launch {
+            // Cold process: restore the backend session before the bridge reads
+            // apiBackend state. Runs on Dispatchers.Default via goAsync - never a
+            // bare initialize() on the main-thread onReceive.
+            runCatching { com.example.chat.ServiceLocator.apiBackend.initialize() }
             try { bridge.dispatch(nonce, action, reply) } catch (_: Exception) { } finally { pending.finish() }
         }
     }

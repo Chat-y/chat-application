@@ -52,4 +52,25 @@ class StatusViewerFailureRegressionTest {
         try { s.viewersFor("status1"); fail("Expected stale identity rejection") }
         catch (_: StatusIdentityUnboundException) { }
     }
+    @Test fun missingCurrentIdentityMakesNoRequest() = runBlocking {
+        var requests = 0
+        val api = ApiStatusClient({ "https://fixture.invalid" }, { "fixture" }, { "fixture" },
+            ApiHttpTransport { _, _, _, _ -> requests++; 200 to "{}" })
+        val s = StatusService(api, { _, _, _ -> error("Unexpected upload") },
+            { null }, { PrivacyPreferencesSnapshot() }, identityBound = { true })
+        try { s.viewersFor("status1"); fail("Expected missing identity rejection") }
+        catch (_: StatusIdentityUnboundException) { }
+        org.junit.Assert.assertEquals(0, requests)
+    }
+
+    @Test fun changedCurrentUserRejectsCompletionEvenWhenBindingRemainsTrue() = runBlocking {
+        var user = "owner"
+        val api = ApiStatusClient({ "https://fixture.invalid" }, { "fixture" }, { "fixture" },
+            ApiHttpTransport { _, _, _, _ -> user = "replacement"; 200 to """{"data":{"viewers":[]}}""" })
+        val s = StatusService(api, { _, _, _ -> error("Unexpected upload") },
+            { user }, { PrivacyPreferencesSnapshot() }, identityBound = { true })
+        try { s.viewersFor("status1"); fail("Expected changed identity rejection") }
+        catch (_: StatusIdentityUnboundException) { }
+    }
+
 }

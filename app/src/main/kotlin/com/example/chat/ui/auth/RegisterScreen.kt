@@ -85,7 +85,9 @@ data class OrgCheckResult(val name: String, val allowUserRegistration: Boolean)
  *    banner for organization mode until then. Default-mode registration is
  *    fully functional against the real backend. */
 // Keep the SMS implementation intact, but registration uses a device-selected unverified number.
-private const val SMS_VERIFICATION_VISIBLE = false
+// private const val SMS_VERIFICATION_VISIBLE = false
+// Optional existing-server flow only: no automatic SMS, provider signup or billing.
+private const val SMS_VERIFICATION_VISIBLE = true
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -115,7 +117,7 @@ fun RegisterScreen(
     // Required contact claim is unverified unless a real matching proof is provided.
     var contactNumber by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var normalizedContactNumber by remember { mutableStateOf<String?>(null) }
-    var phoneProof by remember { mutableStateOf<com.example.chat.data.api.PhoneVerificationProof?>(null) }
+    // Prior unscoped state: var phoneProof by remember { mutableStateOf<PhoneVerificationProof?>(null) }
     var password by remember { mutableStateOf("") }
     val credentialSupport=rememberAuthCredentials()
     var confirmPassword by remember { mutableStateOf("") }
@@ -126,6 +128,7 @@ fun RegisterScreen(
     var obscurePassword by remember { mutableStateOf(true) }
     // Auth screenshot blocking is off by default. Preserve the opt-in hook, do not apply globally.
     // com.example.chat.ui.kit.ProtectSensitiveWindow()
+    com.example.chat.ui.kit.ProtectSensitiveWindow() // A1-14: enabled (FLAG_SECURE lease while this screen is shown)
     com.example.chat.ui.core.components.auth.RemaskPasswordOnBackground { obscurePassword = true }
 
     var isLoading by remember { mutableStateOf(false) }
@@ -133,7 +136,16 @@ fun RegisterScreen(
     val retryWait = com.example.chat.ui.core.components.auth.rememberAuthRetryWait(retryDeadline)
     var completedRegistration by remember { mutableStateOf<Pair<String,String>?>(null) }
     val modePrefs = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("chaty_auth_ui", android.content.Context.MODE_PRIVATE)
-    var useOrganization by remember { mutableStateOf(false) }
+    var useOrganization by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    // Proofs are bound to number, tenant and endpoint by the API contract.
+    // Key the UI holder as well: a mode/workspace edit gets a fresh empty holder,
+    // and a late callback from the retired form can only write its old holder.
+    val phoneProofWorkspace = workspace.trim()
+    val phoneProofOrganization = useOrganization
+    var phoneProof by remember(normalizedContactNumber, phoneProofWorkspace, phoneProofOrganization) {
+        mutableStateOf<com.example.chat.data.api.PhoneVerificationProof?>(null)
+    }
+    var tenantSelectionInitialized by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     var emailError by remember { mutableStateOf<String?>(null) }
@@ -169,7 +181,9 @@ fun RegisterScreen(
         isCheckingOrg = true
         orgCheckJob = scope.launch {
             try {
-                val data = checkOrganization(checked)
+                // A2-02: bounded wait so the workspace check cannot hang forever.
+                val data = kotlinx.coroutines.withTimeoutOrNull(10_000L) { checkOrganization(checked) }
+                    ?: throw Exception("Could not check this workspace in time. Try again.")
                 if (generation != orgCheckGeneration || workspace.trim() != checked || !useOrganization) return@launch
                 orgFound = true
                 orgName = data.name
@@ -182,7 +196,8 @@ fun RegisterScreen(
                 orgFound = false
                 orgName = null
                 allowUserRegistration = false
-                orgCheckError = (e.message ?: e.toString()).replaceFirst("Exception: ", "")
+                // Prior raw exception rendering: orgCheckError = (e.message ?: e.toString()).replaceFirst("Exception: ", "")
+                orgCheckError = authCopy("Could not check this workspace. Check the Workspace ID and try again.")
             } finally {
                 if (generation == orgCheckGeneration) isCheckingOrg = false
             }
@@ -208,9 +223,16 @@ fun RegisterScreen(
             val probe = checkUsernameAvailability
             val result = if (probe == null) {
                 UsernameAvailabilityLogic.State.CouldNotCheck
-            } else {
+                        // Prior: .background(Color(0xFFF59E0B).copy(alpha = 0.12f), ChatyUiTokens.cardShape)
+                    // Prior: .border(ChatyUiTokens.space1, Color(0xFFF59E0B).copy(alpha = 0.4f), ChatyUiTokens.cardShape)
+        } else {
                 try {
-                    UsernameAvailabilityLogic.stateForProbe(probe(clean, checkedWorkspace.takeIf { checkedOrganization }, !checkedOrganization))
+                    // A2-01: bounded wait; a timeout lands on CouldNotCheck.
+                    val probeResult = kotlinx.coroutines.withTimeoutOrNull(10_000L) {
+                        probe(clean, checkedWorkspace.takeIf { checkedOrganization }, !checkedOrganization)
+                    }
+                    if (probeResult == null) UsernameAvailabilityLogic.State.CouldNotCheck
+                    else UsernameAvailabilityLogic.stateForProbe(probeResult)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (e: Exception) {
@@ -223,8 +245,9 @@ fun RegisterScreen(
 
     LaunchedEffect(workspace, useOrganization, active) {
         usernameCheckJob?.cancel()
-        if (!active) { usernameCheckState = UsernameAvailabilityLogic.State.Idle; return@LaunchedEffect }
+        // Invalidate an old response even when this screen becomes inactive.
         usernameCheckGeneration++
+        if (!active) { usernameCheckState = UsernameAvailabilityLogic.State.Idle; return@LaunchedEffect }
         val value = username.trim()
         if (value.isNotEmpty() && UsernameAvailabilityLogic.localFormatError(value) == null) launchUsernameProbe(value)
         else usernameCheckState = UsernameAvailabilityLogic.State.Idle
@@ -252,8 +275,17 @@ fun RegisterScreen(
     }
 
     fun onWorkspaceChanged(value: String) {
+        tenantSelectionInitialized = true
         workspace = value
+        workspaceError = null
+        errorMessage = null
         orgCheckJob?.cancel()
+        // Immediately retire the previous probe, including when clearing the
+        // field. Cancellation alone cannot stop a non-cooperative callback.
+        orgCheckGeneration++
+        orgFound = null
+        orgName = null
+        orgCheckError = null
         val clean = value.trim()
         if (clean.isEmpty()) {
             isCheckingOrg = false
@@ -284,11 +316,12 @@ fun RegisterScreen(
         emailError = ChatyValidators.validateEmail(email.trim())
         usernameError = ChatyValidators.validateUsername(username.trim(), forRegistration = true)
         val requiredNumber = com.example.chat.data.api.RegistrationPhonePolicy.normalize(contactNumber)
-        contactNumberError = if (requiredNumber != null) null else authCopy("Choose a country and enter a valid contact number.")
+        contactNumberError = if (requiredNumber != null) null else authCopy("Use your device number to continue.")
         passwordError = when {
             password.isEmpty() -> authCopy("Please enter a password")
-            password.length < 6 -> authCopy("Password must be at least 6 characters")
-            else -> null
+            // Prior minimum6character check retained inactive; owner approved registration-only tightening.
+            // password.length < 6 -> authCopy("Password must be at least 6 characters")
+            else -> registrationPasswordError(password)?.let { authCopy(it) }
         }
         workspaceError =
             if (useOrganization && workspace.trim().isEmpty()) authCopy("Please enter your Workspace ID") else null
@@ -323,25 +356,39 @@ fun RegisterScreen(
         }
 
         val selectedProof = phoneProof
-        if (selectedProof != null && (!selectedProof.expiresAt.isAfter(java.time.Instant.now()) || selectedProof.normalizedNumber != normalizedContactNumber)) {
+        // Prior check covered expiry/number only; also reject a same-event edit
+        // before recomposition can replace the keyed proof holder.
+        // if (selectedProof != null && (!selectedProof.expiresAt.isAfter(Instant.now()) || selectedProof.normalizedNumber != normalizedContactNumber)) {
+        if (selectedProof != null && (!selectedProof.expiresAt.isAfter(java.time.Instant.now()) ||
+                selectedProof.normalizedNumber != normalizedContactNumber ||
+                phoneProofOrganization != useOrganization || phoneProofWorkspace != workspace.trim() ||
+                (useOrganization && selectedProof.tenantId != workspace.trim()))) {
             phoneProof = null
-            errorMessage = authCopy("Phone verification expired or the number changed. Verify again or continue with an unverified number.")
+            // Prior copy omitted workspace changes.
+            errorMessage = authCopy("Phone verification expired, or the number or workspace changed. Verify again or continue with an unverified number.")
             return
         }
         isLoading = true
         errorMessage = null
         val submittedPassword=password
         val submittedIdentifier=email.trim()
+        val submittedUsername=username.trim()
+        val submittedOrganization=useOrganization
+        val submittedWorkspace=workspace.trim()
+        val submittedNumber=requireNotNull(requiredNumber)
         scope.launch {
             try {
                 val proof = selectedProof
                 check(proof == null || proof.expiresAt.isAfter(java.time.Instant.now())) { authCopy("Phone verification expired. Verify it again before creating your account.") }
+                // Previous register/registerWithPhone arguments: email.trim(), username.trim(), password,
+                // requireNotNull(requiredNumber), if (useOrganization) workspace.trim() else null, !useOrganization
                 val result = authRequest { if (proof != null && registerWithPhone != null) registerWithPhone(
-                    email.trim(), username.trim(), password, requireNotNull(requiredNumber), if (useOrganization) workspace.trim() else null, !useOrganization, proof)
-                else register(email.trim(), username.trim(), password, requireNotNull(requiredNumber), if (useOrganization) workspace.trim() else null, !useOrganization) }
+                    submittedIdentifier, submittedUsername, submittedPassword, submittedNumber, if (submittedOrganization) submittedWorkspace else null, !submittedOrganization, proof)
+                else register(submittedIdentifier, submittedUsername, submittedPassword, submittedNumber, if (submittedOrganization) submittedWorkspace else null, !submittedOrganization) }
                 val (userId, displayName) = result
                 com.example.chat.ui.kit.ChatyHapticsPort.success(feedbackView)
-                if(useOrganization) AuthWorkspaceHistory.record(feedbackView.context,workspace)
+                // if(useOrganization) AuthWorkspaceHistory.record(feedbackView.context,workspace)
+                if(submittedOrganization) AuthWorkspaceHistory.record(feedbackView.context,submittedWorkspace)
                 credentialSupport.save(submittedIdentifier,submittedPassword)
                 completedRegistration = userId to displayName
             } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
@@ -353,7 +400,12 @@ fun RegisterScreen(
     }
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        val (saved, usingDefault) = loadSavedTenant()
+        if (tenantSelectionInitialized) return@LaunchedEffect
+        val (saved, usingDefault) = try { loadSavedTenant() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { return@LaunchedEffect }
+        if (tenantSelectionInitialized) return@LaunchedEffect
+        tenantSelectionInitialized = true
         if (!saved.isNullOrEmpty() && !saved.equals(com.example.chat.data.api.BackendRoutingPolicy.DEFAULT_TENANT_ID, ignoreCase = true)) {
             workspace = saved
             useOrganization = true
@@ -367,6 +419,7 @@ fun RegisterScreen(
     completedRegistration?.let { (id, name) ->
         val proceed = { completedRegistration = null; onRegistered(id, name) }
         androidx.compose.material3.AlertDialog(onDismissRequest = proceed,
+            properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = false), // A2-23: outside tap no longer navigates
             title = { Text(authCopy("Account created")) },
             text = { Column {
                 Text(if (name.isBlank()) authCopy("Welcome to Chaty.") else com.example.chat.core.i18n.authFormatted("Welcome, %1\$s.",name))
@@ -379,7 +432,7 @@ fun RegisterScreen(
                     com.example.chat.ui.core.components.auth.ChatyBackButton(guardedBack, theme)
                 com.example.chat.ui.core.components.auth.AuthOfflineNotice(online, theme)
                 com.example.chat.ui.core.components.auth.AuthLookupProgress(active && useOrganization && isCheckingOrg, theme)
-                if(useOrganization) AuthWorkspaceSuggestions(workspace,theme) {workspace=it;workspaceError=null;errorMessage=null;checkOrg(it)}
+                if(useOrganization) AuthWorkspaceSuggestions(workspace,theme) {tenantSelectionInitialized=true;workspace=it;workspaceError=null;errorMessage=null;checkOrg(it)}
                     Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
                         com.example.chat.ui.core.components.auth.ChatyAppAuthIcon()
                     }
@@ -393,11 +446,13 @@ fun RegisterScreen(
                         theme = theme,
                         useOrganization = useOrganization,
                         onSelect = { org ->
+                            tenantSelectionInitialized = true
                             useOrganization = org
                             modePrefs.edit().putBoolean("organization", org).apply()
                             errorMessage = null
                             if (org && workspace.trim().isNotEmpty()) checkOrg(workspace.trim())
                         },
+                        // Prior: color = Color(0xFF047857).copy(alpha = 0.9f),
                     )
                     Spacer(Modifier.height(ChatyUiTokens.space16))
 
@@ -428,7 +483,7 @@ fun RegisterScreen(
                             orgName = orgName,
                             allowUserRegistration = allowUserRegistration,
                             orgCheckError = orgCheckError,
-                            onDefaultMode = { useOrganization = false; errorMessage = null },
+                            onDefaultMode = { tenantSelectionInitialized = true; useOrganization = false; errorMessage = null },
                             onNewOrg = onRegisterOrganization,
                         )
                         Spacer(Modifier.height(ChatyUiTokens.space16))
@@ -448,7 +503,7 @@ fun RegisterScreen(
                     )
                     Spacer(Modifier.height(ChatyUiTokens.space16))
                     com.example.chat.ui.core.components.auth.EmailSuggestion(email, !isLoading, theme) { email = it; emailError = null }
-                    PhoneNumberEntry(contactNumber, theme = theme, enabled = !isLoading,
+                    PhoneNumberEntry(contactNumber, theme = theme, enabled = !isLoading, deviceNumberOnly = true,
                         onValueChange = { contactNumber = it; normalizedContactNumber = null; phoneProof = null; contactNumberError = null; errorMessage=null },
                         onNormalized = { if (it != normalizedContactNumber) phoneProof = null; normalizedContactNumber = it })
                     if (SMS_VERIFICATION_VISIBLE && registerWithPhone != null) PhoneVerificationSection(normalizedContactNumber,
@@ -490,7 +545,8 @@ fun RegisterScreen(
                         label = authCopy("Password"),
                         prefixIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock,
                             color=authReadable(theme,theme.secondaryTextColor),size=ChatyUiTokens.space20) },
-                        hintText = authCopy("At least 6 characters. No app-set maximum."),
+                        // Prior hint: At least6characters with no app-set maximum.
+                        hintText = authCopy("12 to 128 characters with an uppercase letter, a lowercase letter and a number."),
                         capsule = true,
                         theme = theme,
                         value = password,
@@ -554,7 +610,10 @@ fun RegisterScreen(
                     )
                     Spacer(Modifier.height(ChatyUiTokens.touchGap))
 
-                    RegisterOrgCard(theme = theme, onClick = onRegisterOrganization)
+                    // RegisterOrgCard(theme = theme, onClick = onRegisterOrganization)
+                    com.example.chat.ui.core.components.auth.ChatyAuthRegistrationLinks(
+                        theme, onRegister = {}, onRegisterOrganization = onRegisterOrganization,
+                        enabled = !isLoading, registerIsCurrent = true)
 
                     Spacer(Modifier.height(ChatyUiTokens.space24))
 
@@ -565,7 +624,8 @@ fun RegisterScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                                // Prior: Text(authCopy("Self-Registration Disabled"), color = Color(0xFFB45309), fontSize = ChatyUiTokens.text13_5, fontWeight = FontWeight.ExtraBold)
+            ) {
                         Text(authCopy("Already have an account? "), color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor), fontSize = ChatyUiTokens.text13_5)
                         com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Log In"), theme, guardedBack, !isLoading)
                     }
@@ -727,24 +787,29 @@ private fun OrgStatusBanner(
             Row(
                 modifier = Modifier
                     .padding(top = ChatyUiTokens.space8, bottom = ChatyUiTokens.space8)
+                        // Prior: modifier = Modifier.background(Color(0xFFF59E0B).copy(alpha = 0.2f), CircleShape).padding(ChatyUiTokens.space8),
                     .fillMaxWidth()
-                    .background(Color(0xFF10B981).copy(alpha = 0.1f), ChatyUiTokens.cardShape)
-                    .border(ChatyUiTokens.space1, Color(0xFF10B981).copy(alpha = 0.35f), ChatyUiTokens.cardShape)
+                    // Prior: .background(Color(0xFF10B981).copy(alpha = 0.1f), ChatyUiTokens.cardShape)
+                    // Prior: .border(ChatyUiTokens.space1, Color(0xFF10B981).copy(alpha = 0.35f), ChatyUiTokens.cardShape)
+                    .background(Color(theme.successColor).copy(alpha = 0.1f), ChatyUiTokens.cardShape)
+                    .border(ChatyUiTokens.space1, Color(theme.successColor).copy(alpha = 0.35f), ChatyUiTokens.cardShape)
+                // Prior: Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))
                     .padding(horizontal = ChatyUiTokens.space16, vertical = ChatyUiTokens.space8),
             ) {
-                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))
+                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(theme.successColor), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))
                 Spacer(Modifier.width(ChatyUiTokens.touchGap))
+                        // Prior: color = Color(0xFF047857),
                 Column {
                     Text(
                         if (!orgName.isNullOrEmpty()) authFormat("Organization: %1\$s",orgName.orEmpty()) else authCopy("Valid Organization"),
-                        color = Color(0xFF047857),
+                        color = com.example.chat.ui.auth.authReadable(theme, theme.successColor),
                         fontSize = ChatyUiTokens.text13,
                         fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(ChatyUiTokens.space8))
                     Text(
                         authCopy("User self-registration is enabled for this workspace."),
-                        color = Color(0xFF047857).copy(alpha = 0.9f),
+                        color = com.example.chat.ui.auth.authReadable(theme, theme.successColor),
                         fontSize = ChatyUiTokens.text12,
                     )
                 }
@@ -754,44 +819,49 @@ private fun OrgStatusBanner(
                 modifier = Modifier
                     .padding(top = ChatyUiTokens.space8, bottom = ChatyUiTokens.space8)
                     .fillMaxWidth()
-                    .background(Color(0xFFF59E0B).copy(alpha = 0.12f), ChatyUiTokens.cardShape)
-                    .border(ChatyUiTokens.space1, Color(0xFFF59E0B).copy(alpha = 0.4f), ChatyUiTokens.cardShape)
+                        // Prior: com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock, semanticLabel = null, color = Color(0xFFB45309), modifier = Modifier.size(ChatyUiTokens.space16))
+                    .background(Color(theme.accentColor).copy(alpha = 0.12f), ChatyUiTokens.cardShape)
+                    .border(ChatyUiTokens.space1, Color(theme.accentColor).copy(alpha = 0.4f), ChatyUiTokens.cardShape)
                     .padding(ChatyUiTokens.space16),
             ) {
                 Row {
                     Box(
-                        modifier = Modifier.background(Color(0xFFF59E0B).copy(alpha = 0.2f), CircleShape).padding(ChatyUiTokens.space8),
+                            // Prior: color = Color(0xFF92400E),
+                        modifier = Modifier.background(Color(theme.accentColor).copy(alpha = 0.2f), CircleShape).padding(ChatyUiTokens.space8),
                     ) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock, semanticLabel = null, color = Color(0xFFB45309), modifier = Modifier.size(ChatyUiTokens.space16))
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.lock, semanticLabel = null, color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor), modifier = Modifier.size(ChatyUiTokens.space16))
                     }
                     Spacer(Modifier.width(ChatyUiTokens.touchGap))
                     Column {
-                        Text(authCopy("Self-Registration Disabled"), color = Color(0xFFB45309), fontSize = ChatyUiTokens.text13_5, fontWeight = FontWeight.ExtraBold)
+                        Text(authCopy("Self-Registration Disabled"), color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor), fontSize = ChatyUiTokens.text13_5, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(ChatyUiTokens.space8))
                         Text(
                             authFormat("Organization %1\$s has restricted user self-registration. Only administrators can add or invite members to this workspace.",orgName ?: workspace),
-                            color = Color(0xFF92400E),
+                            color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor),
+                        // Prior: border = androidx.compose.foundation.BorderStroke(ChatyUiTokens.space1, Color(0xFFB45309).copy(alpha = 0.4f)),
                             fontSize = ChatyUiTokens.text12,
+                        // Prior: Text(authCopy("Default Mode"), fontSize = ChatyUiTokens.text11_5, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
                             lineHeight = ChatyUiTokens.text16_2,
                         )
                     }
                 }
                 Spacer(Modifier.height(ChatyUiTokens.touchGap))
                 Row {
+                        // Prior: colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB45309), contentColor = Color.White),
                     OutlinedButton(
                         onClick = onDefaultMode,
                         modifier = Modifier.padding(ChatyUiTokens.touchGap / 2).weight(1f),
                         shape = ChatyUiTokens.cardShape,
-                        border = androidx.compose.foundation.BorderStroke(ChatyUiTokens.space1, Color(0xFFB45309).copy(alpha = 0.4f)),
+                        border = androidx.compose.foundation.BorderStroke(ChatyUiTokens.space1, Color(theme.accentColor).copy(alpha = 0.4f)),
                     ) {
-                        Text(authCopy("Default Mode"), fontSize = ChatyUiTokens.text11_5, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
+                        Text(authCopy("Default Mode"), fontSize = ChatyUiTokens.text11_5, fontWeight = FontWeight.Bold, color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor))
                     }
                     Spacer(Modifier.width(ChatyUiTokens.space8))
                     Button(
                         onClick = onNewOrg,
                         modifier = Modifier.padding(ChatyUiTokens.touchGap / 2).weight(1f),
                         shape = ChatyUiTokens.cardShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB45309), contentColor = Color.White),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(theme.accentColor), contentColor = Color(theme.onAccentColor)),
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = ChatyUiTokens.space0),
                     ) {
                         Text(authCopy("New Org"), fontSize = ChatyUiTokens.text11_5, fontWeight = FontWeight.Bold)
@@ -853,3 +923,10 @@ private fun RegisterOrgCard(theme: ThemeConfig, onClick: () -> Unit) {
         )
     }
 }
+
+// Superseded source retained inactive:
+//         contactNumberError = if (requiredNumber != null) null else authCopy("Choose a country and enter a valid contact number.")
+//             password.length < 6 -> authCopy("Password must be at least 6 characters")
+//             else -> null
+//                     PhoneNumberEntry(contactNumber, theme = theme, enabled = !isLoading,
+//                         hintText = authCopy("At least 6 characters. No app-set maximum."),

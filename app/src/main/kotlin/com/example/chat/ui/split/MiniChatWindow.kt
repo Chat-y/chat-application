@@ -55,6 +55,7 @@ fun MiniChatWindow(
     initialYFraction: Float = 0.15f,
     initialWidthDp: Float = 320f,
     initialHeightDp: Float = 460f,
+    isFocused: Boolean = false, // SPL-49: focus is shown by border, not elevation alone
     content: @Composable () -> Unit,
 ) {
     val colors = LocalAppColors.current
@@ -109,6 +110,9 @@ fun MiniChatWindow(
             offsetX = SplitChatLayoutPolicy.snapNear(offsetX, listOf(margin, (windowWidthPx - miniWidthPx) / 2f, right), tolerance)
             offsetY = SplitChatLayoutPolicy.snapNear(offsetY, listOf(margin, (windowHeightPx - miniHeightPx) / 2f, bottom), tolerance)
         }
+
+        // Accessibility movement is specified in dp, just like the visible resize controls.
+        val accessibleMovePx = with(density) { 48.dp.toPx() }
 
         // Clamping inside box boundaries
         val clampedOffset = SplitChatLayoutPolicy.clampOffset(
@@ -174,7 +178,8 @@ fun MiniChatWindow(
                     .shadow(16.dp, windowShape)
                     .clip(windowShape)
                     .background(colors.surfaceElevated)
-                    .border(1.dp, colors.borderSubtle, windowShape),
+                    // .border(1.dp, colors.borderSubtle, windowShape), // SPL-49: replaced, focused window gets an accent border
+                    .border(if (isFocused) 2.dp else 1.dp, if (isFocused) colors.accent else colors.borderSubtle, windowShape),
             ) {
                 // Drag Header
                 Row(
@@ -182,6 +187,16 @@ fun MiniChatWindow(
                         .fillMaxWidth()
                         .background(colors.surface)
                         .clickable { focusCurrent() }
+                        // SPL-24: non-gesture move actions (48dp steps, then snap) for assistive tech.
+                        .semantics {
+                            customActions = listOf(
+                                // Prior step used raw 48px instead of 48dp.
+                                CustomAccessibilityAction("Move chat window left") { moveWindow(Offset(-accessibleMovePx, 0f)); snapWindow(); true },
+                                CustomAccessibilityAction("Move chat window right") { moveWindow(Offset(accessibleMovePx, 0f)); snapWindow(); true },
+                                CustomAccessibilityAction("Move chat window up") { moveWindow(Offset(0f, -accessibleMovePx)); snapWindow(); true },
+                                CustomAccessibilityAction("Move chat window down") { moveWindow(Offset(0f, accessibleMovePx)); snapWindow(); true },
+                            )
+                        }
                         .pointerInput(paneKey, windowWidthPx, windowHeightPx, miniWidthPx, miniHeightPx, isMinimized) {
                             detectDragGestures(onDragStart = { focusCurrent(); showSnapGuides = true },
                                 onDragEnd = { showSnapGuides = false; snapWindow() },
@@ -206,9 +221,12 @@ fun MiniChatWindow(
                         )
                         if (paneItem.accountNamespace != null) {
                             Text(
-                                "Account: ${paneItem.accountNamespace.take(8)}",
+                                // SPL-21: shorter, readable label (last 4 characters) instead of the first 8 of the raw namespace.
+                                // "Account: ${paneItem.accountNamespace.take(8)}",
+                                "Account ending ${paneItem.accountNamespace.takeLast(4)}",
                                 color = colors.foregroundSecondary,
-                                fontSize = 10.sp,
+                                // SPL-27: 10sp -> 11sp for the subtitle.
+                                fontSize = 11.sp,
                             )
                         }
                     }

@@ -34,6 +34,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,12 +63,16 @@ fun ArchivedChatsScreen(
     onToggleArchive: (String) -> Unit,
     onDeleteConversations: (List<String>) -> Unit,
     isConversationHidden: (String) -> Boolean = { false },
+    /** HOME-RET-003: locked archived chats stay listed but masked and not bulk-actionable. Default false keeps the current call site compiling. */
+    isConversationLocked: (String) -> Boolean = { false },
 ) {
     val noMessages = stringResource(R.string.home_archived_chats_screen_no_messages)
+    val lockedPreview = stringResource(R.string.home_ret_locked_preview)
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val archived = ArchiveVisibilityPolicy.visible(conversations, isConversationHidden)
-    val actionableIds = ArchiveVisibilityPolicy.actionableIds(selectedIds, conversations, isConversationHidden)
+    val hiddenOrLocked: (String) -> Boolean = { isConversationHidden(it) || isConversationLocked(it) }
+    val actionableIds = ArchiveVisibilityPolicy.actionableIds(selectedIds, conversations, hiddenOrLocked)
     val isSelectionMode = actionableIds.isNotEmpty()
 
     // Remove stale selections and close a stale confirmation rather than
@@ -81,7 +89,7 @@ fun ArchivedChatsScreen(
             message = stringResource(R.string.home_archived_chats_screen_this_removes_the_selected_conversations_for_this_account),
             confirmLabel = stringResource(R.string.home_archived_chats_screen_delete),
             onConfirm = {
-                val ids = ArchiveVisibilityPolicy.actionableIds(selectedIds, conversations, isConversationHidden)
+                val ids = ArchiveVisibilityPolicy.actionableIds(selectedIds, conversations, hiddenOrLocked)
                 if (ids.isNotEmpty()) onDeleteConversations(ids)
                 selectedIds = emptySet()
                 showDeleteConfirm = false
@@ -114,7 +122,7 @@ fun ArchivedChatsScreen(
                     )
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = {
-                        ArchiveVisibilityPolicy.actionableIds(selectedIds, conversations, isConversationHidden)
+                        ArchiveVisibilityPolicy.actionableIds(selectedIds, conversations, hiddenOrLocked)
                             .forEach(onToggleArchive)
                         selectedIds = emptySet()
                     }) {
@@ -138,7 +146,12 @@ fun ArchivedChatsScreen(
                             color = Color(theme.primaryTextColor),
                         )
                     }
-                    Text(stringResource(R.string.home_archived_chats_screen_archived), color = Color(theme.primaryTextColor), fontSize = 19.sp)
+                    Text(
+                        stringResource(R.string.home_archived_chats_screen_archived),
+                        modifier = Modifier.semantics { heading() },
+                        color = Color(theme.primaryTextColor),
+                        fontSize = 19.sp,
+                    )
                 }
             }
             if (archived.isEmpty()) {
@@ -155,6 +168,7 @@ fun ArchivedChatsScreen(
                     Spacer(Modifier.height(16.dp))
                     Text(
                         stringResource(R.string.home_archived_chats_screen_no_archived_chats),
+                        modifier = Modifier.semantics { heading() },
                         color = Color(theme.primaryTextColor),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.W700,
@@ -170,6 +184,7 @@ fun ArchivedChatsScreen(
                 LazyColumn(modifier = Modifier.padding(vertical = 8.dp)) {
                     items(archived, key = { it.id }) { conversation ->
                         val isSelected = selectedIds.contains(conversation.id)
+                        val isLocked = isConversationLocked(conversation.id)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -177,9 +192,11 @@ fun ArchivedChatsScreen(
                                     if (isSelected) Color(argbWithAlpha(theme.accentColor, 0.12))
                                     else Color.Transparent,
                                 )
+                                .semantics { selected = isSelected }
                                 .combinedClickable(
+                                    role = Role.Button,
                                     onClick = {
-                                        if (isSelectionMode) {
+                                        if (isSelectionMode && !isLocked) {
                                             selectedIds = if (isSelected) selectedIds - conversation.id
                                             else selectedIds + conversation.id
                                         } else {
@@ -187,6 +204,7 @@ fun ArchivedChatsScreen(
                                         }
                                     },
                                     onLongClick = {
+                                        if (isLocked) return@combinedClickable
                                         selectedIds = if (isSelected) selectedIds - conversation.id
                                         else selectedIds + conversation.id
                                     },
@@ -223,7 +241,7 @@ fun ArchivedChatsScreen(
                                 Spacer(Modifier.height(4.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        conversation.lastMessageText.ifEmpty { noMessages },
+                                        if (isLocked) lockedPreview else conversation.lastMessageText.ifEmpty { noMessages },
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         color = if (conversation.unreadCount > 0) {

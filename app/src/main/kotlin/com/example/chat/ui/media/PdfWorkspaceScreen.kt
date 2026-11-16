@@ -55,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -99,7 +100,8 @@ fun PdfWorkspaceScreen(
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val snackbar = remember { SnackbarHostState() }
-    val isDark = isSystemInDarkTheme()
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    val isDark = colors.isDark
 
     var tick by remember { mutableIntStateOf(0) }
     DisposableEffect(library) {
@@ -111,13 +113,18 @@ fun PdfWorkspaceScreen(
     val files = library.files
     val pdfs = remember(files) { files.filter { it.category == MediaCategory.pdf } }
 
+    // DOC-R4-187: UI refresh state is scoped to this library instance.
+    var refreshing by remember(library) { mutableStateOf(false) }
     var isProcessing by remember { mutableStateOf(false) }
     var processingStatus by remember { mutableStateOf("") }
     var successSheet by remember { mutableStateOf<Triple<String, String, Int?>?>(null) }
 
+    // DOC-R4-187 previous initial refresh retained:
+    // LaunchedEffect(library) { library.setFilter(MediaCategory.pdf); library.refreshLibrary() }
     LaunchedEffect(library) {
-        library.setFilter(MediaCategory.pdf)
-        library.refreshLibrary()
+        refreshing = true
+        try { library.setFilter(MediaCategory.pdf); library.refreshLibrary() }
+        finally { refreshing = false }
     }
 
 //      Old synchronous picker/conversion implementation retained, disabled:
@@ -238,24 +245,27 @@ fun PdfWorkspaceScreen(
     }
 
     Scaffold(
-        containerColor = if (isDark) Color(0xFF0F131A) else Color(0xFFF8FAFC),
+        containerColor = colors.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = if (isDark) Color(0xFF131822) else Color.White,
+                    containerColor = colors.surface,
                 ),
                 title = { Text("PDF Workspace & Tools", fontWeight = FontWeight.W700, fontSize = 16.sp) },
             )
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            LazyColumn(contentPadding = PaddingValues(18.dp)) {
+            // DOC-R4-182 prior list: LazyColumn(contentPadding = PaddingValues(18.dp))
+            // The conversion overlay stays the only accessible pane while work is active.
+            LazyColumn(modifier = if (isProcessing) Modifier.clearAndSetSemantics { } else Modifier,
+                contentPadding = PaddingValues(18.dp)) {
                 item {
                     Text(
                         "CONVERSION UTILITIES",
                         style = MaterialTheme.typography.labelMedium.copy(
-                            letterSpacing = 1.1.sp, fontWeight = FontWeight.W800, color = Color.Gray,
+                            letterSpacing = 1.1.sp, fontWeight = FontWeight.W800, color = colors.foregroundSecondary,
                         ),
                     )
                 }
@@ -265,7 +275,7 @@ fun PdfWorkspaceScreen(
                     // growing subtitles wrap instead of clipping in split-screen.
                     androidx.compose.foundation.layout.BoxWithConstraints {
                         val imagesCard = @Composable {
-                            ToolCard(ChatyIconType.convert, "Images to PDF", "Merge photos into document", Color(0xFF38BDF8), isDark) {
+                            ToolCard(ChatyIconType.convert, "Images to PDF", "Merge photos into document", colors.info, isDark, enabled = !isProcessing) {
                                 if (isProcessing) return@ToolCard
                                 ChatyHapticsPort.light(view)
                                 imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -273,7 +283,7 @@ fun PdfWorkspaceScreen(
                         }
                         val textCard = @Composable {
                             // DOC-R1-038: plain-text conversion - markdown is rendered as raw text, not styled.
-                            ToolCard(ChatyIconType.document, "Text to PDF", "Plain text (.txt/.md) to PDF", Color(0xFF10B981), isDark) {
+                            ToolCard(ChatyIconType.document, "Text to PDF", "Plain text (.txt/.md) to PDF", colors.success, isDark, enabled = !isProcessing) {
                                 if (isProcessing) return@ToolCard
                                 ChatyHapticsPort.light(view)
                                 textPicker.launch(arrayOf("text/plain", "text/markdown", "application/json", "text/csv", "text/*"))
@@ -305,11 +315,22 @@ fun PdfWorkspaceScreen(
                         Text(
                             "YOUR PDF DOCUMENTS",
                             style = MaterialTheme.typography.labelMedium.copy(
-                                letterSpacing = 1.1.sp, fontWeight = FontWeight.W800, color = Color.Gray,
+                                letterSpacing = 1.1.sp, fontWeight = FontWeight.W800, color = colors.foregroundSecondary,
                             ),
                         )
-                        IconButton(onClick = { scope.launch { library.refreshLibrary() } }) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", modifier = Modifier.size(18.dp))
+                        // DOC-R4-187 original: IconButton(onClick = { scope.launch { library.refreshLibrary() } }) {
+                        // Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", modifier = Modifier.size(18.dp)) }
+                        // DOC-R4-182 prior refresh gate: enabled = !refreshing
+                        IconButton(enabled = !refreshing && !isProcessing, modifier = Modifier.semantics {
+                            stateDescription = if (refreshing) "Updating library" else "Ready to refresh"
+                            liveRegion = LiveRegionMode.Polite
+                        }, onClick = {
+                            if (!refreshing) {
+                                refreshing = true
+                                scope.launch { try { library.refreshLibrary() } finally { refreshing = false } }
+                            }
+                        }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -321,7 +342,7 @@ fun PdfWorkspaceScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(if (isDark) Color(0xFF161C26) else Color.White)
+                                .background(colors.surfaceSecondary)
                                 .padding(28.dp),
                             contentAlignment = Alignment.Center,
                         ) { Text("No PDFs stored in Chaty yet. Use Images to PDF or Text to PDF above.") }
@@ -329,15 +350,20 @@ fun PdfWorkspaceScreen(
                 } else {
                     items(pdfs.size, key = { pdfs[it].id }) { idx ->
                         val item = pdfs[idx]
-                        Box(Modifier.springInteractiveScale(0.98f).clickable { onOpenDocument(item) }) {
+                        // DOC-R4-188 original: Box(Modifier.springInteractiveScale(0.98f).clickable { onOpenDocument(item) }) {
+                        Box(Modifier.springInteractiveScale(0.98f).semantics(mergeDescendants = true) {
+                            role = Role.Button
+                            contentDescription = "Open ${item.name}"
+                        // DOC-R4-182 prior click had no processing gate.
+                        }.clickable(enabled = !isProcessing, onClickLabel = "Open ${item.name}") { onOpenDocument(item) }) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isDark) Color(0xFF161C26) else Color.White)
+                                    .background(colors.surfaceSecondary)
                                     .border(
                                         1.dp,
-                                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                        colors.borderSubtle,
                                         RoundedCornerShape(14.dp),
                                     )
                                     .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -346,9 +372,9 @@ fun PdfWorkspaceScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
-                                        .background(Color(0xFFEF4444).copy(alpha = 0.15f), CircleShape),
+                                        .background(colors.error.copy(alpha = 0.15f), CircleShape),
                                     contentAlignment = Alignment.Center,
-                                ) { ChatyMediaIcon(icon = ChatyIconType.pdf, size = 20.dp, color = Color(0xFFEF4444)) }
+                                ) { ChatyMediaIcon(icon = ChatyIconType.pdf, size = 20.dp, color = colors.error) }
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -359,10 +385,10 @@ fun PdfWorkspaceScreen(
                                     Text(
                                         "${item.humanReadableSize} • $stamp",
                                         fontSize = 11.sp,
-                                        color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+                                        color = colors.foregroundSecondary,
                                     )
                                 }
-                                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = Color.Gray)
+                                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = colors.foregroundSecondary)
                             }
                         }
                         Spacer(Modifier.height(8.dp))
@@ -381,7 +407,7 @@ fun PdfWorkspaceScreen(
                     Column(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (isDark) Color(0xFF1E2638) else Color.White)
+                            .background(colors.surfaceElevated)
                             .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -399,7 +425,7 @@ fun PdfWorkspaceScreen(
     successSheet?.let { (title, outputPath, pageCount) ->
         ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp,
             onDismissRequest = { successSheet = null },
-            containerColor = if (isDark) Color(0xFF141923) else Color.White,
+            containerColor = colors.surfaceElevated,
             shape = com.example.chat.ui.kit.ChatyModalShape,
         ) {
             val file = File(outputPath)
@@ -412,17 +438,21 @@ fun PdfWorkspaceScreen(
             }
             Column(modifier = Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    modifier = Modifier.size(54.dp).background(Color(0xFF22C55E).copy(alpha = 0.15f), CircleShape),
+                    modifier = Modifier.size(54.dp).background(colors.success.copy(alpha = 0.15f), CircleShape),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(32.dp)) }
+                ) { Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = colors.success, modifier = Modifier.size(32.dp)) }
                 Spacer(Modifier.height(12.dp))
                 Text(title, fontWeight = FontWeight.W800, fontSize = 17.sp)
                 Spacer(Modifier.height(4.dp))
-                Text("${file.name} • $sizeStr" + (pageCount?.let { " • $it page" + (if (it == 1) "" else "s") } ?: ""), color = Color.Gray, fontSize = 12.sp)
+                Text("${file.name} • $sizeStr" + (pageCount?.let { " • $it page" + (if (it == 1) "" else "s") } ?: ""), color = colors.foregroundSecondary, fontSize = 12.sp)
                 Spacer(Modifier.height(20.dp))
                 Row {
                     OutlinedButton(
                         onClick = {
+                            if (!file.isFile) {
+                                successSheet = null
+                                scope.launch { snackbar.showSnackbar("The PDF is no longer available. Convert it again or return to the library.") }
+                            } else try {
                             successSheet = null
                             // share_plus -> ACTION_SEND + FileProvider
                             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -432,6 +462,9 @@ fun PdfWorkspaceScreen(
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             context.startActivity(Intent.createChooser(intent, null))
+                            } catch (_: Exception) {
+                                scope.launch { snackbar.showSnackbar("Could not share this PDF. Try again or open it from the library.") }
+                            }
                         },
                         modifier = Modifier.weight(1f),
                     ) {
@@ -479,23 +512,34 @@ private fun ToolCard(
     subtitle: String,
     color: Color,
     isDark: Boolean,
+    enabled: Boolean = true,
     onTap: () -> Unit,
 ) {
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    var cardFocused by remember { mutableStateOf(false) }
     // DOC-R4-181: one merged button node so the icon, title and subtitle read as a single command.
-    Box(Modifier.springInteractiveScale(0.96f).semantics(mergeDescendants = true) { role = Role.Button }.clickable(onClick = onTap)) {
+    // DOC-R4-181 original: Box(Modifier.springInteractiveScale(0.96f).semantics(mergeDescendants = true) { role = Role.Button }.clickable(onClick = onTap)) {
+    Box(Modifier.springInteractiveScale(0.96f)
+        .onFocusChanged { cardFocused = it.isFocused }
+        .then(if (cardFocused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier)
+        .semantics(mergeDescendants = true) {
+        role = Role.Button
+        contentDescription = "$title. $subtitle"
+    // DOC-R4-182 prior click was always enabled.
+    }.clickable(enabled = enabled, onClickLabel = title, onClick = onTap)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .shadow(
                     10.dp, RoundedCornerShape(16.dp),
-                    ambientColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
-                    spotColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
+                    ambientColor = colors.shadow,
+                    spotColor = colors.shadow,
                 )
                 .clip(RoundedCornerShape(16.dp))
-                .background(if (isDark) Color(0xFF161C26) else Color.White)
+                .background(colors.surfaceSecondary)
                 .border(
                     1.dp,
-                    if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                    colors.borderSubtle,
                     RoundedCornerShape(16.dp),
                 )
                 .padding(16.dp),
@@ -508,7 +552,7 @@ private fun ToolCard(
             Text(title, fontWeight = FontWeight.W700, fontSize = 14.sp)
             Spacer(Modifier.height(2.dp))
             // DOC-R1-046: 12sp readable metadata baseline (was 11sp).
-            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+            Text(subtitle, fontSize = 12.sp, color = colors.foregroundSecondary)
         }
     }
 }
@@ -529,3 +573,36 @@ private fun ToolCard(
 //     }
 // }
 //
+
+// Source-preservation review: inactive baseline statements retained verbatim.
+// LazyColumn(contentPadding = PaddingValues(18.dp)) {
+// ToolCard(ChatyIconType.convert, "Images to PDF", "Merge photos into document", colors.info, isDark) {
+// ToolCard(ChatyIconType.document, "Text to PDF", "Plain text (.txt/.md) to PDF", colors.success, isDark) {
+
+// Superseded source retained inactive:
+//     val isDark = isSystemInDarkTheme()
+//         containerColor = if (isDark) Color(0xFF0F131A) else Color(0xFFF8FAFC),
+//                     containerColor = if (isDark) Color(0xFF131822) else Color.White,
+//                             letterSpacing = 1.1.sp, fontWeight = FontWeight.W800, color = Color.Gray,
+//                             ToolCard(ChatyIconType.convert, "Images to PDF", "Merge photos into document", Color(0xFF38BDF8), isDark, enabled = !isProcessing) {
+//                             ToolCard(ChatyIconType.document, "Text to PDF", "Plain text (.txt/.md) to PDF", Color(0xFF10B981), isDark, enabled = !isProcessing) {
+//                                 letterSpacing = 1.1.sp, fontWeight = FontWeight.W800, color = Color.Gray,
+//                                 .background(if (isDark) Color(0xFF161C26) else Color.White)
+//                                     .background(if (isDark) Color(0xFF161C26) else Color.White)
+//                                         if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+//                                         .background(Color(0xFFEF4444).copy(alpha = 0.15f), CircleShape),
+//                                 ) { ChatyMediaIcon(icon = ChatyIconType.pdf, size = 20.dp, color = Color(0xFFEF4444)) }
+//                                         color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+//                                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = Color.Gray)
+//                             .background(if (isDark) Color(0xFF1E2638) else Color.White)
+//             containerColor = if (isDark) Color(0xFF141923) else Color.White,
+//                     modifier = Modifier.size(54.dp).background(Color(0xFF22C55E).copy(alpha = 0.15f), CircleShape),
+//                 ) { Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(32.dp)) }
+//                 Text("${file.name} • $sizeStr" + (pageCount?.let { " • $it page" + (if (it == 1) "" else "s") } ?: ""), color = Color.Gray, fontSize = 12.sp)
+//                     ambientColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
+//                     spotColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
+//                 .background(if (isDark) Color(0xFF161C26) else Color.White)
+//                     if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+//             Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+// // ToolCard(ChatyIconType.convert, "Images to PDF", "Merge photos into document", Color(0xFF38BDF8), isDark) {
+// // ToolCard(ChatyIconType.document, "Text to PDF", "Plain text (.txt/.md) to PDF", Color(0xFF10B981), isDark) {

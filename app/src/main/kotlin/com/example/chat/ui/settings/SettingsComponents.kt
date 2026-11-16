@@ -296,7 +296,11 @@ fun SettingsRadioDialog(
         containerColor = colors.surfaceElevated,
         title = { Text(title, color = colors.foreground, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                // Scroll removed (was Modifier.verticalScroll(rememberScrollState())):
+                // ChatyConfirmationDialog's body already scrolls; an inner unbounded scrollable
+                // is measured with infinite max height and throws at first composition.
+            ) {
                 options.forEach { option ->
                     Row(
                         Modifier.fillMaxWidth().clickable { onSelect(option); onDismiss() }.padding(vertical = 10.dp),

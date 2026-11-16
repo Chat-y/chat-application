@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="startup_secure_storage_error">Chaty could not read your secure sign-in storage. Your saved data has not been reset. You can retry without deleting it.</string>
+    <string name="startup_retry">Retry</string>
+</resources>

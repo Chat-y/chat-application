@@ -6,6 +6,7 @@ import com.example.chat.domain.models.PrivacyPublication
 import com.example.chat.domain.models.PrivacyPublicationPolicy
 import com.example.chat.domain.models.UserProfile
 import java.time.Instant
+import kotlinx.coroutines.ensureActive
 import org.json.JSONObject
 
 data class StatusRecord(
@@ -145,10 +146,11 @@ class StatusService(
         mimeType: String? = null,
         durationSeconds: Long = 0,
     ): StatusRecord {
+        // Offline demo must refuse every media kind before upload, not only disabled audio.
+        if (com.example.chat.data.demo.DemoMode.active) throw IllegalStateException(com.example.chat.data.demo.DemoMode.UNAVAILABLE_MESSAGE)
         requireBound()
         if (mediaType == "audio" && !gbAudioStatusEnabled()) {
-        // Offline demo: status posts need the server; refuse.
-        if (com.example.chat.data.demo.DemoMode.active) throw IllegalStateException(com.example.chat.data.demo.DemoMode.UNAVAILABLE_MESSAGE)
+        // Prior demo guard was incorrectly nested here under disabled audio.
             throw IllegalStateException("Enable Audio Status in Advanced Features first.")
         }
         val size = bytes.size.toLong()
@@ -200,11 +202,21 @@ class StatusService(
         return api.recordView(status.id)
     }
 
-    /** Who viewed an own status (server enforces ownership). Errors -> empty. */
+    /** Owner-only viewer load. An unavailable response is not a successful empty list. */
     suspend fun viewersFor(statusId: String): List<StatusViewer> {
         requireBound()
-        return try {
-            (api.views(statusId) ?: emptyList()).map { v ->
+        val ownerId = currentUserId()?.takeIf { it.isNotBlank() }
+            ?: throw StatusIdentityUnboundException()
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            requireBound()
+            if (currentUserId() != ownerId) throw StatusIdentityUnboundException()
+            val entries = api.views(statusId)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            requireBound()
+            if (currentUserId() != ownerId) throw StatusIdentityUnboundException()
+            checkNotNull(entries) { "Status viewers could not be loaded." }
+            entries.map { v ->
                 StatusViewer(
                     userId = v.userId,
                     displayName = v.displayName.ifEmpty { "Chaty user" },
@@ -214,8 +226,6 @@ class StatusService(
                     viewedAt = com.example.chat.core.util.parseIsoToInstant(v.viewedAt) ?: Instant.now(),
                 )
             }
-        } catch (error: Throwable) {
-            emptyList()
         }
     }
 

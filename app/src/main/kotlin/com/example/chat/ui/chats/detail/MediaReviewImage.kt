@@ -1,5 +1,6 @@
 package com.example.chat.ui.chats.detail
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -20,9 +21,13 @@ import coil.compose.AsyncImage
 
 /** A bounded decode plus viewport transform. Zoom never changes the exported media. */
 @Composable
-internal fun MediaReviewImage(source: String, description: String, modifier: Modifier = Modifier) {
+// MR-R3-010 previous signature: internal fun MediaReviewImage(source: String, description: String, modifier: Modifier = Modifier) {
+// MR-R1-036 previous signature: internal fun MediaReviewImage(source: String, description: String, modifier: Modifier = Modifier, itemActions: (@Composable () -> Unit)? = null) {
+internal fun MediaReviewImage(source: String, description: String, modifier: Modifier = Modifier, itemActions: (@Composable () -> Unit)? = null, fullSizePreview: Boolean = true) {
     var scale by remember(source) { mutableFloatStateOf(1f) }
     var offset by remember(source) { mutableStateOf(Offset.Zero) }
+    // MR-R3-007: source-keyed synchronously, so the old item's ready state cannot hide feedback.
+    val previewFeedback = remember(source) { mutableStateOf("loading") }
     Column(modifier) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
             val width = constraints.maxWidth.toFloat()
@@ -36,11 +41,23 @@ internal fun MediaReviewImage(source: String, description: String, modifier: Mod
                 scale = newScale
             }
             LaunchedEffect(width, height) { offset = clamp(offset, scale) }
+            // MR-R4-043 prior: if (previewFeedback.value == "loading") ReviewPreviewLoadingFrame("Loading photo")
+            if (previewFeedback.value == "loading") ReviewPreviewLoadingFrame(stringResource(com.example.chat.R.string.media_released_review_photo_loading))
+            if (previewFeedback.value == "error") Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                // MR-R4-043 prior: Text("Could not load this photo", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+                Text(stringResource(com.example.chat.R.string.media_released_review_photo_error), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+            }
+            val decodeSize = reviewPreviewDecodeSize(fullSizePreview, width.toInt(), height.toInt())
+            val zoomState = stringResource(com.example.chat.R.string.media_released_review_zoom_state, "%.1f".format(scale))
             AsyncImage(
+                onLoading = { previewFeedback.value = "loading" },
+                onSuccess = { previewFeedback.value = "ready" },
+                onError = { previewFeedback.value = "error" },
                 // MR-R4-030: decode bounded by the actual preview viewport (still capped at
                 // 2048 px) instead of one blanket size for every screen density.
                 model = coil.request.ImageRequest.Builder(LocalContext.current).data(source)
-                    .size(width.toInt().coerceIn(1, 2048), height.toInt().coerceIn(1, 2048)).build(),
+                    // MR-R1-036 old size: .size(width.toInt().coerceIn(1, 2048), height.toInt().coerceIn(1, 2048)).build(),
+                    .size(decodeSize.first, decodeSize.second).build(),
                 contentDescription = description,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
@@ -54,13 +71,22 @@ internal fun MediaReviewImage(source: String, description: String, modifier: Mod
                         detectTapGestures(onDoubleTap = { point -> zoomTo(if (scale > 1f) 1f else 2.5f, point) })
                     }
                     .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y; transformOrigin = TransformOrigin(0f, 0f) }
-                    .semantics { stateDescription = "Zoom ${"%.1f".format(scale)} times" },
+                    // MR-R4-043 prior: .semantics { stateDescription = "Zoom ${"%.1f".format(scale)} times" },
+                    .semantics { stateDescription = zoomState },
             )
-            Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalButton(onClick = { zoomTo(scale - 0.5f) }, enabled = scale > 1f, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Zoom out") }
-                TextButton(onClick = { scale = 1f; offset = Offset.Zero }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Reset zoom") }
-                FilledTonalButton(onClick = { zoomTo(scale + 0.5f) }, enabled = scale < 5f, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Zoom in") }
+            // MR-R3-010: measure action + zoom footer together, never guess an image inset.
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            itemActions?.let { content -> Box(Modifier.padding(horizontal = 12.dp)) { content() } }
+            // Previous zoom footer: Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // MR-R4-043 prior: FilledTonalButton(onClick = { zoomTo(scale - 0.5f) }, enabled = scale > 1f, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Zoom out") }
+                FilledTonalButton(onClick = { zoomTo(scale - 0.5f) }, enabled = scale > 1f, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(stringResource(com.example.chat.R.string.media_released_review_zoom_out)) }
+                // MR-R4-043 prior: TextButton(onClick = { scale = 1f; offset = Offset.Zero }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Reset zoom") }
+                TextButton(onClick = { scale = 1f; offset = Offset.Zero }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(stringResource(com.example.chat.R.string.media_released_review_zoom_reset)) }
+                // MR-R4-043 prior: FilledTonalButton(onClick = { zoomTo(scale + 0.5f) }, enabled = scale < 5f, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Zoom in") }
+                FilledTonalButton(onClick = { zoomTo(scale + 0.5f) }, enabled = scale < 5f, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(stringResource(com.example.chat.R.string.media_released_review_zoom_in)) }
             }
+            } // Measured preview footer.
         }
     }
 }

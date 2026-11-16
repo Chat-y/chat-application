@@ -1,5 +1,7 @@
 package com.example.chat.ui.settings.account
 
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -132,10 +134,10 @@ fun AccountSettingsScreen(
     if (showDeleteDialog) {
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Account?") },
+            title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_delete_title)) },
             text = {
                 Text(
-                    "This will permanently delete your user profile, message history, and remove you from all workspaces. This action is irreversible.",
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_delete_body),
                 )
             },
             confirmButton = {
@@ -150,21 +152,23 @@ fun AccountSettingsScreen(
                                 // (previously: isDeleting = false; showLogoutDialog = true)
                                 try {
                                     logout()
-                                } catch (le: Exception) {
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (le: Exception) {
                                     snack("Account deleted, but sign-out failed: ${friendlyError(le)}", colors.error)
                                 }
                                 isDeleting = false
-                            } catch (e: Exception) {
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (e: Exception) {
                                 isDeleting = false
                                 snack("Failed to delete account: ${friendlyError(e)}", colors.error)
-                            }
+                            } finally { isDeleting = false }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.error),
-                ) { Text("Delete Permanently") }
+                ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_delete_confirm)) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteDialog = false }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_cancel)) }
             },
         )
     }
@@ -173,9 +177,9 @@ fun AccountSettingsScreen(
     if (showLogoutDialog) {
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showLogoutDialog = false },
-            title = { Text("Log out of Chaty?") },
+            title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_logout_title)) },
             text = {
-                Text("Your account will be signed out on this device. Your chats and account data remain on the server.")
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_logout_body))
             },
             confirmButton = {
                 Button(
@@ -184,16 +188,17 @@ fun AccountSettingsScreen(
                         scope.launch {
                             try {
                                 logout()
-                            } catch (e: Exception) {
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                                 snack("Could not log out: ${friendlyError(e)}", colors.error)
                             }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.error),
-                ) { Text("Log out") }
+                ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_logout_confirm)) }
             },
             dismissButton = {
-                TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showLogoutDialog = false }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_cancel)) }
             },
         )
     }
@@ -225,14 +230,15 @@ fun AccountSettingsScreen(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        // AC5-34: pane title for screen readers.
+        Box(Modifier.fillMaxSize().padding(padding).semantics { paneTitle = "Account and profile" }) {
             ChatySettingsPage(
-                title = "Account & Profile",
-                subtitle = "Profile photo, display name, username & bio",
+                title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_settings_title),
+                subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_settings_subtitle),
                 onBack = onBack,
             ) {
                 // 1. PROFILE DETAILS
-                ChatySettingsSection(title = "Profile Information") {
+                ChatySettingsSection(title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_section_profile)) {
                     ChatySettingsTile(
                         leading = { AccountAvatar(user, colors.primary, 42) },
                         title = user.displayName.ifEmpty { "Display Name" },
@@ -243,7 +249,7 @@ fun AccountSettingsScreen(
                     ChatySettingsTile(
                         icon = Icons.Rounded.Info,
                         iconColor = colors.primary,
-                        title = "About / Bio",
+                        title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_tile_about),
                         subtitle = if (user.about.isNotEmpty()) user.about else "No bio set (Tap to edit)",
                         onTap = { showEditSheet = true },
                     )
@@ -269,7 +275,7 @@ fun AccountSettingsScreen(
                 }
 
                 // 3. ACCOUNT ACTIONS
-                ChatySettingsSection(title = "Account Actions") {
+                ChatySettingsSection(title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_section_actions)) {
                     // AC1-04: commented out until the QR screen exists; the tile did nothing.
                     // ChatySettingsTile(
                     //     icon = Icons.Rounded.QrCode,
@@ -281,15 +287,15 @@ fun AccountSettingsScreen(
                     ChatySettingsTile(
                         icon = Icons.Rounded.Logout,
                         iconColor = colors.error,
-                        title = "Log Out",
-                        subtitle = "Sign out of your current session on this device",
+                        title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_tile_logout),
+                        subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_tile_logout_sub),
                         onTap = { showLogoutDialog = true },
                     )
                     ChatySettingsTile(
                         icon = Icons.Rounded.DeleteForever,
                         iconColor = colors.error,
-                        title = "Delete Account",
-                        subtitle = "Permanently delete your profile and account data",
+                        title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_tile_delete),
+                        subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_tile_delete_sub),
                         enabled = !isDeleting,
                         onTap = { showDeleteDialog = true },
                     )
@@ -299,7 +305,8 @@ fun AccountSettingsScreen(
             if (isDeleting) {
                 Box(
                     Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f))
+                        // Previous fixed scrim: .background(Color.Black.copy(alpha = 0.4f))
+                        .background(colors.foreground.copy(alpha = 0.4f))
                         .clickable(
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                             indication = null,
@@ -379,7 +386,8 @@ private fun WorkspaceRegistrationToggle(
 
     ChatySwitchTile(
         icon = Icons.Rounded.PersonAdd,
-        iconColor = Color(0xFF6366F1),
+        // Previous fixed tint: iconColor = Color(0xFF6366F1),
+        iconColor = colors.primary,
         title = "Member Self-Registration",
         subtitle = when {
             loading -> "Updating workspace setting..."
@@ -406,7 +414,8 @@ private fun WorkspaceRegistrationToggle(
                         loading = false
                         snack("Failed to update registration settings. Admin rights required.", colors.error)
                     }
-                } catch (e: Exception) {
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                     loading = false
                     snack("Error: ${(e.message ?: e.toString()).removePrefix("Exception: ")}", colors.error)
                 }
@@ -437,9 +446,10 @@ private fun EditProfileSheet(
     var isUploadingPhoto by remember { mutableStateOf(false) }
 
     val photoPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent(),
+        // AC1-17: system photo picker (was GetContent("image/*")).
+        ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+        if (uri == null || isSaving || isUploadingPhoto) return@rememberLauncherForActivityResult
         isUploadingPhoto = true
         scope.launch {
             try {
@@ -454,7 +464,8 @@ private fun EditProfileSheet(
                 updateProfile(user.displayName, user.about, user.username, newUrl)
                 avatarUrl = newUrl
                 snack("Profile photo updated!", colors.accent)
-            } catch (e: Exception) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                 snack("Failed to upload photo: ${(e.message ?: e.toString()).removePrefix("Exception: ")}", colors.error)
             } finally {
                 isUploadingPhoto = false
@@ -476,7 +487,7 @@ private fun EditProfileSheet(
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Edit Profile",
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_edit_profile),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = colors.foreground,
@@ -493,7 +504,7 @@ private fun EditProfileSheet(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .size(80.dp)
-                    .clickable(enabled = !isUploadingPhoto) { photoPicker.launch("image/*") },
+                    .clickable(enabled = !isUploadingPhoto && !isSaving) { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             ) {
                 AccountAvatar(user.copy(avatarUrl = avatarUrl), colors.primary, 80)
                 if (isUploadingPhoto) {
@@ -501,13 +512,15 @@ private fun EditProfileSheet(
                         modifier = Modifier
                             .size(80.dp)
                             .clip(CircleShape)
-                            .background(Color(0x73000000)),
+                            // Previous fixed overlay: .background(Color(0x73000000)),
+                            .background(colors.foreground.copy(alpha = 0.45f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
                             strokeWidth = 2.5.dp,
-                            color = Color.White,
+                            // Previous fixed foreground: color = Color.White,
+                            color = colors.onPrimary,
                         )
                     }
                 } else {
@@ -521,7 +534,8 @@ private fun EditProfileSheet(
                     ) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera,
                             semanticLabel = null,
-                            color = Color.White,
+                            // Previous fixed foreground: color = Color.White,
+                            color = colors.onPrimary,
                             modifier = Modifier.size(16.dp),
                         )
                     }
@@ -529,12 +543,12 @@ private fun EditProfileSheet(
             }
             Spacer(Modifier.height(8.dp))
             TextButton(
-                onClick = { photoPicker.launch("image/*") },
-                enabled = !isUploadingPhoto,
+                onClick = { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                enabled = !isUploadingPhoto && !isSaving,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             ) {
                 Text(
-                    "Change Profile Photo",
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_change_photo),
                     color = colors.primary,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.5.sp,
@@ -545,7 +559,7 @@ private fun EditProfileSheet(
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Display Name") },
+                label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_label_display_name)) },
                 leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null) },
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -555,7 +569,7 @@ private fun EditProfileSheet(
             OutlinedTextField(
                 value = about,
                 onValueChange = { about = it },
-                label = { Text("About / Bio") },
+                label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_label_about)) },
                 leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.info, semanticLabel = null) },
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -566,6 +580,7 @@ private fun EditProfileSheet(
 
             Button(
                 onClick = {
+                    if (isSaving || isUploadingPhoto) return@Button
                     isSaving = true
                     scope.launch {
                         try {
@@ -573,14 +588,15 @@ private fun EditProfileSheet(
                             updateProfile(name.trim(), about.trim(), user.username, avatarUrl)
                             onDismiss()
                             snack("Profile updated successfully!", colors.accent)
-                        } catch (e: Exception) {
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (e: Exception) {
                             snack("Failed to update: ${(e.message ?: e.toString()).removePrefix("Exception: ")}", colors.error)
                         } finally {
                             isSaving = false
                         }
                     }
                 },
-                enabled = !isSaving,
+                enabled = !isSaving && !isUploadingPhoto,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -592,10 +608,11 @@ private fun EditProfileSheet(
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
-                        color = Color.White,
+                        // Previous fixed foreground: color = Color.White,
+                        color = colors.onPrimary,
                     )
                 } else {
-                    Text("Save Profile", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_save_profile), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
             }
         }
@@ -614,6 +631,9 @@ private fun readDownscaledJpeg(
         { resolver.openInputStream(uri) },
         maxEdge * 2,
     ) ?: throw Exception("Could not read the selected image")
+    var scaledOwned: Bitmap? = null
+    var orientedOwned: Bitmap? = null
+    try {
     val longEdge = maxOf(source.width, source.height)
     val scaled = if (longEdge > maxEdge) {
         val scale = maxEdge.toFloat() / longEdge
@@ -626,9 +646,32 @@ private fun readDownscaledJpeg(
     } else {
         source
     }
+    scaledOwned = scaled
+    // AC1-18: apply the EXIF orientation so portrait photos are not uploaded sideways.
+    val orientation = try {
+        resolver.openInputStream(uri)?.use {
+            androidx.exifinterface.media.ExifInterface(it).getAttributeInt(
+                androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL,
+            )
+        } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+    } catch (_: Exception) {
+        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+    }
+    val matrix = android.graphics.Matrix()
+    when (orientation) {
+        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+    }
+    val oriented = if (matrix.isIdentity) scaled else Bitmap.createBitmap(scaled, 0, 0, scaled.width, scaled.height, matrix, true)
+    orientedOwned = oriented
     val out = ByteArrayOutputStream()
-    scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+    check(oriented.compress(Bitmap.CompressFormat.JPEG, quality, out)) { "Could not prepare the selected image" }
     return out.toByteArray()
+    } finally {
+        listOfNotNull(orientedOwned, scaledOwned, source).distinct().forEach { if (!it.isRecycled) it.recycle() }
+    }
 }
 
 private fun queryDisplayName(resolver: android.content.ContentResolver, uri: android.net.Uri): String? = try {
@@ -638,3 +681,23 @@ private fun queryDisplayName(resolver: android.content.ContentResolver, uri: and
 } catch (_: Exception) {
     null
 }
+
+// Superseded account-screen source retained inactive:
+//                                 } catch (le: Exception) {
+//                             } catch (e: Exception) {
+//                             }
+//                             } catch (e: Exception) {
+//                         .background(Color.Black.copy(alpha = 0.4f))
+//         iconColor = Color(0xFF6366F1),
+//                 } catch (e: Exception) {
+//         if (uri == null) return@rememberLauncherForActivityResult
+//             } catch (e: Exception) {
+//                     .clickable(enabled = !isUploadingPhoto) { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+//                             .background(Color(0x73000000)),
+//                             color = Color.White,
+//                             color = Color.White,
+//                 enabled = !isUploadingPhoto,
+//                         } catch (e: Exception) {
+//                 enabled = !isSaving,
+//                         color = Color.White,
+//     oriented.compress(Bitmap.CompressFormat.JPEG, quality, out)

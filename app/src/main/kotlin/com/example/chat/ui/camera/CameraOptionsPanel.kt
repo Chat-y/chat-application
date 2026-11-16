@@ -1,5 +1,7 @@
 package com.example.chat.ui.camera
 
+import com.example.chat.R
+import androidx.compose.ui.res.stringResource
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -45,52 +47,77 @@ fun CameraOptionsPanel(
     showPhotoTimer: Boolean = true,
     frontCamera: Boolean = false,
 ) {
+    val panelLabel = stringResource(R.string.camera_options_panel)
     Column(modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surface, RoundedCornerShape(10.dp))
         .heightIn(max = 350.dp).verticalScroll(rememberScrollState())
-        .semantics { contentDescription="Camera options panel" }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // CAM-R4-030 previous spacing: .semantics { contentDescription="Camera options panel" }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // CAM-R4-004 prior semantics label: "Camera options panel"
+        .semantics { contentDescription=panelLabel }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-            Text("Camera options",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface,modifier=Modifier.weight(1f))
-            androidx.compose.material3.TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onClose){Text("Close",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface)}
+            // CAM-R4-004 prior: Text("Camera options",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface,modifier=Modifier.weight(1f))
+            Text(stringResource(R.string.camera_options_title),color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface,modifier=Modifier.weight(1f))
+            // CAM-R4-004 prior: androidx.compose.material3.TextButton(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onClose){Text("Close",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface)}
+            androidx.compose.material3.TextButton(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onClose){Text(stringResource(R.string.camera_close),color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface)}
         }
-        Text("Capture", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
-        Text("Ratio",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // CAM-R4-004 prior: Text("Capture", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.camera_capture_group), color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+        // CAM-R4-004 prior: Text("Ratio",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.camera_ratio),color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        // CAM-R4-030 previous spacing: Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CaptureAspect.entries.forEach { aspect ->
                 OptionChip(aspect.label, options.aspect == aspect, { onChange(options.copy(aspect = aspect)) }, Modifier.weight(1f))
             }
         }
         if (showPhotoTimer) {
-        Text("Timer",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // CAM-R4-004 prior: Text("Timer",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.camera_timer),color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        // CAM-R4-030 previous spacing: Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(0, 3, 5, 10).forEach { seconds ->
-                OptionChip(if (seconds == 0) "Off" else "${seconds}s", options.timerSeconds == seconds,
+                // CAM-R4-004 prior: OptionChip(if (seconds == 0) "Off" else "${seconds}s", options.timerSeconds == seconds,
+                OptionChip(if (seconds == 0) stringResource(R.string.camera_timer_off) else stringResource(R.string.camera_timer_seconds, seconds), options.timerSeconds == seconds,
                     { onChange(options.copy(timerSeconds = seconds)) }, Modifier.weight(1f))
             }
         }
         }
         if (showPhotoTimer) {
-            OptionChip(if (frontCamera) "Mirror saved selfies" else "Mirror selfies · front camera only",
+            // CAM-R4-004 prior: OptionChip(if (frontCamera) "Mirror saved selfies" else "Mirror selfies · front camera only",
+            OptionChip(if (frontCamera) stringResource(R.string.camera_mirror) else stringResource(R.string.camera_mirror_unavailable),
                 options.mirrorSelfies, { onChange(options.copy(mirrorSelfies = !options.mirrorSelfies)) },
                 Modifier.fillMaxWidth(), frontCamera)
         }
-        Text("Overlays", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OptionChip("Grid lines", options.grid, { onChange(options.copy(grid = !options.grid)) }, Modifier.weight(1f))
-            OptionChip("Level", options.level, { onChange(options.copy(level = !options.level)) }, Modifier.weight(1f))
+        // CAM-R4-004 prior: Text("Overlays", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.camera_overlays_group), color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+        // CAM-R4-030 previous spacing: Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // CAM-R4-004 prior: OptionChip("Grid lines", options.grid, { onChange(options.copy(grid = !options.grid)) }, Modifier.weight(1f))
+            OptionChip(stringResource(R.string.camera_grid), options.grid, { onChange(options.copy(grid = !options.grid)) }, Modifier.weight(1f))
+            // CAM-R4-004 prior: OptionChip("Level", options.level, { onChange(options.copy(level = !options.level)) }, Modifier.weight(1f))
+            OptionChip(stringResource(R.string.camera_level), options.level, { onChange(options.copy(level = !options.level)) }, Modifier.weight(1f))
         }
-        Text("Video / preview", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
-        OptionChip(if (stabilizationSupported) "Preview stabilization" else "Stabilization unavailable on this camera",
+        // CAM-R4-004 prior: Text("Video / preview", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.camera_video_preview_group), color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+        // CAM-R4-004 prior: OptionChip(if (stabilizationSupported) "Preview stabilization" else "Stabilization unavailable on this camera",
+        OptionChip(if (stabilizationSupported) stringResource(R.string.camera_stabilization) else stringResource(R.string.camera_stabilization_unavailable),
             options.stabilization && stabilizationSupported, { if (stabilizationSupported) onChange(options.copy(stabilization = !options.stabilization)) }, Modifier.fillMaxWidth(), stabilizationSupported)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OptionChip("Watermark", options.watermark, { onChange(options.copy(watermark = !options.watermark)) }, Modifier.weight(1f))
-            OptionChip("Clarity", options.clarity, { onChange(options.copy(clarity = !options.clarity)) }, Modifier.weight(1f))
+        // CAM-R4-030 previous spacing: Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // CAM-R4-004 prior: OptionChip("Watermark", options.watermark, { onChange(options.copy(watermark = !options.watermark)) }, Modifier.weight(1f))
+            OptionChip(stringResource(R.string.camera_watermark), options.watermark, { onChange(options.copy(watermark = !options.watermark)) }, Modifier.weight(1f))
+            // CAM-R4-004 prior: OptionChip("Clarity", options.clarity, { onChange(options.copy(clarity = !options.clarity)) }, Modifier.weight(1f))
+            OptionChip(stringResource(R.string.camera_clarity), options.clarity, { onChange(options.copy(clarity = !options.clarity)) }, Modifier.weight(1f))
         }
-        OptionChip(if (nightSupported) "Night mode · hold still" else "Night mode unavailable on this camera",
+        // CAM-R4-004 prior: OptionChip(if (nightSupported) "Night mode · hold still" else "Night mode unavailable on this camera",
+        OptionChip(if (nightSupported) stringResource(R.string.camera_night) else stringResource(R.string.camera_night_unavailable),
             options.night && nightSupported, { if (nightSupported) onChange(options.copy(night = !options.night)) }, Modifier.fillMaxWidth(), nightSupported)
-        Text("Night and Portrait replace HDR while active; these extension modes do not stack.",
+        // CAM-R4-004 prior: Text("Night and Portrait replace HDR while active; these extension modes do not stack.",
+        Text(stringResource(R.string.camera_extension_exclusion_note),
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Night uses the phone maker's supported multi-frame mode. It cannot see in total darkness. Timer, grid and level still work. Face lenses and preview stabilization are off during Night.",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Clarity adjusts photo contrast only. Stabilization affects preview where supported; it does not restore blurred detail. Document scanning has its own crop review.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        // CAM-R4-004 prior: Text("Night uses the phone maker's supported multi-frame mode. It cannot see in total darkness. Timer, grid and level still work. Face lenses and preview stabilization are off during Night.",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.camera_night_note),color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        // CAM-R4-004 prior: Text("Clarity adjusts photo contrast only. Stabilization affects preview where supported; it does not restore blurred detail. Document scanning has its own crop review.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.camera_clarity_note), color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -103,7 +130,9 @@ private fun OptionChip(text: String, selected: Boolean, onClick: () -> Unit, mod
             role = Role.Button
             if(!enabled) disabled() else onClick { onClick(); true }
         }
-        .clickable(enabled = enabled, onClick = onClick).padding(horizontal=10.dp,vertical=12.dp), contentAlignment = Alignment.Center) {
+        // CAM-R4-034 previous: .clickable(enabled = enabled, onClick = onClick).padding(horizontal=10.dp,vertical=12.dp), contentAlignment = Alignment.Center) {
+        // CAM-R4-030 previous spacing: .cameraActionFocusRing().clickable(enabled = enabled, onClick = onClick).padding(horizontal=10.dp,vertical=12.dp), contentAlignment = Alignment.Center) {
+        .cameraActionFocusRing().clickable(enabled = enabled, onClick = onClick).padding(horizontal=12.dp,vertical=12.dp), contentAlignment = Alignment.Center) {
         Text(text, color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.onPrimary else if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.material3.MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
     }
 }
@@ -144,7 +173,11 @@ fun CameraGridAndLevel(grid: Boolean, level: Boolean, modifier: Modifier = Modif
                 drawLine(Color.White.copy(alpha = .4f), Offset(0f, size.height * n / 3), Offset(size.width, size.height * n / 3), 1f)
             }
         }
-        if (level) Text(roll?.let { "Level ${it.toInt()}°" } ?: "Level sensor unavailable", color = if (roll != null && abs(roll!!) < 2) Color.Green else Color.White,
+        // CAM-R4-004 prior: if (level) Text(roll?.let { "Level ${it.toInt()}°" } ?: "Level sensor unavailable", color = if (roll != null && abs(roll!!) < 2) Color.Green else Color.White,
+        if (level) Text(if (roll != null) stringResource(R.string.camera_level_degrees, roll!!.toInt()) else stringResource(R.string.camera_level_unavailable), color = if (roll != null && abs(roll!!) < 2) Color.Green else Color.White,
             modifier = Modifier.align(Alignment.Center).background(Color(0x88000000), RoundedCornerShape(10.dp)).padding(8.dp))
     }
 }
+
+// CAM-R4-034 prior UI modifier lines retained inactive:
+//             androidx.compose.material3.TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onClose){Text("Close",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface)}

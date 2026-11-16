@@ -43,6 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -83,7 +85,7 @@ fun NavigationDestinationsSettingsScreen(
 
     // SET-R1-008/R2-001: reconcile once, and re-seed when the inputs change.
     val reconciledInitial = remember(initialPrimary, initialOverflow) {
-        NavigationDestinationsLogic.reconcile(initialPrimary, initialOverflow)
+        NavigationDestinationsLogic.reconcile(initialPrimary, initialOverflow) { android.util.Log.d("NavDestinations", it) }
     }
     var primary by remember(reconciledInitial) { mutableStateOf<List<String>>(reconciledInitial.first.toList()) }
     var overflow by remember(reconciledInitial) { mutableStateOf<List<String>>(reconciledInitial.second.toList()) }
@@ -105,6 +107,9 @@ fun NavigationDestinationsSettingsScreen(
                 onSave(primary.toList(), overflow.toList())
                 saving = false
                 onSaved()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                saving = false
+                throw cancelled
             } catch (error: Exception) {
                 saving = false
                 snackbar.showSnackbar(errorText(error))
@@ -123,6 +128,9 @@ fun NavigationDestinationsSettingsScreen(
                 overflow = reconciled.second
                 saving = false
                 snackbar.showSnackbar("Destination order reset to the active template.")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                saving = false
+                throw cancelled
             } catch (error: Exception) {
                 saving = false
                 snackbar.showSnackbar(errorText(error))
@@ -156,14 +164,18 @@ fun NavigationDestinationsSettingsScreen(
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = { confirm = "reset" }, enabled = !saving, modifier = Modifier.height(48.dp)) {
-                    Text("Reset", color = colors.primary)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset), color = colors.primary) // was: "Reset"
                 }
                 Spacer(Modifier.width(4.dp))
                 IconButton(onClick = { save() }, enabled = !saving) {
                     if (saving) {
                         CircularProgressIndicator(strokeWidth = 2.dp, color = colors.primary, modifier = Modifier.size(18.dp))
                     } else {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = "Save navigation destinations", color = colors.foreground)
+                        // SET-R3-034: visible text next to the icon so Save never depends on the icon label
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = "Save navigation destinations", color = colors.foreground)
+                            Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_save), color = colors.foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) // was: "Save"
+                        }
                     }
                 }
             }
@@ -184,6 +196,7 @@ fun NavigationDestinationsSettingsScreen(
                             ids = primary,
                             isPrimary = true,
                             primaryCount = primary.size,
+                            enabled = !saving,
                             onMove = { id ->
                                 val p = primary.toMutableList()
                                 val o = overflow.toMutableList()
@@ -210,6 +223,7 @@ fun NavigationDestinationsSettingsScreen(
                             ids = overflow,
                             isPrimary = false,
                             primaryCount = primary.size,
+                            enabled = !saving,
                             onMove = { id ->
                                 val p = primary.toMutableList()
                                 val o = overflow.toMutableList()
@@ -221,6 +235,14 @@ fun NavigationDestinationsSettingsScreen(
                                 NavigationDestinationsLogic.reorder(o, index, delta)
                                 overflow = o
                             },
+                        )
+                        // SET-R2-043: same tip in the two-pane layout
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Tip: keep your most-used screens in Primary. Every destination remains available either here or under More.",
+                            color = colors.foregroundSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
                         )
                     }
                 }
@@ -237,6 +259,7 @@ fun NavigationDestinationsSettingsScreen(
                         ids = primary,
                         isPrimary = true,
                         primaryCount = primary.size,
+                            enabled = !saving,
                         onMove = { id ->
                             val p = primary.toMutableList()
                             val o = overflow.toMutableList()
@@ -256,6 +279,7 @@ fun NavigationDestinationsSettingsScreen(
                         ids = overflow,
                         isPrimary = false,
                         primaryCount = primary.size,
+                            enabled = !saving,
                         onMove = { id ->
                             val p = primary.toMutableList()
                             val o = overflow.toMutableList()
@@ -284,18 +308,18 @@ fun NavigationDestinationsSettingsScreen(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirm = "" },
             title = { Text("Discard changes?") },
-            text = { Text("Your destination order has not been saved.") },
-            dismissButton = { TextButton(onClick = { confirm = "" }) { Text("Keep editing") } },
-            confirmButton = { TextButton(onClick = { confirm = ""; onBack() }) { Text("Discard") } },
+            text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_your_destination_order_has_not_been_save)) }, // was: "Your destination order has not been saved."
+            dismissButton = { TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_keep_editing)) } }, // was: "Keep editing"
+            confirmButton = { TextButton(onClick = { confirm = ""; onBack() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_discard)) } }, // was: "Discard"
         )
     }
     if (confirm == "reset") {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirm = "" },
             title = { Text("Reset to template order?") },
-            text = { Text("The destination order returns to the active template.") },
-            dismissButton = { TextButton(onClick = { confirm = "" }) { Text("Cancel") } },
-            confirmButton = { TextButton(onClick = { confirm = ""; reset() }) { Text("Reset") } },
+            text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_the_destination_order_returns_to_the_act)) }, // was: "The destination order returns to the active template."
+            dismissButton = { TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel)) } }, // was: "Cancel"
+            confirmButton = { TextButton(onClick = { confirm = ""; reset() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset)) } }, // was: "Reset"
         )
     }
 }
@@ -307,6 +331,7 @@ private fun DestinationSection(
     ids: List<String>,
     isPrimary: Boolean,
     primaryCount: Int,
+    enabled: Boolean,
     onMove: (String) -> Unit,
     onReorder: (index: Int, delta: Int) -> Unit,
 ) {
@@ -353,6 +378,7 @@ private fun DestinationSection(
                 count = visibleIds.size,
                 isPrimary = isPrimary,
                 primaryCount = primaryCount,
+                enabled = enabled,
                 onMove = { onMove(id) },
                 onReorder = { i, delta ->
                     val from = ids.indexOf(visibleIds[i])
@@ -371,12 +397,22 @@ private fun DestinationRow(
     count: Int,
     isPrimary: Boolean,
     primaryCount: Int,
+    enabled: Boolean,
     onMove: () -> Unit,
     onReorder: (index: Int, delta: Int) -> Unit,
 ) {
     val colors = LocalAppColors.current
     val title = NavigationDestinationsLogic.labels[id] ?: return
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 2.dp).semantics { stateDescription = "${index + 1} of $count" }) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 2.dp).semantics {
+        stateDescription = "${index + 1} of $count"
+        // SET-R5-034: reorder via TalkBack/switch-access actions, no per-button focus stops
+        val canMove = enabled && (if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY)
+        customActions = listOfNotNull(
+            if (enabled && index != 0) CustomAccessibilityAction("Move up") { onReorder(index, -1); true } else null,
+            if (enabled && index != count - 1) CustomAccessibilityAction("Move down") { onReorder(index, 1); true } else null,
+            if (canMove) CustomAccessibilityAction(if (isPrimary) "Move to More" else "Make primary") { onMove(); true } else null,
+        )
+    }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
@@ -401,19 +437,25 @@ private fun DestinationRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
         ) {
-            IconButton(onClick = { onReorder(index, -1) }, enabled = index != 0, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = { onReorder(index, -1) }, enabled = enabled && index != 0, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up", tint = colors.foreground)
             }
             IconButton(
                 onClick = { onReorder(index, 1) },
-                enabled = index != count - 1,
+                enabled = enabled && index != count - 1,
                 modifier = Modifier.size(48.dp),
             ) {
                 Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down", tint = colors.foreground)
             }
+            // Freeze edits while save/reset owns the submitted destination snapshot.
+            val moveEnabled = enabled && (if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY)
             TextButton(
                 onClick = onMove,
-                enabled = if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY,
+                enabled = moveEnabled,
+                // SET-R4-034: say why a disabled button is disabled
+                modifier = Modifier.semantics {
+                    if (enabled && !moveEnabled) stateDescription = if (isPrimary) "At least one primary destination is required" else "Primary navigation is full"
+                },
             ) {
                 Icon(
                     if (isPrimary) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowUp,
@@ -426,6 +468,11 @@ private fun DestinationRow(
                     if (isPrimary) "Move to More" else "Make primary",
                     color = if (if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY) colors.primary else colors.foregroundTertiary,
                 )
+                // SET-R1-056: say why the button is disabled, at the point of failure
+                if (enabled && !isPrimary && !moveEnabled) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("Primary is full", color = colors.foregroundTertiary, fontSize = 12.sp)
+                }
             }
         }
     }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -59,6 +60,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -153,11 +155,14 @@ fun ProfileEditScreen(
         }
         usernameCheckLoading = true
         kotlinx.coroutines.delay(500)
-        usernameTaken = try {
+        val taken = try {
             checkUsernameAvailable(normalized) == false
-        } catch (_: Exception) {
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
             false  // network hiccup: leave the field neutral, save re-checks
         }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (isCurrentPreview()) usernameTaken = taken
         usernameCheckLoading = false
     }
     var about by remember { mutableStateOf(user.about) }
@@ -196,7 +201,9 @@ fun ProfileEditScreen(
         isSaving = true
         scope.launch {
             try {
+                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
                 val url = picker(source)
+                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
                 if (url != null) {
                     if (target == "avatar") newAvatarUrl = url else newBannerUrl = url
                 }
@@ -216,19 +223,23 @@ fun ProfileEditScreen(
         }
     }
 
+    // P1-17: use the shared reference-counted guard so overlapping sensitive screens cannot clear each other's flag.
+    com.example.chat.ui.kit.ProtectSensitiveWindow()
+    // P5-42: context for string resources used from non-composable save() code.
+    val appContext = androidx.compose.ui.platform.LocalContext.current
     fun save() {
-        if (isSaving) return
+        if (isSaving || !isCurrentPreview()) return
         saveError = null
         // Inline validators from profile_edit_screen.dart.
         // NFC-normalised, bidi controls stripped (P2-11, P3-20).
         val name = sanitizeDisplayName(displayName)
         if (name.isEmpty()) {
-            show("Display name cannot be empty")
+            show(appContext.getString(com.example.chat.R.string.profile_edit_err_name_empty))  // was: "Display name cannot be empty"
             scope.launch { nameFocus.bringIntoView() }
             return
         }
         if (name.length < 2) {
-            show("Must be at least 2 characters")
+            show(appContext.getString(com.example.chat.R.string.profile_edit_err_name_short))  // was: "Must be at least 2 characters"
             scope.launch { nameFocus.bringIntoView() }
             return
         }
@@ -245,7 +256,7 @@ fun ProfileEditScreen(
         val normalized = ChatyValidators.normalizeUsername(username)
         val unchanged = normalized == ChatyValidators.normalizeUsername(user.username)
         if (!unchanged && usernameTaken) {
-            show("Please select an available username before saving.")
+            show(appContext.getString(com.example.chat.R.string.profile_edit_err_username_unavailable))  // was: "Please select an available username before saving."
             return
         }
         isSaving = true
@@ -260,11 +271,13 @@ fun ProfileEditScreen(
                     isSaving = false
                     return@launch
                 }
+                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
                 onSave(name, normalized, about.trim(), newAvatarUrl, newBannerUrl)
+                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
                 isSaving = false
                 justSaved = true
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                snackbar.showSnackbar("Profile updated.")
+                snackbar.showSnackbar(appContext.getString(com.example.chat.R.string.profile_edit_saved_snackbar))  // was: "Profile updated."
                 onBack()
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -273,8 +286,8 @@ fun ProfileEditScreen(
                 val message = "Could not save profile. " +
                     ProfileErrorMessages.friendly(error, "Please try again.", isSave = true)
                 saveError = message
-                show(message)
-            }
+                if (isCurrentPreview()) show(message)
+            } finally { isSaving = false }
         }
     }
 
@@ -291,7 +304,7 @@ fun ProfileEditScreen(
                         )
                     }
                 },
-                title = { Text("Edit Profile", color = Color(theme.primaryTextColor), modifier = Modifier.semantics { heading() }) },
+                title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_title), color = Color(theme.primaryTextColor), modifier = Modifier.semantics { heading() }) },  // was: "Edit Profile"
                 actions = {
                     if (isSaving) {
                         CircularProgressIndicator(
@@ -315,10 +328,25 @@ fun ProfileEditScreen(
                         FilledTonalButton(
                             onClick = { save() },
                             modifier = Modifier.padding(end = 12.dp),
-                        ) { Text("Save") }
+                        ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_save)) }  // was: "Save"
                     }
                 },
             )
+        },
+        // P1-41: bottom-anchored full-width Save (Fitts / thumb reach); the top-bar Save above is kept.
+        bottomBar = {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                androidx.compose.material3.Button(
+                    onClick = { save() },
+                    enabled = !isSaving && !justSaved,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_save)) }
+            }
         },
     ) { padding ->
         Column(
@@ -462,12 +490,20 @@ fun ProfileEditScreen(
                             .semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 }
+                // P5-07: group header.
+                Text(
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_group_identity),
+                    color = Color(theme.accentColor),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp).semantics { heading() },
+                )
                 OutlinedTextField(
                     value = displayName,
                     onValueChange = { if (it.length <= 50) displayName = it },
                     enabled = !isSaving,
-                    label = { Text("Display Name") },
-                    placeholder = { Text("Enter your full name") },
+                    label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_display_name)) },  // was: "Display Name"
+                    placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_display_name_hint)) },  // was: "Enter your full name"
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null) },
                     supportingText = { Text("${displayName.length}/50") },
                     singleLine = true,
@@ -487,8 +523,8 @@ fun ProfileEditScreen(
                         }
                     },
                     enabled = !isSaving,
-                    label = { Text("Username") },
-                    placeholder = { Text("Choose a unique username") },
+                    label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_username)) },  // was: "Username"
+                    placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_username_hint)) },  // was: "Choose a unique username"
                     prefix = { Text("@") },
                     leadingIcon = { Icon(Icons.Outlined.AlternateEmail, contentDescription = null) },
                     isError = usernameTaken,
@@ -508,8 +544,8 @@ fun ProfileEditScreen(
                     value = about,
                     onValueChange = { if (it.length <= 140) about = it },
                     enabled = !isSaving,
-                    label = { Text("About / Status") },
-                    placeholder = { Text("Say something about yourself or current mood") },
+                    label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_about)) },  // was: "About / Status"
+                    placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_about_hint)) },  // was: "Say something about yourself or current mood"
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.info, semanticLabel = null) },
                     // Announce only at 120 and 140 characters, not per keystroke (P2-45).
                     supportingText = {
@@ -526,15 +562,30 @@ fun ProfileEditScreen(
                     modifier = Modifier.fillMaxWidth().bringIntoViewRequester(aboutFocus),
                 )
                 Spacer(Modifier.height(16.dp))
+                // P5-07: group header.
+                Text(
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_group_contact),
+                    color = Color(theme.accentColor),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp).semantics { heading() },
+                )
                 OutlinedTextField(
                     value = if (user.phone.isBlank()) "Not set" else "${user.phone} · ${if (user.phoneVerified) "Verified" else "Unverified"}",
                     onValueChange = {},
                     enabled = false,
-                    label = { Text("Phone Number") },
+                    label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_phone)) },  // was: "Phone Number"
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, semanticLabel = null) },
-                    supportingText = { Text("Phone number is managed via Account settings") },
+                    supportingText = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_phone_managed)) },  // was: "Phone number is managed via Account settings"
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                )
+                // P3-07: visibility note. States only what the code does today: media is stored at public links.
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_visibility_note),
+                    color = Color(theme.secondaryTextColor),
+                    fontSize = 12.sp,
                 )
                 Spacer(Modifier.height(24.dp))
             }
@@ -549,18 +600,23 @@ fun ProfileEditScreen(
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .semantics { heading() }
+                    // P1-39: name the sheet pane; AT announcement/focus behavior needs device validation.
+                    // Previous: .semantics { heading() }
+                    .semantics {
+                        heading()
+                        paneTitle = if (target == "avatar") "Change Profile Photo" else "Change Banner Photo"
+                    }
                     .padding(horizontal = 20.dp, vertical = 8.dp),
             )
             ListItem(
-                headlineContent = { Text("Capture Image") },
-                supportingContent = { Text("Use camera to take a new photo") },
+                headlineContent = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_capture_image)) },  // was: "Capture Image"
+                supportingContent = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_capture_image_desc)) },  // was: "Use camera to take a new photo"
                 leadingContent = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera, semanticLabel = null) },
                 modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { pick(ProfileMediaSource.camera) },
             )
             ListItem(
-                headlineContent = { Text("Pick / Choose from Gallery") },
-                supportingContent = { Text("Select an image from device gallery") },
+                headlineContent = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_pick_gallery)) },  // was: "Pick / Choose from Gallery"
+                supportingContent = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_pick_gallery_desc)) },  // was: "Select an image from device gallery"
                 leadingContent = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.gallery, semanticLabel = null) },
                 modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { pick(ProfileMediaSource.gallery) },
             )
@@ -572,18 +628,18 @@ fun ProfileEditScreen(
         // Exact ChatyConfirmDialog copy from profile_edit_screen.dart.
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showDiscardDialog = false },
-            title = { Text("Discard changes?") },
-            text = { Text("You have unsaved changes that will be lost.") },
+            title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_discard_title)) },  // was: "Discard changes?"
+            text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_discard_body)) },  // was: "You have unsaved changes that will be lost."
             confirmButton = {
                 TextButton(
                     onClick = {
                         showDiscardDialog = false
                         onBack()
                     },
-                ) { Text("Discard", color = Color(theme.dangerColor)) }
+                ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_discard), color = Color(theme.dangerColor)) }  // was: "Discard"
             },
             dismissButton = {
-                TextButton(onClick = { showDiscardDialog = false }) { Text("Keep Editing") }
+                TextButton(onClick = { showDiscardDialog = false }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_keep_editing)) }  // was: "Keep Editing"
             },
         )
     }
@@ -633,3 +689,85 @@ private val BIDI_CONTROLS = Regex("[\u200E\u200F\u202A-\u202E\u2066-\u2069]")
 /** NFC-normalise and strip bidi override/isolate controls so names cannot be spoofed. */
 private fun sanitizeDisplayName(raw: String): String =
     java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFC).replace(BIDI_CONTROLS, "").trim()
+
+// Superseded availability/save callbacks retained inactive for audit:
+//     LaunchedEffect(username) {
+//         val normalized = ChatyValidators.normalizeUsername(username)
+//         val unchanged = normalized == ChatyValidators.normalizeUsername(user.username)
+//         if (unchanged || checkUsernameAvailable == null ||
+//             ChatyValidators.validateUsername(normalized, forRegistration = false) != null
+//         ) {
+//             usernameCheckLoading = false
+//             return@LaunchedEffect
+//         }
+//         usernameCheckLoading = true
+//         kotlinx.coroutines.delay(500)
+//         usernameTaken = try {
+//             checkUsernameAvailable(normalized) == false
+//         } catch (_: Exception) {
+//             false  // network hiccup: leave the field neutral, save re-checks
+//         }
+//         usernameCheckLoading = false
+//     }
+//     fun save() {
+//         if (isSaving) return
+//         saveError = null
+//         // Inline validators from profile_edit_screen.dart.
+//         // NFC-normalised, bidi controls stripped (P2-11, P3-20).
+//         val name = sanitizeDisplayName(displayName)
+//         if (name.isEmpty()) {
+//             show(appContext.getString(com.example.chat.R.string.profile_edit_err_name_empty))  // was: "Display name cannot be empty"
+//             scope.launch { nameFocus.bringIntoView() }
+//             return
+//         }
+//         if (name.length < 2) {
+//             show(appContext.getString(com.example.chat.R.string.profile_edit_err_name_short))  // was: "Must be at least 2 characters"
+//             scope.launch { nameFocus.bringIntoView() }
+//             return
+//         }
+//         ChatyValidators.validateUsername(username)?.let {
+//             show(it)
+//             scope.launch { usernameFocus.bringIntoView() }
+//             return
+//         }
+//         ChatyValidators.validateBio(about)?.let {
+//             show(it)
+//             scope.launch { aboutFocus.bringIntoView() }
+//             return
+//         }
+//         val normalized = ChatyValidators.normalizeUsername(username)
+//         val unchanged = normalized == ChatyValidators.normalizeUsername(user.username)
+//         if (!unchanged && usernameTaken) {
+//             show(appContext.getString(com.example.chat.R.string.profile_edit_err_username_unavailable))  // was: "Please select an available username before saving."
+//             return
+//         }
+//         isSaving = true
+//         scope.launch {
+//             try {
+//                 // Live availability re-check at save time when a checker is
+//                 // wired (mirrors the Dart save-time re-check).
+//                 if (!unchanged && checkUsernameAvailable != null &&
+//                     checkUsernameAvailable(normalized) == false
+//                 ) {
+//                     usernameTaken = true
+//                     isSaving = false
+//                     return@launch
+//                 }
+//                 onSave(name, normalized, about.trim(), newAvatarUrl, newBannerUrl)
+//                 isSaving = false
+//                 justSaved = true
+//                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+//                 snackbar.showSnackbar(appContext.getString(com.example.chat.R.string.profile_edit_saved_snackbar))  // was: "Profile updated."
+//                 onBack()
+//             } catch (cancelled: kotlinx.coroutines.CancellationException) {
+//                 throw cancelled
+//             } catch (error: Exception) {
+//                 isSaving = false
+//                 val message = "Could not save profile. " +
+//                     ProfileErrorMessages.friendly(error, "Please try again.", isSave = true)
+//                 saveError = message
+//                 show(message)
+//             }
+//         }
+//     }
+//

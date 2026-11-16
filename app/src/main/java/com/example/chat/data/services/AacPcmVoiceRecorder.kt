@@ -25,6 +25,7 @@ import java.nio.ByteOrder
 import java.util.LinkedList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.log10
@@ -71,9 +72,10 @@ class AndroidPcmVoiceRecorderPort(
     override suspend fun start(config: VoiceRecordConfig, path: String) {
         stopQuietly()
         val next = CaptureThread(config, path)
-        next.startRecording() // throws when reader/encoder init fails (see CaptureThread.startRecording)
+        // Retain the native generation before start: controller cleanup can await a failed startup.
         capture = next
         lastPath = path
+        next.startRecording() // throws when reader/encoder init fails (see CaptureThread.startRecording)
     }
 
     /** record plugin stop(): returns the recorded path after the capture thread and
@@ -102,11 +104,9 @@ class AndroidPcmVoiceRecorderPort(
 
     private fun stopQuietly() {
         val current = capture ?: return
-        try {
-            current.cancelRecording()
-            current.awaitStop()
-        } catch (_: Exception) {
-        }
+        // A failed old generation keeps its reference and refuses replacement capture.
+        current.stopRecording()
+        current.awaitStop()
         capture = null
     }
 
@@ -128,6 +128,10 @@ private class CaptureThread(
     @Volatile private var captureThread: Thread? = null
     @Volatile private var readerRef: PcmReader? = null
     @Volatile private var failure: Exception? = null
+    @Volatile private var cleanupFailure: Exception? = null
+    private var retainedReader: PcmReader? = null
+    private var retainedEncoder: AacEncoder? = null
+    private val cleanupLock = Any()
     private val stopLatch = CountDownLatch(1)
 
     fun isRecording(): Boolean = captureThread != null && recording.get()
@@ -143,9 +147,9 @@ private class CaptureThread(
         synchronized(transition) {
             check(isRecording()) { "Recording is not active." }
             if (!paused) {
-                paused = true
                 generation++ // Any read already in flight is discarded, even across a quick resume.
-                readerRef?.stop()
+                checkNotNull(readerRef).stop()
+                paused = true // Only publish pause after native AudioRecord.stop succeeds.
             }
         }
     }
@@ -188,12 +192,14 @@ private class CaptureThread(
             try {
                 val (mediaFormat, codecName) = AacFormatSupport.selectCodec(config)
                 val pcmReader = PcmReader(config, mediaFormat)
-                pcmReader.start()
                 reader = pcmReader
+                retainedReader = pcmReader // Register before start, which can throw.
+                pcmReader.start()
 
                 val aacEncoder = AacEncoder(mediaFormat, codecName, path) { ex -> fail(ex) }
-                aacEncoder.startEncoding()
                 encoder = aacEncoder
+                retainedEncoder = aacEncoder // Register before async startup.
+                aacEncoder.startEncoding()
 
                 readerRef = pcmReader
                 recording.set(true)
@@ -237,6 +243,10 @@ private class CaptureThread(
      *  muxer finalized, output deleted when canceled). */
     fun awaitStop() {
         stopLatch.await()
+        if (cleanupFailure != null) {
+            // Capture loop is stopped. Retry only retained native handles, never restart audio.
+            cleanupRetained()
+        }
     }
 
     private fun fail(ex: Exception) {
@@ -244,27 +254,27 @@ private class CaptureThread(
         stopRecording()
     }
 
+    private fun cleanupRetained() = synchronized(cleanupLock) {
+        val cleanup = VoiceNativeCleanup()
+        cleanup.attempt { retainedReader?.stop() }
+        cleanup.attempt { retainedReader?.release(); retainedReader = null }
+        cleanup.attempt { retainedEncoder?.stopEncoding(); retainedEncoder = null }
+        try { cleanup.throwIfFailed(); cleanupFailure = null }
+        catch (error: Exception) { cleanupFailure = error; throw error }
+    }
+
     private fun stopAndRelease(reader: PcmReader?, encoder: AacEncoder?) {
         try {
-            try {
-                reader?.stop()
-                reader?.release()
-            } catch (ex: Exception) {
-                fail(ex)
-            }
-            try {
-                encoder?.stopEncoding()
-            } catch (ex: Exception) {
-                fail(ex)
-            }
-            if (canceled) {
-                deleteOutput()
-            }
-        } catch (ex: Exception) {
-            fail(ex)
+            // Locals are already registered before start; preserve them on failed cleanup.
+            if (retainedReader == null) retainedReader = reader
+            if (retainedEncoder == null) retainedEncoder = encoder
+            cleanupRetained()
+            if (canceled) deleteOutput()
+        } catch (error: Exception) {
+            fail(error)
         } finally {
             captureThread = null
-            stopLatch.countDown()
+            stopLatch.countDown() // Never strand awaitStop when any native cleanup throws.
         }
     }
 
@@ -289,6 +299,7 @@ private class PcmReader(
     private val readBuffer: ShortArray
     private val reader: AudioRecord
     private val effects: CaptureEffects
+    private var readerReleased = false
 
     @Volatile private var amplitudeDb: Double = DEFAULT_AMPLITUDE_DB
 
@@ -299,7 +310,14 @@ private class PcmReader(
         bufferSize = calculateBufferSize(sampleRate, channels, audioFormat)
         readBuffer = ShortArray(bufferSize / 2)
         reader = createReader(sampleRate, channels, audioFormat, bufferSize)
-        effects = CaptureEffects(reader.audioSessionId).also { it.apply(config) }
+        effects = CaptureEffects(reader.audioSessionId)
+        try { effects.apply(config) }
+        catch (error: Exception) {
+            val cleanup = VoiceNativeCleanup(error)
+            cleanup.attempt { effects.release() }
+            cleanup.attempt { reader.release() }
+            cleanup.throwIfFailed()
+        }
     }
 
     fun start() {
@@ -307,9 +325,11 @@ private class PcmReader(
     }
 
     fun stop() {
+        if (readerReleased) return
         if (reader.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
             reader.stop()
         }
+        check(reader.recordingState != AudioRecord.RECORDSTATE_RECORDING) { "Microphone did not stop." }
     }
 
     @Throws(Exception::class)
@@ -327,9 +347,11 @@ private class PcmReader(
     fun getAmplitude(): Double = amplitudeDb
 
     fun release() {
-        stop()
-        effects.release()
-        reader.release()
+        val cleanup = VoiceNativeCleanup()
+        cleanup.attempt { stop() }
+        cleanup.attempt { effects.release() }
+        cleanup.attempt { if (!readerReleased) { reader.release(); readerReleased = true } }
+        cleanup.throwIfFailed()
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -353,8 +375,9 @@ private class PcmReader(
             throw Exception("Unable to instantiate PCM reader.", e)
         }
         if (reader.state != AudioRecord.STATE_INITIALIZED) {
-            reader.release()
-            throw Exception("PCM reader failed to initialize.")
+            val cleanup = VoiceNativeCleanup(Exception("PCM reader failed to initialize."))
+            cleanup.attempt { reader.release() }
+            cleanup.throwIfFailed()
         }
         return reader
     }
@@ -440,9 +463,11 @@ private class CaptureEffects(
     }
 
     fun release() {
-        agc?.release()
-        aec?.release()
-        ns?.release()
+        val cleanup = VoiceNativeCleanup()
+        cleanup.attempt { agc?.release(); agc = null }
+        cleanup.attempt { aec?.release(); aec = null }
+        cleanup.attempt { ns?.release(); ns = null }
+        cleanup.throwIfFailed()
     }
 
     companion object {
@@ -563,6 +588,9 @@ private class AacEncoder(
 
     @Volatile private var mStoppedCompleter: Semaphore? = null
     @Volatile private var mStopped = false
+    @Volatile private var encoderFailure: Exception? = null
+    private val cleanupLock = Any()
+    private val cleanupFinished = CountDownLatch(1)
 
     fun encode(bytes: ByteArray) {
         if (mStopped) {
@@ -584,39 +612,45 @@ private class AacEncoder(
     }
 
     fun stopEncoding() {
-        if (mStopped) {
-            return
-        }
-        mStopped = true
-
-        val completer = Semaphore(0)
-        mStoppedCompleter = completer
-
-        mHandler?.post {
-            if (mInputBufferIndex >= 0) {
-                processInputBuffer()
+        if (!mStopped) {
+            mStopped = true
+            val completer = Semaphore(0)
+            mStoppedCompleter = completer
+            val posted = mHandler?.post {
+                if (mCodec == null) stopAndRelease()
+                else if (mInputBufferIndex >= 0) processInputBuffer()
+            } == true
+            if (!posted) stopAndRelease()
+            try {
+                if (!completer.tryAcquire(5, TimeUnit.SECONDS)) {
+                    // A missing EOS callback must not hang capture teardown indefinitely.
+                    val forced = CountDownLatch(1)
+                    val task = Runnable { try { stopAndRelease() } finally { forced.countDown() } }
+                    if (mHandler?.post(task) != true) task.run()
+                    check(forced.await(5, TimeUnit.SECONDS)) { "Encoder cleanup is still pending." }
+                }
+            } finally { quitSafely() }
+        } else {
+            // Error/startup cleanup may already have run. Retry retained codec/container handles.
+            if (cleanupFinished.count != 0L) {
+                check(cleanupFinished.await(5, TimeUnit.SECONDS)) { "Encoder cleanup is still pending." }
             }
+            stopAndRelease() // Explicit retry can acknowledge a prior error once all handles are clean.
         }
-
-        try {
-            // Wait for the encoder to finish
-            completer.acquire()
-        } finally {
-            quitSafely()
-        }
+        encoderFailure?.let { throw it }
     }
 
     private fun initEncoding() {
-        calculateInputRate()
         var codec: MediaCodec? = null
         try {
+            calculateInputRate()
             codec = MediaCodec.createByCodecName(codecName)
+            mCodec = codec // Register before configure/start can throw.
             codec.setCallback(AudioRecorderCodecCallback(), Handler(looper))
             codec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             mCodec = codec
         } catch (e: Exception) {
-            codec?.release()
             onError(e)
         }
     }
@@ -712,21 +746,26 @@ private class AacEncoder(
 
     private fun onError(e: Exception) {
         mStopped = true
-        stopAndRelease()
-        onFailure(e)
+        val cleanup = VoiceNativeCleanup(e)
+        cleanup.attempt { stopAndRelease() }
+        try { cleanup.throwIfFailed() } catch (failure: Exception) { onFailure(failure) }
     }
 
-    private fun stopAndRelease() {
+    private fun stopAndRelease() = synchronized(cleanupLock) {
+        val cleanup = VoiceNativeCleanup()
         try {
-            mCodec?.stop()
+            cleanup.attempt { mCodec?.stop() }
+            cleanup.attempt { mCodec?.release(); mCodec = null }
+            cleanup.attempt { mContainer?.release(); mContainer = null }
+            try { cleanup.throwIfFailed(); encoderFailure = null }
+            catch (error: Exception) { encoderFailure = error; onFailure(error) }
         } finally {
-            mCodec?.release()
-            mCodec = null
+            // Completion is independent of codec/container success. Failed handles stay retryable.
+            mStoppedCompleter?.release()
+            mStoppedCompleter = null
+            cleanupFinished.countDown()
+            quitSafely()
         }
-        mContainer?.release()
-        mContainer = null
-        mStoppedCompleter?.release()
-        mStoppedCompleter = null
     }
 
     private fun calculateInputRate() {
@@ -809,9 +848,10 @@ private class Mpeg4Writer(
     }
 
     fun release() {
-        stop()
-        mMuxer?.release()
-        mMuxer = null
+        val cleanup = VoiceNativeCleanup()
+        cleanup.attempt { stop() }
+        cleanup.attempt { mMuxer?.release(); mMuxer = null }
+        cleanup.throwIfFailed()
     }
 
     fun onCsdBuffer(csd: ByteArray?) {
@@ -822,3 +862,80 @@ private class Mpeg4Writer(
     fun isReadyForSetup(format: MediaFormat): Boolean =
         format.containsKey("csd-0") || mCsdReceived
 }
+
+/* Previous implementation fragments retained (net212):
+        next.startRecording() // throws when reader/encoder init fails (see CaptureThread.startRecording)
+                paused = true
+                readerRef?.stop()
+*/
+
+/* Previous implementation fragments retained (net216):
+        try {
+            current.cancelRecording()
+            current.awaitStop()
+        } catch (_: Exception) {
+        }
+                pcmReader.start()
+                aacEncoder.startEncoding()
+        cleanupFailure?.let { throw it }
+            try {
+                reader?.stop()
+                reader?.release()
+            } catch (ex: Exception) {
+                cleanupFailure = ex
+                fail(ex)
+            }
+            try {
+                encoder?.stopEncoding()
+            } catch (ex: Exception) {
+                fail(ex)
+            }
+            if (canceled) {
+                deleteOutput()
+            }
+        } catch (ex: Exception) {
+            fail(ex)
+            stopLatch.countDown()
+        effects = CaptureEffects(reader.audioSessionId).also { it.apply(config) }
+        stop()
+        effects.release()
+        reader.release()
+            reader.release()
+            throw Exception("PCM reader failed to initialize.")
+        agc?.release()
+        aec?.release()
+        ns?.release()
+        if (mStopped) {
+            return
+        }
+        mStopped = true
+
+        val completer = Semaphore(0)
+        mStoppedCompleter = completer
+
+        mHandler?.post {
+            if (mInputBufferIndex >= 0) {
+                processInputBuffer()
+
+        try {
+            // Wait for the encoder to finish
+            completer.acquire()
+        } finally {
+            quitSafely()
+        }
+        calculateInputRate()
+            codec?.release()
+        stopAndRelease()
+        onFailure(e)
+    private fun stopAndRelease() {
+            mCodec?.stop()
+            mCodec?.release()
+            mCodec = null
+        mContainer?.release()
+        mContainer = null
+        mStoppedCompleter?.release()
+        mStoppedCompleter = null
+        stop()
+        mMuxer?.release()
+        mMuxer = null
+*/

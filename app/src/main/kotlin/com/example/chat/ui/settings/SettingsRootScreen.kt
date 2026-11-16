@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -80,6 +81,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.heading
@@ -113,6 +115,9 @@ enum class SettingsDestination {
 
 /** Dart ProfileMediaSource. */
 enum class ProfileMediaSource { camera, gallery }
+
+/** SET-R3-021: 84dp avatar * 0.46 */
+private const val AvatarInitialsTextSizeSp = 38.64f
 
 /** SET-R1-026: semantic tint key instead of a composable lambda, so RootRow stays a stable data class. */
 private enum class RootDialog { None, About, Policy }
@@ -203,8 +208,18 @@ fun SettingsRootScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    var dialog by remember { mutableStateOf(RootDialog.None) }
-    var pickTarget by remember { mutableStateOf(RootPick.None) }
+    var dialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(RootDialog.None) } // survives rotation (state-holder step)
+    var pickTarget by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(RootPick.None) }
+    // CS4-50: the Calls row advertises the current call audience as its subtitle.
+    // Derived at render; the static allRootGroups/rootGroups lists are unchanged.
+    val callAudience = preferences.privacy.whoCanCallMe
+    val renderedRootGroups = remember(callAudience) {
+        rootGroups.map { group ->
+            RootGroup(group.title, group.rows.map { row ->
+                if (row.dest == SettingsDestination.Calls) row.copy(subtitle = "Who can call you: $callAudience") else row
+            })
+        }
+    }
     val override = preferences.home.myNameOverride.trim()
     val effectiveOverride = override
     val rawName = user.displayName.trim()
@@ -226,6 +241,9 @@ fun SettingsRootScreen(
             try {
                 if (avatar) onPickAvatar(source) else onPickBanner(source)
                 toast(if (avatar) "Profile photo updated." else "Banner updated.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // SET-R1-005: typed cancellation check first (rethrow), string match below kept as fallback for picker "cancelled" errors
+                throw e
             } catch (e: Exception) {
                 if (e.toString().contains("cancelled")) return@launch
                 // SET-R1-014: canned copy, no raw exception text in the UI
@@ -255,14 +273,15 @@ fun SettingsRootScreen(
             ) {
                 if (canGoBack) Box(Modifier.padding(8.dp)) { ChatyBackButton(onPressed = onBack) } else Spacer(Modifier.width(16.dp))
                 if (suppressDuplicateTitle) Spacer(Modifier.weight(1f))
-                else Text("Settings", Modifier.weight(1f).semantics { heading() }, color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                else Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_settings), Modifier.weight(1f).semantics { heading() }, color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 20.sp) // was: "Settings"
                 IconButton(onClick = { onNavigate(SettingsDestination.EditProfile) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit profile", modifier = Modifier.size(24.dp), color = colors.foreground) }
                 IconButton(onClick = { onNavigate(SettingsDestination.SearchSettings) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = "Search settings", modifier = Modifier.size(24.dp), color = colors.foreground) }
                 IconButton(onClick = { onNavigate(SettingsDestination.QrCode) }) { Icon(Icons.Rounded.QrCode2, "QR code", Modifier.size(25.dp), tint = colors.foreground) }
             }
             // R2/R3: grouped lists capped at 720dp centered on larger
             // windows (approved responsive plan 8 Nov 2026).
-            Column(Modifier.weight(1f).fillMaxWidth().widthIn(max = 720.dp).align(Alignment.CenterHorizontally).verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })) {
+            // Width cap must constrain fillMaxWidth rather than inherit its exact width.
+            Column(Modifier.weight(1f).widthIn(max = 720.dp).fillMaxWidth().align(Alignment.CenterHorizontally).verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })) {
                 Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     val bannerWidthDp = (minOf(LocalConfiguration.current.screenWidthDp, 720) - 32).coerceAtLeast(0)
                     // SET-R1-007/R2-045: use the capped container width; cap height on wide windows
@@ -270,9 +289,9 @@ fun SettingsRootScreen(
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                         Box(
                             Modifier.fillMaxWidth().height(bannerHeight)
-                                .background(colors.surface, RoundedCornerShape(20.dp))
-                                .border(1.dp, colors.borderSubtle, RoundedCornerShape(20.dp))
-                                .clip(RoundedCornerShape(19.dp)),
+                                .background(colors.surface, RoundedCornerShape(24.dp)) // SET-R3-041: one card radius (24dp)
+                                .border(1.dp, colors.borderSubtle, RoundedCornerShape(24.dp))
+                                .clip(RoundedCornerShape(23.dp)),
                         ) {
                             val banner = user.bannerUrl?.trim().orEmpty()
                             if (banner.isEmpty()) {
@@ -292,7 +311,7 @@ fun SettingsRootScreen(
                         }
                         Box(
                             Modifier.align(Alignment.TopEnd).padding(10.dp).size(48.dp).clip(CircleShape)
-                                .background(colors.surface.copy(alpha = 0.92f)).clickable { pickTarget = RootPick.Banner },
+                                .background(colors.surface.copy(alpha = 0.92f)).border(1.dp, colors.borderSubtle, CircleShape).clickable { pickTarget = RootPick.Banner }, // SET-R1-053: border keeps the button visible on busy banners
                             contentAlignment = Alignment.Center,
                         ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = "Change account banner", modifier = Modifier.size(19.dp), color = colors.foreground) }
                         // Dart Positioned(bottom: -40): 4dp padding ring around an 84dp avatar.
@@ -307,7 +326,7 @@ fun SettingsRootScreen(
                         ) {
                             val fallback: @Composable () -> Unit = {
                                 Box(Modifier.fillMaxSize().background(colors.surfaceElevated), contentAlignment = Alignment.Center) {
-                                    Text(if (user.avatarInitials.isNotEmpty()) user.avatarInitials else "U", color = colors.foreground, fontSize = (84 * 0.46f).sp, fontWeight = FontWeight.Bold)
+                                    Text(if (user.avatarInitials.isNotEmpty()) user.avatarInitials else "U", color = colors.foreground, fontSize = AvatarInitialsTextSizeSp.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                             if (!user.avatarUrl.isNullOrEmpty()) ChatyAsyncImage(user.avatarUrl, "Change profile photo", Modifier.fillMaxSize(), error = fallback)
@@ -321,7 +340,8 @@ fun SettingsRootScreen(
                     ) {
                         Text(displayName, Modifier.weight(1f, fill = false), color = colors.foreground, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.35).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.width(4.dp))
-                        Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)
+                        // SET-R1-049: chevron-right matches the row's real destination (was KeyboardArrowDown)
+                        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)
                     }
                     Spacer(Modifier.height(3.dp))
                     Text(handle, color = colors.foregroundSecondary, fontSize = 13.sp)
@@ -338,7 +358,7 @@ fun SettingsRootScreen(
                         .border(1.dp, colors.borderSubtle, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                         .navigationBarsPadding().padding(top = 12.dp, bottom = 16.dp),
                 ) {
-                    rootGroups.forEach { group ->
+                    renderedRootGroups.forEach { group ->
                         Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp)) {
                             Text(group.title, Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp).semantics { heading() }, color = colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             Column(
@@ -353,8 +373,13 @@ fun SettingsRootScreen(
                                         RootTint.accent -> colors.accent
                                         RootTint.warning -> colors.warning
                                         RootTint.primary -> colors.primary
-                                    }, row.title, row.subtitle) { open(row.dest) }
-                                    if (i < group.rows.lastIndex) HorizontalDivider(Modifier.padding(start = 68.dp, end = 16.dp), thickness = 1.dp, color = colors.divider)
+                                    }, row.title, row.subtitle, when (row.dest) { // SET-R4-043: per-behavior trailing icon
+                                        SettingsDestination.About -> Icons.Outlined.Info
+                                        SettingsDestination.PrivacyPolicy -> androidx.compose.material.icons.Icons.Outlined.OpenInNew
+                                        SettingsDestination.ShareChaty -> Icons.Rounded.Share
+                                        else -> null
+                                    }) { open(row.dest) }
+                                    if (i < group.rows.lastIndex) HorizontalDivider(Modifier.padding(start = RootTileDividerInset, end = 16.dp), thickness = 1.dp, color = colors.divider)
                                 }
                             }
                         }
@@ -368,7 +393,7 @@ fun SettingsRootScreen(
                     ) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.logout, semanticLabel = null, modifier = Modifier.size(20.dp), color = colors.error)
                         Spacer(Modifier.width(8.dp))
-                        Text("Log Out of Chaty", color = colors.error, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_log_out_of_chaty), color = colors.error, fontSize = 15.sp, fontWeight = FontWeight.Bold) // was: "Log Out of Chaty"
                     }
                 }
             }
@@ -385,7 +410,7 @@ fun SettingsRootScreen(
                     Triple(Icons.Rounded.PhotoLibrary, "Choose from gallery", ProfileMediaSource.gallery),
                 )) {
                     Row(
-                        Modifier.fillMaxWidth().clickable { pickTarget = RootPick.None; runPick(avatar, src) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = androidx.compose.ui.semantics.Role.Button) { pickTarget = RootPick.None; runPick(avatar, src) }.padding(horizontal = 16.dp, vertical = 14.dp), // SET-R4-032
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(icon, null, tint = colors.foreground)
@@ -398,19 +423,23 @@ fun SettingsRootScreen(
     }
 
     if (dialog == RootDialog.Policy) {
-        AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+        AlertDialog(
+            // SET-R2-048: About/Privacy open as full-screen pages (was a centered dialog; previous shape: ChatyModalShape)
+            modifier = Modifier.fillMaxSize(),
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            shape = androidx.compose.ui.graphics.RectangleShape,
             onDismissRequest = { dialog = RootDialog.None },
             containerColor = colors.surfaceElevated,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Shield, null, tint = colors.accent)
                     Spacer(Modifier.width(8.dp))
-                    Text("Privacy Policy", color = colors.foreground, fontSize = 18.sp)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_privacy_policy), color = colors.foreground, fontSize = 18.sp) // was: "Privacy Policy"
                 }
             },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Your Privacy is Our Priority", color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_your_privacy_is_our_priority), color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 14.sp) // was: "Your Privacy is Our Priority"
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "Optional cross-app island:\nIf you turn this feature on and grant Android notification access, Chaty can read notification text and actions and media-session information to show the island and perform actions you choose. The optional accessibility host places a tappable island above other apps; its configuration does not retrieve screen content or inject gestures. Overlay access lets the island float over other apps. Turn the island off in Chaty or revoke special access in Android Settings. Battery settings are optional troubleshooting controls, not a promise of always-on delivery.\n\n" +
@@ -424,25 +453,29 @@ fun SettingsRootScreen(
             },
             confirmButton = {
                 Button(onClick = { dialog = RootDialog.None }, colors = ButtonDefaults.buttonColors(containerColor = colors.accent)) {
-                    Text("I Understand", color = com.example.chat.ui.kit.chatyReadableOn(colors.accent, colors.onAccent, colors.foreground), fontWeight = FontWeight.Bold)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_i_understand), color = com.example.chat.ui.kit.chatyReadableOn(colors.accent, colors.onAccent, colors.foreground), fontWeight = FontWeight.Bold) // was: "I Understand"
                 }
             },
         )
     }
     if (dialog == RootDialog.About) {
-        AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+        AlertDialog(
+            // SET-R2-048: About/Privacy open as full-screen pages (was a centered dialog; previous shape: ChatyModalShape)
+            modifier = Modifier.fillMaxSize(),
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            shape = androidx.compose.ui.graphics.RectangleShape,
             onDismissRequest = { dialog = RootDialog.None },
             containerColor = colors.surfaceElevated,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.info, semanticLabel = null, color = colors.accent)
                     Spacer(Modifier.width(8.dp))
-                    Text("About Chaty", color = colors.foreground, fontSize = 18.sp)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_about_chaty), color = colors.foreground, fontSize = 18.sp) // was: "About Chaty"
                 }
             },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Chaty", color = colors.foreground, fontWeight = FontWeight.Bold)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_chaty), color = colors.foreground, fontWeight = FontWeight.Bold) // was: "Chaty"
                     Spacer(Modifier.height(4.dp))
                     // SET-R1-016/028: one guarded lookup per dialog open, not per recomposition
                     val versionText = remember {
@@ -463,7 +496,7 @@ fun SettingsRootScreen(
             },
             confirmButton = {
                 Button(onClick = { dialog = RootDialog.None }, colors = ButtonDefaults.buttonColors(containerColor = colors.accent)) {
-                    Text("OK", color = com.example.chat.ui.kit.chatyReadableOn(colors.accent, colors.onAccent, colors.foreground), fontWeight = FontWeight.Bold)
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_ok), color = com.example.chat.ui.kit.chatyReadableOn(colors.accent, colors.onAccent, colors.foreground), fontWeight = FontWeight.Bold) // was: "OK"
                 }
             },
         )
@@ -472,10 +505,10 @@ fun SettingsRootScreen(
 
 /** Dart _SettingsItemTile: 44dp icon box, title 16/w700, subtitle 13 (height 1.25), chevron 20. */
 @Composable
-private fun RootItemTile(icon: ImageVector, tint: Color, title: String, subtitle: String, onTap: () -> Unit) {
+private fun RootItemTile(icon: ImageVector, tint: Color, title: String, subtitle: String, trailingIcon: ImageVector? = null, onTap: () -> Unit) {
     val colors = LocalAppColors.current
     Row(
-        Modifier.fillMaxWidth().clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onTap).padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onTap).padding(horizontal = 12.dp, vertical = 8.dp), // SET-R2-039
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(24.dp), tint = tint) }
@@ -484,10 +517,26 @@ private fun RootItemTile(icon: ImageVector, tint: Color, title: String, subtitle
             Text(title, color = colors.foreground, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             if (subtitle.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
-                Text(subtitle, color = colors.foregroundSecondary, fontSize = 13.sp, lineHeight = 16.25.sp)
+                Text(subtitle, color = colors.foregroundSecondary, fontSize = 14.sp, lineHeight = 17.5.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) // SET-R1-058
             }
         }
         Spacer(Modifier.width(8.dp))
-        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, modifier = Modifier.size(20.dp), color = colors.foregroundSecondary)
+        if (trailingIcon != null) Icon(trailingIcon, null, Modifier.size(20.dp), tint = colors.foregroundSecondary)
+        else com.example.chat.ui.icons.ChatyIcon(
+            com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null,
+            // SET-R3-038: mirror the chevron in RTL
+            modifier = Modifier.size(20.dp).scale(scaleX = if (androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl) -1f else 1f, scaleY = 1f),
+            color = colors.foregroundSecondary,
+        )
     }
 }
+
+/** SET-R4-046: divider inset derived from the tile metrics (12dp padding + 44dp icon box + 12dp gap). */
+private val RootTileDividerInset = 12.dp + 44.dp + 12.dp
+
+// Superseded source retained inactive:
+//             Column(Modifier.weight(1f).fillMaxWidth().widthIn(max = 720.dp).align(Alignment.CenterHorizontally).verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })) {
+
+// Superseded call-settings source retained inactive:
+//             Column(Modifier.weight(1f).fillMaxWidth().widthIn(max = 720.dp).align(Alignment.CenterHorizontally).verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })) {
+//                     rootGroups.forEach { group ->

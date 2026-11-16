@@ -81,8 +81,8 @@ class PeerNewChatRulesContractTest {
         assertEquals("broadcast news", NewChatRules.effectiveGroupTitle("broadcast news", true, 2))
         assertEquals("BROADCAST news", NewChatRules.effectiveGroupTitle("BROADCAST news", true, 2))
         assertEquals("Broadcast", NewChatRules.effectiveGroupTitle("Broadcast", true, 2))
-        // startsWith, not word match: "Broadcasting" keeps its title.
-        assertEquals("Broadcasting", NewChatRules.effectiveGroupTitle("Broadcasting", true, 2))
+        // Approved conservative rule: a partial word does not imply broadcast intent.
+        assertEquals("Broadcast: Broadcasting", NewChatRules.effectiveGroupTitle("Broadcasting", true, 2))
         // Prefix test is on the start only, after trimming.
         assertEquals("Broadcast: Team broadcast", NewChatRules.effectiveGroupTitle("Team broadcast", true, 2))
         assertEquals("broadcast x", NewChatRules.effectiveGroupTitle("  broadcast x", true, 2))
@@ -218,3 +218,7 @@ class PeerNewChatRulesContractTest {
         )
     }
 }
+
+// Superseded source lines retained inactive for review:
+//         // startsWith, not word match: "Broadcasting" keeps its title.
+//         assertEquals("Broadcasting", NewChatRules.effectiveGroupTitle("Broadcasting", true, 2))

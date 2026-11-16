@@ -144,6 +144,8 @@ fun ChatyAppBar(
     onBack: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {},
     backgroundColor: Color? = null,
+    titleModifier: Modifier = Modifier,
+    titleTextStyle: androidx.compose.ui.text.TextStyle? = null,
 ) {
     val colors = LocalAppColors.current
     Row(
@@ -164,9 +166,12 @@ fun ChatyAppBar(
         Column(Modifier.weight(1f), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
             Text(
                 title,
+                modifier = titleModifier,
                 color = colors.onSurface,
-                fontSize = 16.5.sp,
-                fontWeight = FontWeight.W600,
+                // Existing title size remains the default for all other callers.
+                fontSize = titleTextStyle?.fontSize ?: 16.5.sp,
+                fontWeight = titleTextStyle?.fontWeight ?: FontWeight.W600,
+                style = titleTextStyle ?: androidx.compose.material3.LocalTextStyle.current,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

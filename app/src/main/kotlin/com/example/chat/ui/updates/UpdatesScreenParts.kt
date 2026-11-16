@@ -340,6 +340,7 @@ internal fun StatusViewerDialog(
     template: com.example.chat.core.templates.UpdatesTemplate,
     viewSession: StatusViewSession,
     remoteImage: @Composable (url: String, modifier: Modifier) -> Unit,
+    imageSizeFor: (String) -> androidx.compose.ui.geometry.Size?,
     openUrl: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -431,7 +432,7 @@ internal fun StatusViewerDialog(
                             modifier = Modifier.semantics { error(mediaFailureLabel) })
                         ChatyTextButton(onClick = { urlAttempt++ }, label = stringResource(R.string.social_status_viewers_retry))
                     }
-                    else -> StatusContent(status, signedUrl, colors, template, remoteImage, openUrl)
+                    else -> StatusContent(status, signedUrl, colors, template, remoteImage, openUrl, imageSizeFor)
                 }
             }
             deleteError?.let { Text(it, color = colors.error, modifier = Modifier.padding(16.dp)) }
@@ -497,6 +498,7 @@ internal fun StatusContent(
     template: com.example.chat.core.templates.UpdatesTemplate,
     remoteImage: @Composable (url: String, modifier: Modifier) -> Unit,
     openUrl: (String) -> Unit,
+    imageSizeFor: (String) -> androidx.compose.ui.geometry.Size? = { null },
 ) {
     val mediaFailureLabel = stringResource(R.string.social_status_media_failure)
     val photoDescription = stringResource(R.string.social_status_photo_description)
@@ -532,16 +534,27 @@ internal fun StatusContent(
         var offsetY by remember(status.id, signedUrl) { mutableStateOf(0f) }
         Column(Modifier.fillMaxSize()) {
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(18.dp))) {
-                val maxPanX = constraints.maxWidth * (scale - 1f) / 2f
-                val maxPanY = constraints.maxHeight * (scale - 1f) / 2f
+                val intrinsic = imageSizeFor(signedUrl)
+                val viewportWidth = constraints.maxWidth.toFloat()
+                val viewportHeight = constraints.maxHeight.toFloat()
+                val bounds = StatusZoomRules.bounds(viewportWidth, viewportHeight,
+                    intrinsic?.width ?: 0f, intrinsic?.height ?: 0f, scale)
+                val maxPanX = bounds.first
+                val maxPanY = bounds.second
+                LaunchedEffect(maxPanX, maxPanY) {
+                    offsetX = offsetX.coerceIn(-maxPanX, maxPanX)
+                    offsetY = offsetY.coerceIn(-maxPanY, maxPanY)
+                }
                 remoteImage(
                     signedUrl,
                     Modifier.fillMaxSize()
-                        .pointerInput(signedUrl) {
+                        .pointerInput(signedUrl, intrinsic, viewportWidth, viewportHeight) {
                             detectTransformGestures { _, pan, zoom, _ ->
                                 scale = (scale * zoom).coerceIn(1f, 5f)
-                                val boundX = size.width * (scale - 1f) / 2f
-                                val boundY = size.height * (scale - 1f) / 2f
+                                val nextBounds = StatusZoomRules.bounds(size.width.toFloat(), size.height.toFloat(),
+                                    intrinsic?.width ?: 0f, intrinsic?.height ?: 0f, scale)
+                                val boundX = nextBounds.first
+                                val boundY = nextBounds.second
                                 offsetX = (offsetX + pan.x).coerceIn(-boundX, boundX)
                                 offsetY = (offsetY + pan.y).coerceIn(-boundY, boundY)
                             }
@@ -611,10 +624,12 @@ private fun ViewsControl(
     onOpen: () -> Unit,
 ) {
     val dragThreshold = with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }
-    var count by remember(status.id) { mutableStateOf<Int?>(null) }
-    var countLoading by remember(status.id) { mutableStateOf(true) }
-    LaunchedEffect(statusService, status.id, revision) {
+    var count by remember(statusService, status.id) { mutableStateOf<Int?>(null) }
+    var countLoading by remember(statusService, status.id) { mutableStateOf(true) }
+    var countAttempt by remember(statusService, status.id) { mutableStateOf(0) }
+    LaunchedEffect(statusService, status.id, revision, countAttempt) {
         countLoading = true
+        count = null
         val loaded = try {
             val result = statusService.viewersFor(status.id).distinctBy { it.userId }.size
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
@@ -663,6 +678,12 @@ private fun ViewsControl(
                     fontWeight = FontWeight.Bold,
                 )
             }
+            if (!countLoading && count == null) {
+                ChatyTextButton(
+                    onClick = { if (!countLoading) { countLoading = true; countAttempt++ } },
+                    label = stringResource(R.string.social_status_viewers_retry),
+                )
+            }
         }
     }
 }
@@ -680,8 +701,8 @@ internal fun StatusViewersSheet(
 ) {
     val viewersLoadingLabel = stringResource(R.string.social_status_viewers_loading)
     val viewersPaneLabel = stringResource(R.string.social_status_viewers_title)
-    var viewers by remember(statusId) { mutableStateOf<List<StatusViewer>?>(null) }
-    var failed by remember(statusId) { mutableStateOf(false) }
+    var viewers by remember(statusService, statusId) { mutableStateOf<List<StatusViewer>?>(null) }
+    var failed by remember(statusService, statusId) { mutableStateOf(false) }
 
     fun load() {
         failed = false
@@ -1087,4 +1108,36 @@ private fun audioSpokenDuration(milliseconds: Long): String {
     val secondLabel = pluralStringResource(R.plurals.social_status_audio_seconds, remainder, remainder)
     return if (minutes == 0) secondLabel else stringResource(R.string.social_status_audio_minutes_seconds,
         pluralStringResource(R.plurals.social_status_audio_minutes, minutes, minutes), secondLabel)
+}
+
+/** Default viewer renderer reports decoded drawable dimensions, including orientation applied by Coil.
+ *  The size is UI-only, never persisted and never treated as a media-authorization signal. */
+@Composable
+internal fun StatusFittedImage(
+    url: String,
+    modifier: Modifier,
+    colors: ChatyColors,
+    onSize: (androidx.compose.ui.geometry.Size) -> Unit,
+) {
+    val painter = coil.compose.rememberAsyncImagePainter(model = url)
+    val state = painter.state
+    val currentOnSize by androidx.compose.runtime.rememberUpdatedState(onSize)
+    LaunchedEffect(url, state) {
+        if (state is coil.compose.AsyncImagePainter.State.Success) {
+            val width = state.result.drawable.intrinsicWidth
+            val height = state.result.drawable.intrinsicHeight
+            if (width > 0 && height > 0) currentOnSize(androidx.compose.ui.geometry.Size(width.toFloat(), height.toFloat()))
+        }
+    }
+    when (state) {
+        is coil.compose.AsyncImagePainter.State.Error -> Box(modifier, contentAlignment = Alignment.Center) {
+            val message = stringResource(R.string.social_status_media_failure)
+            Text(message, color = colors.foregroundSecondary, modifier = Modifier.semantics { error(message) })
+        }
+        is coil.compose.AsyncImagePainter.State.Loading -> Box(modifier, contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = colors.primary)
+        }
+        else -> androidx.compose.foundation.Image(painter = painter, contentDescription = null,
+            modifier = modifier, contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+    }
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -50,8 +51,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -101,10 +105,14 @@ fun MediaWorkspaceScreen(
 
     LaunchedEffect(library) { library.refreshLibrary() }
 
-    val isDark = isSystemInDarkTheme()
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    val isDark = colors.isDark
     var cleanupConfirm by remember { mutableStateOf(false) }
     var cleanupEstimate by remember { mutableStateOf<Long?>(null) }
     var refreshing by remember { mutableStateOf(false) }
+    // DOC-R4-190: measurement includes mini-player content and its own inner padding.
+    var miniPlayerHeightPx by remember { mutableIntStateOf(0) }
+    val miniPlayerHeight = with(LocalDensity.current) { miniPlayerHeightPx.toDp() }
 
     if (cleanupConfirm) AlertDialog(
         onDismissRequest = { cleanupConfirm = false },
@@ -132,12 +140,12 @@ fun MediaWorkspaceScreen(
         dismissButton = { TextButton(onClick = { cleanupConfirm = false }) { Text("Keep files") } },
     )
     Scaffold(
-        containerColor = if (isDark) Color(0xFF0F131A) else Color(0xFFF8FAFC),
+        containerColor = colors.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = if (isDark) Color(0xFF131822) else Color.White,
+                    containerColor = colors.surface,
                 ),
                 title = { Text("Media Studio & Files", fontWeight = FontWeight.W700, fontSize = 16.sp) },
                 actions = {
@@ -169,7 +177,11 @@ fun MediaWorkspaceScreen(
 
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 90.dp),
+                // DOC-R4-185: read library before pinned playback without extra focus nodes.
+                modifier = Modifier.semantics { isTraversalGroup = true; traversalIndex = 0f },
+                // DOC-R4-190 prior fixed reserve: contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 90.dp),
+                // Scaffold padding above already accounts for its system-inset contract.
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = miniPlayerHeight + 16.dp),
             ) {
                 item { StorageOverviewCard(isDark, totalBytes, breakdown, measured = breakdown.scanCompleted, complete = breakdown.isComplete) }
                 item { Spacer(Modifier.height(20.dp)) }
@@ -180,7 +192,7 @@ fun MediaWorkspaceScreen(
                         style = MaterialTheme.typography.labelMedium.copy(
                             letterSpacing = 1.1.sp,
                             fontWeight = FontWeight.W800,
-                            color = Color.Gray,
+                            color = colors.foregroundSecondary,
                         ),
                     )
                 }
@@ -194,7 +206,7 @@ fun MediaWorkspaceScreen(
                                 icon = ChatyIconType.folder,
                                 title = "File Explorer",
                                 subtitle = "Browse all media",
-                                color = Color(0xFF38BDF8),
+                                color = colors.info,
                                 isDark = isDark,
                                 onTap = onOpenFileExplorer,
                             )
@@ -204,7 +216,7 @@ fun MediaWorkspaceScreen(
                                 icon = ChatyIconType.pdf,
                                 title = "PDF Studio",
                                 subtitle = "Convert & manage",
-                                color = Color(0xFFEF4444),
+                                color = colors.error,
                                 isDark = isDark,
                                 onTap = onOpenPdfStudio,
                             )
@@ -233,7 +245,7 @@ fun MediaWorkspaceScreen(
                         style = MaterialTheme.typography.labelMedium.copy(
                             letterSpacing = 1.1.sp,
                             fontWeight = FontWeight.W800,
-                            color = Color.Gray,
+                            color = colors.foregroundSecondary,
                         ),
                     )
                 }
@@ -245,7 +257,7 @@ fun MediaWorkspaceScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(if (isDark) Color(0xFF161C26) else Color.White)
+                                .background(colors.surfaceSecondary)
                                 .padding(28.dp),
                             contentAlignment = Alignment.Center,
                         ) { Text("No files or media found in Chaty storage. Convert or import a file and it will show up here.") }
@@ -289,10 +301,10 @@ fun MediaWorkspaceScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isDark) Color(0xFF161C26) else Color.White)
+                                    .background(colors.surfaceSecondary)
                                     .border(
                                         width = 1.dp,
-                                        color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                        color = colors.borderSubtle,
                                         shape = RoundedCornerShape(14.dp),
                                     )
                                     .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -325,15 +337,15 @@ fun MediaWorkspaceScreen(
                                             }
                                         },
                                         fontSize = 12.sp,
-                                        color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+                                        color = colors.foregroundSecondary,
                                     )
                                 }
                                 // DOC-R4-208: audio rows play immediately rather than open, so they get a
                                 // play affordance with an action-specific label instead of a generic chevron.
                                 if (file.category == MediaCategory.audio) {
-                                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.playArrow, semanticLabel = "Play ${file.name}", color = Color(0xFF10B981))
+                                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.playArrow, semanticLabel = "Play ${file.name}", color = colors.success)
                                 } else {
-                                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = Color.Gray)
+                                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = colors.foregroundSecondary)
                                 }
                             }
                         }
@@ -343,7 +355,10 @@ fun MediaWorkspaceScreen(
             }
 
             // Mini Player pinned at bottom if active
-            Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+            // DOC-R4-190 prior unmeasured wrapper: Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+            Box(modifier = Modifier.align(Alignment.BottomCenter)
+                .onSizeChanged { miniPlayerHeightPx = it.height }
+                .semantics { isTraversalGroup = true; traversalIndex = 1f }) {
                 ChatyMiniPlayer(coordinator = playerCoordinator, onExpand = onExpandPlayer)
             }
         }
@@ -352,6 +367,7 @@ fun MediaWorkspaceScreen(
 
 @Composable
 private fun StorageOverviewCard(isDark: Boolean, totalBytes: Long, breakdown: Map<MediaCategory, Long>, measured: Boolean = true, complete: Boolean = true) {
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
     val mb = totalBytes / (1024.0 * 1024.0)
     Column(
         modifier = Modifier
@@ -359,46 +375,82 @@ private fun StorageOverviewCard(isDark: Boolean, totalBytes: Long, breakdown: Ma
             .shadow(
                 elevation = 14.dp,
                 shape = RoundedCornerShape(20.dp),
-                ambientColor = Color.Black.copy(alpha = if (isDark) 0.25f else 0.04f),
-                spotColor = Color.Black.copy(alpha = if (isDark) 0.25f else 0.04f),
+                ambientColor = colors.shadow,
+                spotColor = colors.shadow,
             )
             .clip(RoundedCornerShape(20.dp))
-            .background(if (isDark) Color(0xFF161C26) else Color.White)
+            .background(colors.surfaceSecondary)
             .border(
                 width = 1.dp,
-                color = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f),
+                color = colors.borderSubtle,
                 shape = RoundedCornerShape(20.dp),
             )
             .padding(20.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Chaty Media Storage",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W800),
-                )
-                // DOC-R4-210: this is Chaty usage, never device capacity.
-                Text(
-                    "Storage used by Chaty on this device",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray,
-                )
-                // DOC-R4-205: an unreadable directory is not zero storage - say so.
-                if (!measured) {
-                    Text("Measuring storage...", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                } else if (!complete) {
+        // DOC-R4-195: only the header stacks, using card-content width or large text.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (maxWidth < 360.dp || LocalDensity.current.fontScale >= 1.3f) {
+                Column(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(
+                            "Chaty Media Storage",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W800),
+                        )
+                        // DOC-R4-210: this is Chaty usage, never device capacity.
+                        Text(
+                            "Storage used by Chaty on this device",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.foregroundSecondary,
+                        )
+                        // DOC-R4-205: an unreadable directory is not zero storage - say so.
+                        if (!measured) {
+                            Text("Measuring storage...", style = MaterialTheme.typography.bodySmall, color = colors.foregroundSecondary)
+                        } else if (!complete) {
+                            Text(
+                                "Some folders could not be read. These totals are partial.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        "Some folders could not be read. These totals are partial.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
+                        "${"%.1f".format(mb)} MB Used",
+                        fontWeight = FontWeight.W700,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Chaty Media Storage",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W800),
+                        )
+                        // DOC-R4-210: this is Chaty usage, never device capacity.
+                        Text(
+                            "Storage used by Chaty on this device",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.foregroundSecondary,
+                        )
+                        // DOC-R4-205: an unreadable directory is not zero storage - say so.
+                        if (!measured) {
+                            Text("Measuring storage...", style = MaterialTheme.typography.bodySmall, color = colors.foregroundSecondary)
+                        } else if (!complete) {
+                            Text(
+                                "Some folders could not be read. These totals are partial.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                    }
+                    Text(
+                        "${"%.1f".format(mb)} MB Used",
+                        fontWeight = FontWeight.W700,
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }
-            Text(
-                "${"%.1f".format(mb)} MB Used",
-                fontWeight = FontWeight.W700,
-                color = MaterialTheme.colorScheme.primary,
-            )
         }
         Spacer(Modifier.height(14.dp))
         // Multi-segmented bar
@@ -408,22 +460,31 @@ private fun StorageOverviewCard(isDark: Boolean, totalBytes: Long, breakdown: Ma
                 .height(10.dp)
                 .clip(RoundedCornerShape(6.dp)),
         ) {
-            StorageSegment(breakdown[MediaCategory.image] ?: 0, totalBytes, Color(0xFF38BDF8))
-            StorageSegment(breakdown[MediaCategory.video] ?: 0, totalBytes, Color(0xFFA855F7))
-            StorageSegment(breakdown[MediaCategory.audio] ?: 0, totalBytes, Color(0xFF10B981))
-            StorageSegment(breakdown[MediaCategory.pdf] ?: 0, totalBytes, Color(0xFFEF4444))
-            StorageSegment(breakdown[MediaCategory.document] ?: 0, totalBytes, Color(0xFFF59E0B))
+            StorageSegment(breakdown[MediaCategory.image] ?: 0, totalBytes, colors.info)
+            StorageSegment(breakdown[MediaCategory.video] ?: 0, totalBytes, colors.accent)
+            StorageSegment(breakdown[MediaCategory.audio] ?: 0, totalBytes, colors.success)
+            StorageSegment(breakdown[MediaCategory.pdf] ?: 0, totalBytes, colors.error)
+            StorageSegment(breakdown[MediaCategory.document] ?: 0, totalBytes, colors.warning)
             StorageSegment(breakdown[MediaCategory.archive] ?: 0, totalBytes, MaterialTheme.colorScheme.secondary)
             StorageSegment(breakdown[MediaCategory.other] ?: 0, totalBytes, MaterialTheme.colorScheme.outline)
         }
         Spacer(Modifier.height(14.dp))
-        Text(breakdown.entries.joinToString("; ") { "${it.key.name}: ${it.value} bytes" }, style = MaterialTheme.typography.bodySmall)
+        // DOC-R4-184 original bytes-only text:
+        // Text(breakdown.entries.joinToString("; ") { "${it.key.name}: ${it.value} bytes" }, style = MaterialTheme.typography.bodySmall)
+        Column {
+            breakdown.forEach { (category, bytes) ->
+                val share = storageCategoryShare(bytes, totalBytes)
+                val proportion = if (!measured || share == null) "proportion unavailable" else
+                    java.text.NumberFormat.getPercentInstance().apply { maximumFractionDigits = 1 }.format(share)
+                Text("${category.name}: $bytes bytes, $proportion", style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            LegendDot("Photos", Color(0xFF38BDF8))
-            LegendDot("Videos", Color(0xFFA855F7))
-            LegendDot("Audio", Color(0xFF10B981))
-            LegendDot("PDFs", Color(0xFFEF4444))
-            LegendDot("Docs", Color(0xFFF59E0B))
+            LegendDot("Photos", colors.info)
+            LegendDot("Videos", colors.accent)
+            LegendDot("Audio", colors.success)
+            LegendDot("PDFs", colors.error)
+            LegendDot("Docs", colors.warning)
             LegendDot("Archives", MaterialTheme.colorScheme.secondary)
             LegendDot("Other", MaterialTheme.colorScheme.outline)
         }
@@ -438,10 +499,11 @@ private fun androidx.compose.foundation.layout.RowScope.StorageSegment(bytes: Lo
 
 @Composable
 private fun LegendDot(label: String, color: Color) {
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(modifier = Modifier.size(8.dp).background(color, CircleShape))
         Spacer(Modifier.width(4.dp))
-        Text(label, fontSize = 10.sp, color = Color.Gray)
+        Text(label, fontSize = 10.sp, color = colors.foregroundSecondary)
     }
 }
 
@@ -454,22 +516,31 @@ private fun ActionCard(
     isDark: Boolean,
     onTap: () -> Unit,
 ) {
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    var cardFocused by remember { mutableStateOf(false) }
     // DOC-R4-181: one merged button node so the icon, title and subtitle read as a single command.
-    Box(Modifier.springInteractiveScale(0.96f).semantics(mergeDescendants = true) { role = Role.Button }.clickable(onClick = onTap)) {
+    // DOC-R4-181 original: Box(Modifier.springInteractiveScale(0.96f).semantics(mergeDescendants = true) { role = Role.Button }.clickable(onClick = onTap)) {
+    Box(Modifier.springInteractiveScale(0.96f)
+        .onFocusChanged { cardFocused = it.isFocused }
+        .then(if (cardFocused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier)
+        .semantics(mergeDescendants = true) {
+        role = Role.Button
+        contentDescription = "$title. $subtitle"
+    }.clickable(onClickLabel = title, onClick = onTap)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .shadow(
                     elevation = 10.dp,
                     shape = RoundedCornerShape(16.dp),
-                    ambientColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
-                    spotColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
+                    ambientColor = colors.shadow,
+                    spotColor = colors.shadow,
                 )
                 .clip(RoundedCornerShape(16.dp))
-                .background(if (isDark) Color(0xFF161C26) else Color.White)
+                .background(colors.surfaceSecondary)
                 .border(
                     width = 1.dp,
-                    color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                    color = colors.borderSubtle,
                     shape = RoundedCornerShape(16.dp),
                 )
                 .padding(16.dp),
@@ -482,13 +553,14 @@ private fun ActionCard(
             Text(title, fontWeight = FontWeight.W700, fontSize = 14.sp)
             Spacer(Modifier.height(2.dp))
             // DOC-R1-046: 12sp readable metadata baseline (was 11sp).
-            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+            Text(subtitle, fontSize = 12.sp, color = colors.foregroundSecondary)
         }
     }
 }
 
 @Composable
 private fun FileThumb(file: MediaFileDescriptor) {
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
     if (file.category == MediaCategory.image && file.exists) {
         ChatyAsyncImage(
             url = File(file.path).toURI().toString(),
@@ -502,7 +574,7 @@ private fun FileThumb(file: MediaFileDescriptor) {
     Box(
         modifier = Modifier
             .size(38.dp)
-            .background(Color.Gray.copy(alpha = 0.15f), CircleShape),
+            .background(colors.foregroundSecondary.copy(alpha = 0.15f), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         ChatyMediaIcon(
@@ -512,7 +584,7 @@ private fun FileThumb(file: MediaFileDescriptor) {
                 else -> ChatyIconType.document
             },
             size = 18.dp,
-            color = Color(0xFF448AFF), // Colors.blueAccent
+            color = colors.info, // Colors.blueAccent
         )
     }
 }
@@ -530,3 +602,44 @@ private fun describeModified(instant: java.time.Instant): String {
             .withZone(java.time.ZoneId.systemDefault()).format(instant)
     }
 }
+
+// Superseded source retained inactive:
+//     val isDark = isSystemInDarkTheme()
+//         containerColor = if (isDark) Color(0xFF0F131A) else Color(0xFFF8FAFC),
+//                     containerColor = if (isDark) Color(0xFF131822) else Color.White,
+//                             color = Color.Gray,
+//                                 color = Color(0xFF38BDF8),
+//                                 color = Color(0xFFEF4444),
+//                             color = Color.Gray,
+//                                 .background(if (isDark) Color(0xFF161C26) else Color.White)
+//                                     .background(if (isDark) Color(0xFF161C26) else Color.White)
+//                                         color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+//                                         color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+//                                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.playArrow, semanticLabel = "Play ${file.name}", color = Color(0xFF10B981))
+//                                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = Color.Gray)
+//                 ambientColor = Color.Black.copy(alpha = if (isDark) 0.25f else 0.04f),
+//                 spotColor = Color.Black.copy(alpha = if (isDark) 0.25f else 0.04f),
+//             .background(if (isDark) Color(0xFF161C26) else Color.White)
+//                 color = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f),
+//                             color = Color.Gray,
+//                             Text("Measuring storage...", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+//                             color = Color.Gray,
+//                             Text("Measuring storage...", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+//             StorageSegment(breakdown[MediaCategory.image] ?: 0, totalBytes, Color(0xFF38BDF8))
+//             StorageSegment(breakdown[MediaCategory.video] ?: 0, totalBytes, Color(0xFFA855F7))
+//             StorageSegment(breakdown[MediaCategory.audio] ?: 0, totalBytes, Color(0xFF10B981))
+//             StorageSegment(breakdown[MediaCategory.pdf] ?: 0, totalBytes, Color(0xFFEF4444))
+//             StorageSegment(breakdown[MediaCategory.document] ?: 0, totalBytes, Color(0xFFF59E0B))
+//             LegendDot("Photos", Color(0xFF38BDF8))
+//             LegendDot("Videos", Color(0xFFA855F7))
+//             LegendDot("Audio", Color(0xFF10B981))
+//             LegendDot("PDFs", Color(0xFFEF4444))
+//             LegendDot("Docs", Color(0xFFF59E0B))
+//         Text(label, fontSize = 10.sp, color = Color.Gray)
+//                     ambientColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
+//                     spotColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
+//                 .background(if (isDark) Color(0xFF161C26) else Color.White)
+//                     color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+//             Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+//             .background(Color.Gray.copy(alpha = 0.15f), CircleShape),
+//             color = Color(0xFF448AFF), // Colors.blueAccent

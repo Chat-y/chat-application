@@ -1,5 +1,8 @@
 package com.example.chat.ui.calls
 
+import androidx.compose.runtime.collectAsState
+
+import kotlinx.coroutines.flow.collect
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.provider.Settings
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +33,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -65,6 +70,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -77,6 +85,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -102,6 +111,8 @@ import com.example.chat.core.theme.argbWithAlpha
 import com.example.chat.domain.models.UserProfile
 import com.example.chat.ui.theme.LocalThemeConfig
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.map
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
 
 enum class CallContactPickerMode { contacts, dialpad }
@@ -130,12 +141,19 @@ fun CallContactPickerScreen(
     currentUserId: String,
     initialMode: CallContactPickerMode = CallContactPickerMode.contacts,
     onBack: () -> Unit,
-    onStartCall: (contact: UserProfile, isVideo: Boolean) -> Unit,
+// Previous implementation retained:     onStartCall: (contact: UserProfile, isVideo: Boolean) -> Unit,
+    onStartCall: suspend (contact: UserProfile, isVideo: Boolean) -> Unit,
     showToast: (message: String, isError: Boolean) -> Unit,
 ) {
     val theme = LocalThemeConfig.current
     val haptics = LocalHapticFeedback.current
     val context = LocalContext.current
+    val soundScope = androidx.compose.runtime.rememberCoroutineScope()
+    val soundPreferences = remember(context, soundScope) { KeypadSoundPreferences.onDevice(context, soundScope) }
+    val appKeypadSounds by soundPreferences.enabled.collectAsState()
+    val soundPreferenceReady by soundPreferences.ready.collectAsState()
+    val soundPreferenceFailed by soundPreferences.saveFailed.collectAsState()
+
     // Respect silent/vibrate and the device's dial-pad tone preference.
     val tones = remember(context) { runCatching { ToneGenerator(AudioManager.STREAM_DTMF, 70) }.getOrNull() }
     DisposableEffect(tones) { onDispose { tones?.release() } }
@@ -150,16 +168,26 @@ fun CallContactPickerScreen(
             tones?.startTone(androidTone, durationMs) == true
         }
     }
-    // CALLS-R1-33: read the system tone preference and ringer mode once at screen entry
-    // instead of two binder calls per keypress; the read must never block dialing.
-    val dialpadSoundsEnabled = remember {
-        runCatching { Settings.System.getInt(context.contentResolver, Settings.System.DTMF_TONE_WHEN_DIALING, 1) != 0 }.getOrDefault(true)
-    }
-    val normalRingerMode = remember {
-        runCatching { context.getSystemService(AudioManager::class.java)?.ringerMode == AudioManager.RINGER_MODE_NORMAL }.getOrDefault(true)
-    }
+// Previous implementation retained:     // CALLS-R1-33: read the system tone preference and ringer mode once at screen entry
+// Previous implementation retained:     // instead of two binder calls per keypress; the read must never block dialing.
+// Previous implementation retained:     val dialpadSoundsEnabled = remember {
+// Previous implementation retained:         runCatching { Settings.System.getInt(context.contentResolver, Settings.System.DTMF_TONE_WHEN_DIALING, 1) != 0 }.getOrDefault(true)
+// Previous implementation retained:     }
+// Previous implementation retained:     val normalRingerMode = remember {
+// Previous implementation retained:         runCatching { context.getSystemService(AudioManager::class.java)?.ringerMode == AudioManager.RINGER_MODE_NORMAL }.getOrDefault(true)
+// Previous implementation retained:     }
     fun playDialTone(digit: String) {
-        runCatching { toneDispatcher.dispatch(digit, dialpadSoundsEnabled, normalRingerMode) }
+// Previous implementation retained: // Previous implementation retained:         runCatching { toneDispatcher.dispatch(digit, dialpadSoundsEnabled, normalRingerMode) }
+// Previous implementation retained:         runCatching { toneDispatcher.dispatch(digit, appKeypadSounds && dialpadSoundsEnabled, normalRingerMode) }
+        // Re-read on every tap. Entry-time snapshots can sound after switching to Silent.
+        // An unavailable system check fails silent without blocking digit entry.
+        val systemEnabled = runCatching {
+            Settings.System.getInt(context.contentResolver, Settings.System.DTMF_TONE_WHEN_DIALING, 1) != 0
+        }.getOrDefault(false)
+        val normalRinger = runCatching {
+            context.getSystemService(AudioManager::class.java)?.ringerMode == AudioManager.RINGER_MODE_NORMAL
+        }.getOrDefault(false)
+        runCatching { toneDispatcher.dispatch(digit, appKeypadSounds && systemEnabled, normalRinger) }
     }
 
     // CALLS-R1-23: dialed-but-never-connected digits are highly sensitive; this state must
@@ -167,13 +195,24 @@ fun CallContactPickerScreen(
     var query by remember { mutableStateOf("") }
     var isDialpad by remember { mutableStateOf(initialMode == CallContactPickerMode.dialpad) }
     var isKeypadCollapsed by remember { mutableStateOf(false) }
+    var predictiveKeypadProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val reduceKeypadMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    androidx.activity.compose.PredictiveBackHandler(enabled = isDialpad && !isKeypadCollapsed) { events ->
+        completeCallPickerBack(events.map { it.progress },
+            onProgress = { predictiveKeypadProgress = it },
+            onCommit = { if (isDialpad && !isKeypadCollapsed) isKeypadCollapsed = true })
+    }
+    // CALLS-R1-45: session/rotation-scoped choice; no global preference is silently written.
+    var keepKeypadOpen by rememberSaveable { mutableStateOf(false) }
     var startingContactId by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     // Dart _handleScroll: scrolling down in dialpad mode collapses the keypad.
     // CALLS-R1-31: stop collecting scroll frames once the keypad has collapsed.
-    LaunchedEffect(isDialpad, isKeypadCollapsed) {
-        if (!isDialpad || isKeypadCollapsed) return@LaunchedEffect
+// Previous implementation retained:     LaunchedEffect(isDialpad, isKeypadCollapsed) {
+// Previous implementation retained:         if (!isDialpad || isKeypadCollapsed) return@LaunchedEffect
+    LaunchedEffect(isDialpad, isKeypadCollapsed, keepKeypadOpen) {
+        if (!isDialpad || isKeypadCollapsed || keepKeypadOpen) return@LaunchedEffect
         snapshotFlow { listState.firstVisibleItemScrollOffset to listState.firstVisibleItemIndex }
             .collect { (offset, index) ->
                 if ((index > 0 || offset > 24) && !isKeypadCollapsed) {
@@ -193,7 +232,8 @@ fun CallContactPickerScreen(
 
     fun initials(name: String): String {
         val normalized = name.trim()
-        return if (normalized.isEmpty()) "?" else normalized.substring(0, 1).uppercase()
+// Previous implementation retained:         return if (normalized.isEmpty()) "?" else normalized.substring(0, 1).uppercase()
+        return if (normalized.isEmpty()) "?" else callInitials(normalized)
     }
 
     val scope = rememberCoroutineScope()
@@ -202,12 +242,14 @@ fun CallContactPickerScreen(
         startingContactId = contact.id
         // CALLS-R1-58: confirm the consequential action with haptics.
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        onStartCall(contact, isVideo)
-        // CALLS-R1-10: the owner completes the async initiate; hold the guard (and the
-        // spinner) through that window instead of reopening it synchronously.
+// Previous implementation retained:         onStartCall(contact, isVideo)
+// Previous implementation retained:         // CALLS-R1-10: the owner completes the async initiate; hold the guard (and the
+// Previous implementation retained:         // spinner) through that window instead of reopening it synchronously.
         scope.launch {
-            delay(3000)
-            if (startingContactId == contact.id) startingContactId = null
+// Previous implementation retained:             delay(3000)
+// Previous implementation retained:             if (startingContactId == contact.id) startingContactId = null
+            try { onStartCall(contact, isVideo) }
+            finally { if (startingContactId == contact.id) startingContactId = null }
         }
     }
 
@@ -254,8 +296,10 @@ fun CallContactPickerScreen(
         }
         // CALLS-R1-13: one neutral message - never confirm whether a typed number is registered.
         showToast(
-            if (exact.size > 1) "More than one contact matches. Choose the right contact below."
-            else "No call can be started for this number. Tap a matching contact below to call.",
+// Previous implementation retained:             if (exact.size > 1) "More than one contact matches. Choose the right contact below."
+// Previous implementation retained:             else "No call can be started for this number. Tap a matching contact below to call.",
+            if (exact.size > 1) context.getString(com.example.chat.R.string.calls_ui_24)
+            else context.getString(com.example.chat.R.string.calls_ui_25),
             true,
         )
     }
@@ -266,31 +310,38 @@ fun CallContactPickerScreen(
         ),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = Color(theme.backgroundColor),
+        floatingActionButtonPosition = androidx.compose.material3.FabPosition.Center,
         floatingActionButton = {
             if (isDialpad && isKeypadCollapsed) {
                 FloatingActionButton(
+                    modifier = Modifier.testTag("dialpad-reopen").size(56.dp),
                     onClick = { isKeypadCollapsed = false },
                     containerColor = Color(theme.successColor),
                     contentColor = Color.White,
                 ) {
-                    Icon(Icons.Rounded.Dialpad, contentDescription = "Show dialpad", modifier = Modifier.size(28.dp))
+// Previous implementation retained:                     Icon(Icons.Rounded.Dialpad, contentDescription = "Show dialpad", modifier = Modifier.size(28.dp))
+                    Icon(Icons.Rounded.Dialpad, contentDescription = context.getString(com.example.chat.R.string.calls_ui_26), modifier = Modifier.size(28.dp))
                 }
             }
         },
     ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
         val compactHeight = maxHeight < 600.dp
-        Column(Modifier.fillMaxSize()) {
+// Previous implementation retained:         Column(Modifier.fillMaxSize()) {
+        // CALLS-R2-16: keep keypad/list above the soft keyboard instead of being covered by it.
+        Column(Modifier.fillMaxSize().imePadding()) {
             // App bar row (Dart AppBar: back, title, mode toggle).
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
             ) {
                 IconButton(onClick = onBack) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = Color(theme.primaryTextColor))
+// Previous implementation retained:                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = Color(theme.primaryTextColor))
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = context.getString(com.example.chat.R.string.calls_ui_27), color = Color(theme.primaryTextColor))
                 }
                 Text(
-                    if (isDialpad) "Add call" else "Contacts",
+// Previous implementation retained:                     if (isDialpad) "Add call" else "Contacts",
+                    if (isDialpad) context.getString(com.example.chat.R.string.calls_ui_6) else context.getString(com.example.chat.R.string.calls_ui_28),
                     color = Color(theme.primaryTextColor),
                     fontSize = 20.sp,
                     fontWeight = FontWeight.ExtraBold,
@@ -299,8 +350,10 @@ fun CallContactPickerScreen(
                 )
                 IconButton(onClick = { isDialpad = !isDialpad },
                     modifier = Modifier.size(48.dp).semantics(mergeDescendants = true) {
-                        contentDescription = if (isDialpad) "Show contacts" else "Open dialpad"
-                        stateDescription = if (isDialpad) "Dialpad mode" else "Contacts mode"
+// Previous implementation retained:                         contentDescription = if (isDialpad) "Show contacts" else "Open dialpad"
+// Previous implementation retained:                         stateDescription = if (isDialpad) "Dialpad mode" else "Contacts mode"
+                        contentDescription = if (isDialpad) context.getString(com.example.chat.R.string.calls_ui_29) else context.getString(com.example.chat.R.string.calls_ui_30)
+                        stateDescription = if (isDialpad) context.getString(com.example.chat.R.string.calls_ui_31) else context.getString(com.example.chat.R.string.calls_ui_32)
                     }) {
                     Icon(
                         if (isDialpad) Icons.Rounded.Contacts else Icons.Rounded.Dialpad,
@@ -312,6 +365,37 @@ fun CallContactPickerScreen(
                 Spacer(Modifier.width(4.dp))
             }
 
+            // Owner UI-only change: hide the two dialpad options. Stored sound defaults,
+            // current preference reads, tone gating and keypad-collapse behavior stay intact.
+// Previous implementation retained:             if (isDialpad) {
+// Previous implementation retained:                 Row(
+// Previous implementation retained:                     Modifier.fillMaxWidth().toggleable(
+// Previous implementation retained:                         value = keepKeypadOpen,
+// Previous implementation retained:                         role = androidx.compose.ui.semantics.Role.Checkbox,
+// Previous implementation retained:                         onValueChange = { keepKeypadOpen = it },
+// Previous implementation retained:                     ).padding(horizontal = 20.dp, vertical = 4.dp),
+// Previous implementation retained:                     verticalAlignment = Alignment.CenterVertically,
+// Previous implementation retained:                 ) {
+// Previous implementation retained:                     Checkbox(checked = keepKeypadOpen, onCheckedChange = null)
+// Previous implementation retained:                     Spacer(Modifier.width(8.dp))
+// Previous implementation retained: // Previous implementation retained:                     Text("Keep dialpad open", color = Color(theme.primaryTextColor), fontSize = 14.sp)
+// Previous implementation retained:                     Text(context.getString(com.example.chat.R.string.calls_ui_33), color = Color(theme.primaryTextColor), fontSize = 14.sp)
+// Previous implementation retained:                 }
+// Previous implementation retained:             }
+// Previous implementation retained
+// Previous implementation retained:             if (isDialpad) {
+// Previous implementation retained:                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+// Previous implementation retained:                     value = appKeypadSounds, enabled = soundPreferenceReady,
+// Previous implementation retained:                     role = Role.Checkbox, onValueChange = { soundPreferences.choose(it) }
+// Previous implementation retained:                 ).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+// Previous implementation retained:                     Checkbox(checked = appKeypadSounds, onCheckedChange = null, enabled = soundPreferenceReady)
+// Previous implementation retained:                     Text(if (appKeypadSounds) "Keypad sounds: on" else "Keypad sounds: off",
+// Previous implementation retained:                         color = Color(theme.primaryTextColor))
+// Previous implementation retained:                 }
+// Previous implementation retained:                 if (soundPreferenceFailed) Text("Keypad sounds stay off because the choice could not be saved. Tap to try again.",
+// Previous implementation retained:                     color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 20.dp))
+// Previous implementation retained:             }
+// Previous implementation retained
             // Search / number field.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -334,7 +418,8 @@ fun CallContactPickerScreen(
                     ),
                     placeholder = {
                         Text(
-                            if (isDialpad) "Enter number" else "Search contacts",
+// Previous implementation retained:                             if (isDialpad) "Enter number" else "Search contacts",
+                            if (isDialpad) context.getString(com.example.chat.R.string.calls_ui_34) else context.getString(com.example.chat.R.string.calls_ui_35),
                             color = Color(theme.secondaryTextColor),
                             textAlign = if (isDialpad) TextAlign.Center else TextAlign.Start,
                             modifier = Modifier.fillMaxWidth(),
@@ -357,7 +442,8 @@ fun CallContactPickerScreen(
 
             if (isDialpad && digitLimitHit) {
                 Text(
-                    "Number too long",
+// Previous implementation retained:                     "Number too long",
+                    context.getString(com.example.chat.R.string.calls_ui_36),
                     color = Color(theme.dangerColor),
                     fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
@@ -367,9 +453,12 @@ fun CallContactPickerScreen(
             if (isDialpad && query.isNotEmpty()) {
                 Text(
                     when {
-                        visibleContacts.isEmpty() -> "No registered contact matches this number"
-                        visibleContacts.size == 1 -> "1 matching Chaty contact"
-                        else -> "${visibleContacts.size} matching Chaty contacts"
+// Previous implementation retained:                         visibleContacts.isEmpty() -> "No registered contact matches this number"
+// Previous implementation retained:                         visibleContacts.size == 1 -> "1 matching Chaty contact"
+// Previous implementation retained:                         else -> "${visibleContacts.size} matching Chaty contacts"
+                        visibleContacts.isEmpty() -> context.getString(com.example.chat.R.string.calls_ui_37)
+                        visibleContacts.size == 1 -> context.resources.getQuantityString(com.example.chat.R.plurals.call_picker_matching_count, 1, 1)
+                        else -> context.resources.getQuantityString(com.example.chat.R.plurals.call_picker_matching_count, visibleContacts.size, visibleContacts.size)
                     },
                     color = Color(theme.secondaryTextColor),
                     fontSize = 12.sp,
@@ -381,7 +470,8 @@ fun CallContactPickerScreen(
             }
             if (!isDialpad) {
                 Text(
-                    if (visibleContacts.size == 1) "1 contact" else "${visibleContacts.size} contacts",
+// Previous implementation retained:                     if (visibleContacts.size == 1) "1 contact" else "${visibleContacts.size} contacts",
+                    context.resources.getQuantityString(com.example.chat.R.plurals.call_picker_contact_count, visibleContacts.size, visibleContacts.size),
                     color = Color(theme.secondaryTextColor),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -389,7 +479,10 @@ fun CallContactPickerScreen(
                 )
             }
 
-            Box(Modifier.weight(1f)) {
+// Previous implementation retained:             Box(Modifier.weight(1f)) {
+            // CALLS-R1-57: de-emphasize the list while the keypad sheet owns the foreground.
+            val keypadExpanded = isDialpad && !isKeypadCollapsed
+            Box(Modifier.weight(1f).then(if (keypadExpanded) Modifier.alpha(0.5f) else Modifier)) {
                 if (visibleContacts.isEmpty()) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -404,15 +497,18 @@ fun CallContactPickerScreen(
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            if (query.isEmpty()) "No contacts available" else "No matching contacts",
+// Previous implementation retained:                             if (query.isEmpty()) "No contacts available" else "No matching contacts",
+                            if (query.isEmpty()) context.getString(com.example.chat.R.string.calls_ui_38) else context.getString(com.example.chat.R.string.calls_ui_39),
                             color = Color(theme.primaryTextColor),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(5.dp))
                         Text(
-                            if (query.isEmpty()) "Your registered Chaty contacts will appear here."
-                            else "Calls are available for registered Chaty contacts only.",
+// Previous implementation retained:                             if (query.isEmpty()) "Your registered Chaty contacts will appear here."
+// Previous implementation retained:                             else "Calls are available for registered Chaty contacts only.",
+                            if (query.isEmpty()) context.getString(com.example.chat.R.string.calls_ui_40)
+                            else context.getString(com.example.chat.R.string.calls_ui_41),
                             color = Color(theme.secondaryTextColor),
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center,
@@ -421,7 +517,8 @@ fun CallContactPickerScreen(
                 } else {
                     LazyColumn(
                         state = listState,
-                        contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 16.dp),
+// Previous implementation retained:                         contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 16.dp),
+                        contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = if (isDialpad && isKeypadCollapsed) 96.dp else 16.dp),
                     ) {
                         items(visibleContacts, key = { it.id }) { contact ->
                             val name = contact.displayName.trim()
@@ -431,8 +528,10 @@ fun CallContactPickerScreen(
                             // number in every row (shoulder-surfing/screenshots).
                             val subtitle = when {
                                 about.isNotEmpty() -> about
-                                phone.isNotEmpty() -> phone
-                                else -> "Chaty contact"
+// Previous implementation retained:                                 phone.isNotEmpty() -> phone
+                                phone.isNotEmpty() -> callPhoneDisplay(phone, java.util.Locale.getDefault().country)
+// Previous implementation retained:                                 else -> "Chaty contact"
+                                else -> context.getString(com.example.chat.R.string.calls_ui_15)
                             }
                             val isThisCallStarting = startingContactId == contact.id
                             val isStartingCall = startingContactId != null
@@ -450,18 +549,21 @@ fun CallContactPickerScreen(
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        name.ifEmpty { "Chaty contact" },
+// Previous implementation retained:                                         name.ifEmpty { "Chaty contact" },
+                                        name.ifEmpty { context.getString(com.example.chat.R.string.calls_ui_15) },
                                         color = Color(theme.primaryTextColor),
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
+// Previous implementation retained:                                         maxLines = 1,
+                                        maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
                                         subtitle,
                                         color = Color(theme.secondaryTextColor),
                                         fontSize = 12.5.sp,
-                                        maxLines = 1,
+// Previous implementation retained:                                         maxLines = 1,
+                                        maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
@@ -470,7 +572,8 @@ fun CallContactPickerScreen(
                                     // doesn't jump; CALLS-R1-44: announced to screen readers.
                                     Box(
                                         Modifier.width(96.dp).semantics(mergeDescendants = true) {
-                                            contentDescription = "Starting call to $name"
+// Previous implementation retained:                                             contentDescription = "Starting call to $name"
+                                            contentDescription = context.getString(com.example.chat.R.string.call_picker_starting, name)
                                             liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
                                         },
                                         contentAlignment = Alignment.Center,
@@ -488,7 +591,8 @@ fun CallContactPickerScreen(
                                             enabled = !isStartingCall,
                                         ) {
                                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio,
-                                                semanticLabel = "Voice call",
+// Previous implementation retained:                                                 semanticLabel = "Voice call",
+                                                semanticLabel = context.getString(com.example.chat.R.string.calls_ui_20),
                                                 color = Color(theme.accentColor),
                                                 modifier = Modifier.size(21.dp),
                                             )
@@ -498,7 +602,8 @@ fun CallContactPickerScreen(
                                             enabled = !isStartingCall,
                                         ) {
                                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideo,
-                                                semanticLabel = "Video call",
+// Previous implementation retained:                                                 semanticLabel = "Video call",
+                                                semanticLabel = context.getString(com.example.chat.R.string.calls_ui_19),
                                                 color = Color(theme.accentColor),
                                                 modifier = Modifier.size(22.dp),
                                             )
@@ -521,7 +626,11 @@ fun CallContactPickerScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(if (compactHeight) Modifier.weight(1f).semantics { contentDescription = "Dialpad keys" }.verticalScroll(rememberScrollState()) else Modifier)
+                        .graphicsLayer {
+                            translationY = if (reduceKeypadMotion) 0f else size.height * predictiveKeypadProgress
+                        }
+// Previous implementation retained:                         .then(if (compactHeight) Modifier.weight(1f).semantics { contentDescription = "Dialpad keys" }.verticalScroll(rememberScrollState()) else Modifier)
+                        .then(if (compactHeight) Modifier.weight(1f).semantics { contentDescription = context.getString(com.example.chat.R.string.calls_ui_42) }.verticalScroll(rememberScrollState()) else Modifier)
                         .background(
                             Color(theme.surfaceColor),
                             com.example.chat.ui.kit.ChatyModalShape,
@@ -547,10 +656,19 @@ fun CallContactPickerScreen(
                                     .aspectRatio(1f)
                                         .testTag("dial-key-${key.digit}")
                                         .semantics(mergeDescendants = true) {
-                                            contentDescription = "Dial ${key.digit}${if (key.subtitle.isNotEmpty()) ", ${key.subtitle}" else ""}${if (key.digit == "0") ", long press for plus" else ""}"
+// Previous implementation retained:                                             contentDescription = "Dial ${key.digit}${if (key.subtitle.isNotEmpty()) ", ${key.subtitle}" else ""}${if (key.digit == "0") ", long press for plus" else ""}"
+                                            contentDescription = context.getString(
+                                                com.example.chat.R.string.call_picker_dial_key,
+                                                key.digit,
+                                                key.subtitle.takeIf { it.isNotEmpty() }?.let {
+                                                    context.getString(com.example.chat.R.string.call_picker_key_letters, it)
+                                                }.orEmpty(),
+                                                if (key.digit == "0") context.getString(com.example.chat.R.string.call_picker_plus_hint) else "",
+                                            )
                                             if (key.digit == "0") {
                                                 customActions = listOf(
-                                                    androidx.compose.ui.semantics.CustomAccessibilityAction("Insert plus") { appendDigit("+"); true },
+// Previous implementation retained:                                                     androidx.compose.ui.semantics.CustomAccessibilityAction("Insert plus") { appendDigit("+"); true },
+                                                    androidx.compose.ui.semantics.CustomAccessibilityAction(context.getString(com.example.chat.R.string.calls_ui_43)) { appendDigit("+"); true },
                                                 )
                                             }
                                         }
@@ -593,7 +711,8 @@ fun CallContactPickerScreen(
                     }
                     Spacer(Modifier.height(14.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { isKeypadCollapsed = true }, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Hide dialpad" }) {
+// Previous implementation retained:                         IconButton(onClick = { isKeypadCollapsed = true }, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Hide dialpad" }) {
+                        IconButton(onClick = { isKeypadCollapsed = true }, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = context.getString(com.example.chat.R.string.calls_ui_44) }) {
                             Icon(
                                 Icons.Rounded.KeyboardArrowDown,
                                 contentDescription = null,
@@ -607,7 +726,8 @@ fun CallContactPickerScreen(
                             modifier = Modifier
                                 .size(60.dp)
                                 .testTag("dial-call")
-                                .semantics(mergeDescendants = true) { contentDescription = "Call number" }
+// Previous implementation retained:                                 .semantics(mergeDescendants = true) { contentDescription = "Call number" }
+                                .semantics(mergeDescendants = true) { contentDescription = context.getString(com.example.chat.R.string.calls_ui_45) }
                                 .clip(CircleShape)
                                 .background(Color(theme.successColor), CircleShape)
                                 .clickable { triggerCall() },
@@ -624,18 +744,21 @@ fun CallContactPickerScreen(
                             modifier = Modifier
                                 .size(48.dp)
                                 .semantics(mergeDescendants = true) {
-                                    contentDescription = "Delete digit"
+// Previous implementation retained:                                     contentDescription = "Delete digit"
+                                    contentDescription = context.getString(com.example.chat.R.string.calls_ui_46)
                                     role = Role.Button
                                     // CALLS-R1-59: no actions while the field is empty - the dimmed
                                     // icon is then honestly disabled, not tappable-but-dead.
                                     if (query.isNotEmpty()) {
                                         // Semantic actions are for accessibility only. Pointer input below
                                         // keeps ownership of touch gestures, so a tap deletes only once.
-                                        onClick(label = "Delete one digit") {
+// Previous implementation retained:                                         onClick(label = "Delete one digit") {
+                                        onClick(label = context.getString(com.example.chat.R.string.calls_ui_47)) {
                                             if (startingContactId == null) removeDigit()
                                             true
                                         }
-                                        onLongClick(label = "Delete digits repeatedly") {
+// Previous implementation retained:                                         onLongClick(label = "Delete digits repeatedly") {
+                                        onLongClick(label = context.getString(com.example.chat.R.string.calls_ui_48)) {
                                             if (startingContactId == null) backspaceRepeating = true
                                             true
                                         }
@@ -669,4 +792,15 @@ fun CallContactPickerScreen(
         }
         } // Measured compact-height boundary.
     }
+}
+
+
+/** Collapse only after a committed back gesture; cancellation resets the preview, never navigates. */
+internal suspend fun completeCallPickerBack(
+    progress: kotlinx.coroutines.flow.Flow<Float>, onProgress: (Float) -> Unit, onCommit: () -> Unit,
+) {
+    try {
+        progress.collect { onProgress(if (it.isFinite()) it.coerceIn(0f, 1f) else 0f) }
+        onCommit()
+    } finally { onProgress(0f) }
 }

@@ -46,6 +46,7 @@ import com.example.chat.ui.kit.GbSettingRow
 import com.example.chat.ui.kit.GbSwitchTile
 import com.example.chat.ui.kit.rememberGbPickers
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -244,6 +246,7 @@ private val bubbleStyleIds: List<BubbleStyleId> = listOf(
 )
 
 */
+/* Previous local enum lists/family function; registry now owns metadata.
 private val tickStyleIds = DeliveryIconStyle.entries.toList()
 private val bubbleStyleIds = BubbleStyleId.entries.toList()
 
@@ -257,6 +260,8 @@ private fun conversationStyleFamily(name: String): String {
     }
 }
 
+*/
+
 private fun conv(v: Long?, fallback: Color) = v?.let { Color(it) } ?: fallback
 
 /**
@@ -268,15 +273,68 @@ private fun conv(v: Long?, fallback: Color) = v?.let { Color(it) } ?: fallback
  */
 @Composable
 fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, onBack: () -> Unit) {
+    var generation by remember(preferences) { androidx.compose.runtime.mutableLongStateOf(preferences.scopeGeneration) }
+    DisposableEffect(preferences) {
+        // Previous generation listener updated state on the notifying thread without a disposal guard.
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        var attached = true
+        val listener: () -> Unit = {
+            val refresh = { if (attached) generation = preferences.scopeGeneration }
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) refresh() else main.post { refresh() }
+        }
+        preferences.addListener(listener); listener()
+        onDispose { attached = false; preferences.removeListener(listener) }
+    }
+    // Dispose pending picker/gallery/density state when the reusable controller changes account.
+    androidx.compose.runtime.key(preferences,generation) {
+        ScopedConversationBubbleAndTicksScreen(preferences,generation,onBack)
+    }
+}
+
+@Composable
+private fun ScopedConversationBubbleAndTicksScreen(
+    preferences: ChatyPreferencesController, generation: Long, onBack: () -> Unit,
+) {
+    val scopeIsCurrent = remember(preferences,generation) { { preferences.scopeGeneration == generation } }
+
     val strings = androidx.compose.ui.platform.LocalContext.current.resources
     val config = LocalThemeConfig.current
     val colors = LocalAppColors.current
     // Legacy whole-controller version listener replaced by a conversation-only snapshot.
-    val p = rememberConversationPreferences(preferences)
+    // Previous broad snapshot: val p = rememberConversationPreferences(preferences)
+    // Previous snapshot: val p = rememberConversationPreferences(preferences, ::selectBubbleAndTicksPreferences)
+    val model: BubbleAndTicksViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        // Previous key omitted the account generation.
+        key = "conversation-bubbles-${System.identityHashCode(preferences)}-$generation",
+        factory = androidx.compose.runtime.remember(preferences,generation) {
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                    require(modelClass.isAssignableFrom(BubbleAndTicksViewModel::class.java))
+                    return BubbleAndTicksViewModel(read = { if (scopeIsCurrent()) preferences.conversation else com.example.chat.domain.models.ConversationPreferences() },
+                        write = { if (scopeIsCurrent()) preferences.updateConversation(it) },
+                        subscribe = { preferences.addListener(it) }, unsubscribe = { preferences.removeListener(it) },
+                        initialTheme = BubblePreviewTheme(config, colors.surface, colors.surfaceSecondary),
+                        // Retained model callbacks must not edit the controller's later account.
+                        transaction = { transform -> if (scopeIsCurrent()) preferences.editConversation { latest ->
+                            if (scopeIsCurrent()) transform(latest) else latest
+                        } }, scopeIsCurrent = scopeIsCurrent) as T
+                }
+            }
+        },
+    )
+    // Lifecycle-aware collection is separately blocked by the excluded dependency/controller work.
+    val state by model.uiState.collectAsState()
+    val bubbleRollout = rememberConversationStyleRollout(preferences,CONVERSATION_BUBBLE_ROLLOUT,generation)
+    val p = state.preferences
+    val messageGap = rememberConversationMessageGap(preferences,generation)
+    val previewState = state.preview
+    androidx.compose.runtime.SideEffect { model.setTheme(BubblePreviewTheme(config, colors.surface, colors.surfaceSecondary)) }
 
     val accent = Color(config.accentColor)
     val fs = config.fontScale.toFloat().let { if (it.isFinite()) it.coerceIn(0.8f, 2f) else 1f }
 
+    /* Previous screen-owned derived colors:
     val convBg = conv(p.convBackgroundColor, colors.surface)
     val rightBubbleBg = conv(p.rightBubbleColor, accent)
     val rightTextCol = conv(p.rightChatBubbleTextColor, conversationOnColor(rightBubbleBg, Color(config.primaryTextColor), Color(config.backgroundColor)))
@@ -289,47 +347,102 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
     val quotedName = conv(p.quotedNameColor, accent)
     val quotedMsg = conv(p.quotedMessageColor, Color(config.secondaryTextColor))
     val textSize = p.messageTextSize.toFloat().coerceIn(12f, 26f)
+    */
+    val convBg = previewState.convBg
+    val rightBubbleBg = previewState.rightBubbleBg
+    val rightTextCol = previewState.rightTextCol
+    val rightTimeCol = previewState.rightTimeCol
+    val leftBubbleBg = previewState.leftBubbleBg
+    val leftTextCol = previewState.leftTextCol
+    val leftTimeCol = previewState.leftTimeCol
+    val quotedBg = previewState.quotedBg
+    val quotedDivider = previewState.quotedDivider
+    val quotedName = previewState.quotedName
+    val quotedMsg = previewState.quotedMsg
+    val textSize = previewState.textSize
+    val sliderView = androidx.compose.ui.platform.LocalView.current
+    var lastTextDetent by androidx.compose.runtime.remember(textSize) { androidx.compose.runtime.mutableStateOf(conversationTextDetent(textSize)) }
     val sampleContext = androidx.compose.ui.platform.LocalContext.current
     val sampleTime = android.text.format.DateFormat.getTimeFormat(sampleContext).format(java.util.Date(0))
 
     fun setTickStyle(id: DeliveryIconStyle) {
-        val key = id.name
-        preferences.editConversation { latest -> latest.copy(tickStyle = key) }
+        val key = if (bubbleRollout) id.name else conversationLegacyTickValue(id)
+        // Previous writer: preferences.editConversation { latest -> latest.copy(tickStyle = key) }
+        model.edit { latest -> latest.copy(tickStyle = key) }
     }
     fun setBubbleStyle(id: BubbleStyleId) {
-        val value = id.name
-        preferences.editConversation { latest -> latest.copy(bubbleStyle = value) }
+        val value = if (bubbleRollout) id.name else conversationLegacyBubbleValue(id)
+        // Previous writer: preferences.editConversation { latest -> latest.copy(bubbleStyle = value) }
+        model.edit { latest -> latest.copy(bubbleStyle = value) }
         // Legacy duplicate GB write disabled: conversation prefs are the authoritative style.
         // preferences.updateGbFeatures(mapOf("bubble_style" to value), logTitle = "Bubbles Style")
     }
 
+    /* Previous local tick renderer, now shared with BubblePreview.
     @Composable
     fun tickPreview(id: DeliveryIconStyle, color: Color) {
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf(DeliveryState.sent, DeliveryState.delivered, DeliveryState.read).forEach { state ->
+            // Previous local preview-state list: sent, delivered, read. Registry owns it now.
+            ConversationStyleRegistry.tick(id).previewStates.forEach { state ->
                 DeliveryStatusIcon(style = id, state = state, unreadColor = color, readColor = accent, size = 16.dp)
             }
         }
     }
 
+    */
+
     val pickers = rememberGbPickers()
-    fun pickColor(title: String, current: Long?, apply: (Long) -> Unit) =
-        pickers.showColor(title, current ?: config.accentColor) { apply(it) }
+    // Previous picker callback unconditionally applied into the reusable controller.
+    fun pickColor(title: String, current: Long?, apply: (Long) -> Unit) {
+        if (scopeIsCurrent()) pickers.showColor(title, current ?: config.accentColor) {
+            if (scopeIsCurrent()) apply(it)
+        }
+    }
 
     // Legacy fixed incoming shape disabled; both sides now use ChatyBubbleContainer.
 
-    Column(Modifier.fillMaxSize().background(Color(config.backgroundColor))) {
-        com.example.chat.ui.kit.ChatyAppBar(title = strings.getString(com.example.chat.R.string.conv_ui_bubbles_and_ticks_f7fcbf), onBack = onBack)
+    // Previous per-screen shell: Column(Modifier.fillMaxSize().background(Color(config.backgroundColor))) {
+    // Previous per-screen header: com.example.chat.ui.kit.ChatyAppBar(title = strings.getString(com.example.chat.R.string.conv_ui_bubbles_and_ticks_f7fcbf), onBack = onBack, titleModifier = Modifier.semantics { heading() })
+    ConversationSettingsScaffold(title = strings.getString(com.example.chat.R.string.conv_ui_bubbles_and_ticks_f7fcbf), onBack = onBack) {
+
+        var groupedPreview by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
         var showPreview by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
         androidx.compose.material3.TextButton(onClick = { showPreview = !showPreview }) {
             Text(if (showPreview) strings.getString(com.example.chat.R.string.conv_ui_hide_preview_78cb0e) else strings.getString(com.example.chat.R.string.conv_ui_show_preview_0e7698))
         }
-        if (showPreview) Box(Modifier.align(Alignment.CenterHorizontally).widthIn(max = 600.dp).padding(16.dp, 8.dp)) {
-            GbLivePreviewCard(modifier = Modifier.semantics { contentDescription = strings.getString(com.example.chat.R.string.conv_ui_sample_conversation_with_inc_d78404) }, padding = PaddingValues(12.dp)) {
+        ConversationAdaptiveSettingsBody(
+            modifier = Modifier.weight(1f).fillMaxWidth().navigationBarsPadding().imePadding()
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)),
+            compactPinnedPreview = true,
+            preview = {
+        // Previous preview bounds: if (showPreview) Box(Modifier.align(Alignment.CenterHorizontally).widthIn(max = 600.dp).padding(16.dp, 8.dp)) {
+        if (showPreview) Box(Modifier.fillMaxWidth()) {
+            BubblePreview(previewState, groupedCorners = groupedPreview, messageGapDp = messageGap)
+            /* Previous preview assembly:
+            BubblePreview(BubblePreviewState(
+                bubbleStyle = bubbleStyleIdFromString(p.bubbleStyle),
+                tickStyle = deliveryIconStyleFromString(p.tickStyle),
+                convBg = convBg,
+                rightBubbleBg = rightBubbleBg,
+                rightTextCol = rightTextCol,
+                rightTimeCol = rightTimeCol,
+                leftBubbleBg = leftBubbleBg,
+                leftTextCol = leftTextCol,
+                leftTimeCol = leftTimeCol,
+                quotedBg = quotedBg,
+                quotedDivider = quotedDivider,
+                quotedName = quotedName,
+                quotedMsg = quotedMsg,
+                deletedIconColor = conv(p.deletedMessageIconColor, Color(config.secondaryTextColor)),
+                textSize = textSize, makeTextSelectable = p.makeTextSelectable, removeReadMore = p.removeReadMore,
+            ))
+            */
+            /* Original inline preview retained; BubblePreview above now owns rendering.
+            GbLivePreviewCard(modifier = Modifier.semantics { contentDescription = strings.getString(com.example.chat.R.string.conv_ui_sample_conversation_with_inc_d78404) }, padding = PaddingValues(ConversationPreviewLayout.cardPaddingDp.dp /* previous: 12.dp */)) {
                 androidx.compose.foundation.layout.BoxWithConstraints {
                 val sampleBubbleWidth = maxWidth * config.bubbleMaxWidthFactor.toFloat()
                 Column(
-                    Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()).background(convBg, RoundedCornerShape(16.dp)).padding(12.dp),
+                    Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()).background(convBg, RoundedCornerShape(16.dp)).padding(ConversationPreviewLayout.cardPaddingDp.dp /* previous: 12.dp */),
                 ) {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                         ChatyBubbleContainer(styleId = bubbleStyleIdFromString(p.bubbleStyle), isMe = false,
@@ -351,8 +464,19 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                     }
                     ChatyBubbleContainer(styleId = bubbleStyleIdFromString(p.bubbleStyle), isMe = false,
                         fillColor = leftBubbleBg, accentColor = accent, modifier = Modifier.widthIn(max = sampleBubbleWidth).padding(vertical = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
+                                semanticLabel = null,
+                                color = conv(p.deletedMessageIconColor, Color(config.secondaryTextColor)),
+                                modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text(strings.getString(com.example.chat.R.string.conv_ui_deleted_message_5426bd),
+                                color = Color(config.secondaryTextColor), fontSize = (12 * fs).sp)
+                        }
+                        /* Previous sample coloured only text, not the deleted icon.
                         Text(strings.getString(com.example.chat.R.string.conv_ui_deleted_message_5426bd),
                             color = conv(p.deletedMessageIconColor, Color(config.secondaryTextColor)), fontSize = (12 * fs).sp)
+                        */
                     }
                     val longSample = strings.getString(com.example.chat.R.string.conv_ui_a_longer_preview_message_sho_ead0e2).repeat(5)
                     val sample: @Composable () -> Unit = {
@@ -375,22 +499,22 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                             ) {
                                 Column(horizontalAlignment = Alignment.End) {
                                     Column(
-                                        Modifier.padding(bottom = 4.dp)
+                                        Modifier.padding(bottom = ConversationPreviewLayout.detailGapDp.dp /* previous: 4.dp */)
                                             .clip(RoundedCornerShape(8.dp)).background(quotedBg, RoundedCornerShape(8.dp))
                                             .drawBehind {
                                                 // Border(left: 3.5) over rounded 8 box
                                                 drawRect(quotedDivider, Offset.Zero, androidx.compose.ui.geometry.Size(3.5.dp.toPx(), size.height))
                                             }
-                                            .padding(6.dp),
+                                            .padding(ConversationPreviewLayout.quotePaddingDp.dp /* previous: 6.dp */),
                                     ) {
                                         Text(strings.getString(com.example.chat.R.string.conv_ui_alex_64542d), color = quotedName, fontSize = (11 * fs).sp, fontWeight = FontWeight.Bold)
                                         Text(strings.getString(com.example.chat.R.string.conv_ui_do_you_like_my_theme_757cae), color = quotedMsg, fontSize = (11 * fs).sp, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     }
                                     Text(strings.getString(com.example.chat.R.string.conv_ui_yes_your_theme_looks_awesome_c283ee), color = rightTextCol, fontSize = textSize.sp)
-                                    Spacer(Modifier.height(3.dp))
+                                    Spacer(Modifier.height(ConversationPreviewLayout.detailGapDp.dp /* previous: 3.dp */))
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(sampleTime, color = rightTimeCol, fontSize = (11 * fs).sp)
-                                        Spacer(Modifier.width(4.dp))
+                                        Spacer(Modifier.width(ConversationPreviewLayout.detailGapDp.dp /* previous: 4.dp */))
                                         tickPreview(deliveryIconStyleFromString(p.tickStyle), rightTimeCol)
                                     }
                                 }
@@ -400,49 +524,85 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                 }
             }
         }
+            */
         }
+            },
+            controls = {
+            ConversationMessageDensityControls(preferences, messageGap,generation)
+            ConversationBubbleTailControls(preferences,generation)
+            com.example.chat.ui.kit.GbSettingRow(title = strings.getString(com.example.chat.R.string.conv_proposal_grouped_preview),
+                subtitle = strings.getString(com.example.chat.R.string.conv_proposal_preview_only),
+                switchValue = groupedPreview, onSwitchChanged = { groupedPreview = it },
+                iconContent = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.tune, semanticLabel = null) })
+
+        /* Previous option body, scrolling now owned by adaptive shell:
         Column(
-            Modifier.weight(1f).align(Alignment.CenterHorizontally).widthIn(max = 600.dp).fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().imePadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).padding(horizontal = 14.dp, vertical = 8.dp),
+            Modifier.weight(1f).align(Alignment.CenterHorizontally).widthIn(max = 600.dp).fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().imePadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).padding(horizontal = ConversationPreviewLayout.outerPaddingDp.dp, vertical = 8.dp /* previous horizontal: 14.dp */),
         ) {
+        */
+            com.example.chat.ui.kit.GbSettingRow(title = strings.getString(com.example.chat.R.string.conv_proposal_style_rollout),
+                subtitle = strings.getString(com.example.chat.R.string.conv_proposal_style_rollout_scope),switchValue = bubbleRollout,
+                onSwitchChanged = { if (scopeIsCurrent()) preferences.updateGbFeature(CONVERSATION_BUBBLE_ROLLOUT,it) })
             ConversationSettingsSection(title = strings.getString(com.example.chat.R.string.conv_ui_styles_look_and_feel_9ebc23)) {
                 Column {
                     ConversationStyleGallery(
                         title = strings.getString(com.example.chat.R.string.conv_ui_ticks_style_ea6c4e),
                         subtitle = strings.getString(com.example.chat.R.string.conv_ui_preview_choices_apply_saves__bc203c),
-                        values = tickStyleIds,
-                        keyOf = { it.name },
-                        familyOf = { conversationStyleFamily(it.name) },
-                        selected = deliveryIconStyleFromString(p.tickStyle),
-                        labelOf = { id -> id.displayName },
-                        onSelected = { setTickStyle(it) },
-                    ) { id -> tickPreview(id, rightTimeCol) }
+                        values = ConversationStyleRegistry.ticks, quickPickCount = 8, enhanced = bubbleRollout,
+                        keyOf = { it.id.name },
+                        familyOf = { it.family },
+                        selected = ConversationStyleRegistry.tick(deliveryIconStyleFromString(p.tickStyle)),
+                        // Legacy label: labelOf = { id -> id.displayName },
+                        labelOf = { if (bubbleRollout) it.label else it.id.displayName },
+                        onSelected = { setTickStyle(it.id) },
+                    ) { option -> ConversationTickPreview(option.id, rightTimeCol) }
                     ConversationStyleGallery(
                         title = strings.getString(com.example.chat.R.string.conv_ui_bubbles_style_8eac85),
                         subtitle = strings.getString(com.example.chat.R.string.conv_ui_preview_shapes_apply_saves_y_32b25b),
-                        values = bubbleStyleIds,
-                        keyOf = { it.name },
-                        familyOf = { conversationStyleFamily(it.name) },
-                        selected = bubbleStyleIdFromString(p.bubbleStyle),
-                        labelOf = { id -> id.displayName },
-                        onSelected = { setBubbleStyle(it) },
-                    ) { id ->
+                        values = ConversationStyleRegistry.bubbles, quickPickCount = 8, enhanced = bubbleRollout,
+                        keyOf = { it.id.name },
+                        familyOf = { it.family },
+                        selected = ConversationStyleRegistry.bubble(bubbleStyleIdFromString(p.bubbleStyle)),
+                        // Legacy label: labelOf = { id -> id.displayName },
+                        labelOf = { if (!bubbleRollout) it.id.displayName else if (it.recommended) strings.getString(com.example.chat.R.string.conv_proposal_classic_recommended) else it.label },
+                        onSelected = { setBubbleStyle(it.id) },
+                    ) { option ->
                         Box(Modifier.width(64.dp)) {
                             ChatyBubbleContainer(
-                                styleId = id, isMe = true,
+                                styleId = option.id, isMe = true,
                                 fillColor = accent.copy(alpha = 0.85f), accentColor = accent,
-                            ) { Text(strings.getString(com.example.chat.R.string.conv_ui_hi_94dd9e), color = Color.White, fontSize = (11 * fs).sp) }
+                            ) {
+                                // Previous gallery text used Color.White regardless of fill.
+                                Text(strings.getString(com.example.chat.R.string.conv_ui_hi_94dd9e),
+                                    color = com.example.chat.ui.kit.themeGlyphColor(accent.copy(alpha = 0.85f), config),
+                                    fontSize = (11 * fs).sp)
+                            }
                         }
                     }
                     GbSliderTile(
                         title = strings.getString(com.example.chat.R.string.conv_ui_message_text_size_67448e),
                         subtitle = strings.getString(com.example.chat.R.string.conv_ui_before_system_font_scaling_1389fe),
                         value = textSize,
+                        unit = strings.getString(com.example.chat.R.string.conv_proposal_points_unit),
                         min = 12f, max = 26f, divisions = 14,
-                        onChanged = { preferences.editConversation { latest -> latest.copy(messageTextSize = it.toDouble()) } },
+                        // Previous writer: onChanged = { preferences.editConversation { latest -> latest.copy(messageTextSize = it.toDouble()) } },
+                        // Previous adapter callback: onChanged = { model.edit { latest -> latest.copy(messageTextSize = it.toDouble()) } },
+                        onChanged = { value ->
+                            val detent = conversationTextDetent(value)
+                            if (detent != null && detent != lastTextDetent) {
+                                com.example.chat.ui.kit.ChatyHapticsPort.selection(sliderView)
+                                lastTextDetent = detent
+                            }
+                            model.edit { latest -> latest.copy(messageTextSize = value.toDouble()) }
+                        },
                     )
                 }
             }
             Spacer(Modifier.height(16.dp))
+            ConversationBubblePalette(p.rightBubbleColor, p.rightChatBubbleTextColor) { pair ->
+                model.edit { latest -> latest.copy(rightBubbleColor = pair.background,
+                    rightChatBubbleTextColor = pair.foreground, rightBubbleTimeColor = pair.foreground) }
+            }
             ConversationContrastNote(rightTextCol, rightBubbleBg, 4.5f, strings.getString(com.example.chat.R.string.conv_ui_your_message_text_98dcca))
             ConversationContrastNote(rightTimeCol, rightBubbleBg, 4.5f, strings.getString(com.example.chat.R.string.conv_ui_your_message_time_2be207))
             ConversationContrastNote(leftTextCol, leftBubbleBg, 4.5f, strings.getString(com.example.chat.R.string.conv_ui_their_message_text_5eb8ee))
@@ -457,9 +617,11 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.wallpaper), title = strings.getString(com.example.chat.R.string.conv_ui_conversation_background_colo_ebd884), subtitle = if (p.wallpaperType.equals("none", true) || p.wallpaperType.equals("no wallpaper", true)) strings.getString(com.example.chat.R.string.conv_ui_conversation_background_2f906b) else strings.getString(com.example.chat.R.string.conv_ui_applies_only_without_wallpap_60db0c),
                         colorValue = p.convBackgroundColor,
                         enabled = p.wallpaperType.equals("none", true) || p.wallpaperType.equals("no wallpaper", true),
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_conversation_background_colo_ebd884), (convBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(convBackgroundColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_conversation_background_colo_ebd884), (convBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(convBackgroundColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_conversation_background_colo_ebd884), (convBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(convBackgroundColor = c) } } },
                         effectiveColor = convBg,
-                    onReset = { preferences.editConversation { latest -> latest.copy(convBackgroundColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(convBackgroundColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(convBackgroundColor = null) } },
                 )
                 }
             }
@@ -469,23 +631,29 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.chats), title = strings.getString(com.example.chat.R.string.conv_ui_your_message_background_b0a1fc), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_right_chat_bubble_col_c4975d),
                         colorValue = p.rightBubbleColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_color_ba37f3), (rightBubbleBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(rightBubbleColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_color_ba37f3), (rightBubbleBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(rightBubbleColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_color_ba37f3), (rightBubbleBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(rightBubbleColor = c) } } },
                         effectiveColor = rightBubbleBg,
-                    onReset = { preferences.editConversation { latest -> latest.copy(rightBubbleColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(rightBubbleColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(rightBubbleColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.textFormat), title = strings.getString(com.example.chat.R.string.conv_ui_your_message_text_98dcca), subtitle = strings.getString(com.example.chat.R.string.conv_ui_sets_right_chat_bubble_text__e9bdcc),
                         colorValue = p.rightChatBubbleTextColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_text_color_e3d3d4), (rightTextCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(rightChatBubbleTextColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_text_color_e3d3d4), (rightTextCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(rightChatBubbleTextColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_text_color_e3d3d4), (rightTextCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(rightChatBubbleTextColor = c) } } },
                         effectiveColor = rightTextCol,
-                    onReset = { preferences.editConversation { latest -> latest.copy(rightChatBubbleTextColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(rightChatBubbleTextColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(rightChatBubbleTextColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.timer), title = strings.getString(com.example.chat.R.string.conv_ui_your_message_time_2be207), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_the_color_of_the_time_e42c50),
                         colorValue = p.rightBubbleTimeColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_time_color_7f2d8c), (rightTimeCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(rightBubbleTimeColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_time_color_7f2d8c), (rightTimeCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(rightBubbleTimeColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_right_bubble_time_color_7f2d8c), (rightTimeCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(rightBubbleTimeColor = c) } } },
                         effectiveColor = rightTimeCol,
-                    onReset = { preferences.editConversation { latest -> latest.copy(rightBubbleTimeColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(rightBubbleTimeColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(rightBubbleTimeColor = null) } },
                 )
                 }
             }
@@ -495,23 +663,29 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.bubbleChart), title = strings.getString(com.example.chat.R.string.conv_ui_their_message_background_c34216), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_left_chat_bubble_colo_d3417c),
                         colorValue = p.leftBubbleColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_color_de8179), (leftBubbleBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(leftBubbleColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_color_de8179), (leftBubbleBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(leftBubbleColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_color_de8179), (leftBubbleBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(leftBubbleColor = c) } } },
                         effectiveColor = leftBubbleBg,
-                    onReset = { preferences.editConversation { latest -> latest.copy(leftBubbleColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(leftBubbleColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(leftBubbleColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.textFormat), title = strings.getString(com.example.chat.R.string.conv_ui_their_message_text_5eb8ee), subtitle = strings.getString(com.example.chat.R.string.conv_ui_sets_left_chat_bubble_text_c_16a599),
                         colorValue = p.leftChatBubbleTextColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_text_color_b0e74d), (leftTextCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(leftChatBubbleTextColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_text_color_b0e74d), (leftTextCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(leftChatBubbleTextColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_text_color_b0e74d), (leftTextCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(leftChatBubbleTextColor = c) } } },
                         effectiveColor = leftTextCol,
-                    onReset = { preferences.editConversation { latest -> latest.copy(leftChatBubbleTextColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(leftChatBubbleTextColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(leftChatBubbleTextColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.timer), title = strings.getString(com.example.chat.R.string.conv_ui_their_message_time_62e14e), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_the_color_of_the_time_5ff7a1),
                         colorValue = p.leftBubbleTimeColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_time_color_c564db), (leftTimeCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(leftBubbleTimeColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_time_color_c564db), (leftTimeCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(leftBubbleTimeColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_left_bubble_time_color_c564db), (leftTimeCol).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(leftBubbleTimeColor = c) } } },
                         effectiveColor = leftTimeCol,
-                    onReset = { preferences.editConversation { latest -> latest.copy(leftBubbleTimeColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(leftBubbleTimeColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(leftBubbleTimeColor = null) } },
                 )
                 }
             }
@@ -521,37 +695,47 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.deleteOutline), title = strings.getString(com.example.chat.R.string.conv_ui_deleted_message_icon_color_067f99), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_the_color_of_the_revo_5bcd15),
                         colorValue = p.deletedMessageIconColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_deleted_message_icon_color_067f99), (conv(p.deletedMessageIconColor, Color(config.secondaryTextColor))).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(deletedMessageIconColor = c) } } },
-                        effectiveColor = conv(p.deletedMessageIconColor, Color(config.secondaryTextColor)),
-                    onReset = { preferences.editConversation { latest -> latest.copy(deletedMessageIconColor = null) } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_deleted_message_icon_color_067f99), (previewState.deletedIconColor).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(deletedMessageIconColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_deleted_message_icon_color_067f99), (previewState.deletedIconColor).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(deletedMessageIconColor = c) } } },
+                        effectiveColor = previewState.deletedIconColor,
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(deletedMessageIconColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(deletedMessageIconColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.quote), title = strings.getString(com.example.chat.R.string.conv_ui_quoted_divider_color_945344), subtitle = strings.getString(com.example.chat.R.string.conv_ui_color_of_the_vertical_bar_be_d3e5e1),
                         colorValue = p.quotedDividerColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_divider_color_945344), (quotedDivider).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedDividerColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_divider_color_945344), (quotedDivider).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedDividerColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_divider_color_945344), (quotedDivider).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(quotedDividerColor = c) } } },
                         effectiveColor = quotedDivider,
-                    onReset = { preferences.editConversation { latest -> latest.copy(quotedDividerColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(quotedDividerColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(quotedDividerColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.profile), title = strings.getString(com.example.chat.R.string.conv_ui_quoted_name_color_3768f5), subtitle = strings.getString(com.example.chat.R.string.conv_ui_sender_name_color_inside_quo_47fc7e),
                         colorValue = p.quotedNameColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_name_color_3768f5), (quotedName).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedNameColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_name_color_3768f5), (quotedName).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedNameColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_name_color_3768f5), (quotedName).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(quotedNameColor = c) } } },
                         effectiveColor = quotedName,
-                    onReset = { preferences.editConversation { latest -> latest.copy(quotedNameColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(quotedNameColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(quotedNameColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.note), title = strings.getString(com.example.chat.R.string.conv_ui_quoted_message_color_e7d8cf), subtitle = strings.getString(com.example.chat.R.string.conv_ui_quoted_body_text_color_f0bcf5),
                         colorValue = p.quotedMessageColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_message_color_e7d8cf), (quotedMsg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedMessageColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_message_color_e7d8cf), (quotedMsg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedMessageColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_message_color_e7d8cf), (quotedMsg).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(quotedMessageColor = c) } } },
                         effectiveColor = quotedMsg,
-                    onReset = { preferences.editConversation { latest -> latest.copy(quotedMessageColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(quotedMessageColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(quotedMessageColor = null) } },
                 )
                     ConversationColorRow(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.layers), title = strings.getString(com.example.chat.R.string.conv_ui_quoted_background_color_9dab35), subtitle = strings.getString(com.example.chat.R.string.conv_ui_background_of_quote_containe_3b5b90),
                         colorValue = p.quotedBackgroundColor,
-                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_background_color_9dab35), (quotedBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedBackgroundColor = c) } } },
+                        // Previous writer: onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_background_color_9dab35), (quotedBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(quotedBackgroundColor = c) } } },
+                        onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_quoted_background_color_9dab35), (quotedBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> model.edit { latest -> latest.copy(quotedBackgroundColor = c) } } },
                         effectiveColor = quotedBg,
-                    onReset = { preferences.editConversation { latest -> latest.copy(quotedBackgroundColor = null) } },
+                    // Previous writer: onReset = { preferences.editConversation { latest -> latest.copy(quotedBackgroundColor = null) } },
+                    onReset = { model.edit { latest -> latest.copy(quotedBackgroundColor = null) } },
                 )
                 }
             }
@@ -561,25 +745,30 @@ fun ConversationBubbleAndTicksScreen(preferences: ChatyPreferencesController, on
                     GbSwitchTile(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.selectAll), title = strings.getString(com.example.chat.R.string.conv_ui_make_text_selectable_acbcb4), subtitle = strings.getString(com.example.chat.R.string.conv_ui_enable_chat_bubble_text_sele_055cc8),
                         value = p.makeTextSelectable,
-                        onChanged = { preferences.editConversation { latest -> latest.copy(makeTextSelectable = it) } },
+                        // Previous writer: onChanged = { preferences.editConversation { latest -> latest.copy(makeTextSelectable = it) } },
+                        onChanged = { model.edit { latest -> latest.copy(makeTextSelectable = it) } },
                     )
                     GbSwitchTile(
                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.document), title = strings.getString(com.example.chat.R.string.conv_ui_expand_long_messages_3e1481), subtitle = strings.getString(com.example.chat.R.string.conv_ui_long_messages_take_more_spac_9d3a52),
                         value = p.removeReadMore,
-                        onChanged = { preferences.editConversation { latest -> latest.copy(removeReadMore = it) } },
+                        // Previous writer: onChanged = { preferences.editConversation { latest -> latest.copy(removeReadMore = it) } },
+                        onChanged = { model.edit { latest -> latest.copy(removeReadMore = it) } },
                     )
                 }
             }
-            androidx.compose.material3.TextButton(onClick = { preferences.editConversation { latest -> latest.copy(messageTextSize = 16.0) } }) {
+            // Previous writer: androidx.compose.material3.TextButton(onClick = { preferences.editConversation { latest -> latest.copy(messageTextSize = 16.0) } }) {
+            androidx.compose.material3.TextButton(onClick = { model.edit { latest -> latest.copy(messageTextSize = 16.0) } }) {
                 Text(strings.getString(com.example.chat.R.string.conv_ui_reset_text_size_343a72))
             }
             androidx.compose.material3.TextButton(onClick = {
-                preferences.editConversation { latest -> latest.copy(convBackgroundColor = null, rightBubbleColor = null,
+                // Previous writer: preferences.editConversation { latest -> latest.copy(convBackgroundColor = null, rightBubbleColor = null,
+                model.edit { latest -> latest.copy(convBackgroundColor = null, rightBubbleColor = null,
                     rightChatBubbleTextColor = null, rightBubbleTimeColor = null, leftBubbleColor = null,
                     leftChatBubbleTextColor = null, leftBubbleTimeColor = null, deletedMessageIconColor = null,
                     quotedDividerColor = null, quotedNameColor = null, quotedMessageColor = null, quotedBackgroundColor = null) }
             }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_bubble_colours_d8233c)) }
-        }
+            },
+        )
     }
     pickers.Host()
 }

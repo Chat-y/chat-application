@@ -1,5 +1,8 @@
 package com.example.chat.ui.auth
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+
 import com.example.chat.ui.core.components.auth.ChatyUiTokens
 
 import androidx.compose.foundation.background
@@ -85,6 +88,7 @@ fun RegisterOrganizationScreen(
     val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
     val scope = com.example.chat.ui.core.components.auth.rememberAuthRequestScope(active)
+    val online = com.example.chat.ui.core.components.auth.rememberAuthOnline()
 
     var orgName by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var tenantId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
@@ -96,7 +100,9 @@ fun RegisterOrganizationScreen(
     com.example.chat.ui.core.components.auth.RemaskPasswordOnBackground {obscurePassword=true}
     val credentialSupport=rememberAuthCredentials()
     var isLoading by remember { mutableStateOf(false) }
-    var hasManuallyEditedSlug by remember { mutableStateOf(false) }
+    var retryDeadline by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    val retryWait = com.example.chat.ui.core.components.auth.rememberAuthRetryWait(retryDeadline)
+    var hasManuallyEditedSlug by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var allowUserRegistration by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     // Play UGC policy (P-06): account creation is gated on explicit acceptance.
@@ -113,7 +119,10 @@ fun RegisterOrganizationScreen(
 
     fun onOrgNameChanged(value: String) {
         orgName = value
+        orgNameError = null
+        errorMessage = null
         if (!hasManuallyEditedSlug) {
+            tenantIdError = null
             tenantId = value.lowercase()
                 .replace(Regex("[^a-z0-9]+"), "-")
                 .replace(Regex("^-+|-+$"), "")
@@ -129,6 +138,7 @@ fun RegisterOrganizationScreen(
     }
 
     fun handleRegister() {
+        if (isLoading || retryWait > 0) return
         if(AuthTemporaryPolicy.ageRuleConfirmed && !ageConfirmed) {errorMessage=authCopy("Confirm the configured age requirement before continuing.");return}
         orgNameError = when {
             orgName.trim().isEmpty() -> authCopy("Please enter your organization name")
@@ -141,8 +151,9 @@ fun RegisterOrganizationScreen(
         emailError = ChatyValidators.validateEmail(adminEmail.trim())
         passwordError = when {
             adminPassword.isEmpty() -> authCopy("Please enter a password")
-            adminPassword.length < 6 -> authCopy("Password must be at least 6 characters")
-            else -> null
+            // Prior minimum6character check retained inactive; owner approved registration-only tightening.
+            // adminPassword.length < 6 -> authCopy("Password must be at least 6 characters")
+            else -> registrationPasswordError(adminPassword)?.let { authCopy(it) }
         }
         if (listOf(orgNameError, tenantIdError, fullNameError, usernameError, emailError, passwordError)
                 .any { it != null } || isLoading
@@ -155,22 +166,35 @@ fun RegisterOrganizationScreen(
 
         isLoading = true
         errorMessage = null
+        // Freeze the validated request and credential-save pair before launch.
+        val submittedTenant=tenantId.trim().lowercase()
+        val submittedName=orgName.trim()
+        val submittedUsername=adminUsername.trim()
+        val submittedEmail=adminEmail.trim()
+        val submittedPassword=adminPassword
+        val submittedFullName=adminFullName.trim()
+        val submittedAllowRegistration=allowUserRegistration
         scope.launch {
             try {
                 val (userId, orgId, resolvedName) = authRequest {registerOrganization(
-                    tenantId.trim().lowercase(),
-                    orgName.trim(),
-                    adminUsername.trim(),
-                    adminEmail.trim(),
-                    adminPassword,
-                    adminFullName.trim(),
-                    allowUserRegistration,
+                    // Previous validated arguments: tenantId.trim().lowercase(), orgName.trim(),
+                    // adminUsername.trim(), adminEmail.trim(), adminPassword, adminFullName.trim(), allowUserRegistration
+                    submittedTenant,
+                    submittedName,
+                    submittedUsername,
+                    submittedEmail,
+                    submittedPassword,
+                    submittedFullName,
+                    submittedAllowRegistration,
                 )}
-                credentialSupport.save(adminEmail.trim(),adminPassword)
+                // credentialSupport.save(adminEmail.trim(),adminPassword)
+                credentialSupport.save(submittedEmail,submittedPassword)
                 onRegistered(userId, orgId, resolvedName)
             } catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
             catch (e: Exception) {
-                errorMessage = AuthFormPolicy.privateError(friendlyOrgRegisterError(e),adminEmail)
+                // Previous: errorMessage = AuthFormPolicy.privateError(friendlyOrgRegisterError(e),adminEmail)
+                errorMessage = AuthFormPolicy.privateError(friendlyOrgRegisterError(e),submittedEmail)
+                if (e is com.example.chat.data.api.AuthRateLimitException) retryDeadline = android.os.SystemClock.elapsedRealtime() + e.retryAfterSeconds * 1000L
             } finally {isLoading=false}
         }
     }
@@ -178,6 +202,7 @@ fun RegisterOrganizationScreen(
     val guardedBack=com.example.chat.ui.core.components.auth.rememberAuthBackAction(active && (orgName.isNotBlank() || adminPassword.isNotBlank() || adminEmail.isNotBlank()),onBack)
     com.example.chat.ui.core.components.auth.ChatyAuthScreen(theme) {
                 AuthBackButton(onClick = guardedBack)
+                com.example.chat.ui.core.components.auth.AuthOfflineNotice(online, theme)
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
                     com.example.chat.ui.core.components.auth.ChatyAppAuthIcon()
@@ -211,7 +236,8 @@ fun RegisterOrganizationScreen(
                     hintText = authCopy("e.g. acme-corp"),
                     theme = theme,
                     value = tenantId,
-                    onValueChange = { tenantId = it; hasManuallyEditedSlug = true },
+                    // Previous: onValueChange = { tenantId = it; hasManuallyEditedSlug = true },
+                    onValueChange = { tenantId = it; hasManuallyEditedSlug = true; tenantIdError = null; errorMessage = null },
                     error = tenantIdError,
                     prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Link, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
@@ -268,7 +294,8 @@ fun RegisterOrganizationScreen(
                     readOnly = false,
                     capsule = true,
                     label = authCopy("Admin Password"),
-                    hintText = authCopy("Minimum 6 characters"),
+                    // Prior: hintText = authCopy("Minimum 6 characters"),
+                    hintText = authCopy("12 to 128 characters with an uppercase letter, a lowercase letter and a number."),
                     theme = theme,
                     value = adminPassword,
                     onValueChange = { adminPassword = it;passwordError=null;errorMessage=null },
@@ -295,6 +322,8 @@ fun RegisterOrganizationScreen(
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space24))
 
+                com.example.chat.ui.core.components.auth.AuthValidationSummary(
+                    listOf(orgNameError, tenantIdError, fullNameError, usernameError, emailError, passwordError), theme)
                 errorMessage?.let { msg ->
                     Row(
                         modifier = Modifier
@@ -323,8 +352,10 @@ fun RegisterOrganizationScreen(
                     )
                 }
 
+                com.example.chat.ui.core.components.auth.AuthRetryNotice(retryWait, theme)
                 AuthPrimaryButton(
-                    enabled = !isLoading,
+                    // Previous: enabled = !isLoading,
+                    enabled = !isLoading && retryWait == 0,
                     text = authCopy("Create Organization"),
                     capsule = true,
                     theme = theme,
@@ -374,6 +405,7 @@ private fun SectionHeader(theme: ThemeConfig, title: String, icon: @Composable (
             fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text15,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.1.sp,
+            modifier = Modifier.semantics { heading() }, // A1-57: section heading
         )
     }
 }

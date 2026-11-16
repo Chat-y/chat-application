@@ -2,6 +2,10 @@ package com.example.chat.ui.chats.detail
 
 import com.example.chat.domain.models.MessageAttachment
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /** Exact port of lib/data/services/voice_note_service.dart's RecordConfig
  *  (AudioEncoder.aacLc, 96kbps, 44.1kHz, mono, autoGain, echoCancel,
@@ -47,6 +51,8 @@ interface VoiceStagingPort {
  *    displayName, mimeType "audio/mp4", durationSeconds) after reading bytes.
  *  - sendAudioMessage <- the backend send-with-attachment seam
  *    (Dart dataStore.sendMessage(text: '', type: MessageType.audio, attachment:)). */
+class VoiceCaptureBlockedException : IllegalStateException("A call owns audio. Finish the call, then tap Resume.")
+
 class VoiceNoteController(
     val conversationId: String,
     private val recorder: VoiceRecorderPort,
@@ -62,7 +68,62 @@ class VoiceNoteController(
     /** Join finished segments (no re-encode) into the output path; throws when it cannot. */
     private val joinSegments: suspend (segments: List<String>, outputPath: String) -> Unit =
         { _, _ -> throw AacJoinException("Joining recording parts is unavailable.") },
+    private val communicationArbiter: com.example.chat.core.audio.CommunicationMediaArbiter =
+        com.example.chat.ServiceLocator.communicationMediaArbiter,
 ) {
+    private val nativeMutex = Mutex()
+    private var nativeUncertain = false
+    private var captureReservation: com.example.chat.core.audio.CommunicationMediaReservation? = null
+    @Volatile var callInterrupted = false
+        private set
+    /** Local synchronous UI observer only. Must not start/resume native audio. */
+    var onCallSuspended: (() -> Unit)? = null
+
+    /** Local -> arbiter lock order, shared by start/resume and call suspension. */
+    private suspend fun captureNative(operation: suspend () -> Unit): Unit = nativeMutex.withLock {
+        val reservation = captureReservation ?: communicationArbiter.acquireVoiceNoteCapture(
+            com.example.chat.core.audio.CommunicationMediaOwner(), ::suspendForCall,
+        )?.also { captureReservation = it }
+        if (reservation == null) throw VoiceCaptureBlockedException()
+        if (!reservation.runNative {
+            requireActive()
+            nativeUncertain = true
+            operation()
+            nativeUncertain = false
+            callInterrupted = false
+        }) throw VoiceCaptureBlockedException()
+    }
+
+    /** Confirm native suspension without stop/send/join/delete, even for a subsecond draft.
+     * Unsupported/failed native pause fails closed; the call cannot claim microphone ownership. */
+    suspend fun suspendForCall(): Unit {
+        if (disposed) { dispose(); return } // Retry a failed unmounted owner's full native cleanup.
+        nativeMutex.withLock {
+        if (recorderActive || nativeUncertain) {
+            if (!isPaused || nativeUncertain) {
+                nativeUncertain = true
+                recorder.pause()
+                nativeUncertain = false
+                clock.pause()
+            }
+            callInterrupted = true
+            onCallSuspended?.invoke()
+        }
+        }
+    }
+
+    private suspend fun stopNative(): String? = withContext(NonCancellable) {
+        nativeMutex.withLock {
+            nativeUncertain = true
+            val result = recorder.stop()
+            nativeUncertain = false
+            recorderActive = false
+            captureReservation?.release()
+            captureReservation = null
+            result
+        }
+    }
+
     private var recorderActive = false
     private val segments = mutableListOf<String>()
     private var joinedPath: String? = null
@@ -81,7 +142,10 @@ class VoiceNoteController(
         private set
     var isBusy = false
         private set
-    private var disposed = false
+    @Volatile private var disposed = false
+    private val disposalMutex = Mutex()
+    /** Synchronous lifecycle fence before scheduling teardown outside the leaving screen. */
+    fun markDisposing() { disposed = true; invalidated.set(true); onCallSuspended = null }
     private val invalidated = java.util.concurrent.atomic.AtomicBoolean(false)
     /** Safe inside account transition listener: no IO or hardware call. */
     fun invalidate() { invalidated.set(true) }
@@ -131,6 +195,7 @@ class VoiceNoteController(
     suspend fun start() {
         if (disposed) throw IllegalStateException("Voice-note service has been disposed.")
         if (isRecording || isBusy) return
+        check(!nativeUncertain && !recorderActive && path == null) { "Finish recording cleanup before starting again." }
         requireActive()
         val operation = enterBusy()
         var stagingPath: String? = null
@@ -142,18 +207,27 @@ class VoiceNoteController(
             requireActive()
             val config = recordConfig()
             sessionConfig = config
-            recorder.start(config, stagingPath)
-            try { requireActive() } catch (error: Throwable) {
-                runCatching { recorder.stop() }.exceptionOrNull()?.let(error::addSuppressed)
-                throw error
+            captureNative {
+                path = stagingPath // Retain even when a native start is uncertain.
+                recorderActive = true // Track uncertain native ownership even if start throws.
+                recorder.start(config, checkNotNull(stagingPath))
+                try { requireActive() } catch (error: Throwable) {
+                    runCatching { recorder.stop() }.exceptionOrNull()?.let(error::addSuppressed)
+                    throw error
+                }
+                segments.clear(); joinedPath = null; segmentStartMs = 0L
+                clock.start()
+                isRecording = true
+                recorderActive = true
             }
-            path = stagingPath
-            segments.clear(); joinedPath = null; segmentStartMs = 0L
-            clock.start()
-            isRecording = true
-            recorderActive = true
         } catch (error: Throwable) {
-            if (stagingPath != null) staging.deleteQuietly(stagingPath)
+            if (nativeUncertain) runCatching { stopNative() }.exceptionOrNull()?.let(error::addSuppressed)
+            // Previous unconditional delete retained: if (stagingPath != null) staging.deleteQuietly(stagingPath)
+            if (!nativeUncertain) {
+                withContext(NonCancellable) { captureReservation?.release(); captureReservation = null }
+                if (stagingPath != null) staging.deleteQuietly(stagingPath)
+                path = null
+            }
             throw error
         } finally {
             leaveBusy(operation)
@@ -167,11 +241,15 @@ class VoiceNoteController(
         try {
             requireActive()
             if (isPaused) {
-                recorder.resume()
-                clock.resume()
+                // Previous unguarded recorder.resume()/clock.resume() retained by this comment.
+                captureNative { recorder.resume(); clock.resume() }
             } else {
-                recorder.pause()
-                clock.pause()
+                nativeMutex.withLock {
+                    nativeUncertain = true
+                    recorder.pause()
+                    nativeUncertain = false
+                    clock.pause()
+                }
             }
         } finally { leaveBusy(operation) }
     }
@@ -187,7 +265,7 @@ class VoiceNoteController(
         var recordedPath: String? = null
         var keepFile = false
         try {
-            recordedPath = recorder.stop() ?: stagedPath
+            recordedPath = stopNative() ?: stagedPath
             if (recordedPath.isNullOrEmpty()) {
                 return false
             }
@@ -211,14 +289,14 @@ class VoiceNoteController(
             }
             return true
         } finally {
-            isRecording = false
-            recorderActive = false
-            clock.reset()
-            path = null
             try {
-                for (cleanupPath in listOfNotNull(recordedPath, stagedPath).distinct()) {
-                    if (keepFile && cleanupPath == recordedPath) continue
-                    staging.deleteQuietly(cleanupPath)
+                if (!nativeUncertain) {
+                    isRecording = false; recorderActive = false
+                    clock.reset(); path = null
+                    for (cleanupPath in listOfNotNull(recordedPath, stagedPath).distinct()) {
+                        if (keepFile && cleanupPath == recordedPath) continue
+                        staging.deleteQuietly(cleanupPath)
+                    }
                 }
             } finally { leaveBusy(operation) }
         }
@@ -271,7 +349,7 @@ class VoiceNoteController(
         val operation = enterBusy()
         try {
             val staged = path
-            val seg = recorder.stop() ?: staged
+            val seg = stopNative() ?: staged
             recorderActive = false
             clock.pause()
             if (!seg.isNullOrEmpty()) segments += seg
@@ -285,7 +363,8 @@ class VoiceNoteController(
             totalSeconds = seconds
             return joinedClip("voice_note_${now()}.m4a")
         } catch (error: Throwable) {
-            endSession(); throw error
+            if (!nativeUncertain) endSession()
+            throw error
         } finally { leaveBusy(operation) }
     }
 
@@ -314,6 +393,7 @@ class VoiceNoteController(
 
     /** Resume from review: start a new segment. The joined review file is removed; segments stay. */
     suspend fun resumeSegment() {
+        check(!nativeUncertain) { "Recording cleanup must finish before Resume." }
         if (disposed || !isRecording || recorderActive || isBusy) return
         val operation = enterBusy()
         try {
@@ -321,17 +401,27 @@ class VoiceNoteController(
             if (!recorder.hasPermission()) throw IllegalStateException("Microphone permission is required.")
             val next = staging.newStagingPath(now() + (++segmentCounter))
             // Same encoder settings for every part: adaptive config must not change between segments.
-            recorder.start(sessionConfig ?: recordConfig().also { sessionConfig = it }, next)
-            path = next
-            recorderActive = true
-            segmentStartMs = clock.elapsedMs
-            clock.resume()
+            // Previous unguarded recorder.start and clock.resume retained by this comment.
+            captureNative {
+                path = next
+                recorderActive = true // Failed start still owns uncertain native capture until cleanup.
+                recorder.start(sessionConfig ?: recordConfig().also { sessionConfig = it }, next)
+                recorderActive = true
+                segmentStartMs = clock.elapsedMs
+                clock.resume()
+            }
             joinedPath?.let { staging.deleteQuietly(it) }
             joinedPath = null
         } finally { leaveBusy(operation) }
     }
 
     private suspend fun endSession() {
+        // Do not clear path/segments or delete files until uncertain native capture is stopped.
+        val pendingPath = path
+        val stoppedPath = if (recorderActive || nativeUncertain) stopNative() else null
+        for (owned in listOfNotNull(pendingPath, stoppedPath).distinct()) {
+            if (owned !in segments && owned != joinedPath) staging.deleteQuietly(owned)
+        }
         isRecording = false; recorderActive = false
         sessionConfig = null
         clock.reset(); path = null
@@ -340,7 +430,8 @@ class VoiceNoteController(
 
     /** Upload and send a reviewed clip. Everything is deleted on success; on failure the clip stays for another Send. */
     suspend fun sendClip(clip: Clip): Boolean {
-        if (disposed || isBusy || recorderActive) return false
+        if (disposed || isBusy || recorderActive || nativeUncertain) return false
+        if (clip.durationSeconds < 1) return false
         if (clip.joinFailed) throw AacJoinException("Recording parts must be joined before sending.")
         val operation = enterBusy()
         try {
@@ -354,7 +445,11 @@ class VoiceNoteController(
     }
 
     /** Delete from review: remove every part and end the session. */
-    suspend fun discardReview() { if (!isBusy) endSession() }
+    suspend fun discardReview() {
+        if (isBusy) return
+        val operation = enterBusy()
+        try { endSession() } finally { leaveBusy(operation) }
+    }
 
     suspend fun cancel() {
         if (isBusy) return
@@ -363,23 +458,95 @@ class VoiceNoteController(
         val stagedPath = path
         var target = stagedPath
         try {
-            if (isRecording && recorderActive) target = recorder.stop() ?: target
+            if (recorderActive || nativeUncertain) target = stopNative() ?: target
         } finally {
-            isRecording = false
-            recorderActive = false
-            clock.reset()
-            path = null
             try {
-                for (cleanupPath in listOfNotNull(target, stagedPath).distinct()) {
-                    staging.deleteQuietly(cleanupPath)
+                if (!nativeUncertain) {
+                    isRecording = false; recorderActive = false
+                    clock.reset(); path = null
+                    for (cleanupPath in listOfNotNull(target, stagedPath).distinct()) staging.deleteQuietly(cleanupPath)
+                    deleteSegments()
                 }
-                deleteSegments()
             } finally { leaveBusy(operation) }
         }
     }
 
     /** Dart dispose(): single-flight; waits for any pending native start/stop
      *  to finish before cancelling + disposing the recorder. */
+    suspend fun dispose(): Unit = withContext(NonCancellable) {
+        disposalMutex.withLock {
+            markDisposing()
+            busySignal?.await() // Busy startup/upload must finish, even after its screen scope cancels.
+            // Native cleanup is primary; never delete its files or abandon its reservation first.
+            nativeMutex.withLock {
+                nativeUncertain = true
+                recorder.dispose() // Failure retains native ownership and permits the next dispose retry.
+                nativeUncertain = false
+                recorderActive = false
+                captureReservation?.release()
+                captureReservation = null
+            }
+            endSession()
+            discardDraftInternal()
+        }
+    }
+
+}
+
+/* Previous implementation fragments retained (net212):
+            recorder.start(config, stagingPath)
+            try { requireActive() } catch (error: Throwable) {
+                runCatching { recorder.stop() }.exceptionOrNull()?.let(error::addSuppressed)
+                throw error
+            path = stagingPath
+            segments.clear(); joinedPath = null; segmentStartMs = 0L
+            clock.start()
+            isRecording = true
+            recorderActive = true
+            if (stagingPath != null) staging.deleteQuietly(stagingPath)
+                recorder.resume()
+                clock.resume()
+                recorder.pause()
+                clock.pause()
+            recordedPath = recorder.stop() ?: stagedPath
+            isRecording = false
+            recorderActive = false
+            clock.reset()
+            path = null
+                for (cleanupPath in listOfNotNull(recordedPath, stagedPath).distinct()) {
+                    if (keepFile && cleanupPath == recordedPath) continue
+                    staging.deleteQuietly(cleanupPath)
+            val seg = recorder.stop() ?: staged
+            endSession(); throw error
+            recorder.start(sessionConfig ?: recordConfig().also { sessionConfig = it }, next)
+            path = next
+            recorderActive = true
+            segmentStartMs = clock.elapsedMs
+            clock.resume()
+            if (isRecording && recorderActive) target = recorder.stop() ?: target
+            isRecording = false
+            recorderActive = false
+            clock.reset()
+            path = null
+                for (cleanupPath in listOfNotNull(target, stagedPath).distinct()) {
+                    staging.deleteQuietly(cleanupPath)
+                deleteSegments()
+            recorder.dispose()
+*/
+
+/* Previous implementation fragments retained (net214):
+    private suspend fun captureNative(operation: suspend () -> Unit) = nativeMutex.withLock {
+    suspend fun suspendForCall() = nativeMutex.withLock {
+*/
+
+/* Previous implementation fragments retained (net215):
+        if (disposed || isBusy || recorderActive) return false
+    suspend fun discardReview() { if (!isBusy) endSession() }
+*/
+
+/* Previous implementation fragments retained (net217):
+    suspend fun suspendForCall(): Unit = nativeMutex.withLock {
+    private var disposed = false
     suspend fun dispose() {
         val existing = disposeSignal
         if (existing != null) {
@@ -393,11 +560,11 @@ class VoiceNoteController(
             busySignal?.await()
             if (isRecording || path != null) cancel()
             discardDraftInternal()
-            recorder.dispose()
+                recorder.dispose()
+            onCallSuspended = null
             signal.complete(Unit)
         } catch (error: Throwable) {
             signal.completeExceptionally(error)
+            disposeSignal = null // Failed cleanup can be retried; retain draft and reservation meanwhile.
             throw error
-        }
-    }
-}
+*/

@@ -56,7 +56,8 @@ fun ForgotPasswordScreen(
 
     var email by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
-    var emailSent by remember { mutableStateOf(false) }
+    // Prior: var emailSent by remember { mutableStateOf(false) }
+    var emailSent by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) } // A2-15: survives rotation
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var emailError by remember { mutableStateOf<String?>(null) }
 

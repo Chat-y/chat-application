@@ -32,6 +32,8 @@ class CallPipActivity : ComponentActivity() {
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val changed: () -> Unit = { handler.post { revision++; if (!valid()) finishAndRemoveTask() }; Unit }
     private val authChanged: (ApiAccountScope) -> Unit = { changed() }
+    private val preferencesChanged: () -> Unit = { handler.post { if (!isDestroyed) revision++ }; Unit }
+
 
     private fun valid(): Boolean = com.example.chat.ui.calls.CallPipSessionPolicy.allows(
         owner, ServiceLocator.apiBackend.authSnapshot(), callId, ServiceLocator.callSignaling.currentSession) &&
@@ -54,10 +56,16 @@ class CallPipActivity : ComponentActivity() {
         enterWhenReady = !compact && intent.getBooleanExtra(EXTRA_ENTER, false)
         ServiceLocator.callSignaling.addStateListener(changed)
         ServiceLocator.apiBackend.addAuthScopeListener(authChanged)
-        if (ServiceLocator.preferencesController.security.protectFromScreenshots)
-            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+// Previous implementation retained:         if (ServiceLocator.preferencesController.security.protectFromScreenshots)
+// Previous implementation retained:             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        ServiceLocator.preferencesController.addListener(preferencesChanged)
+
         setContent {
             @Suppress("UNUSED_EXPRESSION") revision
+            // Same opt-in and reference-counted lease as the main app, live while PiP remains open.
+            com.example.chat.ui.kit.ProtectSensitiveWindow(
+                ServiceLocator.preferencesController.security.protectFromScreenshots,
+            )
             val session = ServiceLocator.callSignaling.currentSession?.takeIf { valid() }
             val scope = rememberCoroutineScope()
             fun action(block: suspend () -> Unit) {
@@ -79,7 +87,9 @@ class CallPipActivity : ComponentActivity() {
                         val current = ServiceLocator.callSignaling.currentSession ?: return@action
                         ServiceLocator.callSignaling.setAudioRoute(if (current.audioRoute == AudioRouteType.speaker) AudioRouteType.earpiece else AudioRouteType.speaker)
                     } }, onHangup = { action { ServiceLocator.callSignaling.endCall() } },
-                    onReady = { surfaceReady = true; if (enterWhenReady) requestPip() })
+// Previous implementation retained:                     onReady = { surfaceReady = true; if (enterWhenReady) requestPip() })
+                    onReady = { surfaceReady = true; if (enterWhenReady) requestPip() },
+                    microphoneCapture = ServiceLocator.callSignaling.activeMedia as? com.example.chat.data.services.CallMicrophoneCaptureProvider)
                 }
             }
         }
@@ -152,6 +162,7 @@ class CallPipActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         ServiceLocator.callSignaling.removeStateListener(changed)
+        ServiceLocator.preferencesController.removeListener(preferencesChanged)
         ServiceLocator.apiBackend.removeAuthScopeListener(authChanged)
         handler.removeCallbacksAndMessages(null)
         // UI destruction is never hangup. Foreground service retains the accepted media session.

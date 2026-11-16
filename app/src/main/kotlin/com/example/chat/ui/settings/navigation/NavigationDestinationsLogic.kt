@@ -27,6 +27,7 @@ object NavigationDestinationsLogic {
     fun reconcile(
         primary: List<String>,
         overflow: List<String>,
+        onCorrection: ((String) -> Unit)? = null, // SET-R2-002: report silent drops (default: no-op)
     ): Pair<MutableList<String>, MutableList<String>> {
         val nextPrimary = primary.toMutableList()
         val nextOverflow = overflow.toMutableList()
@@ -34,6 +35,7 @@ object NavigationDestinationsLogic {
         for (destination in ChatyNavigationDestinationIds.all) {
             if (!assigned.contains(destination)) nextOverflow.add(destination)
         }
+        (nextPrimary + nextOverflow).filter { !labels.containsKey(it) }.forEach { onCorrection?.invoke("dropped unknown destination id: $it") }
         nextPrimary.removeAll { !labels.containsKey(it) }
         nextOverflow.removeAll { !labels.containsKey(it) }
         for (destination in ChatyNavigationDestinationIds.all) {
@@ -68,8 +70,11 @@ object NavigationDestinationsLogic {
 
     /** _reorder: moves the item at [index] by [delta] positions (remove + insert, not a swap), bounds-checked. */
     fun reorder(list: MutableList<String>, index: Int, delta: Int) {
-        val next = index + delta
-        if (next < 0 || next >= list.size) return
+        // Prior: val next = index + delta; if (next < 0 || next >= list.size) return
+        if (index !in list.indices) return
+        val target = index.toLong() + delta.toLong()
+        if (target < 0L || target >= list.size.toLong()) return
+        val next = target.toInt()
         val item = list.removeAt(index)
         list.add(next, item)
     }

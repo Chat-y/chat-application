@@ -9,10 +9,28 @@ package com.example.chat.core.audio
 enum class AudioUseCase { media, communication, notification }
 
 /** Logical audio output route. */
-enum class AudioOutputRoute { systemDefault, receiver, speaker, bluetooth, wiredHeadset, usb }
+// Previous implementation retained: enum class AudioOutputRoute { systemDefault, receiver, speaker, bluetooth, wiredHeadset, usb }
+enum class AudioOutputRoute { systemDefault, receiver, speaker, bluetooth, wiredHeadset, usb, hearingAid }
 
 /** Status of dual-output (earpiece + loudspeaker) capability. */
 enum class DualOutputStatus { active, unavailable, unsupported, notVerified, failed }
+
+/** Typed local failure without native exception messages or device identifiers. */
+enum class AudioFailureKind { permissionDenied, invalidState, platformUnavailable }
+
+internal fun classifyAudioFailure(failure: Exception): AudioFailureKind = when (failure) {
+    is SecurityException -> AudioFailureKind.permissionDenied
+    is IllegalStateException -> AudioFailureKind.invalidState
+    else -> AudioFailureKind.platformUnavailable
+}
+
+fun failedAudioCapabilities(useCase: AudioUseCase, failure: Exception): AudioCapabilities =
+    defaultAudioCapabilities(useCase).copy(platform = "android", failureKind = classifyAudioFailure(failure),
+        failureReason = when (classifyAudioFailure(failure)) {
+            AudioFailureKind.permissionDenied -> "Audio permission is not available"
+            AudioFailureKind.invalidState -> "Audio output is not available in the current state"
+            AudioFailureKind.platformUnavailable -> "Audio service is not available"
+        })
 
 /** Capability report for an audio use case. */
 data class AudioCapabilities(
@@ -22,6 +40,7 @@ data class AudioCapabilities(
     val failureReason: String? = null,
     val isStereoSupported: Boolean = false,
     val platform: String = "unknown",
+    val failureKind: AudioFailureKind? = null,
 )
 
 /** State machine lifecycle states for Chaty audio coordination. */

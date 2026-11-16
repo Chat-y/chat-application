@@ -113,7 +113,8 @@ fun AutoReplyRulesScreen(
                 icon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.add, semanticLabel = null) },
                 text = { Text("New Rule") },
                 containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = Color.White,
+                // Prior fixed foreground: contentColor = Color.White,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
             )
         },
     ) { padding ->
@@ -139,13 +140,13 @@ fun AutoReplyRulesScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Surface(
-                            color = (if (isMasterEnabled) primary else Color.Gray).copy(alpha = 0.15f),
+                            color = (if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.15f),
                             shape = CircleShape,
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Rounded.ReplyAll,
                                 contentDescription = null,
-                                tint = if (isMasterEnabled) primary else Color.Gray,
+                                tint = if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(8.dp),
                             )
                         }
@@ -247,26 +248,30 @@ fun AutoReplyRulesScreen(
                                 }
                                 Spacer(Modifier.width(8.dp))
                                 Surface(
-                                    color = Color(0xFF607D8B).copy(alpha = 0.12f),
+                                    // Prior fixed badge hue: Color(0xFF607D8B)
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
                                     shape = RoundedCornerShape(8.dp),
                                 ) {
                                     Text(
                                         rule.recipientFilter.uppercase(),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF607D8B),
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     )
                                 }
                                 Spacer(Modifier.weight(1f))
                                 Switch(
                                     checked = rule.enabled,
-                                    onCheckedChange = { engine.toggleRule(index, it) },
+                                    // onCheckedChange = { engine.toggleRule(index, it) }, // AUT-061: by ID
+                                    onCheckedChange = { engine.toggleRuleById(rule.id, it) },
                                 )
-                                IconButton(onClick = { engine.deleteRule(index) }) {
+                                // IconButton(onClick = { engine.deleteRule(index) }) { // AUT-061: by ID
+                                IconButton(onClick = { engine.deleteRuleById(rule.id) }) {
                                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.deleteOutline,
                                         semanticLabel = "Delete Rule",
-                                        color = Color(0xFFFF5252),
+                                        // Prior fixed error hue: Color(0xFFFF5252)
+                                        color = MaterialTheme.colorScheme.error,
                                     )
                                 }
                             }

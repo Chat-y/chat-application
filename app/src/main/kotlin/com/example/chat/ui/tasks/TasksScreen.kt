@@ -66,6 +66,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -265,7 +267,13 @@ fun TasksScreen(
             onCancel = { pendingDelete = null },
             onDelete = {
                 pendingDelete = null
-                scope.launch { runCatching { controller.deleteTask(task.id) } }
+                // Previous failure was silently swallowed: scope.launch { runCatching { controller.deleteTask(task.id) } }
+                scope.launch {
+                    try {
+                        if (!controller.deleteTask(task.id)) snackbar.showSnackbar("Task was not deleted. Try again.")
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { snackbar.showSnackbar("Task could not be deleted. Try again.") }
+                }
             },
         )
     }
@@ -345,6 +353,7 @@ private fun TaskListView(
 
     // R2/R3: task cards capped at 720dp centered on larger windows
     // (approved responsive plan 8 Nov 2026).
+                    // Prior: onDragStart = { offset -> onDragStart(offset) },
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     LazyColumn(
         modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
@@ -436,6 +445,9 @@ private fun TaskListCard(
         Spacer(Modifier.height(8.dp))
         Text(
             task.title,
+            // TAS-109: list titles capped at 3 lines; the full text stays in detail.
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
             color = colors.foreground,
             fontSize = 15.5.sp,
             fontWeight = FontWeight.Bold,
@@ -485,6 +497,11 @@ private fun KanbanBoard(
     var draggedTask by remember { mutableStateOf<ChatTask?>(null) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
     var pointerRoot by remember { mutableStateOf(Offset.Zero) }
+    // TAS-101: grab point inside the card and the board origin, both in root coordinates.
+    var grabOffset by remember { mutableStateOf(Offset.Zero) }
+    var boardOrigin by remember { mutableStateOf(Offset.Zero) }
+    // TAS-026: group once per filtered snapshot instead of filtering per column.
+    val groupedByStatus = remember(filtered) { filtered.groupBy { it.status } }
     val columnBounds = remember { mutableStateOf(mapOf<TaskStatus, Rect>()) }
     val density = LocalDensity.current
 
@@ -503,7 +520,8 @@ private fun KanbanBoard(
             }.dp
         }
 
-        Box(Modifier.fillMaxSize()) {
+        // Prior: Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().onGloballyPositioned { boardOrigin = it.positionInRoot() }) {
             Row(
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
@@ -511,7 +529,8 @@ private fun KanbanBoard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 for ((status, title) in columns) {
-                    val columnTasks = filtered.filter { it.status == status }
+                    // val columnTasks = filtered.filter { it.status == status } // TAS-026: replaced by groupedByStatus
+                    val columnTasks = groupedByStatus[status].orEmpty()
                     val isDropTarget = draggedTask != null &&
                         columnBounds.value[status]?.contains(pointerRoot) == true &&
                         TaskWorkflow.canMove(draggedTask!!.status, status)
@@ -521,8 +540,9 @@ private fun KanbanBoard(
                     )
                     Column(
                         modifier = Modifier
+                            // Prior: .heightIn(min = with(density) { (maxHeightPx - 24).toDp() })
                             .width(columnWidthDp)
-                            .heightIn(min = with(density) { (maxHeightPx - 24).toDp() })
+                            .height(with(density) { (maxHeightPx - 24).coerceAtLeast(0f).toDp() }) // TAS-025: bounded so the stage list can be a LazyColumn
                             .clip(RoundedCornerShape(18.dp))
                             .background(targetBg)
                             .border(
@@ -532,6 +552,7 @@ private fun KanbanBoard(
                             )
                             .onGloballyPositioned { coords ->
                                 columnBounds.value = columnBounds.value + (status to coords.boundsInRoot())
+                        // Prior: for (task in columnTasks) {
                             }
                             .padding(12.dp),
                     ) {
@@ -563,22 +584,39 @@ private fun KanbanBoard(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("Drop tasks here", color = colors.foregroundTertiary, fontSize = 12.sp)
+                                // TAS-108: add a non-gesture instruction.
+                                // Text("Drop tasks here", color = colors.foregroundTertiary, fontSize = 12.sp)
+                                Text(
+                                    "Drop tasks here, or use a task's Move to buttons",
+                                    color = colors.foregroundTertiary,
+                                    fontSize = 12.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                )
                             }
                         }
-                        for (task in columnTasks) {
+                        // TAS-025: bounded LazyColumn with stable task IDs (was a for loop).
+                        LazyColumn(Modifier.weight(1f)) {
+                        items(columnTasks, key = { it.id }) { task ->
                             KanbanCard(
                                 task = task,
                                 colors = colors,
                                 isDragging = draggedTask?.id == task.id,
                                 onOpenDetail = { onOpenDetail(task) },
+                                // Prior: onDragStart = { origin ->
                                 onEditTask = { onEditTask(task) },
                                 onShowHistory = { onShowHistory(task) },
+                                    // Prior: pointerRoot = origin
                                 onMove = onMove,
-                                onDragStart = { origin ->
+                                onDragStart = { rootPoint, grab ->
                                     draggedTask = task
                                     dragOffset = Offset.Zero
-                                    pointerRoot = origin
+                                    pointerRoot = rootPoint
+                                    grabOffset = grab
+                                },
+                                // TAS-102: cancelled drag clears state and never calls onMove.
+                                onDragCancel = {
+                                    draggedTask = null
+                                    dragOffset = Offset.Zero
                                 },
                                 onDrag = { change, amount ->
                                     change.consume()
@@ -600,6 +638,7 @@ private fun KanbanBoard(
                             )
                             Spacer(Modifier.height(8.dp))
                         }
+                        }
                     }
                 }
             }
@@ -609,7 +648,8 @@ private fun KanbanBoard(
                 Box(
                     modifier = Modifier
                         .zIndex(10f)
-                        .offset { IntOffset(dragOffset.x.toInt(), dragOffset.y.toInt()) }
+                        // .offset { IntOffset(dragOffset.x.toInt(), dragOffset.y.toInt()) } // TAS-101: replaced, anchored to grab point
+                        .offset { IntOffset((pointerRoot.x - grabOffset.x - boardOrigin.x).toInt(), (pointerRoot.y - grabOffset.y - boardOrigin.y).toInt()) }
                         .width(240.dp)
                         .alpha(0.92f),
                 ) {
@@ -643,24 +683,31 @@ private fun BoxWithConstraintsCompat(content: @Composable (maxWidthPx: Float, ma
 private fun KanbanCard(
     task: ChatTask,
     colors: TaskColors,
+    // Prior: onDragStart: (Offset) -> Unit,
     isDragging: Boolean,
     onOpenDetail: () -> Unit,
     onEditTask: () -> Unit,
     onShowHistory: () -> Unit,
     onMove: (ChatTask, TaskStatus) -> Unit,
-    onDragStart: (Offset) -> Unit,
+    onDragStart: (Offset, Offset) -> Unit,
+    onDragCancel: () -> Unit,
     onDrag: (androidx.compose.ui.input.pointer.PointerInputChange, Offset) -> Unit,
     onDragEnd: () -> Unit,
 ) {
+    var cardRoot by remember { mutableStateOf(Offset.Zero) }
     Box(
         modifier = Modifier
             .alpha(if (isDragging) 0.35f else 1f)
-            .pointerInput(task.id) {
+                    // Prior: onDragCancel = onDragEnd,
+            .onGloballyPositioned { cardRoot = it.positionInRoot() }
+            // Previous pointer key: .pointerInput(task.id) {
+            .pointerInput(task) {
                 detectDragGesturesAfterLongPress(
-                    onDragStart = { offset -> onDragStart(offset) },
+                    // TAS-101: offset is card-local; convert to root and keep the grab point.
+                    onDragStart = { offset -> onDragStart(cardRoot + offset, offset) },
                     onDrag = onDrag,
                     onDragEnd = onDragEnd,
-                    onDragCancel = onDragEnd,
+                    onDragCancel = onDragCancel,
                 )
             },
     ) {
@@ -749,7 +796,8 @@ private fun TaskHistoryDialog(
                     modifier = Modifier.padding(vertical = 14.dp),
                 )
             } else {
-                LazyColumn {
+                // Preserve reviewed bound inside the scrollable confirmation body.
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
                     items(entries.size) { i ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

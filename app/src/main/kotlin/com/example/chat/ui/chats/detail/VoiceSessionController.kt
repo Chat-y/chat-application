@@ -34,6 +34,7 @@ data class VoiceUiState(
     val busy: Boolean = false,
     val seconds: Int = 0,
     val paused: Boolean = false,
+    val interruptedForCall: Boolean = false,
     /** Finished recording waiting in the review step; recording is false while set. */
     val review: VoiceNoteController.Clip? = null,
 )
@@ -70,6 +71,20 @@ class VoiceSessionController(
     var state = VoiceUiState()
         private set
 
+    init {
+        voice.onCallSuspended = {
+            scope.launch {
+                if (!voice.callInterrupted || !voice.isRecording) return@launch
+                releasedDuringStart = false
+                lockedDuringStart = true
+                sendAfterReview = false
+                update { it.copy(recording = true, locked = true, paused = true,
+                    interruptedForCall = true, seconds = (voice.elapsedMs / 1000L).toInt()) }
+                runCatching { setRecordingIndicator(false) }
+            }
+        }
+    }
+
     private fun update(transform: (VoiceUiState) -> VoiceUiState) {
         state = transform(state)
         if (!state.recording) { ticker?.cancel(); ticker = null }
@@ -92,6 +107,8 @@ class VoiceSessionController(
                 if (canceledDuringStart) {
                     voice.cancel()
                     update { VoiceUiState() }
+                } else if (voice.callInterrupted) {
+                    update { it.copy(recording = true, locked = true, paused = true, interruptedForCall = true) }
                 } else {
                     setRecordingIndicator(true)
                     update { it.copy(recording = true, locked = lockedDuringStart, seconds = 0) }
@@ -103,14 +120,14 @@ class VoiceSessionController(
             } finally {
                 starting = false
                 update { it.copy(busy = false) }
-                if (releasedDuringStart && !canceledDuringStart && !state.locked) finishVoice()
+                if (releasedDuringStart && !canceledDuringStart && !state.locked && !voice.callInterrupted) finishVoice()
             }
         }
     }
 
     /** Dart _finishVoice(): stop + upload + send; on success track + scroll. */
     fun finishVoice() {
-        if (!state.recording || state.busy) return
+        if (!state.recording || state.busy || voice.callInterrupted) return
         // After a Pause and Resume there are several parts: join them in review, then send from there.
         if (voice.hasSegments) { sendAfterReview = true; beginReview(); return }
         update { it.copy(busy = true) }
@@ -133,12 +150,17 @@ class VoiceSessionController(
         scope.launch {
             try {
                 voice.togglePause()
-                update { it.copy(paused = voice.isPaused, seconds = (voice.elapsedMs / 1000L).toInt()) }
+                update { it.copy(paused = voice.isPaused, interruptedForCall = voice.callInterrupted,
+                    seconds = (voice.elapsedMs / 1000L).toInt()) }
+                if (!voice.isPaused) setRecordingIndicator(true)
             } catch (error: Throwable) {
                 showError("Could not change recording pause. ${describeError(error)}")
-                // A failed native transition cannot leave a seemingly usable recording.
-                runCatching { voice.cancel() }
-                update { VoiceUiState() }
+                // Blocked call-resume preserves the draft. Other native failures retain the
+                // existing cancellation path; cancel itself preserves uncertain native files.
+                if (error !is VoiceCaptureBlockedException) {
+                    runCatching { voice.cancel() }
+                    if (!voice.isRecording) update { VoiceUiState() }
+                }
             } finally { update { it.copy(busy = false) } }
         }
     }
@@ -146,7 +168,7 @@ class VoiceSessionController(
 
     /** Paused locked recording -> stop and open the review step. */
     fun beginReview() {
-        if (!state.recording || !state.locked || state.busy) return
+        if (!state.recording || !state.locked || state.busy || voice.callInterrupted) return
         update { it.copy(busy = true) }
         scope.launch {
             try {
@@ -166,7 +188,7 @@ class VoiceSessionController(
             } finally {
                 update { it.copy(busy = false) }
                 val auto = sendAfterReview; sendAfterReview = false
-                if (auto && state.review?.joinFailed == false) sendReview()
+                if (auto && !voice.callInterrupted && state.review?.joinFailed == false) sendReview()
             }
         }
     }
@@ -181,18 +203,46 @@ class VoiceSessionController(
             } catch (error: Throwable) {
                 // The clip stays in review so Send can be tried again.
                 showError("Could not send voice note. ${describeError(error)}")
-                if (voice.isInvalidated) deleteReview()
+                if (voice.isInvalidated) {
+                    // sendClip's finally already released the controller's busy signal. Do not
+                    // call the UI Delete method while this UI state's busy flag is still true.
+                    try {
+                        voice.discardReview()
+                        update { VoiceUiState() }
+                    } catch (cleanup: Throwable) {
+                        showError("Recording cleanup failed. Tap Delete to retry. ${describeError(cleanup)}")
+                    }
+                }
             } finally { update { it.copy(busy = false) } }
         }
     }
 
     /** Leaving the screen: stop any recording and drop a pending review file. */
-    fun dispose() { cancelVoice(); deleteReview() }
+    fun dispose() {
+        // Immediate fence, then a surviving caller must await disposeAndAwait().
+        voice.markDisposing()
+        ticker?.cancel(); ticker = null
+        releasedDuringStart = false; sendAfterReview = false
+    }
+
+    suspend fun disposeAndAwait() {
+        dispose()
+        voice.dispose()
+        runCatching { setRecordingIndicator(false) }
+    }
 
     fun deleteReview() {
-        val had = state.review != null
-        scope.launch { runCatching { voice.discardReview() } }
-        if (had) update { VoiceUiState() }
+        if (state.review == null || state.busy) return
+        update { it.copy(busy = true) }
+        scope.launch {
+            try {
+                voice.discardReview()
+                update { VoiceUiState() }
+            } catch (error: Throwable) {
+                // Keep the review and Delete retry visible until native cleanup is confirmed.
+                showError("Recording cleanup failed. Tap Delete to retry. ${describeError(error)}")
+            } finally { update { it.copy(busy = false) } }
+        }
     }
 
     /** Try joining the parts again; all parts stay on disk until sent or deleted. */
@@ -262,6 +312,7 @@ class VoiceSessionController(
 
     /** Dart _handleVoiceRelease. */
     fun onRelease() {
+        if (voice.callInterrupted) return
         if (starting) { releasedDuringStart = true; return }
         if (VoiceGesturePolicy.onReleaseSends(state.recording, state.locked)) finishVoice()
     }
@@ -276,3 +327,28 @@ class VoiceSessionController(
         }
     }
 }
+
+/* Previous implementation fragments retained (net212):
+                if (releasedDuringStart && !canceledDuringStart && !state.locked) finishVoice()
+        if (!state.recording || state.busy) return
+                update { it.copy(paused = voice.isPaused, seconds = (voice.elapsedMs / 1000L).toInt()) }
+                // A failed native transition cannot leave a seemingly usable recording.
+                runCatching { voice.cancel() }
+                update { VoiceUiState() }
+        if (!state.recording || !state.locked || state.busy) return
+                if (auto && state.review?.joinFailed == false) sendReview()
+*/
+
+/* Previous implementation fragments retained (net215):
+        val had = state.review != null
+        scope.launch { runCatching { voice.discardReview() } }
+        if (had) update { VoiceUiState() }
+*/
+
+/* Previous implementation fragments retained (net217):
+    fun dispose() { cancelVoice(); deleteReview() }
+*/
+
+/* Previous implementation fragments retained (net220):
+                if (voice.isInvalidated) deleteReview()
+*/

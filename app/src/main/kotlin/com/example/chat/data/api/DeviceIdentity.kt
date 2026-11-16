@@ -113,7 +113,7 @@ class DeviceIdentityManager(
         val message = data.getString("challengeMessage")
         val expires = java.time.Instant.parse(data.getString("expiresAt"))
         val now = java.time.Instant.now()
-        check(challengeId.length in 1..128 && message.length in 1..4096 && data.optInt("accountLimit") == 2 &&
+        check(challengeId.length in 1..128 && message.length in 1..4096 &&
             expires.isAfter(now) && !expires.isAfter(now.plusSeconds(90))) { "Invalid or expired installation challenge." }
         check(isCurrent()) { "Account changed. Start sign-in again." }
         mapOf(HEADER_DEVICE_ID to identity.deviceId, HEADER_DEVICE_PUBLIC_KEY to identity.publicKeyBase64,

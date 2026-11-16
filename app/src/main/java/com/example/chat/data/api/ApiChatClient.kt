@@ -90,6 +90,35 @@ class ApiChatClient(
         catch (_: Exception) { null }
     }
 
+    /** Additive checked-read contract. Never infer expiry from error text or a generic outage. */
+    sealed interface MessagesReadResult {
+        data class Success(val messages: List<ChatMessage>) : MessagesReadResult
+        data object AuthenticationRequired : MessagesReadResult
+        data object Forbidden : MessagesReadResult
+        data object Unavailable : MessagesReadResult
+    }
+
+    /** Existing nullable listMessages semantics stay unchanged for legacy callers. */
+    fun readMessagesChecked(roomId: String): MessagesReadResult {
+        if (token().isNullOrBlank()) return MessagesReadResult.AuthenticationRequired
+        val path = safePathSegment(roomId) ?: return MessagesReadResult.Unavailable
+        return try {
+            val response = getWithFallback("chat/rooms/$path/messages")
+            when (response.first) {
+                401 -> MessagesReadResult.AuthenticationRequired
+                403 -> MessagesReadResult.Forbidden
+                200 -> {
+                    val data = JSONObject(response.second).getJSONArray("data")
+                    val messages = ArrayList<ChatMessage>(data.length())
+                    for (i in 0 until data.length()) messages.add(ChatMessage.fromApi(deepMap(data.getJSONObject(i))))
+                    MessagesReadResult.Success(messages)
+                }
+                else -> MessagesReadResult.Unavailable
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { MessagesReadResult.Unavailable }
+    }
+
     /** GET /chat/rooms/<id>/messages -> ChatMessage.fromApi list, or null when
      *  the load failed (Dart keeps prior messages on error). */
     fun listMessages(roomId: String): List<ChatMessage>? {
@@ -194,16 +223,17 @@ class ApiChatClient(
      *  Other failures keep the existing contract: null = not confirmed. */
     fun sendMessage(expected: ApiAccountScope, isCurrent: () -> Boolean, roomId: String, content: String): ChatMessage? {
         val authToken = expected.token?.takeIf { it.isNotBlank() && !expected.userId.isNullOrBlank() } ?: return null
+        val roomPath = safePathSegment(roomId) ?: return null
         val base = expected.baseUrl.trimEnd('/')
         val headers = mapOf("Authorization" to "Bearer $authToken", "x-tenant-id" to expected.tenantId, "Content-Type" to "application/json")
         val payload = JSONObject().put("content", content).toString()
         var response: Pair<Int, String>
         try {
             if (!isCurrent()) throw ApiScopeChangedException()
-            response = transport.execute("POST", "$base/chat/rooms/$roomId/messages", headers, payload)
+            response = transport.execute("POST", "$base/chat/rooms/$roomPath/messages", headers, payload)
             if (!isCurrent()) throw ApiScopeChangedException()          // no 404 retry under a stale scope
             if (response.first == 404) {
-                response = transport.execute("POST", "$base/api/v1/chat/rooms/$roomId/messages", headers, payload)
+                response = transport.execute("POST", "$base/api/v1/chat/rooms/$roomPath/messages", headers, payload)
             }
         } catch (e: ApiScopeChangedException) {
             throw e

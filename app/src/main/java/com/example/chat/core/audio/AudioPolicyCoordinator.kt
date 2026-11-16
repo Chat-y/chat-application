@@ -1,6 +1,7 @@
 package com.example.chat.core.audio
 
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -22,37 +23,54 @@ import kotlinx.coroutines.sync.withLock
  */
 class AudioPolicyCoordinator(
     private val capabilityService: AudioCapabilityService,
-) : AudioPolicyGate {
+    diagnosticsEnabled: Boolean = com.example.chat.BuildConfig.DEBUG,
+// Previous implementation retained: ) : AudioPolicyGate {
+) : AudioPolicyGate, NoFallbackCallRouteGate {
 
     private var _state: AudioSessionState = AudioSessionState.idle
     private var _activeOwner: AudioUseCase? = null
     private var _activeRoute: AudioOutputRoute = AudioOutputRoute.systemDefault
-    private val _diagnostics = mutableListOf<AudioPolicyDiagnosticEvent>()
+// Previous implementation retained:     private val _diagnostics = mutableListOf<AudioPolicyDiagnosticEvent>()
+    private val _diagnostics = AudioDiagnosticBuffer(diagnosticsEnabled, 200)
+    val routeFailureCount: Long get() = _diagnostics.failureCount()
     private val transitionMutex = Mutex()
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
+    private val _policyState = kotlinx.coroutines.flow.MutableStateFlow(
+        AudioPolicySnapshot(_state, _activeOwner, _activeRoute))
+    val policyState: kotlinx.coroutines.flow.StateFlow<AudioPolicySnapshot> = _policyState.asStateFlow()
 
     override val state: AudioSessionState get() = _state
     override val activeOwner: AudioUseCase? get() = _activeOwner
     override val activeRoute: AudioOutputRoute get() = _activeRoute
-    override val diagnostics: List<AudioPolicyDiagnosticEvent> get() = _diagnostics.toList()
+// Previous implementation retained:     override val diagnostics: List<AudioPolicyDiagnosticEvent> get() = _diagnostics.toList()
+    override val diagnostics: List<AudioPolicyDiagnosticEvent> get() = _diagnostics.snapshot()
 
     override fun addListener(listener: () -> Unit) { listeners.addIfAbsent(listener) }
     override fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
-    private fun notifyListeners() { listeners.forEach { it() } }
+// Previous implementation retained:     private fun notifyListeners() { listeners.forEach { it() } }
+    private fun notifyListeners() {
+        _policyState.value = AudioPolicySnapshot(_state, _activeOwner, _activeRoute)
+        listeners.forEach { it() }
+    }
 
-    private fun recordEvent(message: String, useCase: AudioUseCase? = null, error: String? = null) {
-        _diagnostics.add(
+// Previous implementation retained:     private fun recordEvent(message: String, useCase: AudioUseCase? = null, error: String? = null) {
+    private fun recordEvent(message: String, useCase: AudioUseCase? = null, error: String? = null,
+        routeFailure: Boolean = false) {
+// Previous implementation retained:         _diagnostics.add(
+        _diagnostics.record(
             AudioPolicyDiagnosticEvent(
                 message = message,
                 useCase = useCase ?: _activeOwner ?: AudioUseCase.media,
                 route = _activeRoute,
                 state = _state,
                 error = error,
-            )
+// Previous implementation retained:             )
+            ), routeFailure = routeFailure,
         )
-        if (_diagnostics.size > 100) {
-            _diagnostics.removeAt(0)
-        }
+// Previous implementation retained:         if (_diagnostics.size > 100) {
+// Previous implementation retained:             _diagnostics.removeAt(0)
+// Previous implementation retained:         }
+
     }
 
     /** Acquire audio session for VoIP call. */
@@ -64,10 +82,17 @@ class AudioPolicyCoordinator(
             notifyListeners()
 
             try {
+                capabilityService.beginCommunicationSession()
                 val caps = capabilityService.setPreferredRoute(
                     AudioUseCase.communication,
                     initialRoute,
                 )
+                if (caps.failureKind != null) {
+                    _state = AudioSessionState.failed
+                    recordEvent("Native call audio setup failed", error = caps.failureKind.name)
+                    notifyListeners()
+                    return@withLock false
+                }
                 _activeRoute = caps.activeRoute
                 _state = stateForRoute(_activeRoute)
                 recordEvent("Call audio session established", useCase = AudioUseCase.communication)
@@ -82,42 +107,87 @@ class AudioPolicyCoordinator(
             }
         }
 
-    /** Change call audio route (receiver, speaker, bluetooth, wired headset). */
-    override suspend fun setCallRoute(route: AudioOutputRoute): Boolean =
+    /** Settings cannot race a coordinator-owned call transition. Recheck live ringing/demo state too. */
+    suspend fun setSettingsRoute(
+        route: AudioOutputRoute,
+        hasLiveCall: () -> Boolean = { false },
+    ): AudioCapabilities? = transitionMutex.withLock {
+        if (_activeOwner == AudioUseCase.communication || hasLiveCall()) return@withLock null
+        capabilityService.setPreferredRoute(AudioUseCase.communication, route)
+    }
+
+    /** Actual call-media path: report a failed request, never choose a louder fallback. */
+    override suspend fun setCallRouteWithoutFallback(route: AudioOutputRoute): Boolean =
         transitionMutex.withLock {
-            if (_activeOwner != AudioUseCase.communication) {
-                recordEvent("Rejected route change: call is not active owner")
-                return@withLock false
-            }
-            recordEvent("Switching call route to $route", useCase = AudioUseCase.communication)
+            if (_activeOwner != AudioUseCase.communication) return@withLock false
             try {
-                val caps = capabilityService.setPreferredRoute(
-                    AudioUseCase.communication,
-                    route,
-                )
+                val caps = capabilityService.setPreferredRoute(AudioUseCase.communication, route)
+                if (caps.failureKind != null) {
+                    recordEvent("Native call route failed", error = caps.failureKind.name, routeFailure = true)
+                    return@withLock false
+                }
                 _activeRoute = caps.activeRoute
                 _state = stateForRoute(_activeRoute)
-                recordEvent("Call route successfully updated to $_activeRoute", useCase = AudioUseCase.communication)
                 notifyListeners()
-                true
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                recordEvent("Call route update failed, falling back", useCase = AudioUseCase.communication, error = e.toString())
-                // Safe fallback to speakerphone or receiver
-                try {
-                    val fallback = capabilityService.setPreferredRoute(
-                        AudioUseCase.communication,
-                        AudioOutputRoute.speaker,
-                    )
-                    _activeRoute = fallback.activeRoute
-                    _state = stateForRoute(_activeRoute)
-                    notifyListeners()
-                } catch (inner: Exception) {
-                    if (inner is kotlinx.coroutines.CancellationException) throw inner
-                }
+// Previous implementation retained:                 val matched = caps.activeRoute == route
+                val matched = caps.failureKind == null && caps.activeRoute == route
+// Previous implementation retained:                 recordEvent(if (matched) "Media route confirmed: $route" else "Media route unconfirmed: $route")
+                recordEvent(if (matched) "Media route confirmed: $route" else "Media route unconfirmed: $route",
+// Previous implementation retained:                     error = if (matched) null else "Route mismatch")
+                    error = if (matched) null else "Route mismatch", routeFailure = !matched)
+                matched
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+// Previous implementation retained:                 recordEvent("Media route request failed without fallback", error = failure.toString())
+                recordEvent("Media route request failed without fallback", error = failure.javaClass.simpleName,
+                    routeFailure = true)
                 false
             }
         }
+
+    /** Change call audio route (receiver, speaker, bluetooth, wired headset). */
+    override suspend fun setCallRoute(route: AudioOutputRoute): Boolean =
+        setCallRouteWithoutFallback(route)
+
+// Superseded fallback route implementation retained inactive:
+//     override suspend fun setCallRoute(route: AudioOutputRoute): Boolean =
+//         transitionMutex.withLock {
+//             if (_activeOwner != AudioUseCase.communication) {
+//                 recordEvent("Rejected route change: call is not active owner")
+//                 return@withLock false
+//             }
+//             recordEvent("Switching call route to $route", useCase = AudioUseCase.communication)
+//             try {
+//                 val caps = capabilityService.setPreferredRoute(
+//                     AudioUseCase.communication,
+//                     route,
+//                 )
+//                 _activeRoute = caps.activeRoute
+//                 _state = stateForRoute(_activeRoute)
+//                 recordEvent("Call route successfully updated to $_activeRoute", useCase = AudioUseCase.communication)
+//                 notifyListeners()
+//                 true
+//             } catch (e: Exception) {
+//                 if (e is kotlinx.coroutines.CancellationException) throw e
+// // Previous implementation retained:                 recordEvent("Call route update failed, falling back", useCase = AudioUseCase.communication, error = e.toString())
+//                 recordEvent("Call route update failed, falling back", useCase = AudioUseCase.communication,
+//                     error = e.javaClass.simpleName, routeFailure = true)
+//                 // Safe fallback to speakerphone or receiver
+//                 try {
+//                     val fallback = capabilityService.setPreferredRoute(
+//                         AudioUseCase.communication,
+//                         AudioOutputRoute.speaker,
+//                     )
+//                     _activeRoute = fallback.activeRoute
+//                     _state = stateForRoute(_activeRoute)
+//                     notifyListeners()
+//                 } catch (inner: Exception) {
+//                     if (inner is kotlinx.coroutines.CancellationException) throw inner
+//                 }
+//                 false
+//             }
+//         }
+//
 
     /** Handle media playback session acquisition. */
     override suspend fun startMediaSession(): Boolean =
@@ -168,7 +238,8 @@ class AudioPolicyCoordinator(
                 capabilityService.releaseSession(AudioUseCase.communication)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                recordEvent("Error releasing session: $e")
+// Previous implementation retained:                 recordEvent("Error releasing session: $e")
+                recordEvent("Error releasing session", error = e.javaClass.simpleName)
             } finally {
                 _activeOwner = null
                 _activeRoute = AudioOutputRoute.systemDefault
@@ -216,9 +287,20 @@ class AudioPolicyCoordinator(
             AudioOutputRoute.receiver -> AudioSessionState.receiverCall
             AudioOutputRoute.speaker -> AudioSessionState.speakerphoneCall
             AudioOutputRoute.bluetooth,
+            AudioOutputRoute.hearingAid,
             AudioOutputRoute.wiredHeadset,
             AudioOutputRoute.usb -> AudioSessionState.externalCall
             else -> AudioSessionState.receiverCall
         }
     }
+}
+
+
+/** Immutable display state. Legacy listeners remain for existing non-Compose owners. */
+data class AudioPolicySnapshot(val state: AudioSessionState, val activeOwner: AudioUseCase?, val activeRoute: AudioOutputRoute)
+
+
+/** Opt-in contract for media routing that does not redirect to a fallback device. */
+interface NoFallbackCallRouteGate {
+    suspend fun setCallRouteWithoutFallback(route: AudioOutputRoute): Boolean
 }

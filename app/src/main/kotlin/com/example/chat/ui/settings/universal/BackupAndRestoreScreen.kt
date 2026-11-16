@@ -2,6 +2,10 @@ package com.example.chat.ui.settings.universal
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import kotlinx.coroutines.ensureActive
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -77,23 +81,37 @@ fun BackupAndRestoreScreen(
     onMessage: (String) -> Unit = {},
     conversationsSnapshot: () -> List<Map<String, Any?>> = { emptyList() },
 ) {
+    val ownerApi = com.example.chat.ServiceLocator.apiBackend
+    var ownerRevision by remember(ownerApi) { androidx.compose.runtime.mutableIntStateOf(0) }
+    val ownerScope = rememberCoroutineScope()
+    androidx.compose.runtime.DisposableEffect(ownerApi) {
+        val listener: () -> Unit = { ownerScope.launch { ownerRevision++ }; Unit }
+        ownerApi.addListener(listener)
+        onDispose { ownerApi.removeListener(listener) }
+    }
+    @Suppress("UNUSED_EXPRESSION") ownerRevision
+    val backupOwner = ownerApi.authSnapshot()
+    androidx.compose.runtime.key(backupOwner) {
     val colors = LocalAppColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Existing backup behavior remains checked. Unchecking omits complete settings/appearance sections.
+    var includeAppearanceSettings by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+
 
     val logic = remember {
         BackupRestoreLogic(
             docsDir = { context.filesDir },
             tempDir = { context.cacheDir },
             preferencesSnapshot = {
-                linkedMapOf(
+                conversationBackupPreferenceSnapshot(linkedMapOf(
                     "universal" to preferences.universal.toMap(),
                     "home" to preferences.home.toMap(),
                     "conversation" to preferences.conversation.toMap(),
                     "privacy" to preferences.privacy.toMap(),
                     "security" to preferences.security.toMap(),
                     "notification" to preferences.notification.toMap(),
-                )
+                ),includeAppearanceSettings)
             },
             conversationsSnapshot = conversationsSnapshot,
             applyUniversal = { map ->
@@ -164,7 +182,22 @@ fun BackupAndRestoreScreen(
     val apiBackend = remember { com.example.chat.ServiceLocator.apiBackend }
     val mediaCache = remember { com.example.chat.ServiceLocator.mediaCache }
     val prefsStorage = remember { com.example.chat.ServiceLocator.preferencesStorage }
-    fun currentAccountId(): String? = apiBackend.currentUser?.id
+    fun requireBackupOwner() { if (apiBackend.authSnapshot() !== backupOwner) throw kotlinx.coroutines.CancellationException("Backup account changed") }
+    fun currentAccountId(): String? { requireBackupOwner(); return backupOwner.userId }
+    // Decorate stores without changing the archive/import contract. Rollback remains available
+    // after cancellation/account change so already-written sections can restore their snapshots.
+    fun guardedRestoreStores(): (String) -> BackupPortableLogic.SectionStore? {
+        val lookup = BackupSectionCollector(context, prefsStorage, backupOwner.userId.orEmpty(), { emptyList() }).storeFor()
+        val wrappers = java.util.IdentityHashMap<BackupPortableLogic.SectionStore, BackupPortableLogic.SectionStore>()
+        return { name -> lookup(name)?.let { store -> wrappers.getOrPut(store) {
+            object : BackupPortableLogic.SectionStore by store {
+                private fun checkOwner() { requireBackupOwner(); scope.coroutineContext.ensureActive() }
+                override fun snapshot(): ByteArray? { checkOwner(); return store.snapshot() }
+                override fun stage(data: ByteArray) { checkOwner(); store.stage(data) }
+                override fun commit() { checkOwner(); store.commit() }
+            }
+        } } }
+    }
 
     var exportPass1 by remember { mutableStateOf("") }
     var exportPass2 by remember { mutableStateOf("") }
@@ -176,6 +209,7 @@ fun BackupAndRestoreScreen(
     var portableBusy by remember { mutableStateOf(false) }
 
     fun exportTo(uri: android.net.Uri, passphrase: CharArray) {
+        val includeAppearanceSnapshot = includeAppearanceSettings
         scope.launch {
             portableBusy = true
             val message = withContext(Dispatchers.IO) {
@@ -194,13 +228,19 @@ fun BackupAndRestoreScreen(
                             media.sections
                         },
                     )
-                    val sections = collector.collectSections()
+                    // Previous/default: collector.collectSections()
+                    val sections = collector.collectSections(includeAppearanceSnapshot)
+                    requireBackupOwner()
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     val created = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
                     val envelope = BackupPortableLogic.buildEncryptedArchive(account, created, sections, passphrase)
+                    requireBackupOwner()
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     context.contentResolver.openOutputStream(uri)?.use { it.write(envelope.toByteArray(Charsets.UTF_8)) }
                         ?: return@withContext "Could not write the backup file."
                     "Portable backup saved.$mediaNote Keep your passphrase safe - without it this backup cannot be restored."
-                } catch (e: Exception) {
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (e: Exception) {
                     "Backup failed: ${e.message ?: e.javaClass.simpleName}"
                 } finally {
                     passphrase.fill('\u0000')
@@ -215,14 +255,15 @@ fun BackupAndRestoreScreen(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         val p1 = exportPass1
-        if (uri != null && p1.isNotEmpty()) exportTo(uri, p1.toCharArray())
+        if (uri != null && p1.isNotEmpty() && apiBackend.authSnapshot() === backupOwner) exportTo(uri, p1.toCharArray())
+        else portableBusy = false
         exportPass1 = ""; exportPass2 = ""
     }
 
     val openLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        if (uri != null) {
+        if (uri != null && apiBackend.authSnapshot() === backupOwner) {
             scope.launch {
                 val text = withContext(Dispatchers.IO) {
                     // BKP-R2-076: bounded read; stop before allocating an oversized provider file.
@@ -243,23 +284,30 @@ fun BackupAndRestoreScreen(
                             if (tooBig) null else out.toByteArray().toString(Charsets.UTF_8)
                         }
                     }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                     catch (_: Exception) { null }
                 }
+                requireBackupOwner()
+                portableBusy = false
                 if (text == null) onMessage("Could not read that file.") else pendingRestoreText = text
             }
-        }
+        } else portableBusy = false
     }
 
     fun runPortableRestore() {
         val envelope = pendingRestoreText ?: return
+        if (portableBusy || apiBackend.authSnapshot() !== backupOwner) return
         val pass = restorePass.toCharArray()
+        portableBusy = true
         scope.launch {
             portableBusy = true
             val parsed = withContext(Dispatchers.IO) {
                 try { BackupPortableLogic.readEncryptedArchive(envelope, pass) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (e: Exception) { null }
                 finally { pass.fill('\u0000') }
             }
+            requireBackupOwner()
             portableBusy = false
             if (parsed == null) {
                 onMessage("Could not open the backup: wrong passphrase or damaged file.")
@@ -273,15 +321,19 @@ fun BackupAndRestoreScreen(
 
     fun confirmPortableRestore() {
         val parsed = pendingRestoreParsed ?: return
+        if (portableBusy || apiBackend.authSnapshot() !== backupOwner) return
+        val restoreAccount = backupOwner.userId
+        val stores = guardedRestoreStores()
+        portableBusy = true
         scope.launch {
             portableBusy = true
             val result = withContext(Dispatchers.IO) {
                 BackupPortableLogic.importArchive(
-                    parsed, currentAccountId(),
-                    BackupSectionCollector(context, prefsStorage, currentAccountId() ?: "", { emptyList() }).storeFor(),
+                    parsed, restoreAccount, stores,
                 )
             }
             portableBusy = false
+            requireBackupOwner()
             preview = null; pendingRestoreParsed = null; pendingRestoreText = null
             onMessage(when (result) {
                 is BackupPortableLogic.ImportResult.Ok -> result.message
@@ -293,6 +345,12 @@ fun BackupAndRestoreScreen(
     }
 
     SettingsPage(title = "Backup and restore", onBack = onBack) {
+        com.example.chat.ui.kit.GbSettingRow(
+            title = context.getString(com.example.chat.R.string.conv_proposal_backup_include_appearance),
+            subtitle = context.getString(com.example.chat.R.string.conv_proposal_backup_include_appearance_scope),
+            switchValue = includeAppearanceSettings,onSwitchChanged = { if (!portableBusy && !isBackingUp) includeAppearanceSettings = it })
+        Text(context.getString(com.example.chat.R.string.conv_proposal_backup_conversation_disclosure))
+
         // SECTION: Chaty Data
         SettingsSection(title = "Chaty Data") {
             BackupRow(
@@ -326,7 +384,11 @@ fun BackupAndRestoreScreen(
                 title = "Restore portable backup",
                 subtitle = "Pick a backup file, enter its passphrase, review what will be restored and where, then confirm. Only restores into the same account.",
                 busy = portableBusy,
-                onClick = { if (!portableBusy) openLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                onClick = { if (!portableBusy) {
+                    portableBusy = true
+                    try { openLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }
+                    catch (_: Exception) { portableBusy = false; onMessage("Could not open the file picker.") }
+                } },
             )
         }
 
@@ -399,15 +461,18 @@ fun BackupAndRestoreScreen(
     // Passphrase dialog for export (entry + confirmation + recovery warning).
     if (showExportDialog) {
         AlertDialog(
+            properties = androidx.compose.ui.window.DialogProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
             onDismissRequest = { showExportDialog = false; exportPass1 = ""; exportPass2 = "" },
             title = { Text("Choose a backup passphrase") },
             text = {
-                Column {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     Text(
                         "This passphrase encrypts your backup. Chaty never stores it. " +
                             "If you forget it, the backup cannot be recovered - there is no reset.",
                         color = colors.foregroundSecondary, fontSize = 13.sp, lineHeight = 18.sp,
                     )
+                    Text(context.getString(if (includeAppearanceSettings) com.example.chat.R.string.conv_proposal_backup_appearance_included
+                        else com.example.chat.R.string.conv_proposal_backup_appearance_excluded),color = colors.foregroundSecondary,fontSize = 13.sp)
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = exportPass1, onValueChange = { exportPass1 = it },
@@ -429,8 +494,12 @@ fun BackupAndRestoreScreen(
                 Button(
                     enabled = exportPass1.length >= 8 && exportPass1 == exportPass2,
                     onClick = {
-                        showExportDialog = false
-                        createLauncher.launch("chaty_backup_${System.currentTimeMillis()}.chb")
+                        if (!portableBusy) {
+                            portableBusy = true
+                            showExportDialog = false
+                            try { createLauncher.launch("chaty_backup_${System.currentTimeMillis()}.chb") }
+                            catch (_: Exception) { portableBusy = false; exportPass1 = ""; exportPass2 = ""; onMessage("Could not open the file picker.") }
+                        }
                     },
                 ) { Text("Create backup") }
             },
@@ -441,14 +510,17 @@ fun BackupAndRestoreScreen(
     // Passphrase dialog for restore.
     if (pendingRestoreText != null && preview == null) {
         AlertDialog(
+            properties = androidx.compose.ui.window.DialogProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
             onDismissRequest = { pendingRestoreText = null; restorePass = "" },
             title = { Text("Enter backup passphrase") },
             text = {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = restorePass, onValueChange = { restorePass = it },
                     label = { Text("Passphrase") },
                     visualTransformation = PasswordVisualTransformation(), singleLine = true,
                 )
+                }
             },
             confirmButton = {
                 Button(enabled = restorePass.isNotEmpty() && !portableBusy, onClick = { runPortableRestore() }) { Text("Open backup") }
@@ -460,10 +532,11 @@ fun BackupAndRestoreScreen(
     // Preview + explicit confirmation before any restore mutation.
     preview?.let { p ->
         AlertDialog(
+            properties = androidx.compose.ui.window.DialogProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
             onDismissRequest = { preview = null; pendingRestoreParsed = null; pendingRestoreText = null },
             title = { Text("Restore this backup?") },
             text = {
-                Column {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     Text("Created: ${p.createdAt}", color = colors.foregroundSecondary, fontSize = 12.sp)
                     if (!p.matchesCurrentAccount) {
                         Spacer(Modifier.height(6.dp))
@@ -499,6 +572,7 @@ fun BackupAndRestoreScreen(
         )
     }
 }
+} // Captured auth-owner boundary.
 
 private fun resultMessage(result: BackupRestoreLogic.Result): String = when (result) {
     is BackupRestoreLogic.Result.BackupOk -> result.message
@@ -541,3 +615,17 @@ private fun BackupRow(
         }
     }
 }
+
+// Superseded backup wiring retained inactive:
+//     fun currentAccountId(): String? = apiBackend.currentUser?.id
+//                 } catch (e: Exception) {
+//         if (uri != null && p1.isNotEmpty()) exportTo(uri, p1.toCharArray())
+//         if (uri != null) {
+//         }
+//                     parsed, currentAccountId(),
+//                     BackupSectionCollector(context, prefsStorage, currentAccountId() ?: "", { emptyList() }).storeFor(),
+//                 onClick = { if (!portableBusy) openLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+//                 Column {
+//                         showExportDialog = false
+//                         createLauncher.launch("chaty_backup_${System.currentTimeMillis()}.chb")
+//                 Column {

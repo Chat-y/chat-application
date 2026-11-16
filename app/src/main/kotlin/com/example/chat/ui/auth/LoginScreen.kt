@@ -96,10 +96,15 @@ fun LoginScreen(
     var identifier by androidx.compose.runtime.saveable.rememberSaveable(initialIdentifier) { mutableStateOf(initialIdentifier) }
     var workspace by androidx.compose.runtime.saveable.rememberSaveable(initialWorkspace) { mutableStateOf(initialWorkspace.orEmpty()) }
     val modePrefs = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("chaty_auth_ui", android.content.Context.MODE_PRIVATE)
-    var useOrganization by remember(initialWorkspace) { mutableStateOf(!initialWorkspace.isNullOrBlank()) }
+    var useOrganization by androidx.compose.runtime.saveable.rememberSaveable(initialWorkspace) { mutableStateOf(!initialWorkspace.isNullOrBlank()) }
+    var tenantSelectionInitialized by androidx.compose.runtime.saveable.rememberSaveable(initialWorkspace) { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        if (initialWorkspace == null) {
-            val (saved, usingDefault) = loadSavedTenant()
+        if (initialWorkspace == null && !tenantSelectionInitialized) {
+            val (saved, usingDefault) = try { loadSavedTenant() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { return@LaunchedEffect }
+            if (tenantSelectionInitialized) return@LaunchedEffect
+            tenantSelectionInitialized = true
             useOrganization = !usingDefault && !saved.isNullOrBlank() &&
                 !saved.equals(com.example.chat.data.api.BackendRoutingPolicy.DEFAULT_TENANT_ID, ignoreCase = true)
             workspace = if (useOrganization) saved.orEmpty() else ""
@@ -113,6 +118,7 @@ fun LoginScreen(
             saveAttempt=saveEmailAttempt,restoreAttempt=restoreEmailAttempt,onResumeState=onCodeResumeState,
             onUsePassword = { email, selectedWorkspace, organization ->
                 identifier = email
+                tenantSelectionInitialized = true
                 workspace = selectedWorkspace
                 useOrganization = organization
                 useEmailCode = false
@@ -129,6 +135,7 @@ fun LoginScreen(
     var obscurePassword by remember { mutableStateOf(true) }
     // Auth screenshot blocking is off by default. Preserve the opt-in hook, do not apply globally.
     // com.example.chat.ui.kit.ProtectSensitiveWindow()
+    com.example.chat.ui.kit.ProtectSensitiveWindow() // A1-14: enabled (FLAG_SECURE lease while this screen is shown)
     com.example.chat.ui.core.components.auth.RemaskPasswordOnBackground { obscurePassword = true }
 
     var isLoading by remember { mutableStateOf(false) }
@@ -173,16 +180,21 @@ fun LoginScreen(
         storageFailure = null
         val submittedIdentifier=identifier.trim()
         val submittedPassword=password
+        val submittedOrganization=useOrganization
+        val submittedWorkspace=workspace.trim()
         scope.launch {
             try {
                 val userId = authRequest { login(
                     submittedIdentifier,
                     submittedPassword,
-                    if (useOrganization) workspace.trim() else null,
-                    !useOrganization,
+                    // Previous: if (useOrganization) workspace.trim() else null,
+                    if (submittedOrganization) submittedWorkspace else null,
+                    // Previous: !useOrganization,
+                    !submittedOrganization,
                 ) }
                 com.example.chat.ui.kit.ChatyHapticsPort.success(feedbackView)
-                if(useOrganization) AuthWorkspaceHistory.record(feedbackView.context,workspace)
+                // if(useOrganization) AuthWorkspaceHistory.record(feedbackView.context,workspace)
+                if(submittedOrganization) AuthWorkspaceHistory.record(feedbackView.context,submittedWorkspace)
                 credentialSupport.save(submittedIdentifier,submittedPassword)
                 onLoggedIn(userId)
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -224,8 +236,10 @@ fun LoginScreen(
                 AuthCapsuleModeSelector(
                     theme = theme,
                     useOrganization = useOrganization,
-                    onSelect = { useOrganization = it; modePrefs.edit().putBoolean("organization", it).apply(); errorMessage = null },
+                    onSelect = { tenantSelectionInitialized = true; useOrganization = it; modePrefs.edit().putBoolean("organization", it).apply(); errorMessage = null },
                 )
+                // Prior: AuthPrimaryButton(text = authCopy("Send code"), isLoading = loading, capsule = true, theme = theme, onClick = {
+                    // Prior: error = ChatyValidators.validateEmail(email)
                 Spacer(Modifier.height(ChatyUiTokens.space16))
 
                 if (useOrganization) {
@@ -236,13 +250,13 @@ fun LoginScreen(
                         capsule = true,
                         theme = theme,
                         value = workspace,
-                        onValueChange = { workspace = it; workspaceError = null; errorMessage = null },
+                        onValueChange = { tenantSelectionInitialized = true; workspace = it; workspaceError = null; errorMessage = null },
                         error = workspaceError,
                         prefixIcon = {
                             AuthRoleIcon("workspace", theme)
                         },
                     )
-                    AuthWorkspaceSuggestions(workspace,theme) {workspace=it;workspaceError=null;errorMessage=null}
+                    AuthWorkspaceSuggestions(workspace,theme) {tenantSelectionInitialized=true;workspace=it;workspaceError=null;errorMessage=null}
                     Spacer(Modifier.height(ChatyUiTokens.space16))
                 }
 
@@ -303,13 +317,13 @@ fun LoginScreen(
                                 putExtra(
                                     android.content.Intent.EXTRA_TEXT,
                                     "Customer care,\n\nChaty could not sign me in because the app could not save the session securely on this device.\n\nDetails shown by the app:\n" +
-                                        (failure.message ?: authCopy("unknown reason")) +
+                                        authCopy("Secure storage on this device failed. No further technical details are included.") +
                                         "\n\nPlease advise how to fix this.",
                                 )
                             }
                             runCatching {
                                 context.startActivity(
-                                    android.content.Intent.createChooser(send, authCopy("Contact customer care")),
+                                    android.content.Intent.createChooser(send, authCopy(STORAGE_FAILURE_ACTION_LABEL)),
                                 )
                             }
                         },
@@ -349,21 +363,18 @@ fun LoginScreen(
                     }
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space8))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        authCopy("New to Chaty? "),
-                        color = com.example.chat.ui.auth.authReadable(theme, theme.accentColor),
-                        fontSize = ChatyUiTokens.text13_5,
-                    )
-                    com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Register"), theme, onRegister, !isLoading)
-                }
-                Spacer(Modifier.height(ChatyUiTokens.space16))
-                androidx.compose.material3.HorizontalDivider(color = Color(argbWithAlpha(theme.secondaryTextColor, 0.2)))
-                AuthSecondaryButton(authCopy("Register a New Organization"), theme, onRegisterOrganization)
+                com.example.chat.ui.core.components.auth.ChatyAuthRegistrationLinks(
+                    theme, onRegister, onRegisterOrganization, !isLoading)
+                // Text(
+                // authCopy("New to Chaty? "),
+                // color = com.example.chat.ui.auth.authReadable(theme, theme.accentColor),
+                // fontSize = ChatyUiTokens.text13_5,
+                // )
+                // com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Register"), theme, onRegister, !isLoading)
+                // }
+                // Spacer(Modifier.height(ChatyUiTokens.space16))
+                // androidx.compose.material3.HorizontalDivider(color = Color(argbWithAlpha(theme.secondaryTextColor, 0.2)))
+                // AuthSecondaryButton(authCopy("Register a New Organization"), theme, onRegisterOrganization)
                 // Hidden by owner request. Retain the demo UI source and callback, do not render it.
                 // if (demoLogin != null) {
                 //     AuthTextLink(text = authCopy("Try demo"), theme = theme, enabled = !isLoading, onClick = {
@@ -498,10 +509,13 @@ private fun EmailCodeLoginForm(
     val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val theme = LocalThemeConfig.current
     val scope = com.example.chat.ui.core.components.auth.rememberAuthRequestScope(active)
+    val codeOnline = com.example.chat.ui.core.components.auth.rememberAuthOnline()
     var email by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialEmail.takeIf { it.contains('@') }.orEmpty()) }
     var workspace by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialWorkspace.orEmpty()) }
-    var organization by remember { mutableStateOf(!initialWorkspace.isNullOrBlank()) }
+    var organization by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(!initialWorkspace.isNullOrBlank()) }
     var loading by remember { mutableStateOf(false) }
+    var codeRetryDeadline by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    val codeRetryWait = com.example.chat.ui.core.components.auth.rememberAuthRetryWait(codeRetryDeadline)
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf<com.example.chat.data.api.ApiBackendService.EmailCodeAttempt?>(null) }
     var signedInUser by remember { mutableStateOf<String?>(null) }
@@ -518,9 +532,14 @@ private fun EmailCodeLoginForm(
         attempt?.let {if(saveAttempt!=null && resume?.challengeId!=it.challenge.id) resume=saveAttempt(it)}
     }
 
+    var tenantSelectionInitialized by androidx.compose.runtime.saveable.rememberSaveable(initialWorkspace) { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        if (initialWorkspace == null) {
-            val (saved, usingDefault) = loadSavedTenant()
+        if (initialWorkspace == null && !tenantSelectionInitialized) {
+            val (saved, usingDefault) = try { loadSavedTenant() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { return@LaunchedEffect }
+            if (tenantSelectionInitialized) return@LaunchedEffect
+            tenantSelectionInitialized = true
             organization = !usingDefault && !saved.isNullOrBlank()
             workspace = if (organization) saved.orEmpty() else ""
         }
@@ -547,40 +566,54 @@ private fun EmailCodeLoginForm(
     }
     com.example.chat.ui.core.components.auth.ChatyAuthScreen(theme) {
                 AuthBackButton(onClick = guardedEmailBack)
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    com.example.chat.ui.core.components.auth.ChatyAppAuthIcon()
+                }
+                com.example.chat.ui.core.components.auth.AuthOfflineNotice(codeOnline, theme)
                 Spacer(Modifier.height(ChatyUiTokens.space24))
                 Text(authCopy("Welcome back"), color = com.example.chat.ui.auth.authReadable(theme, theme.primaryTextColor), fontSize = ChatyUiTokens.text28, fontWeight = FontWeight.ExtraBold)
                 Text(authCopy("Sign in with an email code."), color = com.example.chat.ui.auth.authReadable(theme, theme.secondaryTextColor))
                 Spacer(Modifier.height(ChatyUiTokens.space24))
-                AuthCapsuleModeSelector(theme, organization) { organization = it; error = null }
+                AuthCapsuleModeSelector(theme, organization) { tenantSelectionInitialized = true; organization = it; error = null }
                 if (organization) {
                     Spacer(Modifier.height(ChatyUiTokens.space16))
                     AuthTextField(label = authCopy("Workspace ID"), hintText = authCopy("e.g. acme-corp"), capsule = true,
-                        theme = theme, value = workspace, onValueChange = { workspace = it })
+                        // Prior: theme = theme, value = workspace, onValueChange = { workspace = it })
+                        theme = theme, value = workspace, onValueChange = { tenantSelectionInitialized = true; workspace = it; error = null })
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space16))
+                    // Prior: theme = theme, value = email, onValueChange = { email = it }, keyboardType = KeyboardType.Email)
                 AuthTextField(label = authCopy("Email"), hintText = authCopy("you@example.com"), capsule = true,
-                    theme = theme, value = email, onValueChange = { email = it }, keyboardType = KeyboardType.Email)
+                    theme = theme, value = email, onValueChange = { email = it; error = null }, keyboardType = KeyboardType.Email)
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 error?.let { Text(authCopy(it), color = com.example.chat.ui.auth.authReadable(theme, theme.dangerColor)); Spacer(Modifier.height(ChatyUiTokens.touchGap)) }
-                AuthPrimaryButton(text = authCopy("Send code"), isLoading = loading, capsule = true, theme = theme, onClick = {
-                    error = ChatyValidators.validateEmail(email)
+                com.example.chat.ui.core.components.auth.AuthRetryNotice(codeRetryWait, theme)
+                AuthPrimaryButton(enabled = codeRetryWait == 0, text = authCopy("Send code"), isLoading = loading, capsule = true, theme = theme, onClick = {
+                    if (loading || codeRetryWait > 0) return@AuthPrimaryButton
+                    error = ChatyValidators.validateEmail(email.trim())
                     if (organization && workspace.isBlank()) error = authCopy("Enter a workspace ID.")
                     if (error == null && !loading) {
                         loading = true
                         val selectedEmail = email.trim()
                         val selectedWorkspace = workspace.trim().takeIf { organization }
+                            // Prior: catch (e: Exception) { error = e.message ?: authCopy("Could not request a code.") }
                         val selectedDefault = !organization
                         scope.launch {
                             try { attempt = authRequest { requestCode(selectedEmail, selectedWorkspace, selectedDefault) } }
                             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                            catch (e: Exception) { error = e.message ?: authCopy("Could not request a code.") }
+                            catch (e: Exception) {
+                                error = e.message ?: authCopy("Could not request a code.")
+                                if (e is com.example.chat.data.api.AuthRateLimitException) codeRetryDeadline = android.os.SystemClock.elapsedRealtime() + e.retryAfterSeconds * 1000L
+                            }
                             finally { loading = false }
                         }
                     }
                 })
                 com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Use password instead"), theme, { onUsePassword(email, workspace, organization) }, !loading)
-                com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Create account"), theme, onRegister, !loading)
-                com.example.chat.ui.core.components.auth.ChatyAuthLink(authCopy("Create a workspace"), theme, onRegisterOrganization, !loading)
+                com.example.chat.ui.core.components.auth.ChatyAuthRegistrationLinks(
+                    theme, onRegister, onRegisterOrganization, !loading)
+                // ChatyAuthLink(authCopy("Create account"), theme, onRegister, !loading)
+                // ChatyAuthLink(authCopy("Create a workspace"), theme, onRegisterOrganization, !loading)
                 if (demoLogin != null) {
                     TextButton(modifier = Modifier.padding(ChatyUiTokens.touchGap / 2), enabled = !loading, onClick = {
                         loading = true

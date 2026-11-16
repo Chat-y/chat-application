@@ -468,9 +468,13 @@ class ChatyPreferencesController(
                 }
             }
 
-            val needsPurge = PreferencesMigrator.rawHasLegacySecrets(remoteRaw)
+            // val needsPurge = PreferencesMigrator.rawHasLegacySecrets(remoteRaw)
+            val needsPurge = PreferencesMigrator.rawHasLegacySecrets(remoteRaw) || LocalProtectionMetadata.isPresent(remoteRaw)
             val migration = PreferencesMigrator.migrate(remoteRaw)
-            applyMap(LocalPreferenceChoicePolicy.merge(migration.data, snapshot(), localChoiceFields))
+            // applyMap(LocalPreferenceChoicePolicy.merge(migration.data, snapshot(), localChoiceFields))
+            val localSnapshot = snapshot()
+            applyMap(LocalProtectionMetadata.keepLocal(
+                LocalPreferenceChoicePolicy.merge(migration.data, localSnapshot, localChoiceFields), localSnapshot))
             choiceBaseline = snapshot()
             if (migration.migratedSecrets) migrateLegacySecrets(migration)
             if (!current()) return
@@ -499,7 +503,8 @@ class ChatyPreferencesController(
         val userId = expectedUserId ?: return
         if (auth.currentUserId() != userId || scopeUserId != userId) return
         try {
-            remoteStore.push(userId, snap - LocalPreferenceChoicePolicy.KEY)
+            // remoteStore.push(userId, snap - LocalPreferenceChoicePolicy.KEY)
+            remoteStore.push(userId, LocalProtectionMetadata.forRemote(snap - LocalPreferenceChoicePolicy.KEY))
         } catch (_: Exception) {
             // Keep the local copy; the next mutation retries the account sync.
         }
@@ -607,6 +612,21 @@ class ChatyPreferencesController(
         privacy = newPrefs
         if (logTitle != null) logHistory("privacy", logTitle, prevVal, newVal)
         persist(explicitGroup = PreferenceKeys.privacy); notifyListeners()
+    }
+
+    /** CS3-49: single entry point for call-audience privacy writes (who can call me +
+     *  exceptions) so callers cannot diverge through ad-hoc privacy.copy(...) paths.
+     *  Additive convenience over updatePrivacy; no behaviour change. Null arguments
+     *  keep the current value. */
+    fun updateCallPrivacy(whoCanCallMe: String? = null, whoCanCallMeExceptions: List<String>? = null, logTitle: String? = null) {
+        val current = privacy
+        updatePrivacy(
+            current.copy(
+                whoCanCallMe = whoCanCallMe ?: current.whoCanCallMe,
+                whoCanCallMeExceptions = whoCanCallMeExceptions ?: current.whoCanCallMeExceptions,
+            ),
+            logTitle = logTitle,
+        )
     }
 
     fun updateSecurity(newPrefs: SecurityPreferences, logTitle: String? = null, prevVal: Any? = null, newVal: Any? = null) {

@@ -40,6 +40,8 @@ import androidx.compose.material.icons.rounded.Cameraswitch
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Hearing
+import androidx.compose.material.icons.rounded.BluetoothAudio
+import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MicOff
@@ -56,6 +58,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,6 +67,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -140,6 +144,7 @@ fun OngoingCallScreen(
     onRequestVideo: (() -> Unit)? = null,
     onReturnToAudio: (() -> Unit)? = null,
     videoUpgradeStatus: String = "Video upgrade pending server and peer support",
+    microphoneCapture: com.example.chat.data.services.CallMicrophoneCaptureProvider? = null,
 ) {
     val reduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
     val theme = LocalThemeConfig.current
@@ -152,6 +157,7 @@ fun OngoingCallScreen(
     val endCallColor = com.example.chat.ui.theme.LocalAppColors.current.error
     val controlBackground = Color(theme.cardColor)
     var controlsVisible by remember { mutableStateOf(true) }
+    var topPanelHeightPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var focusMode by remember { mutableStateOf(false) }
     var localPipOffsetX by remember { mutableStateOf(20f) }
     var localPipOffsetY by remember { mutableStateOf(80f) }
@@ -184,16 +190,20 @@ fun OngoingCallScreen(
         Scaffold(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing), contentWindowInsets = WindowInsets(0, 0, 0, 0), containerColor = callBackdrop()) { padding ->
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxSize().padding(padding).padding(28.dp),
+// Previous implementation retained:                 modifier = Modifier.fillMaxSize().padding(padding).padding(28.dp),
+                modifier = Modifier.fillMaxSize().padding(padding)
+                    .verticalScroll(rememberScrollState()).padding(28.dp),
             ) {
-                Spacer(Modifier.height(140.dp))
+// Previous implementation retained:                 Spacer(Modifier.height(140.dp))
+                Spacer(Modifier.height(24.dp))
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callEnd,
                     semanticLabel = null,
                     color = Color(theme.dangerColor),
                     modifier = Modifier.size(42.dp),
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("Call unavailable", color = callForeground(), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+// Previous implementation retained:                 Text("Call unavailable", color = callForeground(), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("Call unavailable", color = callForeground(), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(5.dp))
                 Text(
                     setupError ?: "This call session is no longer available.",
@@ -224,7 +234,20 @@ fun OngoingCallScreen(
         }
     }
     val isActive = session.isActive
-    Scaffold(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing), contentWindowInsets = WindowInsets(0, 0, 0, 0), containerColor = callBackdrop()) { padding ->
+// Previous implementation retained:     Scaffold(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing), contentWindowInsets = WindowInsets(0, 0, 0, 0), containerColor = callBackdrop()) { padding ->
+    val routeSnackbar = remember(session.callId) { androidx.compose.material3.SnackbarHostState() }
+    var priorAudioRoute by remember(session.callId) { mutableStateOf(session.audioRoute) }
+    val routeContext = LocalContext.current
+    LaunchedEffect(session.callId, session.audioRoute) {
+        if (priorAudioRoute != session.audioRoute) {
+            priorAudioRoute = session.audioRoute
+            routeSnackbar.showSnackbar(routeContext.getString(com.example.chat.R.string.call_audio_output,
+                routeContext.getString(callAudioRouteLabelResource(session.audioRoute))))
+        }
+    }
+    Scaffold(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+        snackbarHost = { androidx.compose.material3.SnackbarHost(routeSnackbar) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0), containerColor = callBackdrop()) { padding ->
         Box(
             Modifier
                 .fillMaxSize()
@@ -277,7 +300,8 @@ fun OngoingCallScreen(
                         },
                 ) {
                     if (!session.isCameraOff && videoSurfaces != null) {
-                        LocalVideoSurface(videoSurfaces, mirror = session.isFrontCamera)
+// Previous implementation retained:                         LocalVideoSurface(videoSurfaces, mirror = session.isFrontCamera)
+                        LocalVideoSurface(session.callId, videoSurfaces, mirror = session.isFrontCamera)
                     } else {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideoOff,
@@ -325,10 +349,14 @@ fun OngoingCallScreen(
             }
 
             // Top panel (Dart AnimatedPositioned slide).
-            val topOffset by animateDpAsState(if (controlsVisible) 0.dp else (-110).dp, animationSpec = if (reduceMotion) snap() else tween(220), label = "topPanel")
+// Previous implementation retained:             val topOffset by animateDpAsState(if (controlsVisible) 0.dp else (-110).dp, animationSpec = if (reduceMotion) snap() else tween(220), label = "topPanel")
+            val hiddenTopOffset = with(androidx.compose.ui.platform.LocalDensity.current) { -topPanelHeightPx.toDp() }
+            val topOffset by animateDpAsState(if (controlsVisible) 0.dp else hiddenTopOffset,
+                animationSpec = if (reduceMotion) snap() else tween(220), label = "topPanel")
             Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
+                    .onSizeChanged { topPanelHeightPx = it.height }
                     .offset(y = topOffset)
                     // CALL-R1-38: hidden panels leave the semantics tree too.
                     .then(if (!controlsVisible && session.isVideo) Modifier.clearAndSetSemantics { } else Modifier)
@@ -356,8 +384,9 @@ fun OngoingCallScreen(
                             // controls already use below. The existing 13.sp secondary
                             // size keeps a long word on one line so maxLines = 2 wraps
                             // at the word boundary instead of breaking inside the word.
-                            fontSize = if (iosLayout && !session.isVideo) 26.sp
-                                else if (headerMaxWidth < 116.dp) 13.sp else 17.sp,
+// Previous implementation retained:                             fontSize = if (iosLayout && !session.isVideo) 26.sp
+// Previous implementation retained:                                 else if (headerMaxWidth < 116.dp) 13.sp else 17.sp,
+                            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                             fontWeight = FontWeight.Bold,
                             // Two lines everywhere: narrow widths wrap instead of
                             // truncating to a stub; one line when the name fits.
@@ -371,10 +400,14 @@ fun OngoingCallScreen(
                             // ticks with the timer once connected - status transitions dominate).
                             statusLabel(session, callDurationSeconds),
                             color = callSecondary(),
-                            fontSize = if (iosLayout && !session.isVideo) 16.sp else 13.sp,
+// Previous implementation retained:                             fontSize = if (iosLayout && !session.isVideo) 16.sp else 13.sp,
+                            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         )
+                        Spacer(Modifier.height(4.dp))
+                        CallAudioRouteIndicator(session.audioRoute)
+                        CallMicrophoneIndicator(microphoneCapture, session.isMuted || session.isLocallyHeld)
                     }
                     }
                     if (onCallTools != null && !(iosLayout && !session.isVideo)) {
@@ -403,7 +436,8 @@ fun OngoingCallScreen(
                     }
                     IconButton(
                         onClick = { focusMode = !focusMode },
-                        modifier = Modifier.semantics { stateDescription = if (focusMode) "Focus mode on" else "Focus mode off" },
+// Previous implementation retained:                         modifier = Modifier.semantics { stateDescription = if (focusMode) "Focus mode on" else "Focus mode off" },
+                        modifier = Modifier.semantics { stateDescription = if (focusMode) "Focus mode on" else "Focus mode off"; liveRegion = LiveRegionMode.Polite },
                     ) {
                         Icon(
                             if (focusMode) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
@@ -423,7 +457,8 @@ fun OngoingCallScreen(
                 ) {
                     Icon(Icons.Rounded.ScreenShare, contentDescription = null, tint = callAccent(), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("You are sharing your screen", color = callForeground(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+// Previous implementation retained:                     Text("You are sharing your screen", color = callForeground(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("You are sharing your screen", color = callForeground(), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, fontWeight = FontWeight.SemiBold)
                 }
             }
             if (callToolsStatus != null || reactionText != null) {
@@ -444,7 +479,11 @@ fun OngoingCallScreen(
                     .then(bottomPanelPadding(template)),
             ) {
                 var showMore by remember { mutableStateOf(false) }
-                val actions = remember(session.isMuted, session.isCameraOff, session.isSharingScreen, session.audioRoute, session.isVideo, hasLocalMedia, session.isDemo, onReturnToAudio) {
+// Previous implementation retained:                 val actions = remember(session.isMuted, session.isCameraOff, session.isSharingScreen, session.audioRoute, session.isVideo, hasLocalMedia, session.isDemo, onReturnToAudio) {
+                val actions = remember(session.callId, session.isMuted, session.isCameraOff,
+                    session.isSharingScreen, session.audioRoute, session.isVideo, hasLocalMedia, session.isDemo,
+                    onReturnToAudio, onToggleMute, onToggleCamera, onSwitchCamera,
+                    onToggleScreenShare, onToggleAudioRoute) {
                     buildList {
                     add(CallControlAction(if (session.isMuted) "Unmute" else "Mute",
                         if (session.isMuted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
@@ -582,7 +621,8 @@ private fun RemoteVideoSurface(
                 Text(
                     statusLabel(session, callDurationSeconds),
                     color = callSecondary(),
-                    fontSize = 15.sp,
+// Previous implementation retained:                     fontSize = 15.sp,
+                    style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.height(16.dp))
@@ -595,32 +635,77 @@ private fun RemoteVideoSurface(
         }
         return
     }
-    AndroidView(
-        factory = { context ->
-            SurfaceViewRenderer(context).apply {
-                // CALL-R1-26: fill the frame, crop overflow - the usual phone-call framing.
-                setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                videoSurfaces.attachRemoteRenderer(this)
-            }
-        },
-        modifier = Modifier.fillMaxSize(),
-        onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) }, // detachRenderer() releases the EGL surface internally
-    )
+// Previous implementation retained:     AndroidView(
+// Previous implementation retained:         factory = { context ->
+// Previous implementation retained:             SurfaceViewRenderer(context).apply {
+// Previous implementation retained:                 // CALL-R1-26: fill the frame, crop overflow - the usual phone-call framing.
+// Previous implementation retained:                 setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+// Previous implementation retained:                 videoSurfaces.attachRemoteRenderer(this)
+// Previous implementation retained:             }
+// Previous implementation retained:         },
+// Previous implementation retained:         modifier = Modifier.fillMaxSize(),
+// Previous implementation retained:         onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) }, // detachRenderer() releases the EGL surface internally
+// Previous implementation retained:     )
+    // A provider reference is an owner, not a value-equal profile. Replacing a session or
+    // owner destroys the previous AndroidView with that exact owner's detach callback.
+// Previous implementation retained:     key(session.callId, RendererProviderIdentity(videoSurfaces)) {
+    key(session.callId, RendererProviderIdentity(videoSurfaces),
+        RendererProviderIdentity(videoSurfaces.remoteRendererBindingIdentity)) {
+        val owner = videoSurfaces
+        AndroidView(
+            factory = { context ->
+                SurfaceViewRenderer(context).apply {
+                    setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                    owner.attachRemoteRenderer(this)
+                }
+            },
+            update = { renderer ->
+                renderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            },
+            modifier = Modifier.fillMaxSize(),
+            onRelease = { renderer -> owner.detachRenderer(renderer) },
+        )
+    }
+}
+
+/** Identity key: even providers implementing value equality own different native surfaces. */
+// Previous implementation retained: internal class RendererProviderIdentity(private val provider: CallVideoSurfaceProvider) {
+internal class RendererProviderIdentity(private val provider: Any?) {
+    override fun equals(other: Any?): Boolean = other is RendererProviderIdentity && provider === other.provider
+    override fun hashCode(): Int = System.identityHashCode(provider)
 }
 
 @Composable
-private fun LocalVideoSurface(videoSurfaces: CallVideoSurfaceProvider, mirror: Boolean) {
-    AndroidView(
-        factory = { context ->
-            SurfaceViewRenderer(context).apply {
-                setMirror(mirror)
-                setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
-                videoSurfaces.attachLocalRenderer(this)
-            }
-        },
-        modifier = Modifier.fillMaxSize(),
-        onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) }, // detachRenderer() releases the EGL surface internally
-    )
+// Previous implementation retained: private fun LocalVideoSurface(videoSurfaces: CallVideoSurfaceProvider, mirror: Boolean) {
+// Previous implementation retained:     AndroidView(
+// Previous implementation retained:         factory = { context ->
+// Previous implementation retained:             SurfaceViewRenderer(context).apply {
+// Previous implementation retained:                 setMirror(mirror)
+// Previous implementation retained:                 setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
+// Previous implementation retained:                 videoSurfaces.attachLocalRenderer(this)
+// Previous implementation retained:             }
+// Previous implementation retained:         },
+// Previous implementation retained:         modifier = Modifier.fillMaxSize(),
+// Previous implementation retained:         onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) }, // detachRenderer() releases the EGL surface internally
+// Previous implementation retained:     )
+private fun LocalVideoSurface(callId: String, videoSurfaces: CallVideoSurfaceProvider, mirror: Boolean) {
+// Previous implementation retained:     key(callId, RendererProviderIdentity(videoSurfaces)) {
+    key(callId, RendererProviderIdentity(videoSurfaces),
+        RendererProviderIdentity(videoSurfaces.localRendererBindingIdentity)) {
+        val owner = videoSurfaces
+        AndroidView(
+            factory = { context ->
+                SurfaceViewRenderer(context).apply {
+                    setMirror(mirror)
+                    setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
+                    owner.attachLocalRenderer(this)
+                }
+            },
+            update = { renderer -> renderer.setMirror(mirror) },
+            modifier = Modifier.fillMaxSize(),
+            onRelease = { renderer -> owner.detachRenderer(renderer) },
+        )
+    }
 }
 
 @Composable
@@ -649,7 +734,8 @@ private fun VoiceCallBackdrop(
             Text(
                 session.remoteDisplayName,
                 color = bundleTokens?.primaryText ?: Color(theme.primaryTextColor),
-                fontSize = identity.nameSp.sp,
+// Previous implementation retained:                 fontSize = identity.nameSp.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).caller,
                 // Large font scales wrap the name to two lines; default metrics let the
                 // lines collide at fontScale 1.5 (run 41870523872 pixel). 1.25em keeps
                 // the gap proportional at any scale.
@@ -662,7 +748,8 @@ private fun VoiceCallBackdrop(
             Text(
                 statusLabel(session, callDurationSeconds),
                 color = bundleTokens?.secondaryText ?: Color(theme.secondaryTextColor),
-                fontSize = 16.sp,
+// Previous implementation retained:                 fontSize = 16.sp,
+                style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status,
                 fontWeight = FontWeight.Medium,
             )
         }
@@ -740,7 +827,8 @@ private fun GoogleLatestProductionControls(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { action ->
                     Column(
-                        Modifier.weight(1f).height(80.dp)
+// Previous implementation retained:                         Modifier.weight(1f).height(80.dp)
+                        Modifier.weight(1f).heightIn(min = 80.dp)
                             .clip(RoundedCornerShape(if (action.active) 20.dp else 40.dp))
                             .background(if (action.active) accent else surface)
                             .semantics {
@@ -760,7 +848,8 @@ private fun GoogleLatestProductionControls(
                         val tint = if (action.active) com.example.chat.ui.theme.LocalAppColors.current.onAccent else callForeground().copy(alpha = if (action.enabled) 1f else 0.4f)
                         Icon(action.icon, null, tint = tint, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.height(4.dp))
-                        Text(action.label, color = tint, fontSize = 12.sp, maxLines = 2,
+// Previous implementation retained:                         Text(action.label, color = tint, fontSize = 12.sp, maxLines = 2,
+                        Text(action.label, color = tint, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control, maxLines = 2,
                             overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -822,12 +911,17 @@ private fun BundleProductionControls(
                             .background(fill),
                             contentAlignment = Alignment.Center) {
                             Icon(action.icon, null,
-                                tint = callForeground().copy(alpha = if (action.enabled) 1f else 0.4f),
+// Previous implementation retained:                                 tint = callForeground().copy(alpha = if (action.enabled) 1f else 0.4f),
+                                tint = (if (action.active) com.example.chat.ui.theme.LocalAppColors.current.onAccent
+                                    else callForeground()).copy(alpha = if (action.enabled) 1f else 0.4f),
                                 modifier = Modifier.size(24.dp))
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(action.label, color = callForeground().copy(alpha = if (action.enabled) 1f else 0.4f),
-                            fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+// Previous implementation retained: // Previous implementation retained: // Previous implementation retained:                             fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+// Previous implementation retained: // Previous implementation retained:                             style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control, maxLines = 2, overflow = TextOverflow.Ellipsis)
+// Previous implementation retained:                             style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
@@ -902,7 +996,8 @@ private fun IosSupportedAudioControls(session: ChatyCallSession, ready: Boolean,
                                         colors.foreground.copy(alpha = if (action.enabled) 1f else 0.4f), modifier = Modifier.size(26.dp))
                                 }
                                 Spacer(Modifier.height(6.dp))
-                                Text(action.label, color = colors.foreground, fontSize = 12.sp,
+// Previous implementation retained:                                 Text(action.label, color = colors.foreground, fontSize = 12.sp,
+                                Text(action.label, color = colors.foreground, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
                         }
@@ -964,11 +1059,40 @@ private fun AudioFourControls(session: ChatyCallSession, mediaReady: Boolean, mu
                     Box(Modifier.size(diameter).clip(CircleShape).background(fill).then(outline), contentAlignment = Alignment.Center) {
                         Icon(a.icon, null, tint = if (a.label == "Hang up") c.onError else if (a.active) c.onAccent else if (a.enabled) c.foreground else c.foregroundSecondary, modifier = Modifier.size(24.dp))
                     }
-                    Text(a.label, color = c.foreground, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    if (a.label == "Video" && video == null) Text("Not ready", color = c.foregroundSecondary, fontSize = 10.sp)
+// Previous implementation retained:                     Text(a.label, color = c.foreground, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text(a.label, color = c.foreground, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).control, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+// Previous implementation retained:                     if (a.label == "Video" && video == null) Text("Not ready", color = c.foregroundSecondary, fontSize = 10.sp)
+                    if (a.label == "Video" && video == null) Text("Not ready", color = c.foregroundSecondary, style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status)
                 }
             }
         }
     }
     }
+}
+
+
+/** Reports the session's actual output route, never a requested or guessed route. */
+@Composable
+internal fun CallAudioRouteIndicator(route: AudioRouteType) {
+    val label = androidx.compose.ui.res.stringResource(callAudioRouteLabelResource(route))
+    val description = androidx.compose.ui.res.stringResource(com.example.chat.R.string.call_audio_output, label)
+    Row(Modifier.semantics(mergeDescendants = true) { contentDescription = description }
+        .background(callSurface(), RoundedCornerShape(12.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(when (route) {
+            AudioRouteType.earpiece -> Icons.Rounded.Hearing
+            AudioRouteType.speaker -> Icons.Rounded.VolumeUp
+            AudioRouteType.bluetooth -> Icons.Rounded.BluetoothAudio
+            AudioRouteType.wiredHeadset -> Icons.Rounded.Headphones
+        }, null, Modifier.size(16.dp), tint = callAccent())
+        Spacer(Modifier.width(4.dp))
+        Text(label, color = callForeground(), style = androidx.compose.material3.MaterialTheme.typography.labelMedium)
+    }
+}
+
+internal fun callAudioRouteLabelResource(route: AudioRouteType): Int = when (route) {
+    AudioRouteType.earpiece -> com.example.chat.R.string.call_audio_earpiece
+    AudioRouteType.speaker -> com.example.chat.R.string.call_audio_speaker
+    AudioRouteType.bluetooth -> com.example.chat.R.string.call_audio_bluetooth
+    AudioRouteType.wiredHeadset -> com.example.chat.R.string.call_audio_wired
 }

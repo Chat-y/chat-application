@@ -1,5 +1,6 @@
 package com.example.chat.ui.camera
 
+import androidx.compose.ui.res.stringResource
 import androidx.camera.core.CameraSelector
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -62,12 +63,12 @@ fun VideoCaptureHost(
         onDismissRequest = { exitPrompt = false; retakePrompt = false },
         title = { Text("Discard this unsaved video?") },
         text = { Text("This is a temporary draft. It is not sent or saved. Closing the app can lose it.") },
-        confirmButton = { Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = {
+        confirmButton = { Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick = {
             val leave = exitPrompt
             stopReader(); session?.discard(); exitPrompt = false; retakePrompt = false
             if (leave) onBackToPhoto()
         }) { Text("Discard video") } },
-        dismissButton = { Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { exitPrompt = false; retakePrompt = false }) { Text("Keep reviewing") } },
+        dismissButton = { Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { exitPrompt = false; retakePrompt = false }) { Text("Keep reviewing") } },
     )
     DisposableEffect(surface, owner, selector, stabilization, auth) {
         val view = surface
@@ -78,8 +79,10 @@ fun VideoCaptureHost(
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).windowInsetsPadding(WindowInsets.safeDrawing),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
-            TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick={requestExit()},modifier=Modifier.heightIn(min=48.dp)) { Text("Back to photo") }
-            Text("Video review",style=MaterialTheme.typography.titleMedium,color=MaterialTheme.colorScheme.onSurface,modifier=Modifier.padding(start=8.dp))
+            // CAM-R4-004 prior: TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick={requestExit()},modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text("Back to photo") }
+            TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick={requestExit()},modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text(stringResource(com.example.chat.R.string.camera_video_back_photo)) }
+            // CAM-R4-004 prior: Text("Video review",style=MaterialTheme.typography.titleMedium,color=MaterialTheme.colorScheme.onSurface,modifier=Modifier.padding(start=8.dp))
+            Text(stringResource(com.example.chat.R.string.camera_video_review_title),style=MaterialTheme.typography.titleMedium,color=MaterialTheme.colorScheme.onSurface,modifier=Modifier.padding(start=8.dp))
         }
         Text("Temporary local video, not sent or saved. Closing the app can lose it.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodyMedium,modifier=Modifier.padding(horizontal=16.dp))
         val review = state as? VideoSessionState.Review
@@ -97,14 +100,19 @@ fun VideoCaptureHost(
             }
         } else {
             (state as? VideoSessionState.Ready)?.let { ready ->
-                Text(if(ready.boundFront) "Front camera" else "Back camera",color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(horizontal=16.dp))
+                // CAM-R4-004 prior: Text(if(ready.boundFront) "Front camera" else "Back camera",color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(horizontal=16.dp))
+                Text(if(ready.boundFront) stringResource(com.example.chat.R.string.camera_video_front_camera) else stringResource(com.example.chat.R.string.camera_video_back_camera),color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(horizontal=16.dp))
             }
             Text(when (val current = state) {
                 is VideoSessionState.Error -> current.message
-                is VideoSessionState.Ready -> if (current.stabilizationEnabled) "Video ready · stabilization on" else "Video ready"
-                is VideoSessionState.Recording -> if (current.hasAudio) "Recording with sound" else "Recording silently"
-                VideoSessionState.Finalizing -> "Finishing video…"
-                else -> "Opening video camera…"
+                // CAM-R4-004 prior: is VideoSessionState.Ready -> if (current.stabilizationEnabled) "Video ready · stabilization on" else "Video ready"
+                is VideoSessionState.Ready -> if (current.stabilizationEnabled) stringResource(com.example.chat.R.string.camera_video_ready_stabilized) else stringResource(com.example.chat.R.string.camera_video_ready)
+                // CAM-R4-004 prior: is VideoSessionState.Recording -> if (current.hasAudio) "Recording with sound" else "Recording silently"
+                is VideoSessionState.Recording -> if (current.hasAudio) stringResource(com.example.chat.R.string.camera_video_recording_sound) else stringResource(com.example.chat.R.string.camera_video_recording_silent)
+                // CAM-R4-004 prior: VideoSessionState.Finalizing -> "Finishing video…"
+                VideoSessionState.Finalizing -> stringResource(com.example.chat.R.string.camera_video_finishing)
+                // CAM-R4-004 prior: else -> "Opening video camera…"
+                else -> stringResource(com.example.chat.R.string.camera_video_opening)
             }, color = MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.bodyMedium,modifier=Modifier.padding(horizontal=16.dp))
             AndroidView(factory = { context -> PreviewView(context).apply {
                 implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -112,10 +120,13 @@ fun VideoCaptureHost(
                 surface = this
             } }, modifier = Modifier.fillMaxWidth().weight(1f))
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                androidx.compose.material3.OutlinedButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { requestExit() },modifier=Modifier.heightIn(min=48.dp), enabled = state !is VideoSessionState.Finalizing) { Text("Photo") }
+                // CAM-R4-004 prior: androidx.compose.material3.OutlinedButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { requestExit() },modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp), enabled = state !is VideoSessionState.Finalizing) { Text("Photo") }
+                androidx.compose.material3.OutlinedButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { requestExit() },modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp), enabled = state !is VideoSessionState.Finalizing) { Text(stringResource(com.example.chat.R.string.camera_video_photo)) }
                 when (state) {
-                    is VideoSessionState.Recording -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { session?.stop() },modifier=Modifier.heightIn(min=48.dp)) { Text("Stop") }
-                    is VideoSessionState.Ready -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { if (auth.isCurrent()) session?.start(requestAudio = true) },modifier=Modifier.heightIn(min=48.dp)) { Text("Record") }
+                    // CAM-R4-004 prior: is VideoSessionState.Recording -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { session?.stop() },modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text("Stop") }
+                    is VideoSessionState.Recording -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { session?.stop() },modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text(stringResource(com.example.chat.R.string.camera_video_stop)) }
+                    // CAM-R4-004 prior: is VideoSessionState.Ready -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { if (auth.isCurrent()) session?.start(requestAudio = true) },modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text("Record") }
+                    is VideoSessionState.Ready -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { if (auth.isCurrent()) session?.start(requestAudio = true) },modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text(stringResource(com.example.chat.R.string.camera_video_record)) }
                     else -> Unit
                 }
             }
@@ -123,3 +134,11 @@ fun VideoCaptureHost(
         }
     }
 }
+
+// CAM-R4-034 prior UI modifier lines retained inactive:
+//         confirmButton = { Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = {
+//         dismissButton = { Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { exitPrompt = false; retakePrompt = false }) { Text("Keep reviewing") } },
+//             TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick={requestExit()},modifier=Modifier.heightIn(min=48.dp)) { Text("Back to photo") }
+//                 androidx.compose.material3.OutlinedButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { requestExit() },modifier=Modifier.heightIn(min=48.dp), enabled = state !is VideoSessionState.Finalizing) { Text("Photo") }
+//                     is VideoSessionState.Recording -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { session?.stop() },modifier=Modifier.heightIn(min=48.dp)) { Text("Stop") }
+//                     is VideoSessionState.Ready -> Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = { if (auth.isCurrent()) session?.start(requestAudio = true) },modifier=Modifier.heightIn(min=48.dp)) { Text("Record") }

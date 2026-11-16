@@ -10,6 +10,8 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import com.example.chat.ui.kit.ChatyHapticsPort
+import com.example.chat.ui.kit.rememberChatyReduceMotion
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Box
@@ -29,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -101,6 +104,8 @@ fun LensCarousel(
     }
 
     val listState = rememberLazyListState()
+    // CAM-R1-045: live OS reduce-motion flag; read inside centerOn at call time.
+    val reduceMotionNow by rememberUpdatedState(rememberChatyReduceMotion())
     var currentIndex by remember { mutableIntStateOf(0) }
     var hapticRearmAtMs by remember { mutableLongStateOf(0L) }
     // Bridge the manager's listener model into Compose state.
@@ -129,7 +134,11 @@ fun LensCarousel(
         programmaticTarget = index
         if (com.example.chat.BuildConfig.DEBUG) Log.i("LENS-DIAG", "centerOn start index=" + index + " gen=" + generation)
         try {
-            listState.animateScrollToItem(index)
+            // CAM-R1-045: reduce-motion jumps straight to the item (same end
+            // position as animateScrollToItem: item start offset 0). The
+            // guard/finally below is unchanged. Finger-fling behavior untouched.
+            // Original: listState.animateScrollToItem(index)
+            if (reduceMotionNow) listState.scrollToItem(index) else listState.animateScrollToItem(index)
         } finally {
             if (com.example.chat.BuildConfig.DEBUG) Log.i("LENS-DIAG", "centerOn end gen=" + generation + " current=" + centeringGeneration + " cleared=" + (centeringGeneration == generation) + " landed=" + listState.firstVisibleItemIndex + "+" + listState.firstVisibleItemScrollOffset)
             if (centeringGeneration == generation) programmaticTarget = null
@@ -215,6 +224,7 @@ fun LensCarousel(
             Box(
                 modifier = Modifier
                     .size(width = slotExtent, height = selectedDiameter + 26.dp)
+                    .cameraActionFocusRing().clickable(role = Role.Button, onClick = onItemTap)
                     .semantics {
                         this.selected = selected
                         // TalkBack/keyboard actionable: the visual thumb uses
@@ -261,9 +271,13 @@ private fun LensCarouselItem(
     onTap: () -> Unit,
 ) {
     val density = LocalDensity.current
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    val glyphColor = com.example.chat.ui.kit.chatyReadableOn(lens.accentColor, colors.onPrimary, colors.foreground)
     // True distance-to-center interpolation (requirement 10):
     // far 0.78 -> near ~0.90 -> center exactly 1.00, recomputed every frame.
-    val itemCenterInViewport = index * slotPx + slotPx * 0.5f - scrollOffsetPx
+    // Leading content padding centers slot0 in the viewport; include it in scale distance.
+    val leadingPadding = ((viewportWidthPx - slotPx) / 2f).coerceAtLeast(0f)
+    val itemCenterInViewport = leadingPadding + index * slotPx + slotPx * 0.5f - scrollOffsetPx
     val viewportCenter = viewportWidthPx / 2f
     val normalizedDistance =
         abs((itemCenterInViewport - viewportCenter) / slotPx).coerceIn(0f, 1f)
@@ -273,7 +287,8 @@ private fun LensCarouselItem(
     Box(
         modifier = Modifier
             .size(with(density) { sizePx.toDp() })
-            .pointerInput(index) { detectTapGestures(onTap = { onTap() }) }
+            // Tap/keyboard/accessibility share the parent clickable, avoiding a pointer-only child.
+            // .pointerInput(index) { detectTapGestures(onTap = { onTap() }) }
             .drawBehind {
                 val r = sizePx / 2f
                 // accent gradient circle approximation: vertical gradient fill
@@ -287,7 +302,7 @@ private fun LensCarouselItem(
                     center = center,
                 )
                 drawCircle(
-                    color = if (selected) Color.White.copy(alpha = 0.9f) else Color(0x3DFFFFFF),
+                    color = if (selected) colors.primary else colors.borderSubtle,
                     radius = r,
                     center = center,
                     style = Stroke(width = if (selected) 2.4f * density.density else 1f * density.density),
@@ -296,11 +311,11 @@ private fun LensCarouselItem(
         contentAlignment = Alignment.Center,
     ) {
         Canvas(modifier = Modifier.size(with(density) { (sizePx * 0.5f).toDp() })) {
-            drawLensGlyph(lens.id, Color.White, size.width, size.height)
+            drawLensGlyph(lens.id, glyphColor, size.width, size.height)
         }
         if (selected && runtimeState == LensRuntimeState.applying) {
             CircularProgressIndicator(
-                color = Color.White.copy(alpha = 0.85f),
+                color = glyphColor.copy(alpha = 0.85f),
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(with(density) { (sizePx + 8 * density.density).toDp() }),
             )
@@ -585,3 +600,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStar(
     drawPath(path, color)
 }
 
+
+// Superseded source retained inactive:
+//     val itemCenterInViewport = index * slotPx + slotPx * 0.5f - scrollOffsetPx
+//             .pointerInput(index) { detectTapGestures(onTap = { onTap() }) }
+//                     color = if (selected) Color.White.copy(alpha = 0.9f) else Color(0x3DFFFFFF),
+//             drawLensGlyph(lens.id, Color.White, size.width, size.height)
+//                 color = Color.White.copy(alpha = 0.85f),

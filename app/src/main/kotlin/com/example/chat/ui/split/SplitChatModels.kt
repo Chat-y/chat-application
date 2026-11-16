@@ -68,7 +68,9 @@ data class SplitChatSessionState(
                 }
                 val focused = value.getString("focusedId")
                 val minimized = value.getBoolean("isMinimized", false)
-                val kept = items.take(4)
+                // SPL-37: drop duplicate compound keys on restore (first wins).
+                // val kept = items.take(4)
+                val kept = items.distinctBy { it.stateKey() }.take(4)
                 return SplitChatSessionState(
                     paneItems = kept,
                     // SPL-01: never point focus at a pane that was not restored.

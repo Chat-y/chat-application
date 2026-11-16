@@ -167,7 +167,7 @@ class MediaInteractionProofTest {
                 key(generation) { MaterialTheme {
                     var open by remember { mutableStateOf(true) }
                     if (open) Box(Modifier.width(320.dp).fillMaxHeight()) {
-                        MediaReviewScreen(listOf(item), onCancel = { open = false }, onSend = { selected -> result = selected; sends++; open = false })
+                        MediaReviewScreen(listOf(item), conversationId = "synthetic-review-chat", onCancel = { open = false }, onSend = { selected -> result = selected; sends++; open = false })
                     } else Text("Review closed; sends=$sends", Modifier.safeDrawingPadding())
                 }
             } } } }

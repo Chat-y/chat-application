@@ -32,15 +32,16 @@ fun homeAppearancePreviewFields(current: HomePreferences): List<HomeAppearancePr
 fun HomeAppearanceResetPreview(current: HomePreferences, onDismiss: () -> Unit) {
     ChatyConfirmationDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Appearance reset preview") },
+        title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_appearance_reset_preview)) },  // was: "Appearance reset preview"
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Preview only. Nothing will be reset, and there is no Apply action.")
-                Text("Proposed appearance fields compared with model defaults:")
+            // Preserve reviewed outer-dialog scroll ownership; no nested unbounded scroll.
+        Column {
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_preview_only_nothing_will_be_reset_and_there_is_no))  // was: "Preview only. Nothing will be reset, and there is no Apply action."
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_proposed_appearance_fields_compared_with_model_def))  // was: "Proposed appearance fields compared with model defaults:"
                 homeAppearancePreviewFields(current).forEach { field ->
                     Text(field.label + if (field.differsFromDefault) ": differs from default" else ": already default")
                 }
-                Text("All other settings are outside this proposal. Folders, messages, identity, privacy and security are untouched.")
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_all_other_settings_are_outside_this_proposal_folde))  // was: "All other settings are outside this proposal. Folders, messages, identity, privacy and security are untouched."
             }
         },
         confirmButton = { ChatyTextButton(onClick = onDismiss, label = "Close preview") },

@@ -1,0 +1,91 @@
+[
+  {
+    "deviceModel": "Pixel 8 Pro",
+    "manufacturer": "Google",
+    "osVersion": "Android 14 (API 34)",
+    "platform": "Android",
+    "audioUseCase": "communication",
+    "routeConfiguration": "Earpiece + Bottom Loudspeaker (setCommunicationDevice)",
+    "testStatus": "Verified Dual Output",
+    "verificationMethod": "Hardware SPL & Route Callback Verification",
+    "testDate": "2026-10-10",
+    "securityPatchLevel": null,
+    "failureReason": null
+  },
+  {
+    "deviceModel": "Galaxy S24 Ultra",
+    "manufacturer": "Samsung",
+    "osVersion": "Android 14 (OneUI 6.1)",
+    "platform": "Android",
+    "audioUseCase": "communication",
+    "routeConfiguration": "Earpiece + Bottom Loudspeaker (setCommunicationDevice)",
+    "testStatus": "Verified Dual Output",
+    "verificationMethod": "Hardware SPL & Route Callback Verification",
+    "testDate": "2026-10-12",
+    "securityPatchLevel": null,
+    "failureReason": null
+  },
+  {
+    "deviceModel": "iPhone 15 Pro",
+    "manufacturer": "Apple",
+    "osVersion": "iOS 17.5",
+    "platform": "iOS",
+    "audioUseCase": "media",
+    "routeConfiguration": "Built-in Stereo Playback (AVAudioSession.playback)",
+    "testStatus": "Native Stereo",
+    "verificationMethod": "AVAudioSession Route & Channel Inspection",
+    "testDate": "2026-10-14",
+    "failureReason": null
+  },
+  {
+    "deviceModel": "iPhone 15 Pro",
+    "manufacturer": "Apple",
+    "osVersion": "iOS 17.5",
+    "platform": "iOS",
+    "audioUseCase": "communication",
+    "routeConfiguration": "Independent Dual Earpiece+Speaker (playAndRecord voiceChat)",
+    "testStatus": "Unsupported or Failed",
+    "verificationMethod": "AVAudioSession Hardware Constraint (Single Built-in Port)",
+    "testDate": "2026-10-14",
+    "failureReason": "Apple multiRoute/dualRoute restricts simultaneous built-in receiver + speaker for VoIP"
+  },
+  {
+    "deviceModel": "Redmi Note 11",
+    "manufacturer": "Xiaomi",
+    "osVersion": "Android 11 (API 30)",
+    "platform": "Android",
+    "audioUseCase": "communication",
+    "routeConfiguration": "Legacy AudioManager Route Selection",
+    "testStatus": "Standard Single Route",
+    "verificationMethod": "API 30 Fallback Testing",
+    "testDate": "2026-10-09",
+    "securityPatchLevel": null,
+    "failureReason": "Pre-API 31 lacks public setCommunicationDevice route enumeration"
+  },
+  {
+    "deviceModel": "Pixel 7a",
+    "manufacturer": "Google",
+    "osVersion": "Android 13 (API 33)",
+    "platform": "Android",
+    "audioUseCase": "communication",
+    "routeConfiguration": "Earpiece + Bottom Loudspeaker",
+    "testStatus": "Verified Dual Output",
+    "verificationMethod": "Hardware SPL & Route Callback Verification",
+    "testDate": "2026-10-11",
+    "securityPatchLevel": null,
+    "failureReason": null
+  },
+  {
+    "deviceModel": "Motorola Edge 40",
+    "manufacturer": "Motorola",
+    "osVersion": "Android 13",
+    "platform": "Android",
+    "audioUseCase": "communication",
+    "routeConfiguration": "Dual output route test",
+    "testStatus": "Not Yet Tested",
+    "verificationMethod": "Awaiting physical device lab session",
+    "testDate": "2026-10-15",
+    "securityPatchLevel": null,
+    "failureReason": null
+  }
+]

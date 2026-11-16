@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.setValue
@@ -69,6 +70,7 @@ fun <T> SettingsSearchScreen(
     icon: (T) -> ImageVector,
     onSelect: (T) -> Unit,
     onBack: () -> Unit,
+    // SET-R2-010: no caller passes this yet; kept for a future chaty://settings/search?q= deep link.
     initialQuery: String = "",
 ) {
     val colors = LocalAppColors.current
@@ -94,9 +96,9 @@ fun <T> SettingsSearchScreen(
                 TextField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).semantics { contentDescription = "Search settings" }, // SET-R1-047
                     singleLine = true,
-                    placeholder = { Text("Search settings...", color = colors.foregroundTertiary) },
+                    placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_search_settings), color = colors.foregroundTertiary) }, // was: "Search settings..."
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { query = "" }) {
@@ -136,11 +138,19 @@ fun <T> SettingsSearchScreen(
                         fontSize = 14.sp,
                     )
                     // SET-R2-047: recovery from an empty result
-                    androidx.compose.material3.TextButton(onClick = { query = "" }) { Text("Clear search", color = colors.primary) }
+                    androidx.compose.material3.TextButton(onClick = { query = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_clear_search), color = colors.primary) } // was: "Clear search"
                 }
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+                // SET-R1-052: popular searches while the query is empty
+                if (query.isEmpty()) item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+                        listOf("Privacy", "Notifications", "Theme", "Storage").forEach { term ->
+                            androidx.compose.material3.AssistChip(onClick = { query = term }, label = { Text(term) })
+                        }
+                    }
+                }
                 items(results) { item ->
                     Row(
                         modifier = Modifier
@@ -157,7 +167,7 @@ fun <T> SettingsSearchScreen(
                                 "${category(item)} \u2022 ${description(item)}",
                                 color = colors.foregroundSecondary,
                                 fontSize = 12.sp,
-                                maxLines = 1,
+                                maxLines = 2, // SET-R1-048
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
                         }

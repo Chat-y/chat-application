@@ -1,0 +1,95 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+  <string name="calls_ui_1">Call entry deleted</string>
+  <string name="calls_ui_2">Undo</string>
+  <string name="calls_ui_3">Today</string>
+  <string name="calls_ui_4">Yesterday</string>
+  <string name="calls_ui_5">Calls</string>
+  <string name="calls_ui_6">Add call</string>
+  <string name="calls_ui_7">Clear</string>
+  <string name="calls_ui_8">Clear call log</string>
+  <string name="calls_ui_9">Call history unavailable</string>
+  <!-- Previous implementation retained: <string name="calls_ui_10">Chaty could not load your protected call history. Tap retry to try again.</string> -->
+  <string name="calls_ui_10">Chaty could not load your call history. Tap retry to try again.</string>
+  <string name="calls_ui_11">Retry</string>
+  <string name="calls_ui_12">No recent calls</string>
+  <string name="calls_ui_13">Your recent calls will appear here.</string>
+  <string name="calls_ui_14">Delete</string>
+  <string name="calls_ui_15">Chaty contact</string>
+  <string name="call_log_group_time">
+    <xliff:g id="value_0">%1$s</xliff:g> • Group call</string>
+  <string name="calls_ui_16">No connection</string>
+  <string name="call_log_incoming_description">Incoming call with <xliff:g id="value_19">%1$s</xliff:g>, <xliff:g id="value_25">%2$s</xliff:g> at <xliff:g id="value_33">%3$s</xliff:g>, <xliff:g id="value_39">%4$s</xliff:g>
+  </string>
+  <string name="call_log_outgoing_description">Outgoing call to <xliff:g id="value_17">%1$s</xliff:g>, <xliff:g id="value_23">%2$s</xliff:g> at <xliff:g id="value_31">%3$s</xliff:g>, <xliff:g id="value_37">%4$s</xliff:g>
+  </string>
+  <string name="call_log_missed_description">Missed call from <xliff:g id="value_17">%1$s</xliff:g>, <xliff:g id="value_23">%2$s</xliff:g> at <xliff:g id="value_31">%3$s</xliff:g>, <xliff:g id="value_37">%4$s</xliff:g>
+  </string>
+  <string name="calls_ui_17">Call back</string>
+  <string name="calls_ui_18">Delete call entry</string>
+  <string name="calls_ui_19">Video call</string>
+  <string name="calls_ui_20">Voice call</string>
+  <string name="call_log_more_actions">More actions for <xliff:g id="value_17">%1$s</xliff:g>
+  </string>
+  <string name="calls_ui_21">Clear call log?</string>
+  <!-- Previous implementation retained: <string name="calls_ui_22">This removes the call history on this account. This can\'t be undone.</string> -->
+  <string name="calls_ui_22">This sends a request to clear your account\'s call log. It does not request deletion of other people\'s call logs. The app cannot confirm server retention or deletion on your other devices. You can\'t undo a successful clear here.</string>
+  <string name="calls_ui_23">Cancel</string>
+  <string name="calls_ui_24">More than one contact matches. Choose the right contact below.</string>
+  <string name="calls_ui_25">No call can be started for this number. Tap a matching contact below to call.</string>
+  <string name="calls_ui_26">Show dialpad</string>
+  <string name="calls_ui_27">Back</string>
+  <string name="calls_ui_28">Contacts</string>
+  <string name="calls_ui_29">Show contacts</string>
+  <string name="calls_ui_30">Open dialpad</string>
+  <string name="calls_ui_31">Dialpad mode</string>
+  <string name="calls_ui_32">Contacts mode</string>
+  <string name="calls_ui_33">Keep dialpad open</string>
+  <string name="calls_ui_34">Enter number</string>
+  <string name="calls_ui_35">Search contacts</string>
+  <string name="calls_ui_36">Number too long</string>
+  <string name="calls_ui_37">No registered contact matches this number</string>
+  <string name="calls_ui_38">No contacts available</string>
+  <string name="calls_ui_39">No matching contacts</string>
+  <string name="calls_ui_40">Your registered Chaty contacts will appear here.</string>
+  <string name="calls_ui_41">Calls are available for registered Chaty contacts only.</string>
+  <string name="call_picker_starting">Starting call to <xliff:g id="value_17">%1$s</xliff:g>
+  </string>
+  <string name="calls_ui_42">Dialpad keys</string>
+  <string name="calls_ui_43">Insert plus</string>
+  <string name="calls_ui_44">Hide dialpad</string>
+  <string name="calls_ui_45">Call number</string>
+  <string name="calls_ui_46">Delete digit</string>
+  <string name="calls_ui_47">Delete one digit</string>
+  <string name="calls_ui_48">Delete digits repeatedly</string>
+  <plurals name="call_picker_contact_count">
+    <item quantity="one">
+      <xliff:g id="value_0">%1$d</xliff:g> contact</item>
+    <item quantity="other">
+      <xliff:g id="value_0">%1$d</xliff:g> contacts</item>
+  </plurals>
+  <plurals name="call_picker_matching_count">
+    <item quantity="one">
+      <xliff:g id="value_0">%1$d</xliff:g> matching Chaty contact</item>
+    <item quantity="other">
+      <xliff:g id="value_0">%1$d</xliff:g> matching Chaty contacts</item>
+  </plurals>
+    <string name="call_picker_dial_key">Dial <xliff:g id="digit">%1$s</xliff:g><xliff:g id="letters">%2$s</xliff:g><xliff:g id="hint">%3$s</xliff:g></string>
+    <string name="call_picker_key_letters">, <xliff:g id="letters">%1$s</xliff:g></string>
+    <string name="call_picker_plus_hint">, long press for plus</string>
+    <string name="call_toast_settings_entry">Toast notifications</string>
+    <string name="call_toast_settings_subtitle">Customize online, story, profile and typing toast appearance</string>
+    <string name="call_log_declined">Declined</string>
+    <string name="call_log_failed">Failed</string>
+    <string name="call_log_cancelled">Cancelled</string>
+    <string name="call_log_busy">Busy</string>
+    <string name="call_log_missed_outcome">Missed</string>
+    <string name="call_log_short_connected">&lt;1s</string>
+    <string name="call_log_connection_unknown">Connection not recorded</string>
+    <string name="call_log_redial_wait">Wait a moment before calling again.</string>
+    <string name="call_microphone_in_use">Microphone in use</string>
+    <string name="call_microphone_in_use_muted">Microphone in use · call audio muted</string>
+    <string name="call_microphone_starting">Microphone capture starting</string>
+    <string name="call_microphone_stopped">Microphone capture stopped</string>
+    <string name="call_microphone_unknown">Microphone capture state unavailable</string>
+</resources>

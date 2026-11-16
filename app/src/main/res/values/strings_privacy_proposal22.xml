@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="privacy_blocked_contact_count">
+        <item quantity="one">%1$d blocked contact</item>
+        <item quantity="other">%1$d blocked contacts</item>
+    </plurals>
+</resources>

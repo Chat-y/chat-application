@@ -1,5 +1,8 @@
 package com.example.chat.ui.settings.security
 
+import com.example.chat.ui.settings.state.settingsSnapshotFlow
+import com.example.chat.ui.settings.state.collectSettingsState
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,6 +71,7 @@ import kotlinx.coroutines.launch
 private val AutoLockOptions = listOf("Immediately", "15s", "30s", "1m", "5m", "15m")
 
 private sealed interface Modal {
+    data object AboutProtection : Modal
     class Verify(val result: CompletableDeferred<Boolean>) : Modal
     class Pick(val current: LockMethodType, val result: CompletableDeferred<LockMethodType?>) : Modal
     class Setup(val method: String, val pinLength: Int, val result: CompletableDeferred<Boolean>) : Modal
@@ -90,26 +94,56 @@ fun SecurityCenterScreen(
     val colors = LocalAppColors.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    var version by remember { mutableIntStateOf(0) }
-    DisposableEffect(preferences) {
-        val l: () -> Unit = { version += 1 }
-        preferences.addListener(l)
-        onDispose { preferences.removeListener(l) }
+//     var version by remember { mutableIntStateOf(0) }
+//     DisposableEffect(preferences) {
+//         val l: () -> Unit = { version += 1 }
+//         preferences.addListener(l)
+//         onDispose { preferences.removeListener(l) }
+//     var version by remember { mutableIntStateOf(0) }
+//     DisposableEffect(preferences) {
+//         val l: () -> Unit = { version += 1 }
+//         preferences.addListener(l)
+//         onDispose { preferences.removeListener(l) }
+//     }
+//     val accountGeneration = preferences.scopeGeneration
+    val selectedFlow = remember(preferences, scope) {
+        settingsSnapshotFlow(scope,
+            snapshot = { preferences.scopeGeneration to preferences.security },
+            addListener = preferences::addListener, removeListener = preferences::removeListener)
     }
-    val accountGeneration = preferences.scopeGeneration
+//     val accountGeneration = preferences.scopeGeneration
+    val selected by selectedFlow.collectSettingsState()
+    val accountGeneration = selected.first
     var pinLength by remember(preferences, accountGeneration) { mutableIntStateOf(4) }
     var biometricAvailable by remember { mutableStateOf(false) }
+    var enrolledClasses by remember(preferences, accountGeneration) { mutableStateOf<List<String>>(emptyList()) }
     var modal by remember(preferences, accountGeneration) { mutableStateOf<Modal?>(null) }
     var active by remember(preferences, accountGeneration) { mutableStateOf(true) }
     var flowBusy by remember(preferences, accountGeneration) { mutableStateOf(false) }
+    // Pending callers get a safe terminal answer if their modal or screen disappears.
+    DisposableEffect(modal) {
+        val pending = modal
+        onDispose {
+            when (pending) {
+                is Modal.Verify -> pending.result.complete(false)
+                is Modal.TestLock -> pending.result.complete(false)
+                is Modal.Setup -> pending.result.complete(false)
+                is Modal.Pick -> pending.result.complete(null)
+                is Modal.SecretPhrase -> pending.result.complete(null)
+                else -> Unit // Informational modals do not own a pending result.
+            }
+        }
+    }
     DisposableEffect(preferences, accountGeneration) { onDispose { active = false } }
 
     suspend fun loadCapabilities() {
         val pl = lockService.getPinLength()
         val bio = lockService.canUseBiometrics()
+        val classes = lockService.availableBiometrics()
         if (!active || preferences.scopeGeneration != accountGeneration) return
         pinLength = pl
         biometricAvailable = bio
+        enrolledClasses = classes
     }
     LaunchedEffect(preferences, accountGeneration) { loadCapabilities() }
 
@@ -163,8 +197,10 @@ fun SecurityCenterScreen(
         }
     }
 
-    @Suppress("UNUSED_EXPRESSION") version
-    val security = preferences.security
+//     @Suppress("UNUSED_EXPRESSION") version
+//     val security = preferences.security
+    // Version counter replaced by selected lifecycle state.
+    val security = selected.second
     com.example.chat.ui.kit.ProtectSensitiveWindow(active = security.isAppLockEnabled)
     val lockedChats = security.lockedConversationIds.size
 
@@ -178,18 +214,27 @@ fun SecurityCenterScreen(
                 title = "Messaging security status",
                 description = "Standard one-to-one and group messages in this Kotlin release use the custom REST chat service over HTTPS. Their content is not end-to-end encrypted, and the service can read it. Standard cloud attachments are also server-readable. The RFC 9420 MLS engine is present but is not connected to the active REST login and message routes. Large peer transfers use AES-GCM encrypted chunks and require the MLS-protected invitation path; setup failures stop the transfer.",
             ) {
+                Text("Messages are not end-to-end encrypted.", color = colors.foreground, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Text(
                     "HTTPS protects traffic in transit between Chaty and the service. It does not prevent the service from accessing standard message content. App Lock protects access to this device only; it does not encrypt server-side chat data.",
                     color = colors.foregroundSecondary,
                     fontSize = 14.sp,
                 )
+                TextButton(onClick = { modal = Modal.AboutProtection }) { Text("What App Lock protects") }
             }
             ChatySettingsSection(
                 title = "Chaty App Lock",
-                description = "App Lock opens Chaty. Chat Lock protects selected conversations. A secret phrase finds the vault but is not a replacement for its authentication.",
+// Superseded source retained below per additive-only review rule.
+//                 description = "App Lock opens Chaty. Chat Lock protects selected conversations. A secret phrase finds the vault but is not a replacement for its authentication.",
+                description = "App Lock opens Chaty. Chat Lock protects selected conversations. A secret phrase finds the vault but is not a replacement for its authentication. Immediately is a background timeout, not a per-screen timer. System dialogs can leave the app; lifecycle exemptions require device verification.",
             ) {
-                val rows = mutableListOf<@Composable () -> Unit>()
-                rows += {
+// Superseded source retained below per additive-only review rule.
+//                 val rows = mutableListOf<@Composable () -> Unit>()
+//                 rows += {
+                // Former mutableListOf<@Composable () -> Unit>() rebuilt and replayed every pass.
+                // Static keyed groups retain each setting's composition without a lambda list.
+                Text("Method", color = colors.foregroundSecondary, fontSize = 14.sp, modifier = Modifier.padding(14.dp))
+                androidx.compose.runtime.key("security-setting-1") {
                     ChatySwitchTile(
                         icon = Icons.Rounded.Lock,
                         iconColor = colors.accent,
@@ -201,7 +246,9 @@ fun SecurityCenterScreen(
                     )
                 }
                 if (security.isAppLockEnabled) {
-                    rows += {
+// Superseded source retained below per additive-only review rule.
+//                     rows += {
+                    androidx.compose.runtime.key("security-setting-2") {
                         ChatySettingsTile(
                             icon = Icons.Rounded.Style,
                             title = "Lock type",
@@ -210,12 +257,20 @@ fun SecurityCenterScreen(
                             onTap = { runFlow(SecurityIntent.changeMethod, null) },
                         )
                     }
-                    if (security.lockMethod == "Biometric") rows += {
+// Superseded source retained below per additive-only review rule.
+//                     if (security.lockMethod == "Biometric") rows += {
+                    if (security.lockMethod == "Biometric") androidx.compose.runtime.key("security-setting-3") {
                         ChatySettingsTile(
                             icon = Icons.Rounded.Fingerprint,
                             title = "Biometric authentication",
-                            subtitle = if (biometricAvailable) "Uses enrolled fingerprint / face authentication from this device"
-                            else "No enrolled biometric is currently available",
+//                             subtitle = if (biometricAvailable) "Uses enrolled fingerprint / face authentication from this device"
+//                             else "No enrolled biometric is currently available",
+                            subtitle = androidx.compose.ui.res.stringResource(when {
+                                "strong" in enrolledClasses -> com.example.chat.R.string.security_biometric_strong_class
+                                "weak" in enrolledClasses -> com.example.chat.R.string.security_biometric_weak_class
+                                biometricAvailable -> com.example.chat.R.string.security_biometric_unknown_class
+                                else -> com.example.chat.R.string.security_biometric_no_class
+                            }),
                             badgeText = if (biometricAvailable) "READY" else "UNAVAILABLE",
                             badgeColor = if (biometricAvailable) colors.success else colors.warning,
                             onTap = {
@@ -226,7 +281,9 @@ fun SecurityCenterScreen(
                             },
                         )
                     }
-                    if (security.lockMethod == "Device Credential") rows += {
+// Superseded source retained below per additive-only review rule.
+//                     if (security.lockMethod == "Device Credential") rows += {
+                    if (security.lockMethod == "Device Credential") androidx.compose.runtime.key("security-setting-4") {
                         ChatySettingsTile(
                             icon = Icons.Rounded.PhonelinkLock,
                             title = "Device screen lock",
@@ -240,16 +297,25 @@ fun SecurityCenterScreen(
                         )
                     }
                     if (security.lockMethod == "PIN") {
-                        rows += {
+// Superseded source retained below per additive-only review rule.
+//                         rows += {
+                        androidx.compose.runtime.key("security-setting-5") {
                             ChatyChoiceTile(
                                 title = "PIN Length",
                                 options = listOf("4 digits", "6 digits"),
                                 selectedOption = if (pinLength == 6) "6 digits" else "4 digits",
                                 optionLabel = { it },
-                                onSelected = { v -> runFlow(SecurityIntent.changeCredential, LockMethodType.pin, if (v == "6 digits") 6 else 4) },
+// Superseded source retained below per additive-only review rule.
+//                                 onSelected = { v -> runFlow(SecurityIntent.changeCredential, LockMethodType.pin, if (v == "6 digits") 6 else 4) },
+                                onSelected = { v ->
+                                    val requested = if (v == "6 digits") 6 else 4
+                                    if (requested != pinLength) runFlow(SecurityIntent.changeCredential, LockMethodType.pin, requested)
+                                },
                             )
                         }
-                        rows += {
+// Superseded source retained below per additive-only review rule.
+//                         rows += {
+                        androidx.compose.runtime.key("security-setting-6") {
                             ChatySettingsTile(
                                 icon = Icons.Rounded.Pin,
                                 title = "Change PIN Code",
@@ -258,7 +324,9 @@ fun SecurityCenterScreen(
                             )
                         }
                     }
-                    if (security.lockMethod == "Password") rows += {
+// Superseded source retained below per additive-only review rule.
+//                     if (security.lockMethod == "Password") rows += {
+                    if (security.lockMethod == "Password") androidx.compose.runtime.key("security-setting-7") {
                         ChatySettingsTile(
                             icon = Icons.Rounded.Password,
                             title = "Change Lock Password",
@@ -267,7 +335,9 @@ fun SecurityCenterScreen(
                         )
                     }
                     if (security.lockMethod == "Pattern") {
-                        rows += {
+// Superseded source retained below per additive-only review rule.
+//                         rows += {
+                        androidx.compose.runtime.key("security-setting-8") {
                             ChatySettingsTile(
                                 icon = Icons.Rounded.Pattern,
                                 title = "Change Unlock Pattern",
@@ -275,55 +345,78 @@ fun SecurityCenterScreen(
                                 onTap = { runFlow(SecurityIntent.changeCredential, LockMethodType.pattern) },
                             )
                         }
-                        rows += {
+// Superseded source retained below per additive-only review rule.
+//                         rows += {
+                        androidx.compose.runtime.key("security-setting-9") {
                             ChatySwitchTile(
                                 title = "Make Pattern Invisible",
                                 subtitle = "Hide pattern lines while drawing",
                                 value = security.makePatternInvisible,
-                                onChanged = { v -> preferences.updateSecurity(security.copy(makePatternInvisible = v), logTitle = "Pattern visibility") },
+// onChanged = { v -> preferences.updateSecurity(security.copy(makePatternInvisible = v), logTitle = "Pattern visibility") },
+// onChanged = { v -> preferences.updateSecurity(preferences.security.copy(makePatternInvisible = v), logTitle = "Pattern visibility") },
+                                onChanged = { v -> if (active && preferences.scopeGeneration == accountGeneration) preferences.updateSecurity(preferences.security.copy(makePatternInvisible = v), logTitle = "Pattern visibility") },
                             )
                         }
-                        rows += {
+// Superseded source retained below per additive-only review rule.
+//                         rows += {
+                        androidx.compose.runtime.key("security-setting-10") {
                             ChatySwitchTile(
                                 title = "Disable Pattern Vibration",
                                 subtitle = "Turn off haptic feedback while drawing the pattern",
                                 value = security.disablePatternVibration,
-                                onChanged = { v -> preferences.updateSecurity(security.copy(disablePatternVibration = v), logTitle = "Pattern vibration") },
+// onChanged = { v -> preferences.updateSecurity(security.copy(disablePatternVibration = v), logTitle = "Pattern vibration") },
+// onChanged = { v -> preferences.updateSecurity(preferences.security.copy(disablePatternVibration = v), logTitle = "Pattern vibration") },
+                                onChanged = { v -> if (active && preferences.scopeGeneration == accountGeneration) preferences.updateSecurity(preferences.security.copy(disablePatternVibration = v), logTitle = "Pattern vibration") },
                             )
                         }
                     }
-                    rows += {
+// Superseded source retained below per additive-only review rule.
+//                     rows += {
+                    Text("Behavior", color = colors.foregroundSecondary, fontSize = 14.sp, modifier = Modifier.padding(14.dp))
+                    androidx.compose.runtime.key("security-setting-11") {
                         ChatyChoiceTile(
                             title = "Auto Lock Timeout",
                             options = AutoLockOptions,
                             selectedOption = security.autoLockTimeout,
                             optionLabel = { it },
-                            onSelected = { v -> preferences.updateSecurity(security.copy(autoLockTimeout = v), logTitle = "Auto Lock Timeout") },
+// onSelected = { v -> preferences.updateSecurity(security.copy(autoLockTimeout = v), logTitle = "Auto Lock Timeout") },
+// onSelected = { v -> preferences.updateSecurity(preferences.security.copy(autoLockTimeout = v), logTitle = "Auto Lock Timeout") },
+                            onSelected = { v -> if (active && preferences.scopeGeneration == accountGeneration) preferences.updateSecurity(preferences.security.copy(autoLockTimeout = v), logTitle = "Auto Lock Timeout") },
                         )
                     }
-                    rows += {
+// Superseded source retained below per additive-only review rule.
+//                     rows += {
+                    Text("Notifications", color = colors.foregroundSecondary, fontSize = 14.sp, modifier = Modifier.padding(14.dp))
+                    androidx.compose.runtime.key("security-setting-12") {
                         ChatySwitchTile(
                             icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.eyeOff),
                             title = "Hide Notification Content when Locked",
                             subtitle = "Conceal message body text while the application is locked",
                             value = security.hideLockNotificationContent,
-                            onChanged = { v -> preferences.updateSecurity(security.copy(hideLockNotificationContent = v), logTitle = "Lock notification privacy") },
+// onChanged = { v -> preferences.updateSecurity(security.copy(hideLockNotificationContent = v), logTitle = "Lock notification privacy") },
+// onChanged = { v -> preferences.updateSecurity(preferences.security.copy(hideLockNotificationContent = v), logTitle = "Lock notification privacy") },
+                            onChanged = { v -> if (active && preferences.scopeGeneration == accountGeneration) preferences.updateSecurity(preferences.security.copy(hideLockNotificationContent = v), logTitle = "Lock notification privacy") },
                         )
                     }
-                    rows += {
+// Superseded source retained below per additive-only review rule.
+//                     rows += {
+                    androidx.compose.runtime.key("security-setting-13") {
                         ChatySettingsTile(
                             icon = Icons.Rounded.LockOpen,
                             iconColor = colors.accent,
                             title = "Test Lock Screen",
+                            trailing = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = colors.foregroundTertiary, modifier = Modifier.size(20.dp)) },
                             subtitle = "Run the same authentication gate used by the application",
                             onTap = { modal = Modal.TestLock(CompletableDeferred()) },
                         )
                     }
                 }
-                rows.forEachIndexed { i, row ->
-                    row()
-                    if (i < rows.lastIndex) ChatySettingsRowDivider()
-                }
+// Superseded source retained below per additive-only review rule.
+//                 rows.forEachIndexed { i, row ->
+//                     row()
+//                     if (i < rows.lastIndex) ChatySettingsRowDivider()
+//                 }
+                // Rows are composed above, not allocated into a mutable list.
             }
             ChatySettingsSection(
                 title = "Chat Lock & Hidden Chats",
@@ -341,11 +434,23 @@ fun SecurityCenterScreen(
                 )
                 ChatySettingsRowDivider()
                 ChatySwitchTile(
+                    icon = Icons.Outlined.Lock, title = "Hide locked chats",
+                    subtitle = "Keep protected conversations out of the normal inbox. Open them from this vault entry.",
+                    value = security.hideLockedChats,
+                    onChanged = { preferences.updateSecurity(preferences.security.copy(hideLockedChats = it), logTitle = "Hide locked chats") },
+                )
+                ChatySwitchTile(
                     icon = Icons.Rounded.TouchApp,
                     title = "Unlock via Chaty Title Tap",
-                    subtitle = "Tap the main screen Chaty header to authenticate and open locked chats",
+// Superseded source retained below per additive-only review rule.
+//                     subtitle = "Tap the main screen Chaty header to authenticate and open locked chats",
+                    subtitle = if (security.hideLockedChats) "Tap the main screen Chaty header to authenticate and open locked chats"
+                        else "Only applies when Hide locked chats is enabled below",
                     value = security.entryByAppTitle,
-                    onChanged = { v -> preferences.updateSecurity(security.copy(entryByAppTitle = v), logTitle = "Title tap vault entry") },
+                    enabled = security.hideLockedChats,
+// onChanged = { v -> preferences.updateSecurity(security.copy(entryByAppTitle = v), logTitle = "Title tap vault entry") },
+// onChanged = { v -> preferences.updateSecurity(preferences.security.copy(entryByAppTitle = v), logTitle = "Title tap vault entry") },
+                    onChanged = { v -> if (active && preferences.scopeGeneration == accountGeneration) preferences.updateSecurity(preferences.security.copy(entryByAppTitle = v), logTitle = "Title tap vault entry") },
                 )
                 ChatySettingsRowDivider()
                 ChatySwitchTile(
@@ -384,7 +489,9 @@ fun SecurityCenterScreen(
                     title = "Protect Screen & App Previews",
                     subtitle = "Blank out app thumbnail in multi-tasking view and block screenshots on supported devices",
                     value = security.protectFromScreenshots,
-                    onChanged = { v -> preferences.updateSecurity(security.copy(protectFromScreenshots = v), logTitle = "Screen & preview security") },
+// onChanged = { v -> preferences.updateSecurity(security.copy(protectFromScreenshots = v), logTitle = "Screen & preview security") },
+// onChanged = { v -> preferences.updateSecurity(preferences.security.copy(protectFromScreenshots = v), logTitle = "Screen & preview security") },
+                    onChanged = { v -> if (active && preferences.scopeGeneration == accountGeneration) preferences.updateSecurity(preferences.security.copy(protectFromScreenshots = v), logTitle = "Screen & preview security") },
                 )
                 ChatySettingsRowDivider()
                 ChatySettingsTile(
@@ -400,6 +507,12 @@ fun SecurityCenterScreen(
 
     val setupAdapter = remember(lockService) { LockSetupServiceAdapter(lockService) }
     when (val m = modal) {
+        Modal.AboutProtection -> AlertDialog(
+            onDismissRequest = { modal = null },
+            title = { Text("What App Lock protects") },
+            text = { Text("App Lock asks for local authentication before opening Chaty. Chat Lock adds a gate for selected conversations. Neither feature adds end-to-end encryption to messages or removes copies from recipients, the service, galleries or backups. Screenshot protection and notification content are separate controls. A secret search phrase reveals the vault entry; it is not a replacement for authentication. Device owners with a compromised or rooted operating system may bypass app-only controls.") },
+            confirmButton = { TextButton(onClick = { modal = null }) { Text("Done") } },
+        )
         is Modal.Verify -> LockOverlayDialog(preferences, lockService, "Confirm it's you", "Verify your current lock to continue", m.result)
         is Modal.TestLock -> LockOverlayDialog(preferences, lockService, "Test Chaty Lock", "Authenticate to verify your Chaty Lock configuration", m.result) { modal = null }
         is Modal.Pick -> LockMethodSelectorSheet(setupAdapter, m.current) { m.result.complete(it) }
@@ -440,6 +553,7 @@ private fun SecretPhraseDialog(result: CompletableDeferred<String?>) {
     var text by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
     AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+        properties = DialogProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
         onDismissRequest = { result.complete(null) },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {

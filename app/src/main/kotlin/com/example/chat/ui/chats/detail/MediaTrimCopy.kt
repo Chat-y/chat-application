@@ -53,7 +53,7 @@ internal suspend fun trimMediaCopy(
     var pendingOutput: File? = null
     try { return withContext(Dispatchers.IO) {
     require(startMs >= 0 && endMs > startMs) { "End must be after start." }
-    val extractor = MediaExtractor()
+    // Prior eager allocation: val extractor = MediaExtractor()
     val out = outputFile ?: File(context.cacheDir, "chaty-outgoing-trimmed-${java.util.UUID.randomUUID()}.${if (video) "mp4" else "m4a"}")
     // Dictated files are created/owned by EditSession. Never point this at an original.
     require(out.canonicalPath != runCatching { File(Uri.parse(source).path.orEmpty()).canonicalPath }.getOrNull()) { "Output cannot overwrite the source." }
@@ -63,7 +63,11 @@ internal suspend fun trimMediaCopy(
         val allowedRoots = listOf(context.cacheDir, context.filesDir).map { it.canonicalPath.trimEnd(File.separatorChar) + File.separator }
         require(allowedRoots.any { outCanonical.startsWith(it) }) { "Output must stay inside app-private storage." }
     }
+    // Validate the destination before allocating a native extractor.
+    val extractor = MediaExtractor()
     pendingOutput = out
+    val startUs = trimTimestampUs(startMs)
+    val endUs = trimTimestampUs(endMs)
     var muxer: MediaMuxer? = null
     var started = false
     var spherical = false
@@ -124,7 +128,8 @@ internal suspend fun trimMediaCopy(
         // must not shift the origin earlier than the chosen decodable video frame.
         val primaryVideo = videoIndex
         if (primaryVideo != null) tracks.keys.filter { it != primaryVideo }.forEach { extractor.unselectTrack(it) }
-        extractor.seekTo(startMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        // Prior: extractor.seekTo(startMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         val actualStartUs = extractor.sampleTime.coerceAtLeast(0)
         if (primaryVideo != null) {
             require(extractor.sampleTrackIndex == primaryVideo && extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
@@ -134,7 +139,8 @@ internal suspend fun trimMediaCopy(
             tracks.keys.filter { it != primaryVideo }.forEach { extractor.selectTrack(it) }
             extractor.seekTo(actualStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         }
-        require(actualStartUs < endMs * 1000) { "No sample in this range." }
+        // Prior: require(actualStartUs < endMs * 1000) { "No sample in this range." }
+        require(actualStartUs < endUs) { "No sample in this range." }
         outputMuxer.start(); started = true
         val buffer = ByteBuffer.allocateDirect(8 * 1024 * 1024)
         val info = MediaCodec.BufferInfo()
@@ -144,7 +150,8 @@ internal suspend fun trimMediaCopy(
         while (extractor.sampleTrackIndex >= 0) {
             coroutineContext.ensureActive()
             val sampleUs = extractor.sampleTime
-            if (sampleUs < 0 || sampleUs >= endMs * 1000) break
+            // Prior: if (sampleUs < 0 || sampleUs >= endMs * 1000) break
+            if (sampleUs < 0 || sampleUs >= endUs) break
             require(extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED == 0) { "Protected media cannot be trimmed here." }
             buffer.clear()
             val count = extractor.readSampleData(buffer, 0)
@@ -155,7 +162,8 @@ internal suspend fun trimMediaCopy(
                 val isVideoSample = extractor.sampleTrackIndex == primaryVideo
                 // MR-R1-012: when the video anchor landed before the chosen cut, drop audio frames
                 // that would otherwise lead in ahead of the cut (within one audio frame of slack).
-                if (!isVideoSample && primaryVideo != null && sampleUs < startMs * 1000) {
+                // Prior: if (!isVideoSample && primaryVideo != null && sampleUs < startMs * 1000) {
+                if (!isVideoSample && primaryVideo != null && sampleUs < startUs) {
                     if (!extractor.advance()) break
                     continue
                 }
@@ -193,8 +201,8 @@ internal suspend fun trimMediaCopy(
         out.delete()
         throw e
     } finally {
-        extractor.release()
-        muxer?.release()
+        // Prior sequential cleanup: extractor.release(); muxer?.release()
+        try { extractor.release() } finally { muxer?.release() }
     }
 
     } } catch (e: Throwable) {
@@ -230,4 +238,10 @@ internal fun scanDurationMs(context: Context, source: String, maxSamples: Int = 
     } finally {
         extractor.release()
     }
+}
+
+/** Long end-of-file sentinels must not overflow into a negative microsecond cutoff. */
+internal fun trimTimestampUs(milliseconds: Long): Long {
+    require(milliseconds >= 0)
+    return if (milliseconds > Long.MAX_VALUE / 1000L) Long.MAX_VALUE else milliseconds * 1000L
 }

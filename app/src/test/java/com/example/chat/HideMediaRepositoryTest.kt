@@ -66,6 +66,10 @@ class HideMediaRepositoryTest {
     @Test fun `drift report flags mismatch only`() {
         val repo = repo(tmp.root)
         val state = HideMediaRepository.MarkerState(photos = false, videos = false, gifs = false)
+        // assertNull(repo.driftReport(state))
+        // Missing folders are now correctly drift, even when every marker preference is off.
+        assertNotNull(repo.driftReport(state))
+        repo.sync(state).getOrThrow()
         assertNull(repo.driftReport(state))
         repo.markerFile(HideMediaRepository.MediaKind.PHOTOS).let {
             it.parentFile.mkdirs()

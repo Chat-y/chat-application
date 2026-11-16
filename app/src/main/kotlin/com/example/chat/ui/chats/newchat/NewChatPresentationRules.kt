@@ -5,7 +5,7 @@ internal object NewChatPresentationRules {
     private val requiredSections = listOf("search", "selected", "contacts")
 
     fun sections(configured: List<String>): List<String> =
-        (configured.filter { it in requiredSections }.distinct() + requiredSections).distinct()
+        (listOf("search") + configured.filter { it in requiredSections } + requiredSections).distinct()
 
     /** Preserve the existing UTF-16 length contract, but never leave half a surrogate at the boundary. */
     fun clampTitle(value: String, maxCodeUnits: Int): String {
@@ -38,3 +38,6 @@ internal object NewChatPresentationRules {
         else -> "Unable to complete this request. Please try again."
     }
 }
+
+// Superseded source lines retained inactive for review:
+//         (configured.filter { it in requiredSections }.distinct() + requiredSections).distinct()

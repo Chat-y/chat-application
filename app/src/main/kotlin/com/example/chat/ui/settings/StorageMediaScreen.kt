@@ -20,6 +20,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -30,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.chat.data.services.ChatMediaService
 import com.example.chat.core.preferences.ChatyPreferencesController
@@ -64,6 +67,8 @@ fun StorageMediaScreen(
     val colors = LocalAppColors.current
     var revision by remember { mutableIntStateOf(0) }
     var confirmClear by remember { mutableStateOf(false) }
+    // ST1-30: spoken/visible result after clearing the cache.
+    var clearedNotice by remember { mutableStateOf(false) }
     var pendingLimitMb by remember { mutableStateOf<Int?>(null) }
     DisposableEffect(preferences) {
         val listener: () -> Unit = { revision += 1 }
@@ -87,7 +92,17 @@ fun StorageMediaScreen(
                 icon = Icons.Rounded.Hd,
                 iconColor = colors.primary,
                 title = "High-resolution images",
-                subtitle = "Image allowance: up to $fullResolutionMb MB (server limit $serverLimitMb MB)",
+                // ST1-04: pipeline trace - the 1/6 MB value only feeds a fallback in
+                // ChatMediaService.maxBytes("image") that never applies, because gbFeatures always
+                // carries "Up_size_limit" (catalog default 50); the picker (ChatAttachmentsBinding)
+                // and the service both gate images at the client's 50 MB storage limit
+                // (ChatMediaService.STORAGE_LIMIT_MB; no server-side enforcement is visible in
+                // source, so the UI must not call it a server limit). "Up to" stays truthful as an
+                // upper bound when a lower stored Up_size_limit applies. State the true limit
+                // instead of implying this switch sets it.
+                subtitle = "Per-image upload limit: up to $serverLimitMb MB. This switch does not change that limit.",
+                // Superseded subtitle retained per owner convention (commented out, not deleted):
+                // subtitle = "Image allowance: up to $fullResolutionMb MB (server limit $serverLimitMb MB)",
                 value = highResolutionEnabled,
                 onChanged = { enabled ->
                     preferences.updateUniversal(
@@ -190,6 +205,16 @@ fun StorageMediaScreen(
                 trailing = { Text("Clear", color = colors.error) },
                 onTap = { confirmClear = true },
             )
+            if (clearedNotice) {
+                Text(
+                    "Local media cache cleared.",
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                )
+            }
         }
     }
 
@@ -204,7 +229,7 @@ fun StorageMediaScreen(
             },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel", color = colors.primary) } },
             confirmButton = {
-                TextButton(onClick = { confirmClear = false; onClearCache() }) { Text("Clear", color = colors.error) }
+                TextButton(onClick = { confirmClear = false; onClearCache(); clearedNotice = true }) { Text("Clear", color = colors.error) }
             },
         )
     }

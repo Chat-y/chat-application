@@ -146,12 +146,14 @@ fun UpdatesScreen(
     recentUpdatesTextColor: () -> Long? = { null },
     pickStatusMedia: suspend (mediaType: String) -> PickedStatusMedia? = { null },
     captureStory: suspend () -> CapturedStoryMedia? = { null },
-    /** Remote media renderer; null selects the built-in default below,
-     *  which binds the shared Coil-backed ChatyAsyncImage (ui/theme). */
+    /** Remote media renderer; null selects the default Coil-backed fitted renderer below. */
     remoteImage: (@Composable (url: String, modifier: Modifier) -> Unit)? = null,
     openUrl: (String) -> Unit = {},
     /** SnackBar equivalent for the exact toast strings. */
     onNotify: (String) -> Unit = {},
+    /** Custom image renderers may report decoded intrinsic pixel dimensions here.
+     *  Without dimensions zoom stays centered rather than allowing unbounded letterbox pan. */
+    imageSizeFor: ((String) -> androidx.compose.ui.geometry.Size?)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -159,26 +161,12 @@ fun UpdatesScreen(
     val loadingLabel = stringResource(R.string.social_updates_loading)
     val ownLabel = stringResource(R.string.social_updates_own)
     val statusAvailable = statusService.isAvailable()
-    // Dart Image.network(..., fit: BoxFit.contain, errorBuilder:
-    // broken_image_outlined 72 @ 40% onSurface) over the shared wrapper.
+    var measuredImage by remember { mutableStateOf<Pair<String, androidx.compose.ui.geometry.Size>?>(null) }
     val defaultRemoteImage: @Composable (String, Modifier) -> Unit = { url, m ->
-        com.example.chat.ui.theme.ChatyAsyncImage(
-            url = url,
-            contentDescription = null,
-            modifier = m,
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-            error = {
-                Box(m, contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.BrokenImage,
-                        contentDescription = null,
-                        tint = colors.foreground.copy(alpha = 0.4f),
-                        modifier = Modifier.size(72.dp),
-                    )
-                }
-            },
-        )
+        StatusFittedImage(url, m, colors) { size -> measuredImage = url to size }
     }
+    val effectiveImageSizeFor: (String) -> androidx.compose.ui.geometry.Size? = imageSizeFor
+        ?: { url -> if (remoteImage == null) measuredImage?.takeIf { it.first == url }?.second else null }
     val effectiveRemoteImage = remoteImage ?: defaultRemoteImage
     val viewSession = remember(currentUser.id) { StatusViewSession() }
     var feedError by remember(currentUser.id) { mutableStateOf(false) }
@@ -437,6 +425,7 @@ fun UpdatesScreen(
             template = template,
             viewSession = viewSession,
             remoteImage = effectiveRemoteImage,
+            imageSizeFor = effectiveImageSizeFor,
             openUrl = openUrl,
             onDismiss = { openStatus = null },
         )

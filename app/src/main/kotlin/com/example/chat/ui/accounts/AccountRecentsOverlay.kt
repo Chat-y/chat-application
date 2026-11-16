@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,7 +83,9 @@ fun AccountRecentsOverlay(
         }
     }
 
-    BackHandler(enabled = !isSwitching) { onDismiss() }
+    // Previous handler let Back fall through to underlying navigation during a switch.
+    // BackHandler(enabled = !isSwitching) { onDismiss() }
+    BackHandler { if (!isSwitching) onDismiss() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val screenW = maxWidth
@@ -189,6 +192,7 @@ fun AccountRecentsOverlay(
                     .clip(CircleShape)
                     .background(colors.input)
                     .clickable(enabled = !isSwitching, onClick = onManageAccounts)
+                    .heightIn(min = 48.dp) // AC5-01
                     .padding(vertical = 15.dp),
                 contentAlignment = Alignment.Center,
             ) {

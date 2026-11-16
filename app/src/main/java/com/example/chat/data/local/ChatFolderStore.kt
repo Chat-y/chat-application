@@ -289,6 +289,7 @@ class ChatFolderStore(context: Context, accountKey: String) {
         knownConversationIds: Set<String>,
         expected: FolderEditToken,
         folderId: String? = null,
+        preserveExistingUnavailableMembers: Boolean = false,
     ): FolderSaveResult = synchronized(lock) {
         val raw = prefs.getString(KEY_STATE, null)
         if (expected.ownerIdentity !== owner || expected.generation != owner.generation || expected.rawState != raw) {
@@ -308,7 +309,12 @@ class ChatFolderStore(context: Context, accountKey: String) {
         }
         // Copy the candidate set before validating; never silently trim/drop IDs.
         val members = conversationIds.toSet()
-        if (members.any { it.isBlank() || it !in knownConversationIds }) {
+        // Opt-in edit keeps unavailable references already in this exact target folder.
+        // It never treats imported or newly selected unknown IDs as repository-known.
+        val preserved = if (preserveExistingUnavailableMembers && folderId != null)
+            state.members[folderId].orEmpty() else emptySet()
+        // Previous strict check: members.any { it.isBlank() || it !in knownConversationIds }
+        if (members.any { it.isBlank() || (it !in knownConversationIds && it !in preserved) }) {
             return@synchronized FolderSaveResult(FolderSaveStatus.INVALID_MEMBERS, folderId)
         }
         val id = folderId ?: ("f_" + java.util.UUID.randomUUID().toString())

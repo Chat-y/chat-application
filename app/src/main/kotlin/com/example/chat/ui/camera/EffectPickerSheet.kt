@@ -1,5 +1,7 @@
 package com.example.chat.ui.camera
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -40,6 +42,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,19 +100,34 @@ private val pickerCategories = listOf(
     EffectCategory.background,
 )
 
-fun effectCategoryLabel(category: EffectCategory): String = when (category) {
-    EffectCategory.beauty -> "Beauty"
-    EffectCategory.cinematic -> "Cinematic"
-    EffectCategory.retro -> "Retro"
-    EffectCategory.film -> "Film"
-    EffectCategory.glow -> "Glow"
-    EffectCategory.faceAR -> "Face AR"
-    EffectCategory.celebration -> "Fun"
-    EffectCategory.cyber -> "Cyber"
-    EffectCategory.background -> "Background"
-    EffectCategory.portrait -> "Portrait"
-    EffectCategory.color -> "Color"
-}
+// CAM-R4-004 prior nonlocalized category mapping:
+// fun effectCategoryLabel(category: EffectCategory): String = when (category) {
+//     EffectCategory.beauty -> "Beauty"
+//     EffectCategory.cinematic -> "Cinematic"
+//     EffectCategory.retro -> "Retro"
+//     EffectCategory.film -> "Film"
+//     EffectCategory.glow -> "Glow"
+//     EffectCategory.faceAR -> "Face AR"
+//     EffectCategory.celebration -> "Fun"
+//     EffectCategory.cyber -> "Cyber"
+//     EffectCategory.background -> "Background"
+//     EffectCategory.portrait -> "Portrait"
+//     EffectCategory.color -> "Color"
+// }
+@Composable
+fun effectCategoryLabel(category: EffectCategory): String = stringResource(when (category) {
+    EffectCategory.beauty -> com.example.chat.R.string.camera_effect_category_beauty
+    EffectCategory.cinematic -> com.example.chat.R.string.camera_effect_category_cinematic
+    EffectCategory.retro -> com.example.chat.R.string.camera_effect_category_retro
+    EffectCategory.film -> com.example.chat.R.string.camera_effect_category_film
+    EffectCategory.glow -> com.example.chat.R.string.camera_effect_category_glow
+    EffectCategory.faceAR -> com.example.chat.R.string.camera_effect_category_facear
+    EffectCategory.celebration -> com.example.chat.R.string.camera_effect_category_celebration
+    EffectCategory.cyber -> com.example.chat.R.string.camera_effect_category_cyber
+    EffectCategory.background -> com.example.chat.R.string.camera_effect_category_background
+    EffectCategory.portrait -> com.example.chat.R.string.camera_effect_category_portrait
+    EffectCategory.color -> com.example.chat.R.string.camera_effect_category_color
+})
 
 @Composable
 fun EffectPickerSheet(
@@ -165,11 +184,13 @@ fun EffectPickerSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 2.dp),
+                    // CAM-R4-030 previous spacing: .padding(horizontal = 24.dp, vertical = 2.dp),
+                    .padding(horizontal = 24.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Filters paused to keep the camera smooth",
+                    // CAM-R4-004 prior: "Filters paused to keep the camera smooth",
+                    stringResource(com.example.chat.R.string.camera_effect_paused_note),
                     color = colors.foregroundSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.W500,
@@ -177,11 +198,12 @@ fun EffectPickerSheet(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = {
+                TextButton(modifier = Modifier.cameraActionFocusRing(), onClick = {
                     ChatyHapticsPort.selection(view)
                     engine.restorePerformanceMode()
                 }) {
-                    Text("Resume", color = colors.primary, fontSize = 12.sp)
+                    // CAM-R4-004 prior: Text("Resume", color = colors.primary, fontSize = 12.sp)
+                    Text(stringResource(com.example.chat.R.string.camera_effect_resume), color = colors.primary, fontSize = 12.sp)
                 }
             }
         }
@@ -196,18 +218,20 @@ fun EffectPickerSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Filters",
+                    // CAM-R4-004 prior: "Filters",
+                    stringResource(com.example.chat.R.string.camera_effect_title),
                     color = colors.foreground,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.W700,
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = {
+                TextButton(modifier = Modifier.cameraActionFocusRing(), onClick = {
                     ChatyHapticsPort.selection(view)
                     onBrowseLenses()
                 }) {
                     Text(
-                        "Browse lenses",
+                        // CAM-R4-004 prior: "Browse lenses",
+                        stringResource(com.example.chat.R.string.camera_effect_browse_lenses),
                         color = colors.primary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.W600,
@@ -221,11 +245,13 @@ fun EffectPickerSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 2.dp), // ChatySpacing.xl
+                    // CAM-R4-030 previous spacing: .padding(horizontal = 24.dp, vertical = 2.dp), // ChatySpacing.xl
+                    .padding(horizontal = 24.dp, vertical = 4.dp), // ChatySpacing.xl
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Intensity",
+                    // CAM-R4-004 prior: "Intensity",
+                    stringResource(com.example.chat.R.string.camera_effect_intensity),
                     color = colors.foregroundSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.W600,
@@ -233,10 +259,11 @@ fun EffectPickerSheet(
                 Slider(
                     value = engine.intensity.toFloat(),
                     onValueChange = { engine.setIntensity(it.toDouble()) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.cameraActionFocusRing().weight(1f),
                 )
                 Text(
-                    "${(engine.intensity * 100).toInt()}%",
+                    // CAM-R4-004 prior: "${(engine.intensity * 100).toInt()}%",
+                    stringResource(com.example.chat.R.string.camera_effect_intensity_percent, (engine.intensity * 100).toInt()),
                     color = colors.foreground,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
@@ -253,22 +280,29 @@ fun EffectPickerSheet(
             edgePadding = 0.dp,
         ) {
             Tab(
+                modifier = Modifier.cameraActionFocusRing(),
                 selected = activeTab == 0,
                 onClick = { selectedTab = 0 },
-                text = { Text("All") },
+                // CAM-R4-004 prior: text = { Text("All") },
+                text = { Text(stringResource(com.example.chat.R.string.camera_effect_all)) },
             )
             Tab(
+                modifier = Modifier.cameraActionFocusRing(),
                 selected = activeTab == 1,
                 onClick = { selectedTab = 1 },
-                text = { Text("Recents") },
+                // CAM-R4-004 prior: text = { Text("Recents") },
+                text = { Text(stringResource(com.example.chat.R.string.camera_effect_recents)) },
             )
             Tab(
+                modifier = Modifier.cameraActionFocusRing(),
                 selected = activeTab == 2,
                 onClick = { selectedTab = 2 },
-                text = { Text("Favorites") },
+                // CAM-R4-004 prior: text = { Text("Favorites") },
+                text = { Text(stringResource(com.example.chat.R.string.camera_effect_favorites)) },
             )
             pickerCategories.forEachIndexed { index, category ->
                 Tab(
+                modifier = Modifier.cameraActionFocusRing(),
                     selected = activeTab == index + 3,
                     onClick = { selectedTab = index + 3 },
                     text = { Text(effectCategoryLabel(category)) },
@@ -293,9 +327,11 @@ fun EffectPickerSheet(
             ) {
                 Text(
                     if (activeTab == 2) {
-                        "No favorites yet - hold a filter to favorite it"
+                        // CAM-R4-004 prior: "No favorites yet - hold a filter to favorite it"
+                        stringResource(com.example.chat.R.string.camera_effect_favorites_empty)
                     } else {
-                        "Nothing here yet"
+                        // CAM-R4-004 prior: "Nothing here yet"
+                        stringResource(com.example.chat.R.string.camera_effect_empty)
                     },
                     color = colors.foregroundSecondary,
                     fontSize = 12.sp,
@@ -310,8 +346,12 @@ fun EffectPickerSheet(
             ) {
                 items(list.size) { i ->
                     val effect = list[i]
+                    val effectDescription = stringResource(com.example.chat.R.string.camera_effect_description, effect.name)
+                    val notAvailableDescription = stringResource(com.example.chat.R.string.camera_effect_not_available)
                     val isSelected = engine.activeEffect.id == effect.id
                     val isFavorite = favorites.contains(effect.id)
+                    val favoriteAction = stringResource(if (isFavorite) com.example.chat.R.string.camera_lens_remove_favorite
+                        else com.example.chat.R.string.camera_lens_add_favorite, effect.name)
                     // INTEGRATOR (honest availability): effects with no working renderer
                     // (segmentation bg_* no-ops) — disabled, dimmed, never selectable.
                     val unavailable = effect.colorMatrix == null && effect.shaderKey == null &&
@@ -337,9 +377,22 @@ fun EffectPickerSheet(
                                 )
                             }
                             .semantics(mergeDescendants = true) {
-                                contentDescription = "${effect.name} filter"
+                                // CAM-R4-004 prior: contentDescription = "${effect.name} filter"
+                                contentDescription = effectDescription
                                 this.selected = isSelected
-                                if (unavailable) stateDescription = "Not available yet"
+                                // CAM-R4-004 prior: if (unavailable) stateDescription = "Not available yet"
+                                if (unavailable) stateDescription = notAvailableDescription
+                                // Pointer-only gestures were invisible to accessibility services.
+                                if (!unavailable) onClick {
+                                    ChatyHapticsPort.selection(view)
+                                    engine.selectEffect(effect)
+                                    true
+                                }
+                                if (effect.id != "none") onLongClick(label = favoriteAction) {
+                                    ChatyHapticsPort.threshold(view)
+                                    engine.toggleFavorite(effect.id)
+                                    true
+                                }
                             },
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -383,11 +436,13 @@ fun EffectPickerSheet(
                                 }
                             }
                         }
-                        Spacer(Modifier.height(6.dp))
+                        // CAM-R4-030 previous spacing: Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(8.dp))
                         Text(
                             effect.name,
                             color = if (isSelected) colors.primary else colors.foreground,
-                            fontSize = 11.sp,
+                            // CAM-R4-028 prior small text: fontSize = 11.sp,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.W500,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -400,3 +455,8 @@ fun EffectPickerSheet(
         }
     }
 }
+
+// CAM-R4-034 prior UI modifier lines retained inactive:
+//                 TextButton(onClick = {
+//                 TextButton(onClick = {
+//                     modifier = Modifier.weight(1f),

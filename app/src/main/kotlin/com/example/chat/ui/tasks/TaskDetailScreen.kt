@@ -91,12 +91,15 @@ fun TaskDetailScreen(
     var confirmDelete by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    var actionBusy by remember { mutableStateOf(false) }
 
     fun userOf(id: String): UserProfile? =
         if (id == currentUser.id) currentUser else getUser(id)
 
     fun updateStatus(newStatus: TaskStatus) {
-        if (currentTask.status == newStatus) return
+        // Prior guard only rejected no-op transitions, allowing concurrent rollback races.
+        if (actionBusy || currentTask.status == newStatus) return
+        actionBusy = true
         // Dart applies the local copy first, then persists. TAS-003: restore
         // the confirmed task when the server does not confirm.
         val previous = currentTask
@@ -104,7 +107,11 @@ fun TaskDetailScreen(
         currentTask = currentTask.copy(status = newStatus, updatedAt = Instant.now())
         scope.launch {
             // TAS-002: same transition use case (validation + history) as Kanban.
-            val result = runCatching { controller.moveTask(previous, newStatus) }.getOrNull()
+            // Prior runCatching swallowed cancellation with ordinary failures.
+            try {
+            val result = try { controller.moveTask(previous, newStatus) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
             when (result) {
                 is TasksController.MoveResult.Moved, is TasksController.MoveResult.NoOp -> Unit
                 is TasksController.MoveResult.Invalid -> {
@@ -120,6 +127,7 @@ fun TaskDetailScreen(
                     actionError = "Could not change the status. Please try again."
                 }
             }
+            } finally { actionBusy = false }
         }
     }
 
@@ -285,6 +293,7 @@ fun TaskDetailScreen(
                     icon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null, color = colors.primary, modifier = Modifier.size(20.dp)) },
                     title = "Created By",
                     colors = colors,
+                    mergeDescendants = true,
                 ) {
                     Text(userOf(currentTask.creatorId)?.displayName ?: currentTask.creatorId, color = colors.foreground.copy(alpha = 0.6f), fontSize = 12.sp)
                 }
@@ -292,6 +301,7 @@ fun TaskDetailScreen(
                     icon = { Icon(Icons.Rounded.CalendarToday, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp)) },
                     title = "Created At",
                     colors = colors,
+                    mergeDescendants = true,
                 ) {
                     Text(formatDate(currentTask.createdAt), color = colors.foreground.copy(alpha = 0.6f), fontSize = 12.sp)
                 }
@@ -299,6 +309,7 @@ fun TaskDetailScreen(
                     icon = { Icon(Icons.Rounded.Alarm, contentDescription = null, tint = colors.warning, modifier = Modifier.size(20.dp)) },
                     title = "Due Date",
                     colors = colors,
+                    mergeDescendants = true,
                 ) {
                     Text(formatDate(currentTask.dueAt), color = colors.foreground.copy(alpha = 0.6f), fontSize = 12.sp)
                 }
@@ -389,11 +400,18 @@ fun TaskDetailScreen(
             onCancel = { confirmDelete = false },
             onDelete = {
                 confirmDelete = false
-                scope.launch {
-                    // TAS-005: leave only after a confirmed delete.
-                    val deleted = runCatching { controller.deleteTask(currentTask.id) }
-                        .getOrDefault(false)
-                    if (deleted) onBack() else actionError = "Could not delete the task. Please try again."
+                if (!actionBusy) {
+                    actionBusy = true
+                    val deletingId = currentTask.id
+                    scope.launch {
+                        try {
+                            // Prior runCatching converted cancellation to an ordinary delete failure.
+                            val deleted = try { controller.deleteTask(deletingId) }
+                                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (_: Exception) { false }
+                            if (deleted) onBack() else actionError = "Could not delete the task. Please try again."
+                        } finally { actionBusy = false }
+                    }
                 }
             },
         )
@@ -418,10 +436,15 @@ private fun TaskPropertyRow(
     icon: @Composable () -> Unit,
     title: String,
     colors: TaskColors,
+    // TAS-141: read label and value as one announcement (read-only rows only).
+    mergeDescendants: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (mergeDescendants) Modifier.semantics(mergeDescendants = true) {} else Modifier)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top,
     ) {
         icon()

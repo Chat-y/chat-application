@@ -23,6 +23,7 @@ fun CallOnlySurface(
     session: ChatyCallSession?, durationSeconds: Int, video: CallVideoSurfaceProvider?, compact: Boolean,
     pipUnavailable: String?, onPip: () -> Unit, onPipSettings: () -> Unit, onOpenApp: () -> Unit,
     onMute: () -> Unit, onSpeaker: () -> Unit, onHangup: () -> Unit, onReady: () -> Unit,
+    microphoneCapture: com.example.chat.data.services.CallMicrophoneCaptureProvider? = null,
 ) {
     Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         if (session?.isVideo == true && video?.hasRemoteVideo == true) {
@@ -35,6 +36,10 @@ fun CallOnlySurface(
                 Text(if (session == null) "Call unavailable" else "Chaty call", color = Color.White, fontSize = 16.sp)
                 if (session != null) Text(callPipStatus(session.state, durationSeconds), color = Color.LightGray, fontSize = 12.sp)
             }
+        }
+        if (session != null) Box(Modifier.align(Alignment.TopCenter)
+            .windowInsetsPadding(WindowInsets.safeDrawing).padding(8.dp)) {
+            com.example.chat.ui.calls.CallMicrophoneIndicator(microphoneCapture, session.isMuted || session.isLocallyHeld)
         }
         if (!compact && session != null) {
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.85f))

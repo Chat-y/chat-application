@@ -1,6 +1,8 @@
 package com.example.chat.ui.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,7 +66,27 @@ fun SettingsSubHost(
         SettingsDestination.Effects -> NavigationEffectsScreen(preferences = prefs, onBack = onBack)
         // Dart settings_root_screen '/settings/notifications' => NotificationSettingsPage (the toast-only screen is not
         // instantiated anywhere in Dart). Dynamic Island native bridge has no Kotlin implementation: bridge = null.
-        SettingsDestination.Notifications -> com.example.chat.ui.settings.notifications.NotificationSettingsPage(
+// Previous implementation retained:         SettingsDestination.Notifications -> com.example.chat.ui.settings.notifications.NotificationSettingsPage(
+// Previous implementation retained:             preferences = prefs, onBack = onBack,
+// Previous implementation retained:             bridge = com.example.chat.ui.island.AndroidDynamicIslandBridge(androidx.compose.ui.platform.LocalContext.current),
+// Previous implementation retained:             // Dart _previewDynamicIsland fallback: notificationService.triggerEventNotification(chat_bubble_rounded icon).
+// Previous implementation retained:             triggerEventNotification = { title, body, accent ->
+// Previous implementation retained:                 ServiceLocator.notifications.triggerEventNotification(
+// Previous implementation retained:                     title = title, body = body,
+// Previous implementation retained:                     icon = com.example.chat.data.realtime.EventNotificationIcon.chatBubble, colorArgb = accent,
+// Previous implementation retained:                 )
+// Previous implementation retained:             },
+// Previous implementation retained:         )
+        SettingsDestination.Notifications -> {
+            // Dedicated toast customization remains separate; the existing Notifications page is unchanged.
+            var showToastSettings by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+            BackHandler(enabled = showToastSettings) { showToastSettings = false }
+            if (showToastSettings) {
+                NotificationToastSettingsScreen(preferences = prefs, onBack = { showToastSettings = false })
+            } else {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.weight(1f)) {
+                        com.example.chat.ui.settings.notifications.NotificationSettingsPage(
             preferences = prefs, onBack = onBack,
             bridge = com.example.chat.ui.island.AndroidDynamicIslandBridge(androidx.compose.ui.platform.LocalContext.current),
             // Dart _previewDynamicIsland fallback: notificationService.triggerEventNotification(chat_bubble_rounded icon).
@@ -75,6 +97,25 @@ fun SettingsSubHost(
                 )
             },
         )
+                    }
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.navigationBarsPadding()) {
+                    com.example.chat.ui.kit.GbSettingRow(
+                        title = context.getString(com.example.chat.R.string.call_toast_settings_entry),
+// Previous implementation retained:                         subtitle = context.getString(com.example.chat.R.string.call_toast_settings_subtitle),
+                        subtitle = buildList {
+                            val t = prefs.toasts
+                            if (t.onlineToastEnabled) add("Online")
+                            if (t.storyToastEnabled) add("Story")
+                            if (t.profileToastEnabled) add("Profile")
+                            if (t.typingToastEnabled) add("Typing")
+                        }.let { enabled -> if (enabled.isEmpty()) "All toast types off" else enabled.joinToString() + " on" },
+                        hasSubScreen = true,
+                        onTap = { showToastSettings = true },
+                    )
+                    }
+                }
+            }
+        }
         SettingsDestination.BackupRestore -> BackupAndRestoreScreen(
             preferences = prefs, onBack = onBack, onMessage = toast,
         )
@@ -176,6 +217,7 @@ fun SettingsSubHost(
                     settings = ServiceLocator.audioSettingsController,
                     capability = ServiceLocator.audioCapabilityService,
                     coordinator = ServiceLocator.audioPolicyCoordinator,
+                    liveCalls = ServiceLocator.callSignaling,
                     scope = scope,
                     onBack = { audio = false },
                 )
@@ -199,6 +241,17 @@ fun SettingsSubHost(
                 fun run(block: suspend () -> Unit) {
                     scope.launch { try { block() } catch (e: Exception) { toast(e.message ?: "Unable to save.") } }
                 }
+                // CS1-10: same IO contacts-plane load as Privacy Center (above); failure stays null
+                // so the screen shows no server claim. Load once per entry into this destination.
+                var serverCallAudience by remember(screenAccountScope) { mutableStateOf<String?>(null) }
+                androidx.compose.runtime.LaunchedEffect(screenAccountScope) {
+                    try {
+                        val policy = withContext(Dispatchers.IO) { ServiceLocator.apiBackend.contactsPlane(screenAccountScope).callPolicy().policy }
+                        if (ServiceLocator.apiBackend.authSnapshot() === screenAccountScope)
+                            serverCallAudience = com.example.chat.ui.settings.privacy.PrivacyOptionsLogic.audienceLabel(policy)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { serverCallAudience = null }
+                }
                 CallSettingsScreen(
                     preferences = prefs,
                     call = CallPresentationState(
@@ -209,16 +262,26 @@ fun SettingsSubHost(
                         ongoingCallTemplate = v.ongoingCallTemplate,
                         callExperienceBundleId = v.callExperienceBundleId,
                     ),
-                    templates = com.example.chat.ui.calls.CallScreenTemplate.all.map { CallTemplateOption(it.wireName, it.displayName) },
                     contacts = ServiceLocator.apiBackend.users.map { CallContactOption(it.id, it.displayName) },
                     onBack = onBack,
-                    onIncomingTemplate = { t -> run { store.setIncomingCallTemplate(t) } },
-                    onOngoingTemplate = { t -> run { store.setOutgoingCallTemplate(t) } },
                     onDynamicIsland = { b -> run { store.setDynamicIslandEnabled(b) } },
                     onPictureInPicture = { b -> run { store.setPictureInPictureEnabled(b) } },
                     onLowData = { b -> run { store.setLowDataUsageEnabled(b) } },
                     onOpenAudioSettings = { audio = true },
                     onOpenCallBundles = { showBundles = true },
+                    serverCallAudience = serverCallAudience,
+                    // CS1-42 / CS2-04: blocked accounts are managed in Privacy Center.
+                    onOpenBlockedContacts = { onSwitch(SettingsDestination.Privacy) },
+                    // CS4-49: reset only the presentation options the screen exposes, from the
+                    // single defaults source (CallPresentationPreferences.defaults). Templates keep
+                    // their persisted values; privacy preferences are untouched.
+                    onResetCallSettings = {
+                        val d = com.example.chat.ui.calls.CallPresentationPreferences.defaults
+                        store.setDynamicIslandEnabled(d.dynamicIslandEnabled)
+                        store.setPictureInPictureEnabled(d.pictureInPictureEnabled)
+                        store.setLowDataUsageEnabled(d.lowDataUsageEnabled)
+                        store.setCallExperienceBundle(d.callExperienceBundleId)
+                    },
                 )
             }
         }
@@ -353,3 +416,8 @@ fun SettingsSubHost(
     }
     return true
 }
+
+// Superseded call-settings source retained inactive:
+//                     templates = com.example.chat.ui.calls.CallScreenTemplate.all.map { CallTemplateOption(it.wireName, it.displayName) },
+//                     onIncomingTemplate = { t -> run { store.setIncomingCallTemplate(t) } },
+//                     onOngoingTemplate = { t -> run { store.setOutgoingCallTemplate(t) } },

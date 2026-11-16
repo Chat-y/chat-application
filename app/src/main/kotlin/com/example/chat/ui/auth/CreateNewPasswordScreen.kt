@@ -71,6 +71,7 @@ fun CreateNewPasswordScreen(
     var obscureConfirm by remember { mutableStateOf(true) }
     // Auth screenshot blocking is off by default. Preserve the opt-in hook, do not apply globally.
     // com.example.chat.ui.kit.ProtectSensitiveWindow()
+    com.example.chat.ui.kit.ProtectSensitiveWindow() // A1-14: enabled (FLAG_SECURE lease while this screen is shown)
     com.example.chat.ui.core.components.auth.RemaskPasswordOnBackground { obscurePassword = true; obscureConfirm = true }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -118,6 +119,9 @@ fun CreateNewPasswordScreen(
         ) {
             Column(modifier = Modifier.widthIn(max = ChatyAdaptiveLogic.AUTH_COLUMN_MAX_DP.dp).fillMaxWidth()) {
                 AuthBackButton(onClick = guardedBack)
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    com.example.chat.ui.core.components.auth.ChatyAppAuthIcon()
+                }
                 Spacer(Modifier.height(ChatyUiTokens.space32))
                 com.example.chat.ui.core.components.auth.AuthOfflineNotice(online,theme)
         Text(

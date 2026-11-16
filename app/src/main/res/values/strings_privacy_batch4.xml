@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="security_biometric_strong_class">Class 3 (Strong) enrollment available. Capability check only, not proof of hardware-bound unlocking.</string>
+    <string name="security_biometric_weak_class">Weak enrollment detected. Capability check only, not proof of hardware-bound unlocking.</string>
+    <string name="security_biometric_unknown_class">Biometrics available; Android did not report the class. Capability check only.</string>
+    <string name="security_biometric_no_class">No enrolled biometric is currently available.</string>
+    <string name="permissions_show_exact_location">Show exact coordinates</string>
+    <string name="permissions_hide_exact_location">Hide exact coordinates</string>
+</resources>

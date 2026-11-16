@@ -158,7 +158,9 @@ fun HomeHeaderTabsBar(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(2.dp)
+                            // R1-58: stronger selected marker (was 2.dp), same theme token.
+                            // .height(2.dp)
+                            .height(3.dp)
                             .background(if (selected) colors.foreground else Color.Transparent),
                     )
                 }

@@ -212,14 +212,18 @@ class CallBundleMatrixProofTest {
         try {
             scenario.onActivity { activity -> activity.setContent {
                 ChatyTheme(ThemePresets.monochromeDark) {
+                    // CS1-02: legacy template params removed. Pre-existing staleness fixed here:
+                    // this call site lacked the required onOpenCallBundles (CS1-17) and asserted the
+                    // pre-tip "Selected Call Bundle" label (renamed "Call screen style" by CS4-47).
                     CallSettingsScreen(preferences = ServiceLocator.preferencesController,
                         call = CallPresentationState(incomingCallTemplate = "sheet", ongoingCallTemplate = "card"),
-                        templates = emptyList(), contacts = emptyList(), onBack = {},
-                        onIncomingTemplate = {}, onOngoingTemplate = {}, onDynamicIsland = {},
-                        onPictureInPicture = {}, onLowData = {}, onOpenAudioSettings = {})
+                        contacts = emptyList(), onBack = {},
+                        onDynamicIsland = {},
+                        onPictureInPicture = {}, onLowData = {}, onOpenAudioSettings = {},
+                        onOpenCallBundles = {})
                 }
             } }
-            assertTrue(dev.wait(Until.hasObject(By.text("Selected Call Bundle")), 8000))
+            assertTrue(dev.wait(Until.hasObject(By.text("Call screen style")), 8000))
             assertFalse(dev.hasObject(By.text("Incoming Call Screen")))
             assertFalse(dev.hasObject(By.text("Ongoing Call Screen")))
             capture("calls-settings-global-only")
