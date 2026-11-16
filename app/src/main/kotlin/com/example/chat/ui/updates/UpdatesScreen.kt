@@ -73,6 +73,8 @@ import androidx.compose.ui.Alignment
 import com.example.chat.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.heading

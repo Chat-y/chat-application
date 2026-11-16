@@ -46,8 +46,9 @@ internal fun rememberCallPermissionCheck(): suspend (Boolean) -> Boolean {
             dismissButton = { TextButton(onClick = { denied = emptyList(); settingsFailed = false }) { Text("Cancel") } },
         )
     }
-    return remember<suspend (Boolean) -> Boolean> {
-        { video: Boolean ->
+    // Prior nested literal was inferred as a non-suspend Function1 by the compiler.
+    return remember {
+        val checkPermission: suspend (Boolean) -> Boolean = { video ->
             val ctx = latestContext
             fun missing() = CallPermissionGate.missing({ permission ->
                 ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED
@@ -63,6 +64,7 @@ internal fun rememberCallPermissionCheck(): suspend (Boolean) -> Boolean {
                 remaining.isEmpty()
             }
         }
+        checkPermission
     }
 }
 

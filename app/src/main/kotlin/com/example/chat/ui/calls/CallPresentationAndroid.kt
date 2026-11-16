@@ -8,7 +8,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.toMutablePreferences
+// toMutablePreferences() is a Preferences member, not a top-level extension.
 import androidx.datastore.preferences.preferencesDataStoreFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

@@ -89,14 +89,18 @@ fun NetworkStatusScreen(onBack: () -> Unit) {
                 // ND1-54: do not imply a metered connection automatically changes upload policy.
                 Text("Metered connections may count toward your provider's data allowance. Check Storage & Data before sending large files.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = {
-                    // ND1-49: let Android explain/manage its own data-saver policy.
-                    val settings = android.content.Intent(android.provider.Settings.ACTION_DATA_SAVER_SETTINGS)
+                    // Prior ACTION_DATA_SAVER_SETTINGS is hidden from the public Android SDK.
+                    // Data usage is public on API 28+; older supported devices use network settings.
+                    val action = if (android.os.Build.VERSION.SDK_INT >= 28)
+                        android.provider.Settings.ACTION_DATA_USAGE_SETTINGS
+                    else android.provider.Settings.ACTION_WIRELESS_SETTINGS
+                    val settings = android.content.Intent(action)
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                     try { networkContext.startActivity(settings) }
                     catch (_: Exception) {
                         android.widget.Toast.makeText(networkContext, "Open Android Settings > Network > Data usage.", android.widget.Toast.LENGTH_LONG).show()
                     }
-                }) { Text("Android data saver settings", color = LocalAppColors.current.primary) }
+                }) { Text("Android data usage settings", color = LocalAppColors.current.primary) }
                 Text("These are Android link estimates. Transfer speeds on the Data Usage page are measured from Chaty traffic.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
