@@ -782,7 +782,7 @@ fun PrivacyCenterScreen(
                 onDismiss = { modal = null },
             )
         } else {
-            WhoCanCallMeDialog(preferences) { modal = null }
+            WhoCanCallMeDialog(preferences, onDismiss = { modal = null })
         }
         PrivacyModal.LastSeen -> presencePrivacy?.let { pp ->
             LastSeenOnlineDialog(

@@ -278,6 +278,15 @@ fun DocumentReaderScreen(
         } finally { searchBusy = false }
     }
 
+    /** DOC-R4-172: after an explicit next/previous, speak the position and a short snippet. */
+    fun announceMatch(match: DocumentSearchMatch) {
+        if (textContent.isEmpty()) return
+        val from = (match.startOffset - 40).coerceAtLeast(0)
+        val to = (match.endOffset + 40).coerceAtMost(textContent.length)
+        val snippet = textContent.substring(from, to).replace('\n', ' ').trim()
+        view.announceForAccessibility("Match ${currentMatchIndex + 1} of ${searchMatches.size}: $snippet")
+    }
+
     fun nextMatch() {
         if (searchMatches.isEmpty()) return
         currentMatchIndex = (currentMatchIndex + 1) % searchMatches.size
@@ -292,15 +301,6 @@ fun DocumentReaderScreen(
         currentPage = searchMatches[currentMatchIndex].pageNumber
         scrollToFocusedMatch(searchMatches[currentMatchIndex])
         announceMatch(searchMatches[currentMatchIndex])
-    }
-
-    /** DOC-R4-172: after an explicit next/previous, speak the position and a short snippet. */
-    fun announceMatch(match: DocumentSearchMatch) {
-        if (textContent.isEmpty()) return
-        val from = (match.startOffset - 40).coerceAtLeast(0)
-        val to = (match.endOffset + 40).coerceAtMost(textContent.length)
-        val snippet = textContent.substring(from, to).replace('\n', ' ').trim()
-        view.announceForAccessibility("Match ${currentMatchIndex + 1} of ${searchMatches.size}: $snippet")
     }
 
 //      Legacy unguarded FileProvider setup retained:

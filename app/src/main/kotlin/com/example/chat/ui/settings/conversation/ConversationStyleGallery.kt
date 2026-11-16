@@ -75,7 +75,7 @@ internal fun <T> ConversationStyleGallery(
             val families = listOf("") + values.map(familyOf).filter { it.isNotEmpty() }.distinct()
             LazyRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(families, key = { it }) { name ->
-                    TextButton(onClick = { family = name }, modifier = Modifier.semantics { selected = family == name }) {
+                    TextButton(onClick = { family = name }, modifier = Modifier.semantics { this.selected = family == name }) {
                         val familyLabel = if (name.isEmpty()) strings.getString(com.example.chat.R.string.conv_helper_all) else name
                         Text(if (family == name) "✓ $familyLabel" else familyLabel)
                     }

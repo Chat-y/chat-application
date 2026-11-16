@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.sp
 import com.example.chat.ui.core.theme.ChatyColors
 import com.example.chat.ui.updates.CapturedStoryMedia
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 
 /** Home/FAB preference flags the Dart shell reads from
  *  ChatyPreferencesController.home (+ privacy.freezeLastSeen). */
@@ -204,7 +205,7 @@ fun ContextualNavigationFab(
     fun standardFab(onClick: () -> Unit) {
         // MOTION (presentational only): brief press scale; no scale when animations are disabled.
         val fabInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-        val fabPressed by androidx.compose.foundation.interaction.collectIsPressedAsState(fabInteraction)
+        val fabPressed by fabInteraction.collectIsPressedAsState()
         val fabReducedMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
         val fabScale by androidx.compose.animation.core.animateFloatAsState(
             targetValue = if (fabPressed && !fabReducedMotion) 0.94f else 1f,

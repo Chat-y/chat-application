@@ -155,7 +155,7 @@ fun CallSettingsScreen(
     val pipSupported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     val overlayAllowed = Settings.canDrawOverlays(context)
     fun openOverlaySettings() {
-        runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_SETTINGS)) }
+        runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) }
     }
     fun openAppSettings() {
         runCatching {

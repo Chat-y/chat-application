@@ -635,7 +635,7 @@ internal fun MediaReviewScreen(items: List<MediaReviewItem>, onCancel: () -> Uni
                         .then(if (thumbFocused) Modifier.border(1.dp, Color.Black, RoundedCornerShape(8.dp)).border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
                             else Modifier.border(if (i == index) 2.dp else 1.dp, if (i == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)))
                         .clickable { index = i; chromeVisible = true }
-                        .semantics { selected = i == index; role = Role.Button; contentDescription = "Attachment ${i + 1} of ${current.size}, ${media.type}, ${media.file.name}"; collectionItemInfo = CollectionItemInfo(0, 1, i, 1, i == index) }) {
+                        .semantics { selected = i == index; role = Role.Button; contentDescription = "Attachment ${i + 1} of ${current.size}, ${media.type}, ${media.file.name}"; collectionItemInfo = CollectionItemInfo(0, 1, i, 1) }) {
                         if (media.mediaType == ReviewMediaType.IMAGE || media.mediaType == ReviewMediaType.GIF) AsyncImage(
                             model = coil.request.ImageRequest.Builder(context).data(media.source).size(192).build(),
                             contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)

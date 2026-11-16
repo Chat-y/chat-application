@@ -38,5 +38,11 @@ object PrivacyOptionsLogic {
         else -> null
     }
 
+    /** Aliases used by the privacy center's preference-write paths: the same
+     *  policy -> label mappings as audienceLabel / onlineLabel. */
+    fun audiencePreferenceValue(policy: String?): String? = audienceLabel(policy)
+
+    fun onlinePreferenceValue(policy: String?): String? = onlineLabel(policy)
+
     val onlineLabels: List<String> = listOf("Everyone", "Same as last seen")
 }

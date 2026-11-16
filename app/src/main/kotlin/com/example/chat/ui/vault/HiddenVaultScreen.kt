@@ -398,6 +398,7 @@ private fun NumericPad(
                                 .background(primary.copy(alpha = 0.12f))
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
                                     enabled = enabled,
                                     role = Role.Button,
                                     onClick = onBiometric,
@@ -421,6 +422,7 @@ private fun NumericPad(
                                 )
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
                                     enabled = enabled,
                                     role = Role.Button,
                                     onClick = onBackspace,
@@ -449,6 +451,7 @@ private fun NumericPad(
                                 )
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
                                     enabled = enabled,
                                     role = Role.Button,
                                     onClick = { onDigit(cell) },
