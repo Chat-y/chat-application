@@ -73,6 +73,7 @@ fun ProfileEditorSheet(
     onSave: suspend (displayName: String, username: String, about: String, avatarUrl: String?) -> Unit,
     checkUsernameAvailable: (suspend (String) -> Boolean)? = null,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val theme = LocalThemeConfig.current
     val scope = rememberCoroutineScope()
 
@@ -85,27 +86,27 @@ fun ProfileEditorSheet(
     var uploadedAvatarUrl by remember { mutableStateOf<String?>(null) }
 
     fun save() {
-        if (saving) return
+        if (saving || photoBusy) return
         ChatyValidators.validateDisplayName(displayName)?.let {
-            scope.launch { snackbar.showSnackbar(it) }
+            scope.launch { snackbar.showSnackbar(ProfileValidationCopy.localize(context, it)) }
             return
         }
         ChatyValidators.validateUsername(username)?.let {
-            scope.launch { snackbar.showSnackbar(it) }
+            scope.launch { snackbar.showSnackbar(ProfileValidationCopy.localize(context, it)) }
             return
         }
         ChatyValidators.validateBio(about)?.let {
-            scope.launch { snackbar.showSnackbar(it) }
+            scope.launch { snackbar.showSnackbar(ProfileValidationCopy.localize(context, it)) }
             return
         }
         val normalized = ChatyValidators.normalizeUsername(username)
         val unchanged = normalized == ChatyValidators.normalizeUsername(user.username)
         if (!unchanged && usernameTaken) {
-            scope.launch { snackbar.showSnackbar("Choose an available username before saving.") }
+            scope.launch { snackbar.showSnackbar(context.getString(com.example.chat.R.string.profile_sheet_username_available)) }
             return
         }
+        saving = true // Synchronous reservation blocks a second tap before coroutine dispatch.
         scope.launch {
-            saving = true
             try {
                 if (!unchanged && checkUsernameAvailable != null &&
                     checkUsernameAvailable(normalized) == false
@@ -116,26 +117,28 @@ fun ProfileEditorSheet(
                 }
                 onSave(displayName.trim(), normalized, about.trim(), uploadedAvatarUrl)
                 onDismiss()
-                snackbar.showSnackbar("Profile updated.")
-            } catch (error: Throwable) {
-                saving = false
-                snackbar.showSnackbar("Could not update profile. " + ProfileErrorMessages.friendly(error, "Please try again.", isSave = true))
-            }
+                snackbar.showSnackbar(context.getString(com.example.chat.R.string.profile_sheet_saved))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                snackbar.showSnackbar(context.getString(com.example.chat.R.string.profile_sheet_save_failure, ProfileErrorMessages.friendly(context, error, context.getString(com.example.chat.R.string.profile_retry), isSave = true)))
+            } finally { saving = false }
         }
     }
 
     fun uploadPhoto(source: ProfileMediaSource) {
+        if (saving || photoBusy) return
+        photoBusy = true // Reserve before dispatch, including accessibility duplicate activation.
         scope.launch {
-            photoBusy = true
             try {
                 val url = onUploadAvatar(source)
                 if (url != null) {
                     uploadedAvatarUrl = url
-                    snackbar.showSnackbar("Profile photo updated.")
+                    snackbar.showSnackbar(context.getString(com.example.chat.R.string.profile_sheet_photo_saved))
                 }
-            } catch (error: Throwable) {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
                 if (error.message?.contains("cancelled") != true) {
-                    snackbar.showSnackbar("Could not update photo. " + ProfileErrorMessages.friendly(error, "Please try again."))
+                    snackbar.showSnackbar(context.getString(com.example.chat.R.string.profile_sheet_photo_failure, ProfileErrorMessages.friendly(context, error, context.getString(com.example.chat.R.string.profile_retry))))
                 }
             } finally {
                 photoBusy = false
@@ -169,7 +172,7 @@ fun ProfileEditorSheet(
                     ) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera, semanticLabel = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Camera")
+                        Text(context.getString(com.example.chat.R.string.profile_sheet_camera))
                     }
                     TextButton(
                         onClick = { uploadPhoto(ProfileMediaSource.gallery) },
@@ -177,14 +180,14 @@ fun ProfileEditorSheet(
                     ) {
                         Icon(Icons.Rounded.Photo, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Gallery")
+                        Text(context.getString(com.example.chat.R.string.profile_sheet_gallery))
                     }
                     if (photoBusy) {
                         CircularProgressIndicator(
                             Modifier
                                 .size(16.dp)
                                 .semantics {
-                                    contentDescription = "Uploading photo"
+                                    contentDescription = context.getString(com.example.chat.R.string.profile_sheet_uploading)
                                     liveRegion = LiveRegionMode.Polite
                                 },
                             strokeWidth = 2.dp,
@@ -193,10 +196,10 @@ fun ProfileEditorSheet(
                 }
             }
             Spacer(Modifier.height(14.dp))
-            Text("Edit profile", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+            Text(context.getString(com.example.chat.R.string.profile_sheet_title), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(4.dp))
             Text(
-                "Update your profile. Usernames are checked live so you never submit a name that is already taken.",
+                context.getString(if (checkUsernameAvailable == null) com.example.chat.R.string.profile_sheet_description_unchecked else com.example.chat.R.string.profile_sheet_description),
                 fontSize = 12.sp,
                 color = Color(theme.secondaryTextColor),
             )
@@ -205,7 +208,7 @@ fun ProfileEditorSheet(
                 value = displayName,
                 onValueChange = { displayName = it },
                 enabled = !saving,
-                label = { Text("Display name") },
+                label = { Text(context.getString(com.example.chat.R.string.profile_sheet_name)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -217,10 +220,10 @@ fun ProfileEditorSheet(
                     usernameTaken = false
                 },
                 enabled = !saving,
-                label = { Text("Username") },
+                label = { Text(context.getString(com.example.chat.R.string.profile_sheet_username)) },
                 isError = usernameTaken,
                 supportingText = {
-                    if (usernameTaken) Text("This username is already taken")
+                    if (usernameTaken) Text(context.getString(com.example.chat.R.string.profile_sheet_username_taken))
                 },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -230,7 +233,7 @@ fun ProfileEditorSheet(
                 value = about,
                 onValueChange = { about = it },
                 enabled = !saving,
-                label = { Text("About") },
+                label = { Text(context.getString(com.example.chat.R.string.profile_sheet_about)) },
                 minLines = 4,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -247,8 +250,40 @@ fun ProfileEditorSheet(
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (saving) "Saving…" else "Save")
+                Text(if (saving) context.getString(com.example.chat.R.string.profile_sheet_saving) else context.getString(com.example.chat.R.string.profile_sheet_save))
             }
         }
     }
 }
+
+// Previous localization paths retained:
+//             scope.launch { snackbar.showSnackbar("Choose an available username before saving.") }
+//                 snackbar.showSnackbar("Profile updated.")
+//                 snackbar.showSnackbar("Could not update profile. " + ProfileErrorMessages.friendly(error, "Please try again.", isSave = true))
+//                     snackbar.showSnackbar("Profile photo updated.")
+//                     snackbar.showSnackbar("Could not update photo. " + ProfileErrorMessages.friendly(error, "Please try again."))
+//                         Text("Camera")
+//                         Text("Gallery")
+//                                     contentDescription = "Uploading photo"
+//             Text("Edit profile", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+//                 "Update your profile. Usernames are checked live so you never submit a name that is already taken.",
+//                 label = { Text("Display name") },
+//                 label = { Text("Username") },
+//                     if (usernameTaken) Text("This username is already taken")
+//                 label = { Text("About") },
+//                 Text(if (saving) "Saving…" else "Save")
+
+// Previous profile copy retained:
+//             scope.launch { snackbar.showSnackbar(it) }
+//             scope.launch { snackbar.showSnackbar(it) }
+//             scope.launch { snackbar.showSnackbar(it) }
+//                 context.getString(com.example.chat.R.string.profile_sheet_description),
+
+// Previous legacy-sheet dispatch/error paths retained:
+//         if (saving) return
+//             saving = true
+//             } catch (error: Throwable) {
+//                 saving = false
+//             }
+//             photoBusy = true
+//             } catch (error: Throwable) {

@@ -311,7 +311,8 @@ private fun LivePreviewCard(
             data = ChatyHeaderData(
                 title = conversationTitle ?: "Alex Morgan",
                 subtitle = "online • component preview",
-                avatar = { StylesAvatarCore(initials = "AM", color = Color(0xFF3B82F6), size = 36) },
+                // Preview avatar tint comes from the theme token (was fixed 0xFF3B82F6).
+                avatar = { StylesAvatarCore(initials = "AM", color = colors.primary, size = 36) },
                 actions = {
                     IconButton(onClick = {}, enabled = false) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, semanticLabel = "Voice call preview", color = colors.foregroundSecondary, modifier = Modifier.size(20.dp))
@@ -631,9 +632,10 @@ private fun StylesPrimaryButton(text: String, onPressed: (() -> Unit)?) {
         shape = RoundedCornerShape(16.dp),
         colors = androidx.compose.material3.ButtonDefaults.buttonColors(
             containerColor = colors.primary,
-            contentColor = Color.White,
+            // On-accent content uses the theme token (was fixed Color.White).
+            contentColor = colors.onPrimary,
             disabledContainerColor = colors.primary.copy(alpha = 0.45f),
-            disabledContentColor = Color.White.copy(alpha = 0.6f),
+            disabledContentColor = colors.onPrimary.copy(alpha = 0.6f),
         ),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
     ) {
@@ -740,7 +742,8 @@ private fun StylesAvatarCore(initials: String, color: Color, size: Int) {
     ) {
         Text(
             text,
-            color = Color.White,
+            // On-accent initials use the theme token (was fixed Color.White).
+            color = LocalAppColors.current.onPrimary,
             fontSize = (size * 0.40).sp,
             fontWeight = FontWeight.W700,
         )

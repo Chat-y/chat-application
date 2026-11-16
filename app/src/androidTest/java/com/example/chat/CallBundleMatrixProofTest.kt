@@ -218,8 +218,8 @@ class CallBundleMatrixProofTest {
                     CallSettingsScreen(preferences = ServiceLocator.preferencesController,
                         call = CallPresentationState(incomingCallTemplate = "sheet", ongoingCallTemplate = "card"),
                         contacts = emptyList(), onBack = {},
-                        onDynamicIsland = {},
-                        onPictureInPicture = {}, onLowData = {}, onOpenAudioSettings = {},
+                        onDynamicIsland = { Result.success(Unit) },
+                        onPictureInPicture = { Result.success(Unit) }, onLowData = { Result.success(Unit) }, onOpenAudioSettings = {},
                         onOpenCallBundles = {})
                 }
             } }
@@ -230,3 +230,5 @@ class CallBundleMatrixProofTest {
         } finally { scenario.close() }
     }
 }
+
+// Previous call-setting preview callbacks returned Unit: onDynamicIsland = {}, onPictureInPicture = {}, onLowData = {}

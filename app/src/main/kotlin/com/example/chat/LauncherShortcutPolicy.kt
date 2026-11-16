@@ -10,6 +10,7 @@ object LauncherShortcutPolicy {
     enum class Decision {
         /** Route to New chat now. */
         OpenNewChat,
+        OpenCallSettings,
         /** Keep waiting (still signed out, locked, or before the shell). */
         Wait,
         /** Drop the pending action without firing (expired or wrong session). */
@@ -26,6 +27,8 @@ object LauncherShortcutPolicy {
         pendingAction == null -> Decision.Wait
         !fresh -> Decision.Drop
         !scopeAllowed -> Decision.Drop
+        pendingAction == LauncherShortcutRouter.ACTION_CALL_SETTINGS &&
+            authenticatedShellVisible && !lockRequired -> Decision.OpenCallSettings
         pendingAction == LauncherShortcutRouter.ACTION_NEW_CHAT &&
             authenticatedShellVisible && !lockRequired -> Decision.OpenNewChat
         else -> Decision.Wait

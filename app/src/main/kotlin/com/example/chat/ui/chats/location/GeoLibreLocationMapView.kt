@@ -33,6 +33,7 @@ class GeoLibreLocationMapView(
     private val onMapReady: () -> Unit = {},
     private val tileRequestsAllowed: () -> Boolean = { true },
     private val onTileRequestDecision: (Boolean) -> Unit = {},
+    private val onStyleLoading: (Boolean) -> Unit = {},
 ) : WebView(context) {
     private val bridge = LocationMapBridgePolicy()
     private val assets = WebViewAssetLoader.Builder()
@@ -40,6 +41,15 @@ class GeoLibreLocationMapView(
     private var darkTheme = systemDark
     private var ready = false
     private var pendingPin: LocationCoordinate? = null
+    // MAP-R1-023: last style dispatched to the page, so startup does not select it twice.
+    private var currentStyle: String? = null
+    // MAP-R1-028: pending coalesced pin dispatch (see showPin).
+    private var pendingPinPost: Runnable? = null
+    // MAP-R5-236: style-load ordering guard; one load in flight, the latest queued selection wins.
+    private var inFlightStyle: String? = null
+    private var styleLoadInFlight = false
+    private var queuedStyle: String? = null
+    private var styleWatchdog: Runnable? = null
     @Volatile private var disposed = false
     private var nativeDestroyed = false
     private val cleanupHandler = Handler(Looper.getMainLooper())
@@ -103,7 +113,18 @@ class GeoLibreLocationMapView(
                 when (val event = bridge.validate(origin.toString(), mainFrame, text.length, fields)) {
                     LocationMapEvent.Ready -> { if (ready) return@addWebMessageListener; ready = true; pendingPin?.let { showPin(it) }; onMapReady() }
                     is LocationMapEvent.ViewChanged -> onViewChanged(event.buildings)
-                    is LocationMapEvent.StyleChanged -> onStyleChanged(event.style)
+                    is LocationMapEvent.StyleChanged -> { currentStyle = event.style; onStyleChanged(event.style) }
+                    is LocationMapEvent.StyleLoaded -> {
+                        // MAP-R5-233/236: the page reached idle after a style load; release the queue.
+                        if (event.style != inFlightStyle) return@addWebMessageListener
+                        inFlightStyle = null
+                        currentStyle = event.style
+                        styleWatchdog?.let { cleanupHandler.removeCallbacks(it) }
+                        styleWatchdog = null
+                        styleLoadInFlight = false
+                        flushQueuedStyle()
+                        if (!styleLoadInFlight) onStyleLoading(false)
+                    }
                     is LocationMapEvent.PinSelected -> onPinSelected(event.coordinate)
                     null -> Unit
                 }
@@ -117,13 +138,24 @@ class GeoLibreLocationMapView(
     fun showPin(coordinate: LocationCoordinate) {
         if (disposed) return
         pendingPin = coordinate
-        if (ready && !disposed) evaluateJavascript(
-            "window.ChatyGeoLibre.setPin(${coordinate.latitude},${coordinate.longitude},'${bridge.session}')", null,
-        )
+        if (ready && !disposed) {
+            // MAP-R1-028: coalesce rapid pin updates so only the latest setPin reaches the page.
+            // Prior: evaluateJavascript("window.ChatyGeoLibre.setPin(...)") ran on every call.
+            pendingPinPost?.let { cleanupHandler.removeCallbacks(it) }
+            val post = Runnable {
+                if (!disposed && ready) evaluateJavascript(
+                    "window.ChatyGeoLibre.setPin(${coordinate.latitude},${coordinate.longitude},'${bridge.session}')", null,
+                )
+            }
+            pendingPinPost = post
+            cleanupHandler.post(post)
+        }
     }
 
     fun setTheme(dark: Boolean) {
         if (disposed) return
+        // MAP-R1-021: skip an unchanged theme; every call used to evaluate JavaScript.
+        if (dark == darkTheme) return
         darkTheme = dark
         setBackgroundColor(if (dark) android.graphics.Color.rgb(16,28,34) else android.graphics.Color.rgb(248,250,251))
         evaluateJavascript("window.ChatyGeoLibre?.setTheme($dark,'${bridge.session}')", null)
@@ -136,7 +168,82 @@ class GeoLibreLocationMapView(
 
     fun selectStyle(style: String) {
         if (disposed || !ready || style !in setOf("liberty", "positron", "dark", "bright", "fiord")) return
+        // MAP-R1-023: skip a style the page already has; theme init plus onMapReady used to select twice.
+        if (!styleLoadInFlight && style == currentStyle) return
+        // Confirmed style changes only on the page acknowledgement; permit retry after a lost ack.
+        // currentStyle = style
+        // MAP-R5-236: one style load in flight; rapid selections collapse into the latest queued style.
+        // Prior: every call evaluated window.ChatyGeoLibre.selectStyle immediately.
+        if (styleLoadInFlight) {
+            queuedStyle = style
+            return
+        }
+        styleLoadInFlight = true
+        inFlightStyle = style
+        onStyleLoading(true)
+        // MAP-R5-236: watchdog so a load that never reaches idle (error, hung network) cannot wedge the queue.
+        val watchdog = Runnable {
+            if (!disposed && styleLoadInFlight) {
+                styleLoadInFlight = false
+                inFlightStyle = null
+                styleWatchdog = null
+                flushQueuedStyle()
+                if (!styleLoadInFlight) onStyleLoading(false)
+            }
+        }
+        styleWatchdog = watchdog
+        cleanupHandler.postDelayed(watchdog, 15_000L)
         evaluateJavascript("window.ChatyGeoLibre.selectStyle('${style}','${bridge.session}')", null)
+    }
+
+    /** MAP-R5-236: dispatch the latest queued style once the in-flight load finished. */
+    private fun flushQueuedStyle() {
+        val queued = queuedStyle
+        queuedStyle = null
+        if (queued != null && queued != currentStyle) selectStyle(queued)
+    }
+
+    /** MAP-R1-002/022: pause the live page on ON_PAUSE instead of disposing the map. */
+    fun pauseMap() {
+        if (disposed) return
+        onPause()
+    }
+
+    /** MAP-R1-002/022: resume a page paused by [pauseMap]. */
+    fun resumeMap() {
+        if (disposed) return
+        onResume()
+    }
+
+    /** MAP-R1-001: best-effort camera snapshot as zoom,bearing,pitch,lat,lng; null when unavailable. */
+    fun snapshotCamera(onSaved: (String?) -> Unit) {
+        if (disposed || !ready) {
+            onSaved(null)
+            return
+        }
+        evaluateJavascript("window.ChatyGeoLibre.cameraState('${bridge.session}')") { raw ->
+            val value = raw?.trim()?.trim('"')?.takeIf { it.matches(Regex("""-?[0-9]+(\.[0-9]+)?(,-?[0-9]+(\.[0-9]+)?){4}""")) }
+            onSaved(value)
+        }
+    }
+
+    /** MAP-R1-001: restore a snapshot captured by [snapshotCamera]; only once the page is ready. */
+    fun restoreCamera(saved: String?) {
+        if (disposed || !ready || saved.isNullOrBlank()) return
+        // Never interpolate restored strings directly as JavaScript arguments.
+        val parts = saved.split(',').map { it.toDoubleOrNull() ?: return }
+        if (parts.size != 5 || parts.any { !it.isFinite() } || parts[0] !in 0.0..24.0 ||
+            parts[1] !in -360.0..360.0 || parts[2] !in 0.0..85.0 ||
+            parts[3] !in -90.0..90.0 || parts[4] !in -180.0..180.0) return
+        evaluateJavascript(
+            "window.ChatyGeoLibre.restoreCamera(${parts[0]},${parts[1]},${parts[2]},${parts[3]},${parts[4]},'${bridge.session}')", null,
+        )
+    }
+
+    /** MAP-R1-036 / MAP-R5-242: non-gesture pin placement at the current map center. */
+    fun dropPinAtCenter() {
+        if (disposed || !ready) return
+        evaluateJavascript("window.ChatyGeoLibre.dropPinAtCenter('${bridge.session}')", null)
     }
 
     /** Host must call from AndroidView disposal. No permission or sharing continues afterward. */
@@ -152,6 +259,12 @@ class GeoLibreLocationMapView(
         }
         ready = false
         pendingPin = null
+        pendingPinPost?.let { cleanupHandler.removeCallbacks(it) }
+        pendingPinPost = null
+        styleWatchdog?.let { cleanupHandler.removeCallbacks(it) }
+        styleWatchdog = null
+        queuedStyle = null
+        styleLoadInFlight = false
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) WebViewCompat.removeWebMessageListener(this, "ChatyMap")
     }
 

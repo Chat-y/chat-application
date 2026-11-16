@@ -41,6 +41,8 @@ import com.example.chat.ui.kit.ChatyTextButton
 import com.example.chat.ui.kit.ChatyDropdownMenuItem as DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -112,6 +114,7 @@ fun TasksScreen(
     val snackbar = remember { SnackbarHostState() }
     var tabIndex by remember { mutableIntStateOf(0) }
     var priorityFilter by remember { mutableStateOf("All") }
+    var searchQuery by remember { mutableStateOf("") }
     var historyTask by remember { mutableStateOf<ChatTask?>(null) }
     var pendingDelete by remember { mutableStateOf<ChatTask?>(null) }
 
@@ -159,6 +162,35 @@ fun TasksScreen(
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.add, semanticLabel = "Create task", color = colors.primary)
                 }
             }
+            // A dedicated row leaves the input usable alongside the add action.
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = { Text("Search tasks") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                leadingIcon = {
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search,
+                        semanticLabel = null, color = colors.foregroundSecondary)
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
+                                semanticLabel = "Clear task search", color = colors.foregroundSecondary)
+                        }
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = colors.foreground,
+                    unfocusedTextColor = colors.foreground,
+                    cursorColor = colors.primary,
+                    focusedBorderColor = colors.primary,
+                    unfocusedBorderColor = colors.border,
+                    focusedLabelColor = colors.primary,
+                    unfocusedLabelColor = colors.foregroundSecondary,
+                ),
+            )
             // Tabs
             TabRow(
                 selectedTabIndex = tabIndex,
@@ -224,25 +256,39 @@ fun TasksScreen(
             // Memoized: controller.tasks returns a fresh copy each read and
             // this screen recomposes on selection/detail state too; List
             // equality keeps the memo stable across identical snapshots.
-            val filtered = remember(tasks, priorityFilter) {
-                tasks.filter { task ->
-                    when (priorityFilter) {
-                        "Urgent" -> task.priority == TaskPriority.urgent
-                        "High" -> task.priority == TaskPriority.high
-                        "Med" -> task.priority == TaskPriority.medium
-                        "Low" -> task.priority == TaskPriority.low
-                        else -> true
-                    }
-                }
+            // Previous priority-only filter retained for reference:
+            // val filtered = remember(tasks, priorityFilter) {
+            // tasks.filter { task ->
+            // when (priorityFilter) {
+            // "Urgent" -> task.priority == TaskPriority.urgent
+            // "High" -> task.priority == TaskPriority.high
+            // "Med" -> task.priority == TaskPriority.medium
+            // "Low" -> task.priority == TaskPriority.low
+            // else -> true
+            // }
+            // }
+            // }
+            val filtered = remember(tasks, priorityFilter, searchQuery) {
+                filterTasks(tasks, priorityFilter, searchQuery)
             }
 
-            if (tabIndex == 0) {
+            // Both tabs use the same results and the same no-match recovery.
+            // First-load state does not turn a failed load into a claimed success.
+            if (!controller.hasLoadedOnce && tasks.isEmpty()) {
+                Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center) {
+                    Text("Tasks have not loaded yet.", color = colors.foregroundSecondary, fontSize = 14.sp)
+                    androidx.compose.material3.TextButton(onClick = { scope.launch { controller.loadTasks() } }) { Text("Retry") }
+                }
+            } else if (tabIndex == 0 || filtered.isEmpty()) {
                 TaskListView(
                     filtered = filtered,
                     colors = colors,
                     priorityFilter = priorityFilter,
+                    hasSearch = searchQuery.isNotBlank(),
                     getUser = getUser,
-                    onClearFilter = { priorityFilter = "All" },
+                    // Previous recovery reset only priority: priorityFilter = "All"
+                    onClearFilter = { priorityFilter = "All"; searchQuery = "" },
                     onOpenDetail = onOpenDetail,
                     onEditTask = onEditTask,
                     onCreateTask = onCreateTask,
@@ -293,6 +339,7 @@ private fun TaskListView(
     filtered: List<ChatTask>,
     colors: TaskColors,
     priorityFilter: String,
+    hasSearch: Boolean,
     getUser: (String) -> UserProfile?,
     onClearFilter: () -> Unit,
     onOpenDetail: (ChatTask) -> Unit,
@@ -307,18 +354,21 @@ private fun TaskListView(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            if (priorityFilter != "All") {
+            // Previously only priority could produce an empty result.
+            if (hasSearch || priorityFilter != "All") {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.tasks, semanticLabel = null, color = colors.primary, modifier = Modifier.size(40.dp))
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "No results for $priorityFilter Priority",
+                    // Previous title: "No results for $priorityFilter Priority"
+                    if (hasSearch) "No matching tasks" else "No results for $priorityFilter Priority",
                     color = colors.foreground,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "No tasks found matching the selected priority filter.",
+                    // Previous copy: "No tasks found matching the selected priority filter."
+                    "No tasks found matching the current search and priority filter.",
                     color = colors.foregroundSecondary,
                     fontSize = 13.sp,
                 )
@@ -389,7 +439,7 @@ private fun TaskListCard(
     val isOverdue = task.isOverdue
     var menuOpen by remember { mutableStateOf(false) }
     val zone = ZoneId.systemDefault()
-    val due = task.dueAt.atZone(zone)
+    val due = task.dueAt?.atZone(zone)
 
     Column(
         modifier = Modifier
@@ -473,7 +523,7 @@ private fun TaskListCard(
             }
             Spacer(Modifier.weight(1f))
             Text(
-                "Due ${due.dayOfMonth}/${due.monthValue}",
+                if (due == null) "No due date" else "Due ${due.dayOfMonth}/${due.monthValue}",
                 color = if (isOverdue) colors.error else colors.foregroundSecondary,
                 fontSize = 12.sp,
                 fontWeight = if (isOverdue) FontWeight.Bold else FontWeight.Medium,
@@ -816,4 +866,20 @@ private fun TaskHistoryDialog(
         },
         containerColor = colors.surface,
     )
+}
+
+/** Local title/description search only; no network request or task mutation. */
+internal fun filterTasks(tasks: List<ChatTask>, priorityFilter: String, query: String): List<ChatTask> {
+    val term = query.trim()
+    return tasks.filter { task ->
+        val matchesPriority = when (priorityFilter) {
+            "Urgent" -> task.priority == TaskPriority.urgent
+            "High" -> task.priority == TaskPriority.high
+            "Med" -> task.priority == TaskPriority.medium
+            "Low" -> task.priority == TaskPriority.low
+            else -> true
+        }
+        matchesPriority && (term.isEmpty() || task.title.contains(term, ignoreCase = true) ||
+            task.description.contains(term, ignoreCase = true))
+    }
 }

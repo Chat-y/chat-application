@@ -138,6 +138,35 @@ fun GbHeaderOverflowMenuDialog(t: ThemeConfig, actions: GbHeaderOverflowActions,
                     .padding(vertical = 8.dp),
             ) {
                 Item(t, Icons.Rounded.Tune, "Header & Navigation", pick(actions.onGbSettings))
+                // Owner decision (2026-11-03): Hide Tasks / Hide Updates entries live in
+                // Settings > Home screen and in the header menu. These items toggle the same
+                // nav_hide_* keys as the HeaderSettingsScreen rows; no new state is introduced.
+                Item(
+                    t,
+                    com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.tasks),
+                    if (preferences.gbBool("nav_hide_tasks")) "Show Tasks tab" else "Hide Tasks tab",
+                    pick {
+                        preferences.updateGbFeatures(
+                            mapOf("nav_hide_tasks" to !preferences.gbBool("nav_hide_tasks")),
+                            logTitle = "Hide Tasks tab",
+                        )
+                    },
+                )
+                // Updates is release-gated; when the tab cannot appear at all the entry is
+                // hidden instead of offering a no-op switch.
+                if (ReleaseFeatures.STATUS_UPDATES) {
+                    Item(
+                        t,
+                        com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.updates),
+                        if (preferences.gbBool("nav_hide_updates")) "Show Updates tab" else "Hide Updates tab",
+                        pick {
+                            preferences.updateGbFeatures(
+                                mapOf("nav_hide_updates" to !preferences.gbBool("nav_hide_updates")),
+                                logTitle = "Hide Updates tab",
+                            )
+                        },
+                    )
+                }
                 if (menuPreferences.menuShowMessageNumber && actions.onMessageNumber != null) {
                     Item(t, Icons.Rounded.ForwardToInbox, "Message a number", pick(actions.onMessageNumber))
                 }

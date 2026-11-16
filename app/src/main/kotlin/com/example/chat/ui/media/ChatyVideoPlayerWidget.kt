@@ -74,6 +74,7 @@ import com.example.chat.ui.kit.springInteractiveScale
 import com.example.chat.ui.media.icons.ChatyIconType
 import com.example.chat.ui.media.icons.ChatyMediaIcon
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 
 /** Exact port of lib/features/media/ui/video/chaty_video_player_widget.dart.
@@ -115,13 +116,32 @@ fun ChatyVideoPlayerWidget(
     var videoWidth by remember { mutableIntStateOf(0) }
     var videoHeight by remember { mutableIntStateOf(0) }
 
-    val player = remember(context, videoPath, isNetworkUrl) {
+    // Prior key omitted lifecycleOwner, which can dispose then reuse the released native player.
+    val player = remember(context, videoPath, isNetworkUrl, lifecycleOwner) {
         ExoPlayer.Builder(context).build().apply {
             val item = if (isNetworkUrl) MediaItem.fromUri(videoPath)
             else MediaItem.fromUri(android.net.Uri.fromFile(File(videoPath)))
             setMediaItem(item)
             prepare()
         }
+    }
+
+    val audioColors = com.example.chat.ui.theme.LocalAppColors.current
+    val playbackAccount = remember(player) { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
+    val playbackAlive = remember(player, lifecycleOwner) { java.util.concurrent.atomic.AtomicBoolean(true) }
+    var audioNotice by remember { mutableStateOf<String?>(null) }
+    val arbiterScope = androidx.compose.runtime.rememberCoroutineScope()
+    // Calls own audio: every native start crosses the shared call/media arbiter. While a call
+    // holds audio, Play is refused with a notice instead of mixing playback over the call.
+    val playbackGuard = remember(player, lifecycleOwner) {
+        com.example.chat.core.audio.CommunicationPlaybackGuard(
+            com.example.chat.ServiceLocator.communicationMediaArbiter,
+            // pauseNative = { player.pause() }, disposeNative = { player.release() },
+            pauseNative = { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { player.pause() } },
+            disposeNative = { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { player.release() } },
+            isOwnerCurrent = { playbackAlive.get() && isForeground &&
+                com.example.chat.ServiceLocator.apiBackend.authSnapshot() === playbackAccount },
+        )
     }
 
     LaunchedEffect(player) {
@@ -140,6 +160,14 @@ fun ChatyVideoPlayerWidget(
             if (!isForeground) player.pause()
         }
         lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+        val accountListener: (com.example.chat.data.api.ApiAccountScope) -> Unit = { next ->
+            if (next !== playbackAccount) {
+                playbackAlive.set(false)
+                playbackGuard.markClosing()
+                arbiterScope.launch(kotlinx.coroutines.NonCancellable) { runCatching { playbackGuard.dispose() } }
+            }
+        }
+        com.example.chat.ServiceLocator.apiBackend.addAuthScopeListener(accountListener)
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isBuffering = playbackState == Player.STATE_BUFFERING
@@ -159,11 +187,21 @@ fun ChatyVideoPlayerWidget(
             }
         }
         player.addListener(listener)
-        if (autoPlay && isForeground) player.play()
+        // Previous unarbitrated start: if (autoPlay && isForeground) player.play()
+        if (autoPlay && isForeground) arbiterScope.launch {
+            runCatching {
+                if (!playbackGuard.runNative { player.play() }) audioNotice = "Finish the call before playing this video."
+            }.onFailure { audioNotice = "Playback is unavailable right now. Try again." }
+        }
         onDispose {
+            playbackAlive.set(false)
+            com.example.chat.ServiceLocator.apiBackend.removeAuthScopeListener(accountListener)
             lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             player.removeListener(listener)
-            player.release()
+            playbackGuard.markClosing()
+            // Previous direct release: player.release()
+            // Native release is serialized with arbitration; a failed release retains the reservation for retry.
+            arbiterScope.launch(kotlinx.coroutines.NonCancellable) { runCatching { playbackGuard.dispose() } }
             if (isFullscreen) {
                 (context as? Activity)?.let { restoreOrientation(it) }
             }
@@ -172,7 +210,7 @@ fun ChatyVideoPlayerWidget(
 
     // Position polling (video_player value listener equivalent)
     LaunchedEffect(player, isPlaying, isForeground) {
-        while (isForeground) {
+        while (isForeground && playbackAlive.get()) {
             positionMs = player.currentPosition.coerceAtLeast(0)
             durationMs = player.duration.coerceAtLeast(0)
             delay(if (isPlaying) 250 else 1000)
@@ -198,24 +236,41 @@ fun ChatyVideoPlayerWidget(
         }
     }
 
+    LaunchedEffect(audioNotice) {
+        if (audioNotice != null) {
+            delay(2600)
+            audioNotice = null
+        }
+    }
+
     fun toggleControls() {
         areControlsVisible = !areControlsVisible
         if (areControlsVisible) startControlsTimer()
     }
 
+    fun playbackIsCurrent() = playbackAlive.get() && isForeground &&
+        com.example.chat.ServiceLocator.apiBackend.authSnapshot() === playbackAccount
+
     fun togglePlayPause() {
+        if (!playbackIsCurrent()) return
         if (!lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) return
         ChatyHapticsPort.light(view)
         if (player.isPlaying) {
             player.pause()
             areControlsVisible = true
         } else {
-            player.play()
-            startControlsTimer()
+            // Previous unarbitrated start: player.play()
+            arbiterScope.launch {
+                runCatching {
+                    if (!playbackGuard.runNative { player.play() }) audioNotice = "Finish the call before playing this video."
+                }.onFailure { audioNotice = "Playback is unavailable right now. Try again." }
+                startControlsTimer()
+            }
         }
     }
 
     fun seekRelative(seconds: Int) {
+        if (!playbackIsCurrent()) return
         ChatyHapticsPort.selection(view)
         val newPos = (player.currentPosition + seconds * 1000L)
             .coerceIn(0, player.duration.coerceAtLeast(0))
@@ -225,6 +280,7 @@ fun ChatyVideoPlayerWidget(
     }
 
     fun toggleFullscreen() {
+        if (!playbackIsCurrent()) return
         ChatyHapticsPort.threshold(view)
         val next = !isFullscreen
         isFullscreen = next
@@ -299,7 +355,8 @@ fun ChatyVideoPlayerWidget(
         // Gesture Areas for Double-Tap Seek and Tap Controls
         Row(modifier = Modifier.fillMaxSize()) {
             Box(
-                modifier = Modifier.weight(1f).fillMaxSize().pointerInput(Unit) {
+                modifier = Modifier.weight(1f).fillMaxSize().pointerInput(player, lifecycleOwner) {
+                    // Prior Unit key retained seek closures for a replaced/released player.
                     detectTapGestures(
                         onTap = { toggleControls() },
                         onDoubleTap = { seekRelative(-10) },
@@ -307,7 +364,8 @@ fun ChatyVideoPlayerWidget(
                 },
             )
             Box(
-                modifier = Modifier.weight(1f).fillMaxSize().pointerInput(Unit) {
+                modifier = Modifier.weight(1f).fillMaxSize().pointerInput(player, lifecycleOwner) {
+                    // Prior Unit key retained seek closures for a replaced/released player.
                     detectTapGestures(
                         onTap = { toggleControls() },
                         onDoubleTap = { seekRelative(10) },
@@ -326,6 +384,21 @@ fun ChatyVideoPlayerWidget(
                     .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(24.dp))
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             ) { Text(text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.W800) }
+        }
+
+        // Arbitration notice pill (a call owns audio, or playback is unavailable)
+        audioNotice?.let { text ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(24.dp))
+                    // .background(Color.Black.copy(alpha = 0.75f))
+                    // .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(24.dp))
+                    .background(audioColors.surface)
+                    .border(1.dp, audioColors.borderSubtle, RoundedCornerShape(24.dp))
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+            // Previous notice text used Color.White rather than the matching theme foreground.
+            ) { Text(text, color = audioColors.foreground, fontSize = 14.sp, fontWeight = FontWeight.W600) }
         }
 
         // Buffering indicator
@@ -389,10 +462,24 @@ fun ChatyVideoPlayerWidget(
                             DropdownMenuItem(
                                 text = { Text("${s}x") },
                                 onClick = {
-                                    player.setPlaybackSpeed(s.toFloat())
+                                    // A speed setter can start some native adapters: while playing it crosses
+                                    // the arbiter; while paused only the preference is stored (coordinator parity).
+                                    if (!playbackIsCurrent()) {
+                                        speedMenuOpen = false
+                                    } else {
+                                    if (player.isPlaying) {
+                                        arbiterScope.launch {
+                                            runCatching {
+                                                if (!playbackGuard.runNative { player.setPlaybackSpeed(s.toFloat()) }) audioNotice = "Playback speed cannot change during a call."
+                                            }.onFailure { audioNotice = "Playback is unavailable right now. Try again." }
+                                        }
+                                    } else {
+                                        player.setPlaybackSpeed(s.toFloat())
+                                    }
                                     currentSpeed = s
                                     speedMenuOpen = false
                                     startControlsTimer()
+                                    }
                                 },
                             )
                         }
@@ -424,8 +511,10 @@ fun ChatyVideoPlayerWidget(
                 Slider(
                     value = positionMs.coerceIn(0, durationMs).toFloat(),
                     onValueChange = { v ->
-                        player.seekTo(v.toLong())
-                        startControlsTimer()
+                        if (playbackIsCurrent()) {
+                            player.seekTo(v.toLong())
+                            startControlsTimer()
+                        }
                     },
                     valueRange = 0f..(if (durationMs > 0) durationMs.toFloat() else 1f),
                     colors = SliderDefaults.colors(

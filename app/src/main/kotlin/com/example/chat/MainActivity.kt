@@ -85,7 +85,7 @@ class MainActivity : FragmentActivity() {
                     N.pendingAccountAlert.value = hash
                 }
             }
-            N.ACTION_OPEN_CHAT -> N.requestOpenRoom(intent.getStringExtra(N.EXTRA_ROOM_ID))
+            N.ACTION_OPEN_CHAT -> N.requestOpenRoom(intent.getStringExtra(N.EXTRA_ROOM_ID), intent.getStringExtra(N.EXTRA_ROOM_NONCE))
             N.ACTION_SHOW_CALL -> {
                 // Ongoing-call notification tap: return to the full call UI. Only for a
                 // live session, so an ended call is never resurrected on screen.
@@ -105,7 +105,7 @@ class MainActivity : FragmentActivity() {
                     N.requestCallAction(com.example.chat.notifications.ChatyNotifications.PendingCallAction(callId, answer = true, owner = owner))
                 }
             }
-            else -> intent?.getStringExtra(N.EXTRA_ROOM_ID)?.let { N.requestOpenRoom(it) }
+            else -> intent?.getStringExtra(N.EXTRA_ROOM_ID)?.let { N.requestOpenRoom(it, intent.getStringExtra(N.EXTRA_ROOM_NONCE)) }
         }
     }
 
@@ -121,6 +121,11 @@ class MainActivity : FragmentActivity() {
     private fun handleDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
         if (data.scheme?.lowercase() != "chaty") return
+        if (data.host == "settings") {
+            val scope = ServiceLocator.apiBackend.authSnapshot()
+            LauncherShortcutRouter.receiveCallsSettingsLink(data.toString(), scope.userId, scope.generation)
+            return
+        }
         if (com.example.chat.ui.auth.v2.AuthV2LinkRouter.receive(data)) return
         when (val host = data.host?.lowercase()) {
             "login-callback", "reset-password" -> {

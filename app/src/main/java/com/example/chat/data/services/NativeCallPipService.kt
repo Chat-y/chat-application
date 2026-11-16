@@ -35,13 +35,23 @@ class NativeCallPipService {
     fun isActive(activity: Activity): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity.isInPictureInPictureMode
 
+    fun updateActions(activity: Activity, width: Int, height: Int, actions: List<android.app.RemoteAction>): Boolean {
+        if (Build.VERSION.SDK_INT < 26 || !isActive(activity)) return false
+        return try {
+            activity.setPictureInPictureParams(PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(width, height)).setActions(actions).build())
+            true
+        } catch (_: Exception) { false }
+    }
+
     /** Dart enter({width: 9, height: 16}). */
-    fun enter(activity: Activity, width: Int = 9, height: Int = 16): Boolean {
+    fun enter(activity: Activity, width: Int = 9, height: Int = 16, actions: List<android.app.RemoteAction> = emptyList()): Boolean {
         if (!isSupported(activity)) return false
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val params = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(width, height))
+                    .setActions(actions)
                     .build()
                 activity.enterPictureInPictureMode(params)
             } else {

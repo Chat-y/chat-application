@@ -219,6 +219,7 @@ fun ChatDetailScreen(
     isMessageSessionCurrent: () -> Boolean = { false },
     onBack: () -> Unit,
     onSend: suspend (String) -> Unit,
+    onSendReply: (suspend (String, ChatMessage) -> Unit)? = null,
     resolveSenderName: (String) -> String = { senderId ->
         if (senderId == currentUserId) "You" else "Team Member"
     },
@@ -288,7 +289,8 @@ fun ChatDetailScreen(
     onToggleReaction: (messageId: String, emoji: String) -> Unit = { _, _ -> },
     onForward: (ChatMessage) -> Unit = {},
     onForwardSelection: ((List<ChatMessage>) -> Unit)? = null,
-    onClearConversation: () -> Unit = {},
+    // Previous fire-and-forget contract: onClearConversation: () -> Unit = {},
+    onClearConversation: suspend () -> Boolean = { false },
     onRetryMessage: (messageId: String) -> Unit = {},
     onOpenInfo: () -> Unit = {},
     // Chaty #29: group sender avatar quick view actions; null lambdas hide their
@@ -564,7 +566,8 @@ fun ChatDetailScreen(
     var highlightedMessageId by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
     var wallpaperOverride by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(wallpaperPatternId) }
     var wallpaperPickerOpen by remember { mutableStateOf(false) }
-    var clearConfirmOpen by remember { mutableStateOf(false) }
+    var clearConfirmOpen by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
+    var clearBusy by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
     var emojiComposerOpen by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
     val composerFocusRequester = remember { FocusRequester() }
     val composerKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -1178,6 +1181,11 @@ fun ChatDetailScreen(
             onCreateTask(command.argument.ifEmpty { null })
             return
         }
+        val submittedReply = replyTarget
+        if (submittedReply != null && onSendReply == null) {
+            scope.launch { snackbarHostState.showSnackbar("Reply linkage is not available for this chat. Cancel reply to send a normal message. Your draft is kept.") }
+            return
+        }
         sending = true
         val clearedRevision = draftRevision
         // Leave the current persisted draft intact through cancellation/process interruption.
@@ -1185,7 +1193,15 @@ fun ChatDetailScreen(
             var sendConfirmed = false
             try {
                 if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
-                onSend(text)
+                if (submittedReply != null) {
+                    val target = messages.singleOrNull { it.id == submittedReply.id && it.conversationId == conversation.id }
+                    check(target != null && !target.isDeletedForMe && !target.isDeletedForEveryone &&
+                        !target.isRevokedBySender && target.metadata["view_once"].let { it == null || it == false }) {
+                        "The reply target is no longer available. Your draft is kept."
+                    }
+                    checkNotNull(onSendReply)(text, target)
+                } else onSend(text)
+                // Previous text-only send: onSend(text). It silently dropped reply linkage.
                 sendConfirmed = true
                 if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
                 if (draftRevision == clearedRevision && composerText == submittedDraft) {
@@ -1908,7 +1924,9 @@ fun ChatDetailScreen(
                         val submittedDraft = composerText
                         val plain = submittedDraft.trim()
                         if (currentDraftOwner == draftOwner && isMessageSessionCurrent() && !sending && plain.isNotEmpty() && editingMessage == null) {
-                            if (!conversation.isDirect || secureChannelEnabled) scope.launch {
+                            if (replyTarget != null) scope.launch {
+                                snackbarHostState.showSnackbar("View-once text cannot carry this reply. Cancel reply first. Your draft is kept.")
+                            } else if (!conversation.isDirect || secureChannelEnabled) scope.launch {
                                 snackbarHostState.showSnackbar("View-once text requires a regular direct chat. Nothing was sent.")
                             } else {
                                 val submittedOwner = draftOwner
@@ -1944,7 +1962,9 @@ fun ChatDetailScreen(
                         }
                     },
                     onScheduleSend = {
-                        if (recoveredViewOnceNeedsChoice) {
+                        if (replyTarget != null) {
+                            scope.launch { snackbarHostState.showSnackbar("Scheduling cannot carry this reply. Cancel reply first. Your draft is kept.") }
+                        } else if (recoveredViewOnceNeedsChoice) {
                             scope.launch { snackbarHostState.showSnackbar("Choose regular send for this recovered text before scheduling it. Nothing was scheduled.") }
                         } else if (!sending && editingMessage == null && composerText.isNotBlank()) {
                             if (secureChannelEnabled) scope.launch { snackbarHostState.showSnackbar("Scheduling is unavailable in encrypted chats.") }
@@ -2259,6 +2279,11 @@ fun ChatDetailScreen(
                             attachmentSheetOpen = false
                             onCameraTap()
                         },
+                        // Reuse the existing locked/tap mic path, not the press-and-hold lifecycle.
+                        onVoiceNote = {
+                            attachmentSheetOpen = false
+                            if (currentDraftOwner == draftOwner && isMessageSessionCurrent()) onVoiceTap()
+                        },
                         onReviewImages = attachmentReviewImages?.let { review ->
                             { uris ->
                                 attachmentSheetOpen = false
@@ -2371,11 +2396,37 @@ fun ChatDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        if (!clearBusy && isMessageSessionCurrent()) {
+                            clearConfirmOpen = false
+                            clearBusy = true
+                            scope.launch {
+                                try {
+                                    val confirmed = onClearConversation()
+                                    if (isMessageSessionCurrent()) {
+                                        // Consumed IDs remain append-only even on confirmed deletion.
+                                        // A later sync/restore must never resurrect view-once content.
+                                        if (confirmed) {
+                                            selectedIds = emptySet(); replyTarget = null; editingMessage = null
+                                            viewOnceTextTarget = null; viewOnceNuxPending = null
+                                        }
+                                        snackbarHostState.showSnackbar(if (confirmed) "Conversation cleared."
+                                            else "Clear was not confirmed. Check the chat before trying again.")
+                                    }
+                                } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                                catch (_: Exception) {
+                                    // An exception can follow a server/local commit; do not promise rollback.
+                                    // if (isMessageSessionCurrent()) snackbarHostState.showSnackbar("Clear was not confirmed. Your messages are kept on this device.")
+                                    if (isMessageSessionCurrent()) snackbarHostState.showSnackbar("Clear was not confirmed. Check the chat before trying again.")
+                                } finally { clearBusy = false }
+                            }
+                        }
+                        /* Previous Unit callback retained.
                         clearConfirmOpen = false
                         onClearConversation()
                         // Unit callback starts async host work, not a confirmed clear.
                         // Retain view-once consumed state until a future confirmed-result contract.
                         scope.launch { snackbarHostState.showSnackbar("Clear requested. Check the chat for the result.") }
+                        */
                     },
                 ) {
                     Text("Clear", color = Color(theme.dangerColor))
@@ -2447,8 +2498,11 @@ internal fun ConversationHeader(
     val appearance = headerAppearance.effective()
     val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val headerVerticalPadding = com.example.chat.ui.chats.detail.conversationHeaderVerticalPadding(appearance.compactLandscape, landscape)
-    val moveCallsToOverflow = com.example.chat.ui.chats.detail.conversationHeaderCallsInOverflow(showHeaderCalls, appearance.callsInOverflow)
+    // Previous: val moveCallsToOverflow = com.example.chat.ui.chats.detail.conversationHeaderCallsInOverflow(showHeaderCalls, appearance.callsInOverflow)
+    // Call placement is decided from the actual pane width below.
 
+
+    val callSettingsContext = androidx.compose.ui.platform.LocalContext.current
     val headerStrings = androidx.compose.ui.platform.LocalContext.current.resources
     val systemAnimationsAllowed = if (appearance.statusMarqueeOnTap) com.example.chat.ui.kit.rememberSystemAnimationsAllowed() else false
     var marqueeRequested by remember(presenceText, appearance.statusMarqueeOnTap) { mutableStateOf(false) }
@@ -2475,6 +2529,9 @@ internal fun ConversationHeader(
     val headerIconColor = if (translucent) transparencyPlan.foreground else appearance.iconsColor ?: headerPrimaryColor
     val dividerColor = if (translucent) transparencyPlan.foreground else com.example.chat.ui.chats.detail.conversationHeaderContrastForeground(headerCanvas)
 
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val compactHeader = maxWidth < 400.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f
+    val moveCallsToOverflow = com.example.chat.ui.chats.detail.conversationHeaderCallsInOverflow(showHeaderCalls, appearance.callsInOverflow || compactHeader)
     Row(
         // Default production64dp minimum:48dp interactive row +8dp above/below.
         // Explicit compact landscape removes padding only. Content/large fonts may grow; targets stay48dp.
@@ -2650,6 +2707,22 @@ internal fun ConversationHeader(
                             onClick = { onMenuOpenChange(false); onStartCall(true) })
                     }
 
+                    DropdownMenuItem(
+                        leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = menuIconTint, size = 20.dp) },
+                        text = { Text("Call settings") },
+                        onClick = {
+                            onMenuOpenChange(false)
+                            try {
+                                callSettingsContext.startActivity(android.content.Intent(callSettingsContext, com.example.chat.MainActivity::class.java).apply {
+                                    action = android.content.Intent.ACTION_VIEW
+                                    data = android.net.Uri.parse("chaty://settings/calls")
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                })
+                            } catch (_: Exception) {
+                                android.widget.Toast.makeText(callSettingsContext, "Could not open call settings. Open Settings, then Calls.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    )
                     if (connectionState != null) {
                         DropdownMenuItem(
                             leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.signal, color = menuIconTint, size = 20.dp) },
@@ -2762,6 +2835,7 @@ internal fun ConversationHeader(
             }
         }
     }
+    } // Actual pane constraints.
 }
 
 /** The production message menu, split out to bound generated Compose register pressure.
@@ -3044,6 +3118,83 @@ private fun SearchHeader(
     onBack: () -> Unit,
     focusRequester: FocusRequester,
 ) {
+    // Independent input/navigation rows prevent counters and 48dp targets squeezing the query.
+    Column(Modifier.fillMaxWidth().background(Color(theme.surfaceColor)).padding(horizontal = 4.dp, vertical = 8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
+                semanticLabel = "Back",
+                color = Color(theme.primaryTextColor),
+            )
+        }
+        Box(Modifier.weight(1f).heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text(
+                    "Search loaded history",
+                    color = Color(theme.secondaryTextColor),
+                    fontSize = (15.5 * theme.fontScale).sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                textStyle = TextStyle(
+                    color = Color(theme.primaryTextColor),
+                    fontSize = (15.5 * theme.fontScale).sp,
+                ),
+                cursorBrush = SolidColor(Color(theme.accentColor)),
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).semantics {
+                    contentDescription = "Search messages in loaded history"
+                },
+                singleLine = true,
+            )
+        }
+        IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
+            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
+                semanticLabel = if (query.isEmpty()) "Close search" else "Clear search",
+                color = Color(theme.primaryTextColor),
+            )
+        }
+        }
+        if (query.isNotBlank()) Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+        ) {
+        if (query.isNotBlank() && matchCount == 0) Text("No matches", color = Color(theme.secondaryTextColor), fontSize = 12.sp,
+            modifier = Modifier.semantics { stateDescription = "No matches in loaded history" })
+        if (matchCount > 0) {
+            Text(
+                "${matchIndex.coerceIn(1, matchCount)} of $matchCount",
+                color = Color(theme.secondaryTextColor),
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.W600,
+                modifier = Modifier.padding(horizontal = 6.dp).semantics {
+                    stateDescription = "Match ${matchIndex.coerceIn(1, matchCount)} of $matchCount in loaded history"
+                },
+            )
+            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Icons.Rounded.KeyboardArrowUp,
+                    contentDescription = "Previous match",
+                    tint = Color(theme.primaryTextColor),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Next match",
+                    tint = Color(theme.primaryTextColor),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        }
+    }
+
+    /* Previous single-row search header retained.
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -3115,6 +3266,7 @@ private fun SearchHeader(
             )
         }
     }
+    */
 }
 
 /** Quick replies overlay (Dart _showQuickReplyOverlay block): opened by '#'
@@ -6455,3 +6607,11 @@ private fun parseHexColor(hex: String): Color? {
 // /* Previous bubble call retained.
 //                             isMe = isMine,
 // */
+
+// Replaced lines retained for source comparison (not executable).
+//     onClearConversation: () -> Unit = {},
+//     var clearConfirmOpen by remember { mutableStateOf(false) }
+//                 onSend(text)
+//                             if (!conversation.isDirect || secureChannelEnabled) scope.launch {
+//                         if (recoveredViewOnceNeedsChoice) {
+//     val moveCallsToOverflow = com.example.chat.ui.chats.detail.conversationHeaderCallsInOverflow(showHeaderCalls, appearance.callsInOverflow)

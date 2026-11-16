@@ -32,7 +32,7 @@ class CallSettingsTraversalOrderTest {
                     call = CallPresentationState(incomingCallTemplate = "sheet", ongoingCallTemplate = "card"),
                     contacts = emptyList(),
                     onBack = {},
-                    onDynamicIsland = {}, onPictureInPicture = {}, onLowData = {},
+                    onDynamicIsland = { Result.success(Unit) }, onPictureInPicture = { Result.success(Unit) }, onLowData = { Result.success(Unit) },
                     onOpenAudioSettings = {}, onOpenCallBundles = {},
                 )
             }
@@ -48,3 +48,5 @@ class CallSettingsTraversalOrderTest {
         assertTrue("quality before permissions", quality < permissions)
     }
 }
+
+// Previous call-setting preview callbacks returned Unit: onDynamicIsland = {}, onPictureInPicture = {}, onLowData = {}

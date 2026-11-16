@@ -92,11 +92,25 @@ fun HideMediaScreen(
     // hide values so unrelated preference changes do not re-read them (HM1-12, HM1-45).
 // Superseded source retained below per additive-only review rule.
 //     val prefsVersion = rememberPreferencesVersion(preferences)
-    val markerState = remember(preferences, preferences.scopeGeneration) { androidx.compose.runtime.mutableStateOf(
-        Triple(preferences.universal.hidePhotosFromGallery, preferences.universal.hideVideosFromGallery, preferences.universal.hideGifsFromGallery)) }
-    androidx.compose.runtime.DisposableEffect(preferences, preferences.scopeGeneration) {
-        val listener: () -> Unit = { markerState.value = Triple(preferences.universal.hidePhotosFromGallery, preferences.universal.hideVideosFromGallery, preferences.universal.hideGifsFromGallery) }
+//     val markerState = remember(preferences, preferences.scopeGeneration) { androidx.compose.runtime.mutableStateOf(
+//         Triple(preferences.universal.hidePhotosFromGallery, preferences.universal.hideVideosFromGallery, preferences.universal.hideGifsFromGallery)) }
+//     androidx.compose.runtime.DisposableEffect(preferences, preferences.scopeGeneration) {
+//         val listener: () -> Unit = { markerState.value = Triple(preferences.universal.hidePhotosFromGallery, preferences.universal.hideVideosFromGallery, preferences.universal.hideGifsFromGallery) }
+    // Include the owner even when two accounts have identical marker choices.
+    fun markerSnapshot() = preferences.scopeGeneration to Triple(
+        preferences.universal.hidePhotosFromGallery,
+        preferences.universal.hideVideosFromGallery,
+        preferences.universal.hideGifsFromGallery,
+    )
+    val markerState = remember(preferences) { androidx.compose.runtime.mutableStateOf(markerSnapshot()) }
+    val accountGeneration = markerState.value.first
+    androidx.compose.runtime.DisposableEffect(preferences) {
+//         val listener: () -> Unit = { markerState.value = markerSnapshot() }
+//         preferences.addListener(listener)
+        val listener: () -> Unit = { markerState.value = markerSnapshot() }
         preferences.addListener(listener)
+        // A scope change between remember and effect registration must not be missed.
+        markerState.value = markerSnapshot()
         onDispose { preferences.removeListener(listener) }
     }
     val theme = themeController.globalTheme
@@ -124,7 +138,8 @@ fun HideMediaScreen(
     val scope = rememberCoroutineScope()
 // Superseded source retained below per additive-only review rule.
 //     val state = remember(preferences, repository, scope, snackbar) {
-    val state = remember(preferences, preferences.scopeGeneration, repository, scope, snackbar) {
+//     val state = remember(preferences, preferences.scopeGeneration, repository, scope, snackbar) {
+    val state = remember(preferences, accountGeneration, repository, scope, snackbar) {
         HideMediaState(preferences, repository, scope, snackbar)
     }
 
@@ -132,9 +147,12 @@ fun HideMediaScreen(
 //     val hidePhotos = remember(prefsVersion) { preferences.universal.hidePhotosFromGallery }
 //     val hideVideos = remember(prefsVersion) { preferences.universal.hideVideosFromGallery }
 //     val hideGifs = remember(prefsVersion) { preferences.universal.hideGifsFromGallery }
-    val hidePhotos = markerState.value.first
-    val hideVideos = markerState.value.second
-    val hideGifs = markerState.value.third
+//     val hidePhotos = markerState.value.first
+//     val hideVideos = markerState.value.second
+//     val hideGifs = markerState.value.third
+    val hidePhotos = markerState.value.second.first
+    val hideVideos = markerState.value.second.second
+    val hideGifs = markerState.value.second.third
     val onCount = listOf(hidePhotos, hideVideos, hideGifs).count { it }
 
     LaunchedEffect(state) { state.onScreenOpen() }
@@ -254,7 +272,9 @@ fun HideMediaScreen(
 //                             subtitle = "Keep chat photos out of gallery scans",
                             // subtitle = "Maintain a private photo-folder marker; exports stay visible",
                             subtitle = stringResource(R.string.privacy_media_photos_effect),
+//                             value = hidePhotos,
                             value = hidePhotos,
+                            enabled = !state.saving,
                             onChanged = { v ->
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress) // HM4-41
                                 state.setHidden(HideMediaRepository.MediaKind.PHOTOS, v)
@@ -266,7 +286,9 @@ fun HideMediaScreen(
 //                             subtitle = "Keep chat videos out of gallery scans",
                             // subtitle = "Maintain a private video-folder marker; exports stay visible",
                             subtitle = stringResource(R.string.privacy_media_videos_effect),
+//                             value = hideVideos,
                             value = hideVideos,
+                            enabled = !state.saving,
                             onChanged = { v ->
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 state.setHidden(HideMediaRepository.MediaKind.VIDEOS, v)
@@ -278,7 +300,9 @@ fun HideMediaScreen(
 //                             subtitle = "Keep chat GIFs and animated stickers out of gallery scans",
                             // subtitle = "Maintain a private GIF-folder marker; exports stay visible",
                             subtitle = stringResource(R.string.privacy_media_gifs_effect),
+//                             value = hideGifs,
                             value = hideGifs,
+                            enabled = !state.saving,
                             onChanged = { v ->
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 state.setHidden(HideMediaRepository.MediaKind.GIFS, v)
@@ -311,7 +335,13 @@ fun HideMediaScreen(
 /** Single accessible switch target; no duplicate child toggle action. */
 @Composable
 // private fun MediaVisibilitySwitch(icon: ...)
+// internal fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, value: Boolean, onChanged: (Boolean) -> Unit) {
 internal fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, value: Boolean, onChanged: (Boolean) -> Unit) {
+    MediaVisibilitySwitch(icon, title, subtitle, value, enabled = true, onChanged = onChanged)
+}
+
+@Composable
+internal fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, value: Boolean, enabled: Boolean, onChanged: (Boolean) -> Unit) {
     val actionLabel = stringResource(if (value) R.string.privacy_media_turn_off else R.string.privacy_media_turn_on)
     var keyboardFocused by remember { mutableStateOf(false) }
     Row(
@@ -325,7 +355,8 @@ internal fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.Ima
                 // Label the existing toggle action; do not add a second action or bypass toggleable.
                 onClick(label = actionLabel, action = null)
             }
-            .toggleable(value = value, role = Role.Switch, onValueChange = onChanged)
+//             .toggleable(value = value, role = Role.Switch, onValueChange = onChanged)
+            .toggleable(value = value, enabled = enabled, role = Role.Switch, onValueChange = onChanged)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -335,7 +366,8 @@ internal fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.Ima
             Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(
-            checked = value, onCheckedChange = null,
+//             checked = value, onCheckedChange = null,
+            checked = value, onCheckedChange = null, enabled = enabled,
             // Thumb icon so ON/OFF is not colour-only (HM1-55).
             thumbContent = if (value) {
                 { Icon(Icons.Rounded.Check, null, Modifier.size(SwitchDefaults.IconSize)) }

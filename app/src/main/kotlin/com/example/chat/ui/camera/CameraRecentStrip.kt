@@ -111,7 +111,8 @@ fun CameraRecentStrip(
                     .width(36.dp)
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0x66FFFFFF)),
+                    // Previous value: Color(0x66FFFFFF)
+                    .background(rememberCameraOverlayColors().content.copy(alpha = 0.40f)),
             )
         }
         if (open) {

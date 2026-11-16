@@ -19,6 +19,12 @@ class SecureSendPendingException(code: String) : Exception(code)
  *  preserved; wiring lands with the PostgREST client slice). */
 interface SupabaseRpc {
     suspend fun rpc(function: String, params: Map<String, Any?>): Any?
+
+    /** An implementation must bind the request to this identity or fail closed. */
+    fun forScope(expectedScope: Any?): SupabaseRpc {
+        check(expectedScope == null) { "This client cannot bind an account-scoped request." }
+        return this
+    }
 }
 
 const val SECURE_SETUP_PENDING_CODE = "secure_setup_pending"
@@ -93,7 +99,13 @@ class SecureMessageTransport(
 
     /** Exact port of _deliverEncryptedMessage: encrypt, then the
      *  send_mls_message_v1 RPC with the exact p_* parameter names. */
-    suspend fun deliverEncryptedMessage(send: PendingSecureSend): String {
+    suspend fun deliverEncryptedMessage(
+        send: PendingSecureSend,
+        expectedScope: Any? = null,
+        requireCurrent: () -> Unit = {},
+    ): String {
+        requireCurrent()
+        val requestRpc = rpc.forScope(expectedScope)
         val mls = encryptor()
             ?: throw IllegalStateException("Encrypted message transport is unavailable.")
         val encrypted = mls.encryptPayload(
@@ -104,9 +116,12 @@ class SecureMessageTransport(
                 "metadata" to send.metadata,
             ),
         )
+        requireCurrent() // Encryption may suspend while an account is switched.
         val deviceId = mls.currentDeviceId
             ?: throw IllegalStateException("Encrypted device identity is unavailable.")
-        val raw = rpc.rpc(
+        requireCurrent()
+        // Previous ambient request: val raw = rpc.rpc(...)
+        val raw = requestRpc.rpc(
             "send_mls_message_v1",
             mapOf(
                 "p_conversation_id" to send.conversationId,
@@ -117,6 +132,7 @@ class SecureMessageTransport(
                 "p_ciphertext" to encrypted.ciphertext,
             ),
         )
+        requireCurrent()
         return raw?.toString() ?: ""
     }
 
@@ -194,3 +210,7 @@ class SecureMessageTransport(
         )
     }
 }
+
+// Replaced lines retained for source comparison (not executable).
+//     suspend fun deliverEncryptedMessage(send: PendingSecureSend): String {
+//         val raw = rpc.rpc(

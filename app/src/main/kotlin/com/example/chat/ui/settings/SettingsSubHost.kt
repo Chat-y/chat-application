@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,7 +32,7 @@ val hostedSettingsDestinations: Set<SettingsDestination> = setOf(
     SettingsDestination.Permissions, SettingsDestination.StorageMedia,
     SettingsDestination.TemplateStudio, SettingsDestination.ThemeEngine,
     SettingsDestination.HomeShortcuts, SettingsDestination.WasteCleaning,
-    SettingsDestination.DynamicIsland,
+    SettingsDestination.DynamicIsland, SettingsDestination.ToastNotifications,
 )
 
 /**
@@ -64,6 +65,9 @@ fun SettingsSubHost(
             unblockUser = { id -> withContext(Dispatchers.IO) { ServiceLocator.apiBackend.contactsPlane(screenAccountScope).unblock(id) } },
         )
         SettingsDestination.Effects -> NavigationEffectsScreen(preferences = prefs, onBack = onBack)
+        SettingsDestination.ToastNotifications -> NotificationToastSettingsScreen(
+            preferences = prefs, onBack = onBack,
+        )
         // Dart settings_root_screen '/settings/notifications' => NotificationSettingsPage (the toast-only screen is not
         // instantiated anywhere in Dart). Dynamic Island native bridge has no Kotlin implementation: bridge = null.
 // Previous implementation retained:         SettingsDestination.Notifications -> com.example.chat.ui.settings.notifications.NotificationSettingsPage(
@@ -228,9 +232,11 @@ fun SettingsSubHost(
                     onApplyBundle = { bundleId ->
                         scope.launch {
                             try {
-                                store.setCallExperienceBundle(bundleId)
-                            } catch (e: Exception) {
-                                toast(e.message ?: "Unable to apply bundle.")
+                                // Previous detached call: store.setCallExperienceBundle(bundleId)
+                                store.applyExperienceBundle(bundleId, com.example.chat.ui.calls.BundleApplyTarget.CALLS)
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (e: Exception) {
+                                toast("Unable to apply call bundle. Check the selected bundle and try again.")
                             }
                         }
                     },
@@ -238,9 +244,16 @@ fun SettingsSubHost(
                 )
             } else {
                 val v = store.value
-                fun run(block: suspend () -> Unit) {
-                    scope.launch { try { block() } catch (e: Exception) { toast(e.message ?: "Unable to save.") } }
-                }
+                // Previous launch-only wrapper retained below; awaiting propagates storage failures.
+                suspend fun saveCallOption(block: suspend () -> Unit): Result<Unit> = try {
+                    check(ServiceLocator.apiBackend.authSnapshot() === screenAccountScope)
+                    block()
+                    Result.success(Unit)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) { Result.failure(failure) }
+                // fun run(block: suspend () -> Unit) {
+                //     scope.launch { try { block() } catch (e: Exception) { toast(e.message ?: "Unable to save.") } }
+                // }
                 // CS1-10: same IO contacts-plane load as Privacy Center (above); failure stays null
                 // so the screen shows no server claim. Load once per entry into this destination.
                 var serverCallAudience by remember(screenAccountScope) { mutableStateOf<String?>(null) }
@@ -252,8 +265,18 @@ fun SettingsSubHost(
                     } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                     catch (_: Exception) { serverCallAudience = null }
                 }
+                val audioMode by ServiceLocator.audioSettingsController.preferenceModeState.collectAsState()
+                val audioSaveFailed by ServiceLocator.audioSettingsController.saveError.collectAsState()
                 CallSettingsScreen(
                     preferences = prefs,
+                    audioPreferenceSummary = callAudioPreferenceSummary(audioMode, audioSaveFailed),
+                    capturePreferences = v.capture,
+                    hideCallHistoryOnLockScreen = v.hideCallHistoryOnLockScreen,
+                    onHideCallHistoryOnLockScreen = { hidden -> saveCallOption { store.saveHideCallHistoryOnLockScreen(hidden) } },
+                    quietHours = v.quietHours,
+                    onSaveQuietHours = { schedule -> saveCallOption { store.saveQuietHours(schedule) } },
+                    onSaveVideoQuality = { quality -> saveCallOption { store.saveVideoQuality(quality) } },
+                    onSaveCaptureOption = { option, enabled -> saveCallOption { store.saveCaptureOption(option, enabled) } },
                     call = CallPresentationState(
                         dynamicIslandEnabled = v.dynamicIslandEnabled,
                         pictureInPictureEnabled = v.pictureInPictureEnabled,
@@ -264,9 +287,12 @@ fun SettingsSubHost(
                     ),
                     contacts = ServiceLocator.apiBackend.users.map { CallContactOption(it.id, it.displayName) },
                     onBack = onBack,
-                    onDynamicIsland = { b -> run { store.setDynamicIslandEnabled(b) } },
-                    onPictureInPicture = { b -> run { store.setPictureInPictureEnabled(b) } },
-                    onLowData = { b -> run { store.setLowDataUsageEnabled(b) } },
+                    // Previous: onDynamicIsland = { b -> run { store.setDynamicIslandEnabled(b) } },
+                    onDynamicIsland = { b -> saveCallOption { store.saveDynamicIslandEnabled(b) } },
+                    // Previous: onPictureInPicture = { b -> run { store.setPictureInPictureEnabled(b) } },
+                    onPictureInPicture = { b -> saveCallOption { store.savePictureInPictureEnabled(b) } },
+                    // Previous: onLowData = { b -> run { store.setLowDataUsageEnabled(b) } },
+                    onLowData = { b -> saveCallOption { store.saveLowDataUsageEnabled(b) } },
                     onOpenAudioSettings = { audio = true },
                     onOpenCallBundles = { showBundles = true },
                     serverCallAudience = serverCallAudience,
@@ -276,11 +302,18 @@ fun SettingsSubHost(
                     // single defaults source (CallPresentationPreferences.defaults). Templates keep
                     // their persisted values; privacy preferences are untouched.
                     onResetCallSettings = {
-                        val d = com.example.chat.ui.calls.CallPresentationPreferences.defaults
-                        store.setDynamicIslandEnabled(d.dynamicIslandEnabled)
-                        store.setPictureInPictureEnabled(d.pictureInPictureEnabled)
-                        store.setLowDataUsageEnabled(d.lowDataUsageEnabled)
-                        store.setCallExperienceBundle(d.callExperienceBundleId)
+                        check(ServiceLocator.apiBackend.authSnapshot() === screenAccountScope)
+// Previous sequential reset:                         val d = com.example.chat.ui.calls.CallPresentationPreferences.defaults
+// Previous sequential reset:                         // Previous: store.setDynamicIslandEnabled(d.dynamicIslandEnabled)
+// Previous sequential reset:                         store.saveDynamicIslandEnabled(d.dynamicIslandEnabled)
+// Previous sequential reset:                         // Previous: store.setPictureInPictureEnabled(d.pictureInPictureEnabled)
+// Previous sequential reset:                         store.savePictureInPictureEnabled(d.pictureInPictureEnabled)
+// Previous sequential reset:                         // Previous: store.setLowDataUsageEnabled(d.lowDataUsageEnabled)
+// Previous sequential reset:                         store.saveLowDataUsageEnabled(d.lowDataUsageEnabled)
+// Previous sequential reset:                         // Previous: store.setCallExperienceBundle(d.callExperienceBundleId)
+// Previous sequential reset:                         store.applyExperienceBundle(d.callExperienceBundleId, com.example.chat.ui.calls.BundleApplyTarget.CALLS)
+                        check(ServiceLocator.apiBackend.authSnapshot() === screenAccountScope)
+                        store.resetPresentationDefaults()
                     },
                 )
             }

@@ -12,6 +12,20 @@ internal object ProfileErrorMessages {
     )
     private val statusCode = Regex("\\b[1-5][0-9]{2}\\b")
 
+    /** UI callers resolve curated copy through Android resources; the pure overload remains compatible. */
+    fun friendly(context: android.content.Context, error: Throwable, fallback: String, isSave: Boolean = false): String {
+        val message = friendly(error, fallback, isSave)
+        val resource = when (message) {
+            "You're offline or the connection is weak. Check your connection and try again." -> com.example.chat.R.string.profile_error_offline
+            "Your session has expired. Please sign in again." -> com.example.chat.R.string.profile_error_session
+            "That photo is too large. Choose a smaller one." -> com.example.chat.R.string.profile_error_size
+            "That file type isn't supported. Try a JPEG or PNG." -> com.example.chat.R.string.profile_error_type
+            "That username is already taken. Try another one." -> com.example.chat.R.string.profile_error_username
+            else -> return message
+        }
+        return context.getString(resource)
+    }
+
     fun friendly(error: Throwable, fallback: String, isSave: Boolean = false): String {
         val raw = error.message.orEmpty().trim()
         val lower = raw.lowercase()

@@ -195,7 +195,8 @@ class ApiBackendService(
         baseUrl = { config.restApiBaseUrl },
         tenantId = { config.tenantId },
         token = { session.token },
-        transport = OkHttpApiTransport(),
+        transport = OkHttpApiTransport(allowRedirects = false),
+        scopeSnapshot = ::authSnapshot,
     )
 
     /** ApiBackendService._currentOrg (Dart): current organization payload -
@@ -967,7 +968,11 @@ class ApiBackendService(
         // Owner captured before launch: a sign-out or account switch in between must not mark
         // another account's room read.
         val owner = authSnapshot()
-        chatScope.launch { if (authSnapshot() === owner) ownerChatClient(owner).markRoomRead(chatId) }
+        // Prefer PR #3 scoped WS receipts. A queued frame is not server acceptance;
+        // REST remains the offline fallback. Do not update message ticks from this ack.
+        if (!realtime.sendRoomReceipt(chatId, "read", owner)) {
+            chatScope.launch { if (authSnapshot() === owner) ownerChatClient(owner).markRoomRead(chatId) }
+        }
     }
 
     // ---- Push / background notification hooks (set by the locator) ----
@@ -2300,6 +2305,40 @@ class ApiBackendService(
     }
 
     /** Dart clearConversationMessages: local clear + preview, then DELETE all. */
+    suspend fun clearConversationMessages(chatId: String, expectedScope: ApiAccountScope = authSnapshot()): Boolean {
+        check(authSnapshot() === expectedScope && !expectedScope.userId.isNullOrBlank()) {
+            "Account changed; chat not cleared."
+        }
+        val capturedIds = synchronized(chatLock) { _messages[chatId].orEmpty().map { it.id }.toSet() }
+        val confirmed = withContext(Dispatchers.IO) {
+            if (authSnapshot() !== expectedScope) throw ApiScopeChangedException()
+            chat.clearMessagesChecked(chatId, expectedScope)
+        }
+        if (!confirmed) return false
+        var gone: List<com.example.chat.data.local.AttachmentRef> = emptyList()
+        val applied = withAuthScope(expectedScope) {
+            synchronized(chatLock) {
+                val current = _messages[chatId].orEmpty()
+                val remaining = current.filterNot { it.id in capturedIds }
+                gone = com.example.chat.data.media.AttachmentRefs.refsGone(chatId, current, remaining)
+                _messages[chatId] = remaining.toMutableList()
+                val index = _conversations.indexOfFirst { it.id == chatId }
+                // A concurrent incoming/newly sent message must keep its preview.
+                if (index != -1 && remaining.isEmpty()) {
+                    _conversations[index] = _conversations[index].copy(lastMessageText = "")
+                }
+            }
+            notifyGone(gone)
+            // schedulePersistRoomMessages(chatId)
+            // schedulePersistConversations()
+            schedulePersistRoomMessages(chatId, expectedScope)
+            schedulePersistConversations(expectedScope)
+            notifyChatListeners()
+        }
+        return applied
+    }
+
+    /* Previous optimistic clear retained.
     suspend fun clearConversationMessages(chatId: String) {
         var gone: List<com.example.chat.data.local.AttachmentRef> = emptyList()
         synchronized(chatLock) {
@@ -2316,6 +2355,8 @@ class ApiBackendService(
         notifyChatListeners()
         withContext(Dispatchers.IO) { chat.clearMessages(chatId) }
     }
+
+    */
 
     private suspend fun syncActiveRoomMessages(chatId: String) {
         val expected = authSnapshot()
@@ -3449,14 +3490,16 @@ class ApiBackendService(
 
     fun emailCodeResume(attempt:EmailCodeAttempt)=EmailCodeResume(attempt.challenge.id,attempt.challenge.email,
         attempt.targetTenant,attempt.baseUrl,attempt.expectedScope.userId,attempt.isDefaultTenant,
-        System.currentTimeMillis()+attempt.challenge.expiresInSeconds*1000L,attempt.challenge.resendAfterSeconds,attempt.expectedScope.tenantId)
+        System.currentTimeMillis()+attempt.challenge.expiresInSeconds*1000L,attempt.challenge.resendAfterSeconds,attempt.expectedScope.tenantId,attempt.challenge.mayResend,
+        System.currentTimeMillis()+attempt.challenge.resendAfterSeconds*1000L)
 
     fun restoreEmailCode(resume:EmailCodeResume):EmailCodeAttempt? {
         val owner=authSnapshot();val routing=config.snapshot()
         if(resume.expiresAtEpochMs<=System.currentTimeMillis() || resume.challengeId.isBlank() || resume.email.isBlank() ||
             resume.baseUrl!=owner.baseUrl || resume.userId!=owner.userId || resume.ownerTenant!=owner.tenantId || resume.tenant.isBlank()) return null
         val remaining=((resume.expiresAtEpochMs-System.currentTimeMillis())/1000L).coerceIn(0,Int.MAX_VALUE.toLong()).toInt()
-        return EmailCodeAttempt(ApiEmailCodeClient.Challenge(resume.challengeId,resume.email,0,remaining),owner,
+        val resendRemaining=((resume.resendAtEpochMs-System.currentTimeMillis()+999L)/1000L).coerceIn(0,300).toInt()
+        return EmailCodeAttempt(ApiEmailCodeClient.Challenge(resume.challengeId,resume.email,resendRemaining,remaining,resume.mayResend),owner,
             resume.tenant,owner.baseUrl,routing.webSocketTemplate,routing.generation,resume.defaultTenant)
     }
 
@@ -3553,6 +3596,11 @@ class ApiBackendService(
         if (authSnapshot() !== expected) return@withContext false
         val message = synchronized(chatLock) { _messages[conversationId]?.firstOrNull { it.id == messageId } } ?: return@withContext false
         if (message.type != MessageType.audio || message.senderId == expected.userId || message.isDeletedForEveryone || message.isRevokedBySender) return@withContext false
+        // Prior played path used only REST. A live WS path now waits for a typed,
+        // matching server acknowledgment, rather than treating socket queueing as success.
+        if (realtime.isConnected) {
+            return@withContext realtime.acknowledgeMessageReceipt(messageId, "played", expected) && authSnapshot() === expected
+        }
         try { ApiMessageReceiptsClient(expected, OkHttpApiTransport(allowRedirects = false)) { authSnapshot() === expected }.acknowledge(messageId, "played") }
         catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
         catch (_: Exception) { false }

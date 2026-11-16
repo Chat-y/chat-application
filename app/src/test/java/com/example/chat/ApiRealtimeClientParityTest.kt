@@ -8,6 +8,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.async
 
 /** Behavior parity tests for the custom-backend WebSocket plane
  *  (api_backend_service.dart:593-806, 1551-1564; backend_config.dart:80-108). */
@@ -631,5 +632,68 @@ class ApiRealtimeClientParityTest {
     fun sendCallSignalIsNoOpWhenDisconnected() {
         val rig = Rig()
         assertFalse(rig.client.sendCallSignal("u2", emptyMap()))
+    }
+
+    @Test fun roomReceiptUsesTypedEnvelopeAndContinuesMatchingBatches() {
+        val rig = Rig().connect()
+        assertTrue(rig.client.sendDelivered("room-one"))
+        val first = org.json.JSONObject(rig.socket.sent.last())
+        assertEquals("receipt", first.getString("type"))
+        assertEquals("delivered", first.getJSONObject("data").getString("kind"))
+        assertEquals("room-one", first.getJSONObject("data").getString("room_id"))
+        val count = rig.socket.sent.size
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"room_id":"unrequested","kind":"delivered","updated":500,"has_more":true}}""")
+        rig.scheduler.drain(); rig.scheduler.advanceBy(25)
+        assertEquals(count, rig.socket.sent.size)
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"room_id":"room-one","kind":"delivered","updated":500,"has_more":true}}""")
+        rig.scheduler.drain(); rig.scheduler.advanceBy(25)
+        assertEquals(count + 1, rig.socket.sent.size)
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"room_id":"room-one","kind":"delivered","updated":0,"has_more":false}}""")
+        rig.scheduler.drain(); rig.scheduler.advanceBy(25)
+        assertEquals(count + 1, rig.socket.sent.size)
+    }
+
+    @Test fun receiptErrorAndDisconnectStopContinuation() {
+        val rig = Rig().connect()
+        assertTrue(rig.client.sendRoomReceipt("room-one", "read"))
+        val count = rig.socket.sent.size
+        rig.socket.incoming("""{"type":"receipt_error","data":{"status":403,"detail":"Not a member"}}""")
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"room_id":"room-one","kind":"read","updated":500,"has_more":true}}""")
+        rig.scheduler.drain(); rig.scheduler.advanceBy(25)
+        assertEquals(count, rig.socket.sent.size)
+        assertTrue(rig.client.sendRoomReceipt("room-one", "read"))
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"room_id":"room-one","kind":"read","updated":500,"has_more":true}}""")
+        rig.scheduler.drain()
+        val beforeDisconnect = rig.socket.sent.size
+        rig.client.disconnect(); rig.scheduler.drain(); rig.scheduler.advanceBy(25)
+        assertEquals(beforeDisconnect, rig.socket.sent.size)
+    }
+
+    @Test fun playedReceiptWaitsForMatchingAckNotQueuedFrame() = kotlinx.coroutines.runBlocking {
+        val rig = Rig().connect()
+        val wait = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            rig.client.acknowledgeMessageReceipt("message-one", "played", null)
+        }
+        assertFalse(wait.isCompleted)
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"message_id":"other","kind":"played","updated":1}}""")
+        rig.scheduler.drain()
+        assertFalse(wait.isCompleted)
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"message_id":"message-one","kind":"played","updated":0}}""")
+        rig.scheduler.drain()
+        assertTrue(wait.await())
+    }
+    @Test fun playedReceiptErrorAndDisconnectNeverReturnSuccess() = kotlinx.coroutines.runBlocking {
+        val rig = Rig().connect()
+        val errorWait = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            rig.client.acknowledgeMessageReceipt("message-one", "played", null)
+        }
+        rig.socket.incoming("""{"type":"receipt_error","data":{"status":403}}""")
+        rig.scheduler.drain()
+        assertFalse(errorWait.await())
+        val closeWait = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            rig.client.acknowledgeMessageReceipt("message-two", "played", null)
+        }
+        rig.client.disconnect(); rig.scheduler.drain()
+        assertFalse(closeWait.await())
     }
 }

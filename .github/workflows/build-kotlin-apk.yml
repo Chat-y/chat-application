@@ -195,6 +195,44 @@ jobs:
           }
           echo "Telegram confirmed delivery of ${UPLOAD_PATH}."
 
+      # One-time emulator check approved 2026-11-16. Offline demo only.
+      # Uses the x86_64 release split produced by the existing build step.
+      - name: Enable KVM for one-time emulator smoke test
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[one-time-emulator-2043]')
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: One-time release launch and offline demo login smoke test
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[one-time-emulator-2043]')
+        timeout-minutes: 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048M
+          heap-size: 512M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -euo pipefail
+            APK="$(find app/build/outputs/apk/release -type f -name '*x86_64*.apk' -print -quit)"
+            test -n "$APK" && test -f "$APK"
+            python3 ci/chat-open-release-probe.py "$APK"
+
+      - name: Upload one-time emulator evidence
+        if: always() && github.event_name == 'push' && contains(github.event.head_commit.message, '[one-time-emulator-2043]')
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaty-one-time-emulator-evidence
+          path: chat-open-evidence/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Clean up Firebase config file
         if: always()
         run: rm -f app/google-services.json

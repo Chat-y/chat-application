@@ -55,7 +55,8 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
             Row(
                 Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0x99141414))
+                    // Previous value: Color(0x99141414)
+                    .background(rememberCameraOverlayColors().scrim)
                     // CAM-R4-034 previous: .clickable(enabled=enabled){expanded=true}
                     .cameraActionFocusRing().clickable(enabled=enabled){expanded=true}
                     // CAM-R4-030 previous spacing: .padding(horizontal=8.dp,vertical=2.dp)
@@ -69,7 +70,8 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                     val presetLabel = stringResource(if(ratio%1f==0f) R.string.camera_zoom_preset_whole else R.string.camera_zoom_preset_fraction, ratio)
                     Text(
                         String.format(java.util.Locale.ROOT,if(ratio%1f==0f)"%.0fx" else "%.1fx",ratio),
-                        color = if(active) Color(0xFFFFD54F) else Color.White,
+                        // Previous value: Color(0xFFFFD54F) / Color.White
+                        color = if(active) rememberCameraOverlayColors().accent else rememberCameraOverlayColors().content,
                         fontSize = 12.sp,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
@@ -87,7 +89,8 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
             // Horizontal slider (reference): live value above the track.
             Text(
                 String.format(java.util.Locale.ROOT,if(proposed%1f==0f)"%.0fx" else "%.1fx",proposed),
-                color = Color.White,
+                // Previous value: Color.White
+                color = rememberCameraOverlayColors().content,
                 fontSize = 13.sp,
                 modifier = Modifier
                     // CAM-R4-034 previous: .clickable(enabled=enabled && !forceSlider){expanded=false}
@@ -101,7 +104,8 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                     .fillMaxWidth()
                     .height(44.dp)
                     .clip(RoundedCornerShape(22.dp))
-                    .background(Color(0x99141414))
+                    // Previous value: Color(0x99141414)
+                    .background(rememberCameraOverlayColors().scrim)
                     .cameraActionFocusRing()
                     .focusable(enabled = enabled)
                     .semantics {
@@ -132,14 +136,20 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
             ) {
                 val trackPad = 30.dp
                 val f = ((proposed-min)/(max-min)).coerceIn(0f,1f)
-                Text("-",color=Color.White,fontSize=14.sp,modifier=Modifier.align(Alignment.CenterStart).padding(start=12.dp))
-                Text("+",color=Color.White,fontSize=14.sp,modifier=Modifier.align(Alignment.CenterEnd).padding(end=12.dp))
-                Box(Modifier.align(Alignment.Center).padding(horizontal=trackPad).fillMaxWidth().height(2.dp).background(Color(0x44FFFFFF)))
-                Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad).fillMaxWidth(f).height(2.dp).background(Color(0xFFFFD54F)))
-                Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad+(maxWidth-trackPad*2-14.dp)*f).size(14.dp).clip(CircleShape).background(Color(0xFFFFD54F)))
+                // Previous value: Color.White
+                Text("-",color=rememberCameraOverlayColors().content,fontSize=14.sp,modifier=Modifier.align(Alignment.CenterStart).padding(start=12.dp))
+                // Previous value: Color.White
+                Text("+",color=rememberCameraOverlayColors().content,fontSize=14.sp,modifier=Modifier.align(Alignment.CenterEnd).padding(end=12.dp))
+                // Previous value: Color(0x44FFFFFF)
+                Box(Modifier.align(Alignment.Center).padding(horizontal=trackPad).fillMaxWidth().height(2.dp).background(rememberCameraOverlayColors().contentDisabled))
+                // Previous value: Color(0xFFFFD54F)
+                Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad).fillMaxWidth(f).height(2.dp).background(rememberCameraOverlayColors().accent))
+                // Previous value: Color(0xFFFFD54F)
+                Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad+(maxWidth-trackPad*2-14.dp)*f).size(14.dp).clip(CircleShape).background(rememberCameraOverlayColors().accent))
             }
         }
         // CAM-R4-004 prior: if(current>=4f) Text("High zoom loses detail; hold steady.",color=Color.White)
-        if(current>=4f) Text(stringResource(R.string.camera_zoom_warning),color=Color.White)
+        // Previous value: Color.White
+        if(current>=4f) Text(stringResource(R.string.camera_zoom_warning),color=rememberCameraOverlayColors().content)
     }
 }

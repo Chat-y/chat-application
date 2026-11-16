@@ -33,8 +33,10 @@ object CameraPhotoOutput {
                     ExifInterface.ORIENTATION_ROTATE_270 -> postRotate(270f)
                     ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> postScale(-1f, 1f)
                     ExifInterface.ORIENTATION_FLIP_VERTICAL -> postScale(1f, -1f)
-                    ExifInterface.ORIENTATION_TRANSPOSE -> { postScale(-1f, 1f); postRotate(90f) }
-                    ExifInterface.ORIENTATION_TRANSVERSE -> { postScale(-1f, 1f); postRotate(270f) }
+                    // Previous: TRANSPOSE { postScale(-1f, 1f); postRotate(90f) }; TRANSVERSE { postScale(-1f, 1f); postRotate(270f) }
+                    // - compose order swapped the two corrections (scale-then-rotate maps 5<->7).
+                    ExifInterface.ORIENTATION_TRANSPOSE -> { postRotate(90f); postScale(-1f, 1f) }
+                    ExifInterface.ORIENTATION_TRANSVERSE -> { postRotate(270f); postScale(-1f, 1f) }
                 }
             }
             val oriented = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)

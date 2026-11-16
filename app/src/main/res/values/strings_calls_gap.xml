@@ -92,4 +92,5 @@
     <string name="call_microphone_starting">Microphone capture starting</string>
     <string name="call_microphone_stopped">Microphone capture stopped</string>
     <string name="call_microphone_unknown">Microphone capture state unavailable</string>
+  <string name="call_picker_invite_friends">Invite friends</string>
 </resources>

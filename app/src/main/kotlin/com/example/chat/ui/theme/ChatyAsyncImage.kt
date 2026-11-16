@@ -19,12 +19,33 @@ fun ChatyAsyncImage(
     contentScale: ContentScale = ContentScale.Crop,
     placeholder: (@Composable () -> Unit)? = null,
     error: (@Composable () -> Unit)? = null,
+    // Settings profile surfaces know their target decode size; other callers keep existing behavior.
+    requestSize: coil.size.Size? = null,
+    // Opt-in only. Disabled by both app reduced motion and Android Remove animations.
+    crossfadeMillis: Int = 0,
 ) {
     if (url.isNullOrBlank()) {
         error?.invoke() ?: placeholder?.invoke()
         return
     }
-    val painter = rememberAsyncImagePainter(model = url)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Previous full-resolution request: rememberAsyncImagePainter(model = url)
+    val wantsFade = crossfadeMillis > 0 && LocalThemeConfig.current.animationLevel > 0.0
+    val mayAnimate = if (wantsFade) com.example.chat.ui.kit.rememberSystemAnimationsAllowed() else false
+    val fadeMillis = if (mayAnimate) crossfadeMillis.coerceAtLeast(0) else 0
+    val model = androidx.compose.runtime.remember(url, requestSize, fadeMillis, context) {
+        if (requestSize == null && fadeMillis == 0) url else coil.request.ImageRequest.Builder(context)
+            .data(url)
+            .apply { if (requestSize != null) size(requestSize) }
+            .crossfade(fadeMillis)
+            .build()
+    }
+    // Previous size-only request retained inactive:
+    // val model = androidx.compose.runtime.remember(url, requestSize, context) {
+    // if (requestSize == null) url else coil.request.ImageRequest.Builder(context)
+    // .data(url).size(requestSize).build()
+    // }
+    val painter = rememberAsyncImagePainter(model = model)
     when (painter.state) {
         is AsyncImagePainter.State.Loading -> placeholder?.invoke()
         is AsyncImagePainter.State.Error -> (error ?: placeholder)?.invoke()

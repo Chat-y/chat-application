@@ -181,6 +181,7 @@ fun MediaViewerScreen(
     registerStopReader: (((() -> Unit)?) -> Unit)? = null,
     // Owned viewers must cross the same short account/epoch barrier as inline playback.
     deliverPlayback: ((() -> Unit) -> Boolean)? = null,
+    ownedActionBusy: Boolean = false,
 ) {
     // MV-R2-020: replacing a consumer must dispose the previous reader, requests and copies.
     // A storage path alone is not the identity of a provided leased/edited model.
@@ -189,6 +190,8 @@ fun MediaViewerScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val viewerActive = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
+    DisposableEffect(Unit) { onDispose { viewerActive.set(false) } }
     var providedSourceChecked by remember(providedModel, storagePath) { mutableStateOf(false) }
     // A provided source cannot reach Coil or an action while its path check is pending.
     val renderProvidedModel = if (providedSourceChecked) providedModel else null
@@ -222,6 +225,7 @@ fun MediaViewerScreen(
     val ownedCopies = remember(storagePath) { mutableListOf<java.io.File>() }
     DisposableEffect(storagePath) { onDispose { ownedCopies.forEach { it.delete() } } }
     var externalActionBusy by remember(storagePath) { mutableStateOf(false) }
+    var savingToGallery by remember(storagePath) { mutableStateOf(false) }
     var trimSource by remember(storagePath) { mutableStateOf<String?>(null) }
     var error by remember(storagePath) { mutableStateOf<String?>(null) }
     val viewerErrorText = error?.let { message ->
@@ -264,24 +268,32 @@ fun MediaViewerScreen(
         }
     }
 
-    fun stopVideoReader(reader: VideoView? = videoView) {
-        try { reader?.stopPlayback() }
-        finally {
-            if (videoView === reader) {
+    fun stopVideoReader(reader: VideoView? = videoView): Boolean {
+        // A failed native stop must not erase the only reference available to retry.
+        val stopped = reader == null || runCatching { reader.stopPlayback() }.isSuccess ||
+            runCatching { reader.suspend() }.isSuccess
+        if (videoView === reader) {
+            isPlaying = false; videoPlayPending = false; videoReady = false
+            if (stopped) {
                 videoView = null
                 videoMediaPlayer = null
-                videoReady = false; videoFailed = false
-                isPlaying = false; videoPlayPending = false
+                videoFailed = false
                 durationMs = 0; positionMs = 0; bufferedPct = 0
                 videoWidth = 0; videoHeight = 0
+            } else {
+                videoFailed = true
+                error = "Could not stop this attachment. Close and reopen it before playing another copy."
             }
         }
+        return stopped
     }
-    androidx.compose.runtime.SideEffect { registerStopReader?.invoke { stopVideoReader() } }
+    androidx.compose.runtime.SideEffect {
+        registerStopReader?.invoke { check(stopVideoReader()) { "Attachment reader cleanup failed" } }
+    }
     // Retry state declared before image readiness so every attempt starts unready.
     // Dart _load.
     LaunchedEffect(storagePath, type, reloadAttempt, providedModel) {
-        stopVideoReader() // Retry/source replacement never leaves an old native URL/player alive.
+        if (!stopVideoReader()) return@LaunchedEffect // Do not replace a reader whose teardown failed.
         providedSourceChecked = false
         error = null
         signedUrl = null
@@ -313,7 +325,16 @@ fun MediaViewerScreen(
         }
         providedSourceChecked = true
         // Leased image bytes are already the consumer model; the placeholder is not a URL.
-        if (type == "image" && providedModel is ByteArray) return@LaunchedEffect
+        if (providedModel != null) {
+            signedUrl = when (providedModel) {
+                is java.io.File -> providedModel.toURI().toString()
+                is Uri -> providedModel.toString()
+                is String -> providedModel
+                else -> null
+            }
+            if (signedUrl == null && type != "image") error = "Could not load this attachment. Reopen it from the chat."
+            return@LaunchedEffect
+        }
         val path = storagePath
         if (path.isNullOrEmpty()) {
             // MV-R5-031 previous jargon: error = "This attachment does not have a valid storage path."
@@ -456,7 +477,7 @@ fun MediaViewerScreen(
     // MV-R5-014: an explicit download gets a fresh token, not the one retained since open.
     // Local derivatives/leases are already snapshots and must not be replaced by originals.
     suspend fun freshDownloadSource(source: String): String {
-        if (!source.startsWith("https:", ignoreCase = true)) return source
+        if (providedModel != null || !source.startsWith("https:", ignoreCase = true)) return source
         val originalPath = storagePath?.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("Attachment source unavailable")
         val refreshed = try {
@@ -473,7 +494,7 @@ fun MediaViewerScreen(
     }
 
     fun launchExternal(share: Boolean) {
-        if (restrictedViewOnce || error != null || externalActionBusy) return
+        if (restrictedViewOnce || error != null || externalActionBusy || savingToGallery || ownedActionBusy || !viewerActive.get()) return
         if (ownedActions) { if (share) onOwnedShare?.invoke() else onOwnedOpen?.invoke(); return }
         val source = editedCopy?.toURI()?.toString()
             ?: (renderProvidedModel as? java.io.File)?.toURI()?.toString()
@@ -514,7 +535,7 @@ fun MediaViewerScreen(
     var externalOpenConfirmation by remember(storagePath) { mutableStateOf(false) }
     // Previous direct handoff: fun openExternally() = launchExternal(false)
     fun openExternally() {
-        if (!restrictedViewOnce && error == null && !externalActionBusy &&
+        if (!restrictedViewOnce && error == null && !externalActionBusy && !savingToGallery && !ownedActionBusy &&
             (signedUrl != null || renderProvidedModel != null)) externalOpenConfirmation = true
     }
     fun share() = launchExternal(true)
@@ -532,10 +553,9 @@ fun MediaViewerScreen(
     // Dart _toggleVideo.
     // GB media-preview option: save the viewed image/video to the device gallery.
     var galleryConfirmation by remember(storagePath) { mutableStateOf(false) }
-    var savingToGallery by remember(storagePath) { mutableStateOf(false) }
     val gallerySaveAvailable = !ownedActions || onOwnedSaveToGallery != null
     fun performGallerySave() {
-        if (restrictedViewOnce || savingToGallery || !gallerySaveAvailable) return
+        if (restrictedViewOnce || error != null || savingToGallery || externalActionBusy || ownedActionBusy || !viewerActive.get() || !gallerySaveAvailable) return
         if (ownedActions) { onOwnedSaveToGallery?.invoke(); return }
         val source = editedCopy?.absolutePath
             ?: (renderProvidedModel as? java.io.File)?.absolutePath
@@ -547,7 +567,7 @@ fun MediaViewerScreen(
                 val message = try {
                     val refreshed = freshDownloadSource(source)
                     withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        saveMediaToGallery(context, refreshed, title, type == "video")
+                        saveMediaToGallery(context, refreshed, title, type == "video", viewerActive::get)
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { "Could not save attachment. Try again." }
@@ -556,7 +576,7 @@ fun MediaViewerScreen(
         }
     }
     fun saveToGallery() {
-        if (restrictedViewOnce || savingToGallery) return
+        if (restrictedViewOnce || error != null || savingToGallery || externalActionBusy || ownedActionBusy || !gallerySaveAvailable) return
         val hidden = runCatching {
             val prefs = com.example.chat.ServiceLocator.preferencesController.universal
             when {
@@ -675,7 +695,7 @@ fun MediaViewerScreen(
         },
         dismissButton = { TextButton(onClick = { closeViewer() }) { Text("Close") } },
     )
-    if (externalActionBusy || savingToGallery) androidx.compose.material3.AlertDialog(
+    if (externalActionBusy || savingToGallery || ownedActionBusy) androidx.compose.material3.AlertDialog(
         onDismissRequest = {},
         title = { Text(if (savingToGallery) "Saving gallery copy" else "Preparing attachment") },
         text = { CircularProgressIndicator() },
@@ -699,7 +719,7 @@ fun MediaViewerScreen(
         // Bubble phase lets focused buttons/sliders handle their own keys first.
         // MV-R2-045 prior modifier = modifier.onKeyEvent { event ->
         modifier = Modifier.onKeyEvent { event ->
-            if (event.type != KeyEventType.KeyDown || keyboardHelp || externalActionBusy || savingToGallery || error != null) false
+            if (event.type != KeyEventType.KeyDown || keyboardHelp || externalActionBusy || savingToGallery || ownedActionBusy || error != null) false
             else when {
                 event.key == Key.Slash && event.isShiftPressed -> { keyboardHelp = true; true }
                 event.key == Key.Escape -> { closeViewer(); true }
@@ -765,7 +785,9 @@ fun MediaViewerScreen(
                 // MV-R1-049: primary actions remain Save/Share; editing and external Open live in overflow.
                 // Existing handlers/readiness/restrictions remain the source of each action's behavior.
                 val actionsVisible = !restrictedViewOnce && error == null
-                val actionsReady = signedUrl != null || renderProvidedModel != null
+                val actionsReady = (signedUrl != null || renderProvidedModel != null) &&
+                    (ownedActions || signedUrl != null || renderProvidedModel is java.io.File) &&
+                    !externalActionBusy && !savingToGallery && !ownedActionBusy
                 // MV-R2-045 previous: if (actionsVisible && !compactToolbar) {
                 if (actionsVisible && !compactToolbar && !wideActionRail) {
                     // MV-R5-024 prior direct icon buttons retained within tooltip wrappers.
@@ -775,10 +797,10 @@ fun MediaViewerScreen(
                                 semanticLabel = "Save to gallery", color = foreground)
                         }
                     }
-                    com.example.chat.ui.media.AudioPlayerTooltip("Share file link") {
+                    com.example.chat.ui.media.AudioPlayerTooltip("Share attachment") {
                         IconButton(onClick = ::share, enabled = actionsReady) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share,
-                                semanticLabel = "Share file link", color = foreground)
+                                semanticLabel = "Share attachment", color = foreground)
                         }
                     }
                     // MV-R5-024 prior direct buttons retained inactive:
@@ -789,7 +811,7 @@ fun MediaViewerScreen(
                     // }
                     // IconButton(onClick = ::share, enabled = actionsReady) {
                     //     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share,
-                    //         semanticLabel = "Share file link", color = foreground)
+                    //         semanticLabel = "Share attachment", color = foreground)
                     // }
 
                 }
@@ -808,7 +830,7 @@ fun MediaViewerScreen(
                     DropdownMenu(expanded = actionsExpanded, onDismissRequest = { actionsExpanded = false }) {
                         if (type in setOf("video", "audio")) DropdownMenuItem(
                             text = { Text("Trim a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady,
-                            onClick = { actionsExpanded = false; if (ownedActions) onOwnedEdit?.invoke() else trimming = true },
+                            onClick = { actionsExpanded = false; if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) trimming = true },
                         )
                         if (type == "video") DropdownMenuItem(
                             text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.media_viewer_loop_video)) },
@@ -820,7 +842,7 @@ fun MediaViewerScreen(
                         )
                         if (type == "image" && !title.endsWith(".gif", ignoreCase = true)) DropdownMenuItem(
                             text = { Text("Edit a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady,
-                            onClick = { actionsExpanded = false; if (ownedActions) onOwnedEdit?.invoke() else editing = true },
+                            onClick = { actionsExpanded = false; if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) editing = true },
                         )
                         DropdownMenuItem(text = { Text("Open with app") }, modifier = Modifier.heightIn(min = 48.dp),
                             enabled = actionsReady, onClick = { actionsExpanded = false; openExternally() })
@@ -829,16 +851,16 @@ fun MediaViewerScreen(
                                 text = { Text("Save to gallery") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady && gallerySaveAvailable,
                                 onClick = { actionsExpanded = false; saveToGallery() },
                             )
-                            DropdownMenuItem(text = { Text("Share file link") }, modifier = Modifier.heightIn(min = 48.dp),
+                            DropdownMenuItem(text = { Text("Share attachment") }, modifier = Modifier.heightIn(min = 48.dp),
                                 enabled = actionsReady, onClick = { actionsExpanded = false; share() })
                         }
                     }
                 }
                 // Prior complete action block retained inactive:
-                // // MV-R3-022 original: if (type in setOf("video", "audio") && !restrictedViewOnce && error == null) TextButton(onClick = { if (ownedActions) onOwnedEdit?.invoke() else trimming = true }, enabled = signedUrl != null || renderProvidedModel != null) { Text("Trim") }
-                // // MR-R3-042 previous visible label: if (type in setOf("video", "audio") && !restrictedViewOnce && error == null) TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { if (ownedActions) onOwnedEdit?.invoke() else trimming = true }, enabled = signedUrl != null || renderProvidedModel != null) { Text("Trim") }
-                // if (type in setOf("video", "audio") && !restrictedViewOnce && error == null) TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { if (ownedActions) onOwnedEdit?.invoke() else trimming = true }, enabled = signedUrl != null || renderProvidedModel != null) { Text("Trim a copy") }
-                // if (type == "image" && !title.endsWith(".gif", ignoreCase = true) && !restrictedViewOnce && error == null) IconButton(onClick = { if (ownedActions) onOwnedEdit?.invoke() else editing = true }, enabled = signedUrl != null || renderProvidedModel != null) {
+                // // MV-R3-022 original: if (type in setOf("video", "audio") && !restrictedViewOnce && error == null) TextButton(onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) trimming = true }, enabled = signedUrl != null || renderProvidedModel != null) { Text("Trim") }
+                // // MR-R3-042 previous visible label: if (type in setOf("video", "audio") && !restrictedViewOnce && error == null) TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) trimming = true }, enabled = signedUrl != null || renderProvidedModel != null) { Text("Trim") }
+                // if (type in setOf("video", "audio") && !restrictedViewOnce && error == null) TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) trimming = true }, enabled = signedUrl != null || renderProvidedModel != null) { Text("Trim a copy") }
+                // if (type == "image" && !title.endsWith(".gif", ignoreCase = true) && !restrictedViewOnce && error == null) IconButton(onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) editing = true }, enabled = signedUrl != null || renderProvidedModel != null) {
                 // com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit a copy", color = foreground)
                 // }
                 // if (!restrictedViewOnce && error == null) IconButton(onClick = ::openExternally, enabled = signedUrl != null || renderProvidedModel != null) {
@@ -856,7 +878,7 @@ fun MediaViewerScreen(
                 // }
                 // if (!restrictedViewOnce && error == null) IconButton(onClick = ::share, enabled = signedUrl != null || renderProvidedModel != null) {
                 // com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share,
-                // semanticLabel = "Share file link",
+                // semanticLabel = "Share attachment",
                 // color = foreground,
                 // )
                 // }
@@ -1014,12 +1036,16 @@ fun MediaViewerScreen(
                                                 videoReady = true
                                             }
                                             setOnErrorListener { _, _, _ ->
+                                                if (videoView !== this) return@setOnErrorListener true
                                                 videoMediaPlayer = null
+                                                isPlaying = false
+                                                videoReady = false
                                                 videoFailed = true
                                                 videoPlayPending = false
                                                 true
                                             }
                                             setOnCompletionListener {
+                                                if (videoView !== this) return@setOnCompletionListener
                                                 // MV-R2-005: leave a replayable start position, never autoplay.
                                                 // Previous statement retained with same behavior: isPlaying = false
                                                 isPlaying = false
@@ -1195,7 +1221,9 @@ fun MediaViewerScreen(
         }
         }
         if (wideActionRail && !restrictedViewOnce && error == null) {
-            val actionsReady = signedUrl != null || renderProvidedModel != null
+            val actionsReady = (signedUrl != null || renderProvidedModel != null) &&
+                    (ownedActions || signedUrl != null || renderProvidedModel is java.io.File) &&
+                    !externalActionBusy && !savingToGallery && !ownedActionBusy
             Surface(color = elevated, modifier = Modifier.width(160.dp).fillMaxHeight()) {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1203,10 +1231,10 @@ fun MediaViewerScreen(
                     if (type in setOf("image", "video")) TextButton(onClick = ::saveToGallery, enabled = actionsReady && gallerySaveAvailable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Save to gallery") }
                     TextButton(onClick = ::share, enabled = actionsReady,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Share file link") }
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Share attachment") }
                     if (type in setOf("video", "audio")) TextButton(enabled = actionsReady,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        onClick = { if (ownedActions) onOwnedEdit?.invoke() else trimming = true }) { Text("Trim a copy") }
+                        onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) trimming = true }) { Text("Trim a copy") }
                     if (type == "video") TextButton(enabled = actionsReady && videoReady && !videoFailed,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
                             stateDescription = if (loopVideo) loopVideoStateOn else loopVideoStateOff
@@ -1214,7 +1242,7 @@ fun MediaViewerScreen(
                         onClick = { toggleLoopVideo() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.media_viewer_loop_video)) }
                     if (type == "image" && !title.endsWith(".gif", ignoreCase = true)) TextButton(enabled = actionsReady,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        onClick = { if (ownedActions) onOwnedEdit?.invoke() else editing = true }) { Text("Edit a copy") }
+                        onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) editing = true }) { Text("Edit a copy") }
                     TextButton(onClick = ::openExternally, enabled = actionsReady,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Open with app") }
                 }
@@ -1293,6 +1321,13 @@ private fun ImageViewerContent(
         // Capture decode bounds before entering the nested BoxScope.
         val decodeWidth = viewerDecodeExtent(constraints.maxWidth)
         val decodeHeight = viewerDecodeExtent(constraints.maxHeight)
+        LaunchedEffect(model, viewportW, viewportH) {
+            zoomAnimation?.cancel()
+            val clamped = viewerZoomTransform(scale, offset.x, offset.y,
+                0f, 0f, 0f, 0f, 1f, viewportW, viewportH)
+            scale = clamped.scale
+            offset = Offset(clamped.x, clamped.y)
+        }
         DisposableEffect(model, viewportW, viewportH, reduceMotion) {
             onDispose { zoomAnimation?.cancel() }
         }
@@ -1551,7 +1586,7 @@ internal suspend fun saveMediaToGallery(context: android.content.Context, source
     isVideo: Boolean, isOwnerCurrent: () -> Boolean = { true }): String {
     if (android.os.Build.VERSION.SDK_INT < 29) {
         // Previous refusal: Saving to gallery needs Android 10 or newer.
-        return "Saving to gallery needs Android 10 or newer. Use Share file link to choose another app."
+        return "Saving to gallery needs Android 10 or newer. Use Share attachment to choose another app."
     }
     val safeName = com.example.chat.ui.media.FileSanitizationService { context.cacheDir }.sanitizeFileName(displayName)
     val extension = safeName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
@@ -1570,21 +1605,50 @@ internal suspend fun saveMediaToGallery(context: android.content.Context, source
         put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
     }
     val resolver = context.contentResolver
+    val saveContext = kotlinx.coroutines.currentCoroutineContext()
+    fun checkCurrentSave() {
+        saveContext.ensureActive()
+        check(isOwnerCurrent()) { "Attachment session changed." }
+    }
     // Previous insert failure: Save failed: the gallery refused the new item.
-    check(isOwnerCurrent()) { "Attachment session changed." }
+    checkCurrentSave()
     val uri = resolver.insert(collection, values) ?: return "Could not add this attachment to the gallery. Check gallery access and try again."
     try {
-        check(isOwnerCurrent()) { "Attachment session changed." }
+        checkCurrentSave()
         resolver.openOutputStream(uri)?.use { out ->
-            openMediaInput(context, source).use { input -> require(copyMediaBounded(input, out, com.example.chat.ui.media.FileSanitizationService.MAX_SAFE_FILE_SIZE.toLong()) > 0) }
+            openMediaInput(context, source).use { input ->
+                val buffer = ByteArray(32 * 1024)
+                var copied = 0L
+                val limit = com.example.chat.ui.media.FileSanitizationService.MAX_SAFE_FILE_SIZE.toLong()
+                while (true) {
+                    checkCurrentSave()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count == 0) {
+                        // A provider may return zero from a bulk read. Make bounded progress.
+                        val single = input.read()
+                        if (single < 0) break
+                        checkCurrentSave()
+                        check(copied < limit) { "Attachment exceeds gallery copy limit" }
+                        out.write(single)
+                        copied++
+                        continue
+                    }
+                    checkCurrentSave()
+                    check(copied + count <= limit) { "Attachment exceeds gallery copy limit" }
+                    out.write(buffer, 0, count)
+                    copied += count
+                }
+                require(copied > 0) { "Attachment is empty" }
+            }
         } ?: error("could not open the gallery item for writing")
-        check(isOwnerCurrent()) { "Attachment session changed before gallery publication." }
+        checkCurrentSave()
         values.clear()
         values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-        // Do not claim a visible gallery copy when the provider published no row.
-        // Previous unchecked call: resolver.update(uri, values, null, null)
+        // Provider operations are not transactions with account changes. Recheck after
+        // publication and roll back on invalidation, cancellation or failed publication.
         check(resolver.update(uri, values, null, null) == 1) { "Gallery publication failed" }
-        check(isOwnerCurrent()) { "Attachment session changed during gallery publication." }
+        checkCurrentSave()
     } catch (cancelled: CancellationException) {
         // Rollback refusal must not replace the original cancellation.
         runCatching { resolver.delete(uri, null, null) }
@@ -1625,7 +1689,7 @@ internal suspend fun saveMediaToGallery(context: android.content.Context, source
 */
 
 /* Previous implementation fragments retained (net227):
-        if (restrictedViewOnce || savingToGallery) return
+        if (restrictedViewOnce || error != null || savingToGallery || externalActionBusy || ownedActionBusy || !gallerySaveAvailable) return
                         IconButton(onClick = ::saveToGallery, enabled = actionsReady) {
                                 text = { Text("Save to gallery") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady,
                     if (type in setOf("image", "video")) TextButton(onClick = ::saveToGallery, enabled = actionsReady,
@@ -1643,3 +1707,44 @@ private suspend fun saveMediaToGallery(context: android.content.Context, source:
                                     modifier = Modifier.weight(1f),
         modifier = Modifier.widthIn(max = 328.dp).padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite }, // ChatySpacing.xl
 */
+
+// Previous source retained for source-only media polish:
+//         if (type == "image" && providedModel is ByteArray) return@LaunchedEffect
+//         if (!source.startsWith("https:", ignoreCase = true)) return source
+//         if (restrictedViewOnce || error != null || externalActionBusy) return
+//         if (!restrictedViewOnce && error == null && !externalActionBusy &&
+//     var savingToGallery by remember(storagePath) { mutableStateOf(false) }
+//         if (restrictedViewOnce || savingToGallery || !gallerySaveAvailable) return
+//                         saveMediaToGallery(context, refreshed, title, type == "video")
+//         if (restrictedViewOnce || savingToGallery) return
+//     if (externalActionBusy || savingToGallery) androidx.compose.material3.AlertDialog(
+//             if (event.type != KeyEventType.KeyDown || keyboardHelp || externalActionBusy || savingToGallery || error != null) false
+//                 val actionsReady = signedUrl != null || renderProvidedModel != null
+//                     com.example.chat.ui.media.AudioPlayerTooltip("Share file link") {
+//                                 semanticLabel = "Share file link", color = foreground)
+//                     //         semanticLabel = "Share file link", color = foreground)
+//                             DropdownMenuItem(text = { Text("Share file link") }, modifier = Modifier.heightIn(min = 48.dp),
+//                 // semanticLabel = "Share file link",
+//             val actionsReady = signedUrl != null || renderProvidedModel != null
+//                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Share file link") }
+//         return "Saving to gallery needs Android 10 or newer. Use Share file link to choose another app."
+//         if (restrictedViewOnce || savingToGallery) return
+
+// Previous cleanup source retained:
+//     fun stopVideoReader(reader: VideoView? = videoView) {
+//         try { reader?.stopPlayback() }
+//         finally {
+//             if (videoView === reader) {
+//                 videoReady = false; videoFailed = false
+//                 isPlaying = false; videoPlayPending = false
+//     androidx.compose.runtime.SideEffect { registerStopReader?.invoke { stopVideoReader() } }
+//         stopVideoReader() // Retry/source replacement never leaves an old native URL/player alive.
+
+// Previous gallery-copy source retained:
+//     check(isOwnerCurrent()) { "Attachment session changed." }
+//         check(isOwnerCurrent()) { "Attachment session changed." }
+//             openMediaInput(context, source).use { input -> require(copyMediaBounded(input, out, com.example.chat.ui.media.FileSanitizationService.MAX_SAFE_FILE_SIZE.toLong()) > 0) }
+//         check(isOwnerCurrent()) { "Attachment session changed before gallery publication." }
+//         // Do not claim a visible gallery copy when the provider published no row.
+//         // Previous unchecked call: resolver.update(uri, values, null, null)
+//         check(isOwnerCurrent()) { "Attachment session changed during gallery publication." }

@@ -21,6 +21,23 @@ class CallSettingsAudienceMappingTest {
         assertTrue(audienceOptions.indexOf("My Contacts Except…") != audienceOptions.indexOf("My Contacts"))
     }
 
+    @Test fun legacyAndWireAudienceSpellingsResolveToSameSelection() {
+        val kind = com.example.chat.domain.models.PrivacyAudienceValue.CONTACTS_EXCEPT
+        assertEquals(kind, com.example.chat.domain.models.PrivacyAudienceValue.parse("My Contacts Except..."))
+        assertEquals(kind, com.example.chat.domain.models.PrivacyAudienceValue.parse("My Contacts Except…"))
+        assertEquals(kind, com.example.chat.domain.models.PrivacyAudienceValue.parse("contacts_except"))
+        assertEquals("My Contacts Except…", callAudienceLabel(kind))
+        assertEquals(null, com.example.chat.domain.models.PrivacyAudienceValue.parse("future-policy"))
+    }
+
+    @Test fun audioEntrySummaryNamesPreferenceWithoutClaimingActiveRoute() {
+        val modes = com.example.chat.core.audio.AudioPreferenceMode.entries
+        assertEquals("Automatic", callAudioPreferenceSummary(modes[0], false))
+        assertEquals("Standard stereo playback", callAudioPreferenceSummary(modes[1], false))
+        assertEquals("Dual-speaker (experimental)", callAudioPreferenceSummary(modes[2], false))
+        assertTrue(callAudioPreferenceSummary(modes[0], true).contains("could not be saved"))
+    }
+
     @Test fun excludedContactsLabelIsCountAware() {
         assertEquals("No contacts excluded", excludedContactsLabel(0))
         assertEquals("1 contact excluded", excludedContactsLabel(1))

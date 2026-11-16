@@ -137,9 +137,10 @@ class ApiTasksClientParityTest {
         assertEquals("New", json.getString("title"))
         assertEquals("desc", json.getString("description"))
         assertEquals("medium", json.getString("priority"))
-        // Live backend: single assigned_to_id, no due_date field.
+        // PR #3: single assigned_to_id plus optional ISO-8601 due_date.
         assertEquals("u1", json.getString("assigned_to_id"))
-        assertFalse(json.has("due_date"))
+        // Prior legacy expectation: assertFalse(json.has("due_date"))
+        assertEquals("2026-10-28T18:00:00Z", json.getString("due_date"))
         assertFalse(json.has("assigned_to_ids"))
         assertEquals("t9", task.id)
         assertEquals(TaskStatus.inbox, task.status)

@@ -217,6 +217,15 @@ class AndroidChatyAudioPlatform(context: Context) : ChatyAudioPlatform {
     }
 
     private fun applyRoute(route: AudioOutputRoute) {
+        // Check at use time as permission can be revoked while Settings stays open.
+        // No device names or addresses are read or logged by this route selector.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            (route == AudioOutputRoute.bluetooth || route == AudioOutputRoute.hearingAid)) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(appContext,
+                    android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                throw SecurityException("Nearby devices permission is required for Bluetooth audio")
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 // Previous implementation retained:             val targetType = when (route) {
 // Previous implementation retained:                 AudioOutputRoute.speaker -> AudioDeviceInfo.TYPE_BUILTIN_SPEAKER

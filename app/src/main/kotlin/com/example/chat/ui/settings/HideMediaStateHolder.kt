@@ -53,7 +53,9 @@ class HideMediaState(
 //                 repository.driftReport(state)?.let { repository.logDebugOnce(it) }
 //                 repository.sync(state).onFailure {
 //                     failure = "Could not restore local media markers. Try saving the setting again."
+//                 val loaded = diskQueue.run {
                 val loaded = diskQueue.run {
+                    check(preferences.scopeGeneration == accountGeneration) { "Media preference owner changed" }
                     repository.driftReport(state)?.let { repository.logDebugOnce(it) }
                     repository.sync(state).getOrThrow()
                     (!repository.isBannerSeen()) to repository.affectedFileCount()
@@ -113,7 +115,8 @@ class HideMediaState(
     }
 
     private fun update(offerUndo: Boolean, auditEvent: String, transform: (UniversalPreferences) -> UniversalPreferences) {
-        if (saving) return
+//         if (saving) return
+        if (saving || preferences.scopeGeneration != accountGeneration) return
         saving = true
         operationGeneration++
         val operation = operationGeneration
@@ -128,7 +131,9 @@ class HideMediaState(
 //                     .getOrThrow()
 //                 // Debug-only guard: marker state must equal the three preferences (HM3-45).
 //                 repository.assertMarkersMatch(requested.markerState())
+//                 val changedCount: Int = diskQueue.transaction(action = {
                 val changedCount: Int = diskQueue.transaction(action = {
+                    check(preferences.scopeGeneration == accountGeneration) { "Media preference owner changed" }
                     repository.sync(requested.markerState())
                         .onSuccess { repository.audit(auditEvent) }
                         .onFailure { repository.auditFailure(auditEvent) }
@@ -161,7 +166,9 @@ class HideMediaState(
                     }
                     saving = true
 //                     repository.sync(latest.markerState()).getOrThrow()
+//                     val restoredCount: Int = diskQueue.transaction(action = {
                     val restoredCount: Int = diskQueue.transaction(action = {
+                        check(preferences.scopeGeneration == accountGeneration) { "Media preference owner changed" }
                         repository.sync(latest.markerState()).getOrThrow()
                         repository.audit("undo reset")
                         repository.affectedFileCount()
@@ -181,8 +188,12 @@ class HideMediaState(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+//                 saving = false
+//                 snackbar.showSnackbar("Could not save the gallery preference. Your choice was not changed. Try again.")
                 saving = false
-                snackbar.showSnackbar("Could not save the gallery preference. Your choice was not changed. Try again.")
+                if (preferences.scopeGeneration == accountGeneration) {
+                    snackbar.showSnackbar("Could not finish saving the gallery preference. Reopen this page to resync local markers, then try again.")
+                }
             } finally {
                 if (operation == operationGeneration) saving = false
             }

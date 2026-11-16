@@ -42,6 +42,7 @@ object ChatyNotifications {
     const val ACTION_SHOW_CALL = "com.example.chat.action.SHOW_CALL"
 
     const val EXTRA_ROOM_ID = "room_id"
+    const val EXTRA_ROOM_NONCE = "room_nonce"
     const val EXTRA_CALL_ID = "call_id"
     const val EXTRA_CALLER_ID = "caller_id"
     const val EXTRA_CALLER_NAME = "caller_name"
@@ -49,15 +50,35 @@ object ChatyNotifications {
 
     private const val CALL_NOTIFICATION_ID = 7410
     private const val MISSED_BASE_ID = 7500
+    private const val MISSED_SUMMARY_ID = 7499
+    private const val MISSED_GROUP = "chaty.missed_calls"
+    private const val MISSED_TAG_PREFIX = "chaty.missed:"
 
     /** True while any app screen is visible (kept by ChatyApplication). */
     @Volatile var appInForeground: Boolean = false
 
-    /** Chat to open after a notification tap (consumed by AppRoot). */
+    /** A room request belongs to the exact live session that posted its notification.
+     * Unknown nonces (including process-death restores) only open the normal app shell. */
+    class PendingRoomOpen(val roomId: String, val owner: com.example.chat.data.api.ApiAccountScope)
+    private val roomActions = java.util.concurrent.ConcurrentHashMap<String, PendingRoomOpen>()
+    private val _pendingRoomOpen = MutableStateFlow<PendingRoomOpen?>(null)
+    val pendingRoomOpen: StateFlow<PendingRoomOpen?> = _pendingRoomOpen
+    // Prior unscoped routing retained for review, not execution:
+    // fun requestOpenRoom(roomId: String?) { if (!roomId.isNullOrBlank()) _pendingRoomId.value = roomId }
+    // fun consumeOpenRoom() { _pendingRoomId.value = null }
     private val _pendingRoomId = MutableStateFlow<String?>(null)
     val pendingRoomId: StateFlow<String?> = _pendingRoomId
-    fun requestOpenRoom(roomId: String?) { if (!roomId.isNullOrBlank()) _pendingRoomId.value = roomId }
-    fun consumeOpenRoom() { _pendingRoomId.value = null }
+    fun requestOpenRoom(roomId: String?, nonce: String? = null) {
+        val request = nonce?.let { roomActions.remove(it) } ?: return
+        if (roomId != request.roomId || ServiceLocator.apiBackend.authSnapshot() !== request.owner) return
+        _pendingRoomOpen.value = request
+        _pendingRoomId.value = request.roomId
+    }
+    fun consumeOpenRoom(expected: PendingRoomOpen? = null) {
+        if (expected != null && _pendingRoomOpen.value !== expected) return
+        _pendingRoomOpen.value = null
+        _pendingRoomId.value = null
+    }
 
     /** Call the user acted on from the notification (consumed by MainActivity once the offer is in). */
     data class PendingCallAction(val callId: String, val answer: Boolean,
@@ -74,6 +95,7 @@ object ChatyNotifications {
      */
     fun clearForSignOut(context: Context) {
         consumeOpenRoom()
+        roomActions.clear()
         consumeCallAction()
         synchronized(linesByRoom) {
             linesByRoom.clear()
@@ -102,7 +124,8 @@ object ChatyNotifications {
                 description = "Rings for incoming voice and video calls"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 1000, 800, 1000, 800)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                // Previous: lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
                 setSound(
                     RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
                     AudioAttributes.Builder()
@@ -115,6 +138,7 @@ object ChatyNotifications {
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_MISSED, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "Calls you did not answer"
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             },
         )
     }
@@ -140,6 +164,8 @@ object ChatyNotifications {
         roomTitle: String? = null,
         isGroup: Boolean = false,
     ) {
+        val owner = ServiceLocator.apiBackend.authSnapshot()
+        if (owner.userId.isNullOrBlank() || owner.token.isNullOrBlank()) return
         if (roomId.isBlank() || !canPost(context)) return
         ensureChannels(context)
         val lines = synchronized(linesByRoom) {
@@ -168,8 +194,14 @@ object ChatyNotifications {
         }
         for (l in lines) style.addMessage(l.text, l.time, Person.Builder().setName(l.sender).build())
 
+        if (ServiceLocator.apiBackend.authSnapshot() !== owner) return
+        val nonce = java.util.UUID.randomUUID().toString()
+        // Bounded ephemeral routing registry, never persisted or restored into another session.
+        if (roomActions.size >= 500) roomActions.clear()
+        roomActions[nonce] = PendingRoomOpen(roomId, owner)
         val open = Intent(context, MainActivity::class.java).apply {
             action = ACTION_OPEN_CHAT
+            putExtra(EXTRA_ROOM_NONCE, nonce)
             putExtra(EXTRA_ROOM_ID, roomId)
             data = android.net.Uri.Builder().scheme("chaty").authority("open-chat").appendPath(roomId).build()
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -400,12 +432,49 @@ object ChatyNotifications {
             .setContentTitle("Missed ${if (video) "video" else "voice"} call")
             .setContentText(name)
             .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                NotificationCompat.Builder(context, CHANNEL_MISSED)
+                    .setSmallIcon(android.R.drawable.sym_call_missed)
+                    .setContentTitle("Missed Chaty call")
+                    .setContentText("Unlock to view caller")
+                    .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+                    .build(),
+            )
+            .setGroup(MISSED_GROUP)
             .setAutoCancel(true)
             .setContentIntent(PendingIntent.getActivity(context, 4, open, flags()))
             .build()
         try {
-            NotificationManagerCompat.from(context).notify(MISSED_BASE_ID + (callId.hashCode() and 0xFFF), notification)
+// Previous: NotificationManagerCompat.from(context).notify(MISSED_BASE_ID + (callId.hashCode() and 0xFFF), notification)
+            val manager = NotificationManagerCompat.from(context)
+            // The full call ID is a tag: distinct calls must not collide in a 12-bit hash bucket.
+            manager.notify(MISSED_TAG_PREFIX + callId, MISSED_BASE_ID, notification)
+            val summary = NotificationCompat.Builder(context, CHANNEL_MISSED)
+                .setSmallIcon(android.R.drawable.sym_call_missed)
+                .setContentTitle("Missed Chaty calls")
+                .setContentText("Open Chaty to review missed calls")
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+                .setGroup(MISSED_GROUP)
+                .setGroupSummary(true)
+                .setOnlyAlertOnce(true)
+                .setSilent(true)
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(context, 4, open, flags()))
+                .build()
+            manager.notify(MISSED_SUMMARY_ID, summary)
         } catch (_: SecurityException) {}
+    }
+
+    /** Used when the Calls log is actually opened. Message/incoming notifications are untouched. */
+    fun clearMissedCallNotifications(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        try {
+            manager.activeNotifications.filter { it.tag?.startsWith(MISSED_TAG_PREFIX) == true }
+                .forEach { manager.cancel(it.tag, it.id) }
+            manager.cancel(MISSED_SUMMARY_ID)
+        } catch (_: SecurityException) { /* Notification permission can change while the log opens. */ }
     }
 
     fun forgetCall(callId: String) {

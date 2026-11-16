@@ -25,4 +25,7 @@
     <string name="social_updates_type_audio">Audio update</string>
     <string name="social_updates_type_file">File update</string>
     <string name="social_updates_type_unknown">Media update</string>
+    <string name="social_updates_search_label">Search loaded updates</string>
+    <string name="social_updates_search_clear">Clear search</string>
+    <string name="social_updates_search_no_matches">No loaded updates match your search.</string>
 </resources>

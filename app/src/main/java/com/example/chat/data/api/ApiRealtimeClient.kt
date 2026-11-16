@@ -261,17 +261,71 @@ class ApiRealtimeClient(
         )
     }
 
-    /** Delivery ack is scoped to the account/socket that observed the message. */
-    fun sendDelivered(roomId: String): Boolean {
+    private data class RoomReceiptRequest(val roomId: String, val kind: String,
+        val socket: Socket, val scope: Any?)
+    private val pendingRoomReceipts = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, RoomReceiptRequest>()
+
+    /** Queueing a receipt is not proof that any message was delivered/read. */
+    fun sendRoomReceipt(roomId: String, kind: String, expectedScope: Any? = connectionScopeIdentity()): Boolean {
+        if (kind !in setOf("read", "delivered")) return false
         val safeRoomId = ApiPathSegments.safe(roomId) ?: return false
         val currentSocket = socket ?: return false
-        return sendScopedFrame(
-            currentSocket,
-            socketScope,
-            JSONObject().put("type", "delivered").put("room_id", safeRoomId),
-        )
+        if (expectedScope !== socketScope) return false
+        val pending = RoomReceiptRequest(safeRoomId, kind, currentSocket, expectedScope)
+        val key = safeRoomId to kind
+        if (pendingRoomReceipts.size >= 128 && !pendingRoomReceipts.containsKey(key)) return false
+        pendingRoomReceipts[key] = pending
+        val queued = sendRoomReceiptFrame(pending)
+        if (!queued) pendingRoomReceipts.remove(key, pending)
+        return queued
+    }
+    private fun sendRoomReceiptFrame(request: RoomReceiptRequest): Boolean = sendScopedFrame(
+        request.socket, request.scope, JSONObject().put("type", "receipt").put("data",
+            JSONObject().put("room_id", request.roomId).put("kind", request.kind)))
+
+    /** Message-level seam uses the same typed envelope; return means queued only. */
+    fun sendMessageReceipt(messageId: String, kind: String, expectedScope: Any? = connectionScopeIdentity()): Boolean {
+        if (kind !in setOf("read", "delivered", "played")) return false
+        val safeMessageId = ApiPathSegments.safe(messageId) ?: return false
+        val currentSocket = socket ?: return false
+        if (expectedScope !== socketScope) return false
+        return sendScopedFrame(currentSocket, expectedScope,
+            JSONObject().put("type", "receipt").put("data", JSONObject().put("message_id", safeMessageId).put("kind", kind)))
     }
 
+    private class PendingMessageReceipt(val socket: Socket, val scope: Any?,
+        val result: kotlinx.coroutines.CompletableDeferred<Boolean>)
+    private val pendingMessageReceipts = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, PendingMessageReceipt>()
+
+    /** Success requires a matching server acknowledgment, never just a queued frame.
+     * No automatic retries: receipt_error lacks a request ID and may fail all pending waits. */
+    suspend fun acknowledgeMessageReceipt(messageId: String, kind: String, expectedScope: Any?): Boolean {
+        if (kind !in setOf("read", "delivered", "played")) return false
+        val safeId = ApiPathSegments.safe(messageId) ?: return false
+        val activeSocket = socket ?: return false
+        if (expectedScope !== socketScope || expectedScope !== connectionScopeIdentity()) return false
+        if (pendingMessageReceipts.size >= 128) return false
+        val key = safeId to kind
+        val pending = PendingMessageReceipt(activeSocket, expectedScope, kotlinx.coroutines.CompletableDeferred())
+        // One outstanding wait per semantic operation; never replace another caller's wait.
+        if (pendingMessageReceipts.putIfAbsent(key, pending) != null) return false
+        return try {
+            if (!sendMessageReceipt(safeId, kind, expectedScope)) false
+            else kotlinx.coroutines.withTimeoutOrNull(10_000L) { pending.result.await() } == true &&
+                activeSocket === socket && expectedScope === connectionScopeIdentity()
+        } finally {
+            pendingMessageReceipts.remove(key, pending)
+            pending.result.cancel()
+        }
+    }
+    private fun failPendingMessageReceipts() {
+        pendingMessageReceipts.entries.toList().forEach { (key, pending) ->
+            if (pendingMessageReceipts.remove(key, pending)) pending.result.complete(false)
+        }
+    }
+
+    /** Prior legacy frame: JSONObject().put("type", "delivered").put("room_id", safeRoomId). */
+    fun sendDelivered(roomId: String): Boolean = sendRoomReceipt(roomId, "delivered")
 
     /** Recording indicator on the custom backend WebSocket; no Supabase RPC. */
     fun sendRecording(roomId: String, isRecording: Boolean): Boolean {
@@ -342,6 +396,8 @@ class ApiRealtimeClient(
 
     /** Dart _cleanupWebSocket. */
     private fun cleanupLocked() {
+        failPendingMessageReceipts()
+        pendingRoomReceipts.clear()
         pingCancel?.cancel()
         pingCancel = null
         lastInboundAt = 0L
@@ -477,6 +533,47 @@ class ApiRealtimeClient(
                     val raw = dataOrMessage(payload)
                     val roomId = raw?.let { str(it, "room_id") } ?: ""
                     if (roomId.isNotEmpty()) listener?.onMessagesCleared(roomId)
+                }
+                "receipt_updated" -> {
+                    val raw = dataOrMessage(payload) ?: return
+                    // Message-level acks never continue room batches or imply aggregate tick state.
+                    val messageId = (raw.opt("message_id") as? String)?.takeIf { it.isNotBlank() }
+                    if (messageId != null) {
+                        val kind = raw.optString("kind")
+                        val updated = raw.opt("updated") as? Number ?: return
+                        if (kind !in setOf("read", "delivered", "played") || updated.toLong() < 0) return
+                        val key = messageId to kind
+                        val pending = pendingMessageReceipts[key] ?: return
+                        if (pending.socket === socket && pending.scope === socketScope &&
+                            pending.scope === connectionScopeIdentity() && pendingMessageReceipts.remove(key, pending))
+                            pending.result.complete(true) // 0 means already covered, also success.
+                        return
+                    }
+                    val room = raw.optString("room_id")
+                    val kind = raw.optString("kind")
+                    val updated = raw.opt("updated") as? Number ?: return
+                    val more = raw.opt("has_more") as? Boolean ?: return
+                    if (updated.toLong() < 0 || kind !in setOf("read", "delivered")) return
+                    val key = room to kind
+                    val pending = pendingRoomReceipts[key] ?: return
+                    if (pending.socket !== socket || pending.scope !== socketScope) {
+                        pendingRoomReceipts.remove(key, pending)
+                        return
+                    }
+                    if (!more) pendingRoomReceipts.remove(key, pending) // updated=0 is still success.
+                    else if (updated.toLong() > 0) {
+                        // Resume only a matching initiated room operation; never use frame order.
+                        scheduler.schedule(25L) {
+                            if (pendingRoomReceipts[key] === pending && !sendRoomReceiptFrame(pending))
+                                pendingRoomReceipts.remove(key, pending)
+                        }
+                    } else pendingRoomReceipts.remove(key, pending) // inconsistent non-advancing batch, no loop.
+                }
+                "receipt_error" -> {
+                    // No retry for membership/transition/malformed errors. This response has
+                    // no request identifier, so retire pending continuation, never guess its owner.
+                    pendingRoomReceipts.clear()
+                    failPendingMessageReceipts()
                 }
                 "message_receipt_updated" -> {
                     val raw = dataOrMessage(payload) ?: return

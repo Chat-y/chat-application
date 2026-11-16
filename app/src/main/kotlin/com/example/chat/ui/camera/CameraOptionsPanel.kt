@@ -139,6 +139,8 @@ private fun OptionChip(text: String, selected: Boolean, onClick: () -> Unit, mod
 
 @Composable
 fun CameraGridAndLevel(grid: Boolean, level: Boolean, modifier: Modifier = Modifier) {
+    // Resolve theme tokens during composition, not inside Canvas drawing.
+    val overlayColors = rememberCameraOverlayColors()
     val context = LocalContext.current
     var roll by remember { mutableStateOf<Float?>(null) }
     DisposableEffect(level) {
@@ -169,13 +171,17 @@ fun CameraGridAndLevel(grid: Boolean, level: Boolean, modifier: Modifier = Modif
     Box(modifier) {
         Canvas(Modifier.fillMaxSize()) {
             if (grid) for (n in 1..2) {
-                drawLine(Color.White.copy(alpha = .4f), Offset(size.width * n / 3, 0f), Offset(size.width * n / 3, size.height), 1f)
-                drawLine(Color.White.copy(alpha = .4f), Offset(0f, size.height * n / 3), Offset(size.width, size.height * n / 3), 1f)
+                // Previous value: Color.White.copy(alpha = .4f)
+                drawLine(overlayColors.content.copy(alpha = .4f), Offset(size.width * n / 3, 0f), Offset(size.width * n / 3, size.height), 1f)
+                // Previous value: Color.White.copy(alpha = .4f)
+                drawLine(overlayColors.content.copy(alpha = .4f), Offset(0f, size.height * n / 3), Offset(size.width, size.height * n / 3), 1f)
             }
         }
         // CAM-R4-004 prior: if (level) Text(roll?.let { "Level ${it.toInt()}°" } ?: "Level sensor unavailable", color = if (roll != null && abs(roll!!) < 2) Color.Green else Color.White,
-        if (level) Text(if (roll != null) stringResource(R.string.camera_level_degrees, roll!!.toInt()) else stringResource(R.string.camera_level_unavailable), color = if (roll != null && abs(roll!!) < 2) Color.Green else Color.White,
-            modifier = Modifier.align(Alignment.Center).background(Color(0x88000000), RoundedCornerShape(10.dp)).padding(8.dp))
+        // Previous value: Color.Green / Color.White
+        if (level) Text(if (roll != null) stringResource(R.string.camera_level_degrees, roll!!.toInt()) else stringResource(R.string.camera_level_unavailable), color = if (roll != null && abs(roll!!) < 2) overlayColors.success else overlayColors.content,
+            // Previous value: Color(0x88000000)
+            modifier = Modifier.align(Alignment.Center).background(overlayColors.scrimStrong, RoundedCornerShape(10.dp)).padding(8.dp))
     }
 }
 

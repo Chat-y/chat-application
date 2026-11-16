@@ -36,6 +36,12 @@ class ChatyNotificationLaneTest {
             log += "post:$tag"; hook?.invoke(); active += tag
         }
         override fun cancelIncomingCall(tag: String) { log += "cancel:$tag"; kinds += "call:$tag"; if (tag == failOrphan) throw IllegalStateException("sink"); if (throwOnCancel || tag == failCancelFor) throw IllegalStateException("sink"); active -= tag }
+        override fun postMissedCall(tag: String, summaryTag: String, group: String) {
+            log += "missed:$tag"; active += tag; active += summaryTag
+        }
+        override fun cancelMissedCall(tag: String) { log += "cancel-missed:$tag"; active -= tag }
+        override fun postCallbackReminder(tag: String) { log += "reminder:$tag"; active += tag }
+        override fun cancelCallbackReminder(tag: String) { log += "cancel-reminder:$tag"; active -= tag }
         override fun activeTags(): List<String> { if (throwOnActive) throw IllegalStateException("sink"); return active.toList() }
     }
 
@@ -51,6 +57,52 @@ class ChatyNotificationLaneTest {
         val r = reg.register(owner, ChatyNotificationPolicy.ACTION_REPLY, conversationId = convo)
         val d = reg.register(owner, ChatyNotificationPolicy.ACTION_DISMISS, conversationId = convo)
         lane.postMessage(owner, convo, "t", "b", 1L, r, d); return r to d
+    }
+
+    @Test fun missedReceiptIsDeferredScopeBoundAndClearsOnlyMissedTags() {
+        val a = scope(); cur = a
+        lane.postMissedCall(a, "call1")
+        assertTrue(sink.active.isEmpty())
+        ex.drain()
+        assertEquals(setOf("mc:${a.generation}:call:call1", "mc:${a.generation}:summary"), sink.active)
+        post(a, "chat1"); ex.drain()
+        lane.clearMissedCalls(a); ex.drain()
+        assertEquals(setOf(lane.messageTag(a, "chat1")), sink.active)
+    }
+
+    @Test fun staleMissedReceiptCannotPostAfterAccountSwitch() {
+        val a = scope(); val b = scope(); cur = a
+        lane.postMissedCall(a, "call1")
+        cur = b
+        ex.drain()
+        assertTrue(sink.active.isEmpty())
+        lane.postMissedCall(b, "call2"); ex.drain()
+        cur = a; lane.cleanupNonCurrent(); ex.drain()
+        assertTrue(sink.active.isEmpty())
+    }
+
+    @Test fun callbackReminderIsDeferredAndAccountScoped() {
+        val first = scope(); val second = scope(); cur = first
+        lane.postCallbackReminder(first, "request1")
+        assertTrue(sink.active.isEmpty())
+        cur = second; ex.drain()
+        assertTrue(sink.active.isEmpty())
+        lane.postCallbackReminder(second, "request2"); ex.drain()
+        assertEquals(setOf("cr:${second.generation}:request2"), sink.active)
+        cur = first; lane.cleanupNonCurrent(); ex.drain()
+        assertTrue(sink.active.isEmpty())
+    }
+
+    @Test fun callbackReminderOrphanReconcilesAndDoesNotUseMissedClear() {
+        val owner = scope(); cur = owner
+        lane.postCallbackReminder(owner, "request"); ex.drain()
+        lane.clearMissedCalls(owner); ex.drain()
+        assertTrue("cr:${owner.generation}:request" in sink.active)
+        val orphan = "cr:999:orphan"
+        sink.active += orphan
+        lane.reconcileOnStart(); ex.drain()
+        assertFalse(orphan in sink.active)
+        assertTrue("cr:${owner.generation}:request" in sink.active)
     }
 
     @Test fun nothing_runs_inline_and_listener_path_only_enqueues() {

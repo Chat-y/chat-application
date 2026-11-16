@@ -45,4 +45,5 @@
         <item quantity="one">%d conversation</item>
         <item quantity="other">%d conversations</item>
     </plurals>
+    <string name="social_search_policy_unavailable">Search is unavailable until your privacy settings are ready. Go back and try again.</string>
 </resources>

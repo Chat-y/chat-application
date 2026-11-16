@@ -13,13 +13,15 @@ class ApiRegistrationUsernameClient(
     fun check(username: String): ApiAuthClient.UsernameAvailability {
         val clean = username.trim()
         require(clean.length in 3..30) { "Username must have 3 to 30 characters." }
+        val uri = java.net.URI(baseUrl)
+        require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null) { "Secure username endpoint required." }
         val encoded = java.net.URLEncoder.encode(clean, "UTF-8")
         val headers = mapOf("Content-Type" to "application/json", "x-tenant-id" to tenantId)
         kotlin.check(isCurrent()) { "Workspace changed; check the username again." }
-        var response = transport.execute("GET", "${baseUrl.trimEnd('/')}/auth/username-availability?u=$encoded", headers, null)
+        var response = transport.execute("GET", "${baseUrl.trimEnd('/')}/auth/username-availability?username=$encoded", headers, null)
         kotlin.check(isCurrent()) { "Workspace changed; check the username again." }
         if (response.first == 404) {
-            response = transport.execute("GET", "${baseUrl.trimEnd('/')}/api/v1/auth/username-availability?u=$encoded", headers, null)
+            response = transport.execute("GET", "${baseUrl.trimEnd('/')}/api/v1/auth/username-availability?username=$encoded", headers, null)
             kotlin.check(isCurrent()) { "Workspace changed; check the username again." }
         }
         kotlin.check(response.first == 200) { "Could not check username (${response.first})." }

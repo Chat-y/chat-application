@@ -3,6 +3,7 @@ package com.example.chat.ui.calls
 import com.example.chat.data.services.CallSignalingService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -45,9 +46,79 @@ enum class CallScreenTemplate(val wireName: String, val displayName: String, val
     }
 }
 
+/** Applied only when a new media session starts. Existing active calls are not reconfigured. */
+data class CallCapturePreferences(
+    val videoQuality: CallVideoQuality = CallVideoQuality.AUTO,
+    val frontCamera: Boolean = true,
+    val mirrorFrontPreview: Boolean = true,
+    val noiseSuppression: Boolean = true,
+    val echoCancellation: Boolean = true,
+)
+enum class CallVideoQuality(val label: String, private val maxWidth: Int, private val maxHeight: Int) {
+    AUTO("Auto", 1280, 720), SD_480("480p maximum", 854, 480), HD_720("720p maximum", 1280, 720);
+    /** Preserve aspect ratio and even capture dimensions. Never upscale a network-selected profile. */
+    fun limit(width: Int, height: Int): Pair<Int, Int> {
+        val safeWidth = width.coerceAtLeast(2)
+        val safeHeight = height.coerceAtLeast(2)
+        val scale = minOf(1.0, maxWidth.toDouble() / safeWidth, maxHeight.toDouble() / safeHeight)
+        return ((safeWidth * scale).toInt() / 2 * 2).coerceAtLeast(2) to
+            ((safeHeight * scale).toInt() / 2 * 2).coerceAtLeast(2)
+    }
+    companion object {
+        const val STORAGE_KEY = "chaty.calls.capture.video_quality.v1"
+        fun parse(value: String?): CallVideoQuality = entries.firstOrNull { it.name == value } ?: AUTO
+    }
+}
+
+enum class CallCaptureOption(val storageKey: String) {
+    FRONT_CAMERA("chaty.calls.capture.front_camera.v1"),
+    MIRROR_PREVIEW("chaty.calls.capture.mirror_front_preview.v1"),
+    NOISE_SUPPRESSION("chaty.calls.capture.noise_suppression.v1"),
+    ECHO_CANCELLATION("chaty.calls.capture.echo_cancellation.v1");
+    fun selected(value: CallCapturePreferences): Boolean = when (this) {
+        FRONT_CAMERA -> value.frontCamera
+        MIRROR_PREVIEW -> value.mirrorFrontPreview
+        NOISE_SUPPRESSION -> value.noiseSuppression
+        ECHO_CANCELLATION -> value.echoCancellation
+    }
+    fun update(value: CallCapturePreferences, enabled: Boolean): CallCapturePreferences = when (this) {
+        FRONT_CAMERA -> value.copy(frontCamera = enabled)
+        MIRROR_PREVIEW -> value.copy(mirrorFrontPreview = enabled)
+        NOISE_SUPPRESSION -> value.copy(noiseSuppression = enabled)
+        ECHO_CANCELLATION -> value.copy(echoCancellation = enabled)
+    }
+}
+
+/** Device-local new-call alert schedule. Equal endpoints are rejected, never interpreted as all day. */
+data class CallQuietHours(val enabled: Boolean = false, val startMinute: Int = 22 * 60, val endMinute: Int = 7 * 60) {
+    fun contains(localMinute: Int): Boolean = enabled && localMinute in 0..1439 &&
+        startMinute in 0..1439 && endMinute in 0..1439 && startMinute != endMinute &&
+        if (startMinute < endMinute) localMinute >= startMinute && localMinute < endMinute
+        else localMinute >= startMinute || localMinute < endMinute
+    fun encode(): String = "$enabled,$startMinute,$endMinute"
+    fun activeNow(): Boolean {
+        val time = java.time.LocalTime.now()
+        return contains(time.hour * 60 + time.minute)
+    }
+    companion object {
+        const val STORAGE_KEY = "chaty.calls.quiet_hours.v1"
+        fun parse(raw: String?): CallQuietHours {
+            val fields = raw?.split(',') ?: return CallQuietHours()
+            if (fields.size != 3 || fields[0] !in listOf("true", "false")) return CallQuietHours()
+            val start = fields[1].toIntOrNull() ?: return CallQuietHours()
+            val end = fields[2].toIntOrNull() ?: return CallQuietHours()
+            if (start !in 0..1439 || end !in 0..1439 || start == end) return CallQuietHours()
+            return CallQuietHours(fields[0] == "true", start, end)
+        }
+    }
+}
+
 /** Device-local call presentation preferences. Exact port of
  *  call_presentation_preferences.dart CallPresentationPreferences. */
 data class CallPresentationPreferences(
+    val hideCallHistoryOnLockScreen: Boolean = false,
+    val quietHours: CallQuietHours = CallQuietHours(),
+    val capture: CallCapturePreferences = CallCapturePreferences(),
     val dynamicIslandEnabled: Boolean = true,
     val pictureInPictureEnabled: Boolean = true,
     val lowDataUsageEnabled: Boolean = false,
@@ -74,6 +145,8 @@ interface CallPresentationPrefsStorage {
     suspend fun getString(key: String): String?
     suspend fun putBool(key: String, value: Boolean): Boolean
     suspend fun putString(key: String, value: String): Boolean
+    /** Unsupported adapters fail closed rather than emulate an atomic reset with separate writes. */
+    suspend fun putCallSettingsSnapshot(value: CallPresentationPreferences): Boolean = false
 }
 
 /**
@@ -89,6 +162,7 @@ class CallPresentationPreferencesStore(
     private val scope: CoroutineScope,
 ) {
     companion object {
+        const val HIDE_HISTORY_LOCKSCREEN_KEY = "chaty.calls.hide_history_lockscreen.v1"
         const val DYNAMIC_ISLAND_KEY = "chaty.calls.dynamic_island_enabled.v1"
         const val PICTURE_IN_PICTURE_KEY = "chaty.calls.picture_in_picture_enabled.v1"
         const val LOW_DATA_USAGE_KEY = "chaty.calls.low_data_usage_enabled.v1"
@@ -124,6 +198,15 @@ class CallPresentationPreferencesStore(
             try {
             val pair = storage.getString(BUNDLE_SCOPES_KEY)?.split('|')?.takeIf { it.size == 2 }
             value = CallPresentationPreferences(
+                hideCallHistoryOnLockScreen = storage.getBool(HIDE_HISTORY_LOCKSCREEN_KEY) ?: false,
+                quietHours = CallQuietHours.parse(storage.getString(CallQuietHours.STORAGE_KEY)),
+                capture = CallCapturePreferences(
+                    videoQuality = CallVideoQuality.parse(storage.getString(CallVideoQuality.STORAGE_KEY)),
+                    frontCamera = storage.getBool(CallCaptureOption.FRONT_CAMERA.storageKey) ?: true,
+                    mirrorFrontPreview = storage.getBool(CallCaptureOption.MIRROR_PREVIEW.storageKey) ?: true,
+                    noiseSuppression = storage.getBool(CallCaptureOption.NOISE_SUPPRESSION.storageKey) ?: true,
+                    echoCancellation = storage.getBool(CallCaptureOption.ECHO_CANCELLATION.storageKey) ?: true,
+                ),
                 dynamicIslandEnabled = storage.getBool(DYNAMIC_ISLAND_KEY) ?: true,
                 pictureInPictureEnabled = storage.getBool(PICTURE_IN_PICTURE_KEY) ?: true,
                 lowDataUsageEnabled = storage.getBool(LOW_DATA_USAGE_KEY) ?: false,
@@ -178,7 +261,8 @@ class CallPresentationPreferencesStore(
         update = { it.copy(ongoingCallTemplate = template) },
     )
 
-    /** Single storage commit and publication for Both. Cancellation writes nothing. */
+    // Previous: Single storage commit and publication for Both. Cancellation writes nothing.
+    /** Waiting is cancellable; an already-started commit and its publication finish together. */
     suspend fun applyExperienceBundle(bundleId: String, target: BundleApplyTarget) {
         require(bundleId in setOf("chaty_default", "apple_ios", "samsung_one_ui", "google_phone_latest", "google_phone_classic", "vivo_iqoo", "azure_ring_vertical", "mono_chevron_dark", "nextcloud_talk"))
         initialize(); initializationComplete.await()
@@ -187,12 +271,119 @@ class CallPresentationPreferencesStore(
                 callExperienceBundleId = if (target != BundleApplyTarget.MESSAGES) bundleId else value.callExperienceBundleId,
                 messageExperienceBundleId = if (target != BundleApplyTarget.CALLS) bundleId else value.messageExperienceBundleId,
             )
-            if (!storage.putString(BUNDLE_SCOPES_KEY, next.callExperienceBundleId + "|" + next.messageExperienceBundleId))
-                throw IllegalStateException("Unable to save bundle selection. Nothing was applied.")
-            value = next; notifyListeners()
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            // Keep the storage receipt and in-memory publication indivisible on cancellation.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                if (!storage.putString(BUNDLE_SCOPES_KEY, next.callExperienceBundleId + "|" + next.messageExperienceBundleId))
+                    throw IllegalStateException("Unable to save bundle selection. Nothing was applied.")
+                value = next; notifyListeners()
+            }
         }
     }
     fun setCallExperienceBundle(bundleId: String) { scope.launch { applyExperienceBundle(bundleId, BundleApplyTarget.CALLS) } }
+
+    /** Alert admission must await restore rather than ring using pre-load defaults. */
+    suspend fun awaitInitialized() {
+        initialize()
+        initializationComplete.await()
+    }
+
+    /** Device privacy choice; appearance reset deliberately preserves it. */
+    suspend fun saveHideCallHistoryOnLockScreen(enabled: Boolean) = saveBool(
+        HIDE_HISTORY_LOCKSCREEN_KEY, enabled, { it.hideCallHistoryOnLockScreen },
+        { it.copy(hideCallHistoryOnLockScreen = enabled) },
+    )
+
+    suspend fun saveQuietHours(schedule: CallQuietHours) {
+        require(schedule.startMinute in 0..1439 && schedule.endMinute in 0..1439 && schedule.startMinute != schedule.endMinute)
+        initialize()
+        initializationComplete.await()
+        writeMutex.withLock {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                check(storage.putString(CallQuietHours.STORAGE_KEY, schedule.encode())) { "Quiet hours could not be saved." }
+                value = value.copy(quietHours = schedule)
+                notifyListeners()
+            }
+        }
+    }
+
+    suspend fun saveVideoQuality(quality: CallVideoQuality) {
+        initialize()
+        initializationComplete.await()
+        writeMutex.withLock {
+            if (value.capture.videoQuality == quality) return@withLock
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                check(storage.putString(CallVideoQuality.STORAGE_KEY, quality.name)) { "Video quality could not be saved." }
+                value = value.copy(capture = value.capture.copy(videoQuality = quality))
+                notifyListeners()
+            }
+            // Prior unpaired write: check(storage.putString(CallVideoQuality.STORAGE_KEY, quality.name)); value = value.copy(capture = value.capture.copy(videoQuality = quality)); notifyListeners()
+        }
+    }
+
+    suspend fun saveCaptureOption(option: CallCaptureOption, enabled: Boolean) = saveBool(
+        option.storageKey, enabled, { option.selected(it.capture) },
+        { it.copy(capture = option.update(it.capture, enabled)) },
+    )
+
+    /** One serialized storage transaction; templates and message bundle scope are preserved. */
+    suspend fun resetPresentationDefaults() {
+        initialize()
+        initializationComplete.await()
+        writeMutex.withLock {
+            val defaults = CallPresentationPreferences.defaults
+            val next = value.copy(
+                capture = defaults.capture,
+                dynamicIslandEnabled = defaults.dynamicIslandEnabled,
+                pictureInPictureEnabled = defaults.pictureInPictureEnabled,
+                lowDataUsageEnabled = defaults.lowDataUsageEnabled,
+                callExperienceBundleId = defaults.callExperienceBundleId,
+            )
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            // Like other confirmed saves, finish publication with the storage receipt on cancellation.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                check(storage.putCallSettingsSnapshot(next)) { "Call settings reset could not be saved." }
+                value = next
+                notifyListeners()
+            }
+            // Previous unpaired reset: check(storage.putCallSettingsSnapshot(next)); value = next; notifyListeners()
+        }
+    }
+
+    /** Await persistence so settings can report the actual result, not coroutine launch. */
+    suspend fun saveDynamicIslandEnabled(enabled: Boolean) = saveBool(
+        DYNAMIC_ISLAND_KEY, enabled, { it.dynamicIslandEnabled }, { it.copy(dynamicIslandEnabled = enabled) },
+    )
+
+    suspend fun savePictureInPictureEnabled(enabled: Boolean) = saveBool(
+        PICTURE_IN_PICTURE_KEY, enabled, { it.pictureInPictureEnabled }, { it.copy(pictureInPictureEnabled = enabled) },
+    )
+
+    suspend fun saveLowDataUsageEnabled(enabled: Boolean) = saveBool(
+        LOW_DATA_USAGE_KEY, enabled, { it.lowDataUsageEnabled }, { it.copy(lowDataUsageEnabled = enabled) },
+    )
+
+    private suspend fun saveBool(
+        key: String, enabled: Boolean,
+        read: (CallPresentationPreferences) -> Boolean,
+        update: (CallPresentationPreferences) -> CallPresentationPreferences,
+    ) {
+        initialize()
+        initializationComplete.await()
+        writeMutex.withLock {
+            if (read(value) == enabled) return@withLock
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            // Keep the storage receipt and in-memory publication indivisible on cancellation.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                if (!storage.putBool(key, enabled))
+                    throw IllegalStateException("Unable to save this call presentation preference.")
+                value = update(value)
+                notifyListeners()
+            }
+        }
+    }
 
     private fun setString(
         key: String,
@@ -207,12 +398,16 @@ class CallPresentationPreferencesStore(
             initializationComplete.await()
             writeMutex.withLock {
                 if (read(value) == template) return@withLock
-                val saved = storage.putString(key, template)
-                if (!saved) {
-                    throw IllegalStateException("Unable to save this call screen template.")
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                // Keep the storage receipt and in-memory publication indivisible on cancellation.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    val saved = storage.putString(key, template)
+                    if (!saved) {
+                        throw IllegalStateException("Unable to save this call screen template.")
+                    }
+                    value = update(value)
+                    notifyListeners()
                 }
-                value = update(value)
-                notifyListeners()
             }
         }
     }
@@ -230,15 +425,19 @@ class CallPresentationPreferencesStore(
             initializationComplete.await()
             writeMutex.withLock {
                 if (read(value) == enabled) return@withLock
-                val saved = storage.putBool(key, enabled)
-                if (!saved) {
-                    throw IllegalStateException("Unable to save this call presentation preference.")
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                // Keep the storage receipt and in-memory publication indivisible on cancellation.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    val saved = storage.putBool(key, enabled)
+                    if (!saved) {
+                        throw IllegalStateException("Unable to save this call presentation preference.")
+                    }
+                    // Publish only after storage succeeds. Build from the latest
+                    // state so simultaneous changes to different preferences
+                    // cannot clobber each other.
+                    value = update(value)
+                    notifyListeners()
                 }
-                // Publish only after storage succeeds. Build from the latest
-                // state so simultaneous changes to different preferences
-                // cannot clobber each other.
-                value = update(value)
-                notifyListeners()
             }
         }
     }

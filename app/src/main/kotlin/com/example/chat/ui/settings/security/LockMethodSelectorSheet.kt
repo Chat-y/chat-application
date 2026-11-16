@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -159,19 +160,22 @@ private fun RadioIcon(selected: Boolean) {
 /** _MethodCard: press scale 0.98 over 120ms easeOutCubic. */
 @Composable
 private fun MethodCard(icon: ImageVector, title: String, subtitle: String, selected: Boolean, onTap: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
+//     var pressed by remember { mutableStateOf(false) }
+    val interactions = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interactions.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.98f else 1f, tween(120, easing = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1f)), label = "methodScale")
     Box(
         Modifier.scale(scale)
             .semantics { role = Role.Button; this.selected = selected; contentDescription = if (selected) "$title, selected" else title }
-            .pointerInput(onTap) {
-                detectTapGestures(onPress = {
-                    pressed = true
-                    val ok = tryAwaitRelease()
-                    pressed = false
-                    if (ok) onTap()
-                })
-            },
+//             .pointerInput(onTap) {
+//                 detectTapGestures(onPress = {
+//                     pressed = true
+//                     val ok = tryAwaitRelease()
+//                     pressed = false
+//                     if (ok) onTap()
+//                 })
+//             },
+            .clickable(interactionSource = interactions, indication = null, role = Role.Button, onClick = onTap),
     ) { CardBody(icon, title, subtitle, selected, true) { RadioIcon(selected) } }
 }
 

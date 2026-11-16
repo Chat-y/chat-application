@@ -105,6 +105,11 @@ class ConversationsRepository(
         val locks = dispatchLocks ?: return block()
         return locks.withLock(lockAccountKey(), conversationId, block)
     }
+    private fun requireOwner(expectedScope: Any?) {
+        var current = false
+        check(withScope(expectedScope) { current = true } && current) { "Account changed; operation cancelled." }
+    }
+
     private fun notifyGone(refs: List<com.example.chat.data.local.AttachmentRef>) {
         if (refs.isNotEmpty()) runCatching { onAttachmentsGone(refs) }
     }
@@ -411,9 +416,11 @@ class ConversationsRepository(
     )
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun loadConversations(loadMembers: Boolean = true) {
-        val expectedScope = scopeSnapshot()
-        val raw = rpc.rpc("get_my_conversations", emptyMap())
+    suspend fun loadConversations(loadMembers: Boolean = true, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
+        // Previous ambient read: val raw = rpc.rpc("get_my_conversations", emptyMap())
+        val raw = rpc.forScope(expectedScope).rpc("get_my_conversations", emptyMap())
+        requireOwner(expectedScope)
         val rows = raw as? List<*> ?: emptyList<Any?>()
         val next = LinkedHashMap<String, Conversation>()
 
@@ -470,7 +477,8 @@ class ConversationsRepository(
     }
 
     suspend fun loadConversationMembers(conversationId: String, expectedScope: Any? = scopeSnapshot()) {
-        val raw = rpc.rpc(
+        requireOwner(expectedScope)
+        val raw = rpc.forScope(expectedScope).rpc(
             "get_conversation_members",
             mapOf("p_conversation_id" to conversationId),
         )
@@ -495,30 +503,34 @@ class ConversationsRepository(
     }
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun loadMessages(conversationId: String) {
-        val expectedScope = scopeSnapshot()
+    suspend fun loadMessages(conversationId: String, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
         var fromSnapshot = false
         val messages: MutableList<ChatMessage> = try {
-            val raw = rpc.rpc(
+            val raw = rpc.forScope(expectedScope).rpc(
                 "get_conversation_messages",
                 mapOf(
                     "p_conversation_id" to conversationId,
                     "p_limit" to 100,
                 ),
             )
+            requireOwner(expectedScope)
             val rows = raw as? List<*> ?: emptyList<Any?>()
             val hydratedRows = mutableListOf<Map<String, Any?>>()
             for (item in rows) {
                 val row = item as? Map<String, Any?> ?: continue
                 if (row["is_hidden"] == true) continue
-                noteSeq(conversationId, row)
-                hydratedRows.add(hydrateEncryptedMessageRow(conversationId, row))
+                requireOwner(expectedScope)
+                check(withScope(expectedScope) { noteSeq(conversationId, row) }) { "Account changed." }
+                hydratedRows.add(hydrateEncryptedMessageRow(conversationId, row, expectedScope))
+                requireOwner(expectedScope)
             }
             hydratedRows.map { transport.messageFromRow(it, currentUserId()) }
                 .sortedBy { it.createdAt }
                 .toMutableList()
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error
+            requireOwner(expectedScope)
             // S1 offline read fallback (Bandi, 2026-11-14): serve the encrypted
             // snapshot cache so a cold-opened chat shows its saved messages, no
             // spinner. Cached rows never advance seq cursors and are not
@@ -531,6 +543,7 @@ class ConversationsRepository(
 
         // Retain any optimistic / queued messages currently in memory so they
         // don't disappear on reload.
+        requireOwner(expectedScope)
         val currentList = messagesByChatId[conversationId] ?: mutableListOf()
         for (current in currentList) {
             if (current.deliveryState == DeliveryState.queued ||
@@ -628,25 +641,30 @@ class ConversationsRepository(
      *  realtime envelope reveals a seq gap. */
     @Volatile private var cursorsRestored = false
 
-    suspend fun catchUpConversation(conversationId: String) {
+    suspend fun catchUpConversation(conversationId: String, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
         if (!cursorsRestored) {
             cursorsRestored = true
             restoreSyncCursors()
         }
-        val expectedScope = scopeSnapshot()
+        requireOwner(expectedScope)
         val params = mutableMapOf<String, Any?>(
             "p_conversation_id" to conversationId,
             "p_limit" to 200,
         )
         lastSeqByChatId[conversationId]?.let { params["p_after_seq"] = it }
-        val raw = rpc.rpc("get_conversation_messages", params)
+        // Previous ambient rpc.rpc could mix accounts after cursor restore.
+        val raw = rpc.forScope(expectedScope).rpc("get_conversation_messages", params)
+        requireOwner(expectedScope)
         val rows = raw as? List<*> ?: return
         val applied = mutableListOf<ChatMessage>()
         for (item in rows) {
             val row = item as? Map<String, Any?> ?: continue
             if (row["is_hidden"] == true) continue
-            noteSeq(conversationId, row)
-            val hydrated = hydrateEncryptedMessageRow(conversationId, row)
+            requireOwner(expectedScope)
+            check(withScope(expectedScope) { noteSeq(conversationId, row) }) { "Account changed." }
+            val hydrated = hydrateEncryptedMessageRow(conversationId, row, expectedScope)
+            requireOwner(expectedScope)
             applied.add(transport.messageFromRow(hydrated, currentUserId()))
         }
         if (applied.isEmpty()) return
@@ -656,7 +674,10 @@ class ConversationsRepository(
                 if (list.none { it.id == message.id }) list.add(message)
             }
             list.sortBy { it.createdAt }
-            snapshotScope?.launch { persistMessageSnapshot(conversationId, list) }
+            // Previous launch captured a mutable list and ambient account defaults.
+            val snapshotCopy = list.toList()
+            val capturedUser = currentUserId()
+            snapshotScope?.launch { persistMessageSnapshot(conversationId, snapshotCopy, expectedScope, capturedUser) }
         }
         notifyChanged()
     }
@@ -665,12 +686,13 @@ class ConversationsRepository(
      *  the opaque MLS payload). A seq gap triggers catch-up instead of
      *  decrypting out of order; otherwise the envelope is hydrated and
      *  appended immediately. */
-    suspend fun ingestSecureEnvelope(data: Map<String, Any?>) {
+    suspend fun ingestSecureEnvelope(data: Map<String, Any?>, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
         val conversationId = data["room_id"]?.toString() ?: return
         val seq = (data["seq"] as? Number)?.toLong()
         val last = lastSeqByChatId[conversationId]
         if (seq != null && last != null && seq > last + 1) {
-            catchUpConversation(conversationId)
+            catchUpConversation(conversationId, expectedScope)
             return
         }
         val row = mutableMapOf<String, Any?>(
@@ -686,8 +708,8 @@ class ConversationsRepository(
             "sender_device_id" to data["sender_device_id"],
             "encrypted_payload" to data["encrypted_payload"],
         )
-        val expectedScope = scopeSnapshot()
-        val hydrated = hydrateEncryptedMessageRow(conversationId, row)
+        val hydrated = hydrateEncryptedMessageRow(conversationId, row, expectedScope)
+        requireOwner(expectedScope)
         val message = transport.messageFromRow(hydrated, currentUserId())
         withScope(expectedScope) {
             val list = messagesByChatId.getOrPut(conversationId) { mutableListOf() }
@@ -699,13 +721,15 @@ class ConversationsRepository(
                 snapshotScope?.launch { persistMessageSnapshot(conversationId, snapshotCopy, expectedScope, capturedUser) }
             }
         }
-        seq?.let { noteSeq(conversationId, mapOf("seq" to it)) }
+        // Previous noteSeq ran outside the original owner guard after decryption.
+        withScope(expectedScope) { seq?.let { noteSeq(conversationId, mapOf("seq" to it)) } }
         notifyChanged()
     }
 
     /** MLS edit fan-out (chat UI matrix, 15-min server window): re-decrypt the
      *  replacement ciphertext and update the local copy in place. */
-    suspend fun applySecureEdit(data: Map<String, Any?>) {
+    suspend fun applySecureEdit(data: Map<String, Any?>, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
         val conversationId = data["room_id"]?.toString() ?: return
         val id = data["id"]?.toString() ?: return
         val row = mutableMapOf<String, Any?>(
@@ -720,8 +744,8 @@ class ConversationsRepository(
             "sender_device_id" to data["sender_device_id"],
             "encrypted_payload" to data["encrypted_payload"],
         )
-        val expectedScope = scopeSnapshot()
-        val hydrated = hydrateEncryptedMessageRow(conversationId, row)
+        val hydrated = hydrateEncryptedMessageRow(conversationId, row, expectedScope)
+        requireOwner(expectedScope)
         val message = transport.messageFromRow(hydrated, currentUserId())
         withScope(expectedScope) {
             val list = messagesByChatId[conversationId] ?: return@withScope
@@ -741,11 +765,12 @@ class ConversationsRepository(
 
     /** Delete-for-everyone fan-out (48 h server window): tombstone the local
      *  copy; the next server fetch confirms (list rows arrive payload-less). */
-    suspend fun applyRemoteDeleteForEveryone(data: Map<String, Any?>) {
+    suspend fun applyRemoteDeleteForEveryone(data: Map<String, Any?>, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
         val conversationId = data["room_id"]?.toString() ?: return
         val id = data["id"]?.toString() ?: return
         if (data["for_everyone"] != true) return
-        val expectedDeleteScope = scopeSnapshot()
+        val expectedDeleteScope = expectedScope
         withScope(expectedDeleteScope) {
             val list = messagesByChatId[conversationId] ?: return@withScope
             val index = list.indexOfFirst { it.id == id }
@@ -822,7 +847,9 @@ class ConversationsRepository(
     suspend fun hydrateEncryptedMessageRow(
         conversationId: String,
         source: Map<String, Any?>,
+        expectedScope: Any? = scopeSnapshot(),
     ): Map<String, Any?> {
+        requireOwner(expectedScope)
         val row = source.toMutableMap()
         if (row["view_once"] == true || (row["metadata"] as? Map<*, *>)?.get("view_once") == true) {
             row["body"] = com.example.chat.core.messages.ViewOnceTextPolicy.PLACEHOLDER
@@ -868,10 +895,13 @@ class ConversationsRepository(
             return decryptionFailureRow(row)
         }
         return try {
+            // Original owner check immediately before native work; no account recapture here.
+            requireOwner(expectedScope)
             val decrypted = service.decryptPayload(
                 conversationId = conversationId,
                 ciphertext = ciphertext,
             )
+            requireOwner(expectedScope)
             val decryptedMetadata = (decrypted["metadata"] as? Map<String, Any?>) ?: emptyMap()
             val serverMetadata = (row["metadata"] as? Map<String, Any?>) ?: emptyMap()
             row["body"] = decrypted["text"]?.toString() ?: ""
@@ -879,6 +909,8 @@ class ConversationsRepository(
             row["metadata"] = decryptedMetadata + serverMetadata
             row
         } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            requireOwner(expectedScope)
             decryptionFailureRow(row)
         }
     }
@@ -908,13 +940,16 @@ class ConversationsRepository(
         linkedTaskId: String? = null,
         extraMetadata: Map<String, Any?>? = null,
         clientMessageId: String? = null,
+        expectedScope: Any? = scopeSnapshot(),
     ): ChatMessage {
+        requireOwner(expectedScope)
         val me = currentUserId() ?: throw Exception("Authentication required.")
         if (!conversationsById.containsKey(conversationId)) {
             // A secure-channel send can arrive before any conversation list
             // load this session (the flag lives outside the list): hydrate the
             // list once instead of failing a send the server would accept.
-            loadConversations(loadMembers = false)
+            loadConversations(loadMembers = false, expectedScope = expectedScope)
+            requireOwner(expectedScope)
             if (!conversationsById.containsKey(conversationId)) {
                 throw Exception("Conversation not found.")
             }
@@ -923,6 +958,7 @@ class ConversationsRepository(
             throw IllegalStateException("Encrypted message transport is unavailable.")
         }
 
+        requireOwner(expectedScope)
         val pendingSend = transport.buildPendingSend(
             conversationId = conversationId,
             text = text,
@@ -937,8 +973,10 @@ class ConversationsRepository(
         )
 
         try {
-            return deliverAndResolve(pendingSend, fallbackType = type)
+            return deliverAndResolve(pendingSend, fallbackType = type, expectedScope = expectedScope)
         } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            requireOwner(expectedScope)
             if (error is MlsStorageInitializationException &&
                 error.failure != MlsStorageInitializationFailure.databaseInUse
             ) {
@@ -949,6 +987,7 @@ class ConversationsRepository(
 
             val store = pendingStore ?: throw error
             store.put(me, pendingSend)
+            requireOwner(expectedScope)
 
             val optimisticMsg = ChatMessage(
                 id = pendingSend.clientMessageId,
@@ -965,6 +1004,14 @@ class ConversationsRepository(
                 createdAt = pendingSend.createdAt,
                 deliveryState = DeliveryState.queued,
             )
+            val queuedCount = store.read(me).size
+            check(withScope(expectedScope) {
+                val list = messagesByChatId.getOrPut(conversationId) { mutableListOf() }
+                if (list.none { it.id == pendingSend.clientMessageId }) list.add(optimisticMsg)
+                notifyChanged()
+                onQueuedCountChanged(queuedCount)
+            }) { "Account changed; queued send belongs to its original account." }
+            /* Previous unguarded optimistic update retained.
             val list = messagesByChatId.getOrPut(conversationId) { mutableListOf() }
             if (list.none { it.id == pendingSend.clientMessageId }) {
                 list.add(optimisticMsg)
@@ -972,6 +1019,7 @@ class ConversationsRepository(
             notifyChanged()
 
             onQueuedCountChanged(store.read(me).size)
+            */
 
             if (transport.isMlsSetupPendingError(error)) {
                 throw SecureSendPendingException(SECURE_SETUP_PENDING_CODE)
@@ -1001,18 +1049,22 @@ class ConversationsRepository(
     private suspend fun deliverAndResolve(
         send: PendingSecureSend,
         fallbackType: MessageType,
+        expectedScope: Any? = scopeSnapshot(),
     ): ChatMessage {
         // The single MLS dispatch point (direct sends AND queued retries):
         // takes the cross-plane lock so a toggle can never catch an MLS
         // delivery mid-flight.
         val messageId = withDispatchLock(send.conversationId) {
-            transport.deliverEncryptedMessage(send)
+            requireOwner(expectedScope)
+            transport.deliverEncryptedMessage(send, expectedScope) { requireOwner(expectedScope) }
         }
+        requireOwner(expectedScope)
         kotlinx.coroutines.coroutineScope {
-            val a = launch { loadMessages(send.conversationId) }
-            val b = launch { loadConversations(loadMembers = false) }
+            val a = launch { loadMessages(send.conversationId, expectedScope) }
+            val b = launch { loadConversations(loadMembers = false, expectedScope = expectedScope) }
             a.join(); b.join()
         }
+        requireOwner(expectedScope)
         val me = currentUserId()
         val result = messagesByChatId[send.conversationId]
             ?.firstOrNull { it.id == messageId }
@@ -1023,14 +1075,30 @@ class ConversationsRepository(
                 type = fallbackType,
                 text = send.text,
                 attachment = attachmentFromPending(send.attachment),
+                replyToMessageId = send.replyToMessageId,
+                replyToPreviewText = send.replyToPreviewText,
+                replyToSenderName = send.replyToSenderName,
+                linkedTaskId = send.linkedTaskId,
+                metadata = send.metadata,
                 createdAt = send.createdAt,
                 deliveryState = DeliveryState.sent,
             )
-        onMessageCreated(send.conversationId, result.id)
+        check(withScope(expectedScope) { onMessageCreated(send.conversationId, result.id) }) { "Account changed." }
         return result
     }
 
     /** Exact port of markAsUnread (local bump, then best-effort RPC). */
+    suspend fun markAsUnread(conversationId: String, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
+        // Unsupported backend methods must fail rather than report a swallowed success.
+        rpc.forScope(expectedScope).rpc("mark_conversation_unread", mapOf("p_conversation_id" to conversationId))
+        check(withScope(expectedScope) {
+            val current = conversationsById[conversationId]
+            if (current != null) conversationsById[conversationId] = current.copy(unreadCount = current.unreadCount.coerceAtLeast(1))
+            notifyChanged()
+        }) { "Account changed." }
+    }
+    /* Previous optimistic/swallowed unread RPC retained.
     suspend fun markAsUnread(conversationId: String) {
         val current = conversationsById[conversationId]
         if (current != null) {
@@ -1046,6 +1114,8 @@ class ConversationsRepository(
             )
         }
     }
+
+    */
 
     /** Exact port of clearConversation. */
     fun clearConversation(conversationId: String) {
@@ -1205,7 +1275,10 @@ class ConversationsRepository(
         conversationId: String,
         messageId: String,
         newText: String,
+        expectedScope: Any? = scopeSnapshot(),
     ) {
+        requireOwner(expectedScope)
+        val requestRpc = rpc.forScope(expectedScope)
         val text = newText.trim()
         if (text.isEmpty()) {
             throw IllegalArgumentException("Message cannot be empty.")
@@ -1222,7 +1295,8 @@ class ConversationsRepository(
         // authoritative server row before choosing a transport so an offline
         // cache can never make an MLS message look like a legacy row.
         if (list[index].metadata.isEmpty()) {
-            loadMessages(conversationId)
+            loadMessages(conversationId, expectedScope)
+            requireOwner(expectedScope)
             list = messagesByChatId[conversationId]
                 ?: throw IllegalStateException("Conversation messages could not be refreshed.")
             index = list.indexOfFirst { it.id == messageId }
@@ -1269,7 +1343,8 @@ class ConversationsRepository(
                         "metadata" to appMetadata,
                     ),
                 )
-                rpc.rpc(
+                requireOwner(expectedScope)
+                requestRpc.rpc(
                     "edit_mls_message_v1",
                     mapOf(
                         "p_message_id" to messageId,
@@ -1280,7 +1355,8 @@ class ConversationsRepository(
                     ),
                 )
             } else {
-                rpc.rpc(
+                requireOwner(expectedScope)
+                requestRpc.rpc(
                     "edit_chat_message",
                     mapOf(
                         "p_message_id" to messageId,
@@ -1290,13 +1366,16 @@ class ConversationsRepository(
             }
         } catch (error: Throwable) {
             // Restore the exact prior message; no unencrypted fallback write.
-            list[index] = original
-            notifyChanged()
+            withScope(expectedScope) {
+                list[index] = original
+                notifyChanged()
+            }
             throw error
         }
 
-        loadMessages(conversationId)
-        notifyChanged()
+        requireOwner(expectedScope)
+        loadMessages(conversationId, expectedScope)
+        check(withScope(expectedScope) { notifyChanged() }) { "Account changed." }
     }
 
     /** Exact port of _deleteMessageAsync's non-demo path. */
@@ -1304,9 +1383,12 @@ class ConversationsRepository(
         conversationId: String,
         messageId: String,
         forEveryone: Boolean = false,
+        expectedScope: Any? = scopeSnapshot(),
     ) {
+        requireOwner(expectedScope)
+        val requestRpc = rpc.forScope(expectedScope)
         val target = messagesByChatId[conversationId]?.firstOrNull { it.id == messageId }
-        rpc.rpc(
+        requestRpc.rpc(
             "delete_chat_message",
             mapOf(
                 "p_message_id" to messageId,
@@ -1314,15 +1396,34 @@ class ConversationsRepository(
             ),
         )
         // RPC succeeded (it throws otherwise): the message is gone for this user, drop its local media now.
-        if (target != null) notifyGone(listOfNotNull(com.example.chat.data.media.AttachmentRefs.refOf(conversationId, target)))
+        check(withScope(expectedScope) {
+            if (target != null) notifyGone(listOfNotNull(com.example.chat.data.media.AttachmentRefs.refOf(conversationId, target)))
+        }) { "Account changed; reopen the original account to check the deletion." }
         kotlinx.coroutines.coroutineScope {
-            val a = launch { loadMessages(conversationId) }
-            val b = launch { loadConversations(loadMembers = false) }
+            val a = launch { loadMessages(conversationId, expectedScope) }
+            val b = launch { loadConversations(loadMembers = false, expectedScope = expectedScope) }
             a.join(); b.join()
         }
-        notifyChanged()
+        check(withScope(expectedScope) { notifyChanged() }) { "Account changed." }
     }
 
+    suspend fun markAsRead(conversationId: String, expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
+        if (shouldSendReadReceipts(conversationId)) {
+            rpc.forScope(expectedScope).rpc("mark_conversation_read", mapOf("p_conversation_id" to conversationId))
+            requireOwner(expectedScope)
+            loadConversations(loadMembers = false, expectedScope = expectedScope)
+            requireOwner(expectedScope)
+            if (messagesByChatId.containsKey(conversationId)) loadMessages(conversationId, expectedScope)
+        } else {
+            check(withScope(expectedScope) {
+                val current = conversationsById[conversationId]
+                if (current != null && current.unreadCount != 0) conversationsById[conversationId] = current.copy(unreadCount = 0)
+            }) { "Account changed." }
+        }
+        check(withScope(expectedScope) { notifyChanged() }) { "Account changed." }
+    }
+    /* Previous ambient read RPC/refresh retained.
     suspend fun markAsRead(conversationId: String) {
         if (shouldSendReadReceipts(conversationId)) {
             rpc.rpc(
@@ -1341,6 +1442,8 @@ class ConversationsRepository(
         }
         notifyChanged()
     }
+
+    */
 
     /** Exact port of searchUsersRemote's non-demo path (search_profiles
      *  RPC, result caching into usersById, optional self prepend). */
@@ -1424,6 +1527,19 @@ class ConversationsRepository(
     /** Exact port of markAllAsRead: local counters cleared first and again
      *  after any server refresh, receipts persisted only where the read-
      *  receipt policy allows (ghost mode / privacy suppresses publication). */
+    suspend fun markAllAsRead(expectedScope: Any? = scopeSnapshot(), conversationIds: Set<String>? = null) {
+        requireOwner(expectedScope)
+        val ids = synchronized(stateLock) { conversationsById.values.filter {
+            it.unreadCount > 0 && (conversationIds == null || it.id in conversationIds)
+        }.map { it.id } }
+        // Reuse the scoped contract; do not clear all counters before an unconfirmed request.
+        for (id in ids) {
+            requireOwner(expectedScope)
+            markAsRead(id, expectedScope)
+        }
+    }
+
+    /* Previous unscoped mark-all and swallowed failures retained.
     suspend fun markAllAsRead() {
         val unreadIds = conversationsById.values
             .filter { it.unreadCount > 0 }
@@ -1464,6 +1580,8 @@ class ConversationsRepository(
         // state.
         clearLocalCounters()
     }
+
+    */
 
     companion object {
         fun presenceFromDatabase(value: String?): PresenceState = when (value) {
@@ -1538,3 +1656,45 @@ class MlsServiceEncryptorAdapter(
         payload: Map<String, Any?>,
     ): com.example.chat.core.crypto.MlsEncryptedPayload = service.encryptEditedPayload(conversationId, payload)
 }
+
+// Replaced lines retained for source comparison (not executable).
+//     suspend fun loadConversations(loadMembers: Boolean = true) {
+//         val expectedScope = scopeSnapshot()
+//         val raw = rpc.rpc("get_my_conversations", emptyMap())
+//         val raw = rpc.rpc(
+//     suspend fun loadMessages(conversationId: String) {
+//         val expectedScope = scopeSnapshot()
+//             val raw = rpc.rpc(
+//                 noteSeq(conversationId, row)
+//             loadConversations(loadMembers = false)
+//             return deliverAndResolve(pendingSend, fallbackType = type)
+//             transport.deliverEncryptedMessage(send)
+//             val a = launch { loadMessages(send.conversationId) }
+//             val b = launch { loadConversations(loadMembers = false) }
+//         onMessageCreated(send.conversationId, result.id)
+
+// Previous catch-up/ingest lines retained for source comparison (not executable):
+//     suspend fun catchUpConversation(conversationId: String) {
+//         val expectedScope = scopeSnapshot()
+//         val raw = rpc.rpc("get_conversation_messages", params)
+//             noteSeq(conversationId, row)
+//             snapshotScope?.launch { persistMessageSnapshot(conversationId, list) }
+//     suspend fun ingestSecureEnvelope(data: Map<String, Any?>) {
+//             catchUpConversation(conversationId)
+//         seq?.let { noteSeq(conversationId, mapOf("seq" to it)) }
+//     suspend fun applySecureEdit(data: Map<String, Any?>) {
+//     suspend fun applyRemoteDeleteForEveryone(data: Map<String, Any?>) {
+//         val expectedDeleteScope = scopeSnapshot()
+
+// Previous edit/delete lines retained for source comparison (not executable):
+//         newText: String,
+//         forEveryone: Boolean = false,
+//                 rpc.rpc(
+//         rpc.rpc(
+//             list[index] = original
+//         loadMessages(conversationId)
+//             val a = launch { loadMessages(conversationId) }
+//             val b = launch { loadConversations(loadMembers = false) }
+//         if (target != null) notifyGone(listOfNotNull(com.example.chat.data.media.AttachmentRefs.refOf(conversationId, target)))
+
+// Prior hydration call retained: hydratedRows.add(hydrateEncryptedMessageRow(conversationId, row, expectedScope))

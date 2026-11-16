@@ -2,6 +2,10 @@ package com.example.chat.ui.chats.detail
 
 import com.example.chat.ReleaseFeatures
 
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -54,15 +58,6 @@ import com.example.chat.core.theme.argbWithAlpha
  *  of attachment actions plus the demo sandbox dock. Callbacks are owned by
  *  the screen; the upload pipeline itself is the attachment-service slice. */
 
-private val gradientGallery = listOf(Color(0xFFE91E63), Color(0xFFC2185B))
-private val gradientVideo = listOf(Color(0xFFFF5722), Color(0xFFE64A19))
-private val gradientDocument = listOf(Color(0xFF7F66FF), Color(0xFF5E35B1))
-private val gradientAudio = listOf(Color(0xFFFF9800), Color(0xFFF57C00))
-private val gradientLocation = listOf(Color(0xFF2E7D32), Color(0xFF1B5E20))
-private val gradientContact = listOf(Color(0xFF0097A7), Color(0xFF006064))
-private val gradientPoll = listOf(Color(0xFF0288D1), Color(0xFF01579B))
-private val gradientTask = listOf(Color(0xFF00BFA5), Color(0xFF00897B))
-private val gradientLargeFile = listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
 
 enum class AttachmentAction { image, video, document, audio, location, contact, poll, task,
     chatyDirect, largeFile, demoDocument, demoAudio, demoCall, demoTask, demoLocation }
@@ -82,6 +77,16 @@ fun AttachmentSheetContent(
     val accent = Color(theme.accentColor)
     val foreground = Color(theme.primaryTextColor)
     val foregroundSecondary = Color(theme.secondaryTextColor)
+    val themedGradient = listOf(accent, Color(theme.cardColor))
+    val gradientGallery = themedGradient
+    val gradientVideo = themedGradient
+    val gradientDocument = themedGradient
+    val gradientAudio = themedGradient
+    val gradientLocation = themedGradient
+    val gradientContact = themedGradient
+    val gradientPoll = themedGradient
+    val gradientTask = themedGradient
+    val gradientLargeFile = themedGradient
 
     // Poll is deferred to the next release (ReleaseFeatures.POLLS).
     val items = listOfNotNull(
@@ -131,18 +136,18 @@ fun AttachmentSheetContent(
                 Row(
                     Modifier
                         .background(
-                            Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))),
+                            Brush.linearGradient(themedGradient),
                             RoundedCornerShape(8.dp),
                         )
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.Science, contentDescription = null, tint = Color.White,
+                    Icon(Icons.Rounded.Science, contentDescription = null, tint = Color(theme.onAccentColor),
                         modifier = Modifier.size(12.dp))
                     Box(Modifier.width(4.dp))
                     Text(
                         "DEMO SANDBOX",
-                        color = Color.White,
+                        color = Color(theme.onAccentColor),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.W800,
                         letterSpacing = 0.5.sp,
@@ -173,19 +178,22 @@ fun AttachmentSheetContent(
                 }
                 Box(Modifier.width(8.dp))
                 DemoPill(Icons.Rounded.TaskAlt, "Test Task Card",
-                    listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8))) {
+                    themedGradient) {
                     onAction(AttachmentAction.demoTask)
                 }
                 Box(Modifier.width(8.dp))
                 DemoPill(Icons.Rounded.PinDrop, "Test Location",
-                    listOf(Color(0xFF10B981), Color(0xFF059669))) {
+                    themedGradient) {
                     onAction(AttachmentAction.demoLocation)
                 }
             }
         }
 
         // 3-column grid (Dart: 3 columns when width >= 220 and textScale <= 1.6)
-        val rows = items.chunked(3)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+        val columns = (maxWidth.value / (88f * fontScale)).toInt().coerceIn(1, 3)
+        val rows = items.chunked(columns)
         rows.forEach { rowItems ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 rowItems.forEach { item ->
@@ -193,9 +201,10 @@ fun AttachmentSheetContent(
                         onAction(item.action)
                     }
                 }
-                repeat(3 - rowItems.size) { Box(Modifier.weight(1f)) }
+                repeat(columns - rowItems.size) { Box(Modifier.weight(1f)) }
             }
             Box(Modifier.height(12.dp))
+        }
         }
         // The Dart sheet's "encrypted on this device" footer is dropped on
         // purpose: the Kotlin REST backend has no E2EE, so the claim would be
@@ -215,7 +224,7 @@ private fun DemoPill(
             .heightIn(min = 48.dp)
             .background(gradient.first().copy(alpha = 0.12f), RoundedCornerShape(14.dp))
             .border(1.dp, gradient.first().copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-            .pointerInput(label) { detectTapGestures(onTap = { onTap() }) }
+            .clickable(role = Role.Button, onClick = onTap)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -225,7 +234,7 @@ private fun DemoPill(
                 .background(Brush.linearGradient(gradient), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+            Icon(icon, contentDescription = null, tint = androidx.compose.material3.MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp))
         }
         Box(Modifier.width(8.dp))
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.1).sp)
@@ -243,7 +252,7 @@ private fun AttachmentGridTile(
     Column(
         modifier
             .heightIn(min = 76.dp)
-            .pointerInput(item.label) { detectTapGestures(onTap = { onTap() }) }
+            .clickable(role = Role.Button, onClick = onTap)
             .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -262,9 +271,31 @@ private fun AttachmentGridTile(
             fontSize = 12.sp,
             fontWeight = FontWeight.W700,
             letterSpacing = (-0.1).sp,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
     }
 }
+
+// Previous source retained for source-only media polish:
+// private val gradientGallery = listOf(Color(0xFFE91E63), Color(0xFFC2185B))
+// private val gradientVideo = listOf(Color(0xFFFF5722), Color(0xFFE64A19))
+// private val gradientDocument = listOf(Color(0xFF7F66FF), Color(0xFF5E35B1))
+// private val gradientAudio = listOf(Color(0xFFFF9800), Color(0xFFF57C00))
+// private val gradientLocation = listOf(Color(0xFF2E7D32), Color(0xFF1B5E20))
+// private val gradientContact = listOf(Color(0xFF0097A7), Color(0xFF006064))
+// private val gradientPoll = listOf(Color(0xFF0288D1), Color(0xFF01579B))
+// private val gradientTask = listOf(Color(0xFF00BFA5), Color(0xFF00897B))
+// private val gradientLargeFile = listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
+//                             Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))),
+//                     Icon(Icons.Rounded.Science, contentDescription = null, tint = Color.White,
+//                         color = Color.White,
+//                     listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8))) {
+//                     listOf(Color(0xFF10B981), Color(0xFF059669))) {
+//         val rows = items.chunked(3)
+//                 repeat(3 - rowItems.size) { Box(Modifier.weight(1f)) }
+//             .pointerInput(label) { detectTapGestures(onTap = { onTap() }) }
+//             Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+//             .pointerInput(item.label) { detectTapGestures(onTap = { onTap() }) }
+//             maxLines = 1,

@@ -65,7 +65,8 @@ fun ThemePreviewCard(
                         .border(2.dp, if (isSelected) tc(t.accentColor) else tc(t.secondaryTextColor).alpha(0.6f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (isSelected) Box(Modifier.size(6.dp).background(if (t.isDark) Color.Black else Color.White, CircleShape))
+                    // Prior fixed dot: if (t.isDark) Color.Black else Color.White
+                    if (isSelected) Box(Modifier.size(6.dp).background(tc(t.onAccentColor), CircleShape))
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -85,10 +86,10 @@ fun ThemePreviewCard(
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { ThemePairPreview(t, layout = layout) }
             Spacer(Modifier.size(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ColorDot(tc(t.backgroundColor), "Bg"); Spacer(Modifier.width(4.dp))
-                ColorDot(tc(t.surfaceColor), "Surface"); Spacer(Modifier.width(4.dp))
-                ColorDot(tc(t.accentColor), "Accent"); Spacer(Modifier.width(4.dp))
-                ColorDot(tc(t.outgoingBubbleColor), "Bubble")
+                ColorDot(tc(t.backgroundColor), "Bg", t); Spacer(Modifier.width(4.dp))
+                ColorDot(tc(t.surfaceColor), "Surface", t); Spacer(Modifier.width(4.dp))
+                ColorDot(tc(t.accentColor), "Accent", t); Spacer(Modifier.width(4.dp))
+                ColorDot(tc(t.outgoingBubbleColor), "Bubble", t)
                 Spacer(Modifier.weight(1f))
                 Text(
                     if (isSelected) "\u25CF Active" else "Apply",
@@ -105,28 +106,31 @@ fun ThemePreviewCard(
 /** Dart Tooltip: long-press shows the plain tooltip text. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun ColorDot(color: Color, tooltip: String) {
+private fun ColorDot(color: Color, tooltip: String, t: ThemeConfig) {
     // m3 1.3.1 ships PlainTooltip only in Tooltip_androidKt (not on the
     // metadata compile path), so the plain tooltip body is spelled out with
     // the same surface/shape/text the PlainTooltip composable wraps.
+    // Tooltip chrome follows the previewed theme's tokens (was a fixed
+    // 0xFF3B3F44 surface with white text).
     androidx.compose.material3.TooltipBox(
         positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = {
             androidx.compose.material3.Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = Color(0xFF3B3F44),
+                color = tc(t.surfaceColor),
                 shadowElevation = 2.dp,
             ) {
                 Text(
                     tooltip,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    color = Color.White,
+                    color = tc(t.primaryTextColor),
                     fontSize = 12.sp,
                 )
             }
         },
         state = androidx.compose.material3.rememberTooltipState(),
     ) {
-        Box(Modifier.size(14.dp).background(color, CircleShape).border(1.dp, Color.Black.alpha(0.15f), CircleShape))
+        // Prior fixed border: Color.Black.alpha(0.15f)
+        Box(Modifier.size(14.dp).background(color, CircleShape).border(1.dp, tc(t.secondaryTextColor).alpha(0.25f), CircleShape))
     }
 }

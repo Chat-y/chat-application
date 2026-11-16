@@ -84,6 +84,12 @@ fun HomeSwipeActions(
         }
     }
 
+    fun closeNow() {
+        animation.value?.cancel()
+        offset.floatValue = 0f
+        scope.launch { snap.snapTo(0f) }
+    }
+
     // Selection mode must not keep a stale tray or a pointer-blocking overlay.
     // Mask its offset synchronously; cancel/reset the animation in this effect.
     LaunchedEffect(enabled) {
@@ -141,7 +147,11 @@ fun HomeSwipeActions(
                             maxDragPx = if (leading) maxLeadingPx else maxTrailingPx,
                             dragOffset = current,
                             revealed = abs(current) > 6f,
-                            onTrigger = { settle(0f); action.onTriggered() },
+                            // was: onTrigger = { settle(0f); action.onTriggered() },
+                            // Close immediately (no animation) before running the action, so a row that is
+                            // archived, re-sorted or reused by the lazy list never keeps a stale offset
+                            // and appears blank or displaced.
+                            onTrigger = { closeNow(); action.onTriggered() },
                         )
                     }
                 }

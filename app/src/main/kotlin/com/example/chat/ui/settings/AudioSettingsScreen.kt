@@ -1,5 +1,8 @@
 package com.example.chat.ui.settings
 
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import kotlinx.coroutines.flow.collect
 import androidx.lifecycle.repeatOnLifecycle
 
@@ -83,9 +86,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.composed
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -175,6 +180,29 @@ fun AudioSettingsScreen(
             onCommit = { currentAudioBack() })
     }
     val context = androidx.compose.ui.platform.LocalContext.current
+    fun hasBluetoothPermission(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+        androidx.core.content.ContextCompat.checkSelfPermission(context,
+            android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    var bluetoothPermissionGranted by remember(context) { mutableStateOf(hasBluetoothPermission()) }
+    var bluetoothPermissionDenied by rememberSaveable { mutableStateOf(false) }
+    var showBluetoothRationale by rememberSaveable { mutableStateOf(false) }
+    val bluetoothPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        bluetoothPermissionGranted = granted
+        bluetoothPermissionDenied = !granted
+        // Granting permission only refreshes the route list, never changes output.
+    }
+    val audioLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(audioLifecycleOwner, context) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                bluetoothPermissionGranted = hasBluetoothPermission()
+            }
+        }
+        audioLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { audioLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 // Previous implementation retained:     var version by remember { mutableIntStateOf(0) }
 // Previous implementation retained:     // AU1-14: listeners may fire on a non-main thread; hop to main before
 // Previous implementation retained:     // touching snapshot state.
@@ -225,10 +253,12 @@ fun AudioSettingsScreen(
 // Previous implementation retained:         capability.getCapabilities(AudioUseCase.communication)
     var loadingError by remember(capability) { mutableStateOf(false) }
     var capabilityAttempt by remember(capability) { androidx.compose.runtime.mutableIntStateOf(0) }
-    androidx.compose.runtime.LaunchedEffect(capability, capabilityAttempt) {
+// Previous implementation retained:     androidx.compose.runtime.LaunchedEffect(capability, capabilityAttempt) {
+    androidx.compose.runtime.LaunchedEffect(capability, capabilityAttempt, bluetoothPermissionGranted) {
         loadingError = false
         try {
-            capability.getCapabilities(AudioUseCase.communication)
+            // capability.getCapabilities(AudioUseCase.communication) // may reuse stale pre-permission cache
+            capability.refreshCapabilities(AudioUseCase.communication)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -243,7 +273,10 @@ fun AudioSettingsScreen(
     }
     val dualStatus = uiState.dualStatus
     val activeRoute = uiState.activeRoute
-    val availableRoutes = uiState.routes
+// Previous implementation retained:     val availableRoutes = uiState.routes
+    val availableRoutes = uiState.routes.filter { route ->
+        bluetoothPermissionGranted || (route != AudioOutputRoute.bluetooth && route != AudioOutputRoute.hearingAid)
+    }
     val mode = uiState.mode
     val callInProgress = uiState.callInProgress
 
@@ -259,6 +292,7 @@ fun AudioSettingsScreen(
     var showDeviceDetails by rememberSaveable { mutableStateOf(false) }
     var showAllDevices by rememberSaveable { mutableStateOf(false) }
     var showSpeakerConfirm by rememberSaveable { mutableStateOf(false) }
+    var showExperimentalConfirm by rememberSaveable { mutableStateOf(false) }
 
     fun requestRoute(route: AudioOutputRoute) {
 // Previous implementation retained:         scope.launch {
@@ -303,6 +337,22 @@ fun AudioSettingsScreen(
         }
     }
 
+    if (showBluetoothRationale) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showBluetoothRationale = false },
+            title = { Text("Bluetooth call audio") },
+            text = { Text("Allow Nearby devices to choose Bluetooth headphones or hearing aids for calls. This does not start a call or change the current audio output.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = {
+                showBluetoothRationale = false
+                bluetoothPermissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+            }) { Text("Continue") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { showBluetoothRationale = false }) { Text("Cancel") } },
+            containerColor = colors.surface,
+            titleContentColor = colors.foreground,
+            textContentColor = colors.foregroundSecondary,
+        )
+    }
+
 // Previous implementation retained:     Box(Modifier.fillMaxSize().background(colors.background)) {
     Box(Modifier.fillMaxSize().background(colors.background).then(
         Modifier.graphicsLayer {
@@ -312,6 +362,24 @@ fun AudioSettingsScreen(
         // AU1-37: shared page header (was: custom 19*fontScale title Row).
         ChatyAppBar(title = "Audio & Speakers", onBack = onBack)
         CallAudioRecoverySection()
+        if (!bluetoothPermissionGranted) {
+            Text("Nearby devices permission is needed to choose Bluetooth call audio.",
+                color = colors.foregroundSecondary, modifier = Modifier.padding(horizontal = 16.dp))
+            androidx.compose.material3.TextButton(onClick = { showBluetoothRationale = true },
+                modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 8.dp)) {
+                Text("Allow Bluetooth audio")
+            }
+            if (bluetoothPermissionDenied) {
+                Text("If the permission prompt no longer appears, allow Nearby devices in app settings.",
+                    color = colors.foregroundSecondary, modifier = Modifier.padding(horizontal = 16.dp))
+                androidx.compose.material3.TextButton(onClick = {
+                    runCatching { context.startActivity(android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.fromParts("package", context.packageName, null))) }
+                        .onFailure { screenScope.launch { snackbarHostState.showSnackbar("App settings could not be opened") } }
+                }, modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 8.dp)) { Text("Open app settings") }
+            }
+        }
         if (screenState !is AudioUiLoadState.Ready) {
             AudioCapabilitiesPlaceholder(failed = screenState is AudioUiLoadState.Failed,
                 onRetry = { capabilityAttempt++ })
@@ -449,7 +517,8 @@ fun AudioSettingsScreen(
                     androidx.compose.material3.ListItem(
 // Previous implementation retained:                         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).springInteractiveScale(0.98f)
                         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                            .then(if (!reduceAudioMotion) Modifier.springInteractiveScale(0.98f) else Modifier)
+// Previous implementation retained:                             .then(if (!reduceAudioMotion) Modifier.springInteractiveScale(0.98f) else Modifier)
+                            .then(if (!reduceAudioMotion) Modifier.audioRoutePressScale() else Modifier)
                             .onFocusChanged { routeHasFocus = it.isFocused }
                             .then(if (routeHasFocus) Modifier.border(2.dp, colors.accent, AudioCardShape) else Modifier)
                             // AU4-32: one merged TalkBack item; AU4-34: "Active" in the state description.
@@ -498,7 +567,8 @@ fun AudioSettingsScreen(
             // 3. Routing preference
 // Previous implementation retained:             AudioSectionHeader("Routing preference")
             AudioSectionHeader("Call audio")
-            Text("Modes are saved preferences on this phone. They do not activate dual-speaker playback; that support is not verified.",
+// Previous implementation retained:             Text("Modes are saved preferences on this phone. They do not activate dual-speaker playback; that support is not verified.",
+            Text("Only the selected mode is saved on this phone, not Bluetooth names or addresses. This preference is not sent to the server. It does not activate dual-speaker playback; that support is not verified.",
                 color = colors.foregroundSecondary, fontSize = 13.sp)
             if (modeSaveFailed) {
                 Text("This audio preference has not been saved on this phone.", color = colors.error)
@@ -530,7 +600,8 @@ fun AudioSettingsScreen(
 // Previous implementation retained:                         dualStatus != DualOutputStatus.unsupported && dualStatus != DualOutputStatus.unavailable && dualStatus != DualOutputStatus.failed,
 // Previous implementation retained:                     ) { settings.setPreferenceMode(AudioPreferenceMode.experimentalDualOutput) }
                         audioModeSelectionEnabled(AudioPreferenceMode.experimentalDualOutput, dualStatus),
-                    ) { selectAudioModeIfEnabled(settings, AudioPreferenceMode.experimentalDualOutput, dualStatus) }
+// Previous implementation retained:                     ) { selectAudioModeIfEnabled(settings, AudioPreferenceMode.experimentalDualOutput, dualStatus) }
+                    ) { if (audioModeSelectionEnabled(AudioPreferenceMode.experimentalDualOutput, dualStatus)) showExperimentalConfirm = true }
                 }
             }
             Spacer(Modifier.height(24.dp))
@@ -557,8 +628,25 @@ fun AudioSettingsScreen(
 // Previous implementation retained:                     AudioSettingsController.deviceVerifications.sortedByDescending { it.deviceModel == Build.MODEL }
 // Previous implementation retained:                 val allRecords = AudioSettingsController.deviceVerifications
                 val allRecords = deviceRecordState
-                val records = remember(allRecords, showAllDevices) {
+// Previous implementation retained:                 val records = remember(allRecords, showAllDevices) {
+// Previous implementation retained:                     audioDeviceRecordsForDisplay(allRecords, Build.MODEL, showAllDevices)
+// Previous implementation retained:                 }
+                val matchingRecords = remember(allRecords, showAllDevices) {
                     audioDeviceRecordsForDisplay(allRecords, Build.MODEL, showAllDevices)
+                }
+                var recordPage by remember(allRecords, showAllDevices) { mutableIntStateOf(0) }
+                val pageCount = ((matchingRecords.size + 19) / 20).coerceAtLeast(1)
+                val safePage = recordPage.coerceIn(0, pageCount - 1)
+                val records = matchingRecords.drop(safePage * 20).take(20)
+                if (pageCount > 1) {
+                    Text("Device records page ${safePage + 1} of $pageCount",
+                        color = colors.foregroundSecondary, modifier = Modifier.padding(horizontal = 14.dp))
+                    Column(Modifier.fillMaxWidth()) {
+                        androidx.compose.material3.TextButton(enabled = safePage > 0,
+                            onClick = { recordPage = safePage - 1 }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Previous records") }
+                        androidx.compose.material3.TextButton(enabled = safePage < pageCount - 1,
+                            onClick = { recordPage = safePage + 1 }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Next records") }
+                    }
                 }
                 androidx.compose.material3.TextButton(onClick = { showAllDevices = !showAllDevices },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
@@ -658,6 +746,22 @@ fun AudioSettingsScreen(
         }
     }
     SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+
+    if (showExperimentalConfirm) {
+        ChatyConfirmationDialog(
+            shape = ChatyModalShape,
+            onDismissRequest = { showExperimentalConfirm = false },
+            title = { Text("Save experimental audio preference?", color = colors.foreground) },
+            text = { Text("Dual-speaker support is not verified. If supported in a future call, people nearby may hear its audio. Saving this preference does not activate dual-speaker playback.", color = colors.foregroundSecondary) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = {
+                showExperimentalConfirm = false
+                // Re-check the live capability, not the status captured when the dialog opened.
+                val latestStatus = capability.communicationCapabilities.value?.dualOutputStatus ?: DualOutputStatus.unavailable
+                selectAudioModeIfEnabled(settings, AudioPreferenceMode.experimentalDualOutput, latestStatus)
+            }) { Text("Save preference") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { showExperimentalConfirm = false }) { Text("Cancel") } },
+        )
     }
 
     if (showSpeakerConfirm) {
@@ -879,3 +983,39 @@ internal val audioRoutingHelpSteps = listOf(
     "If the requested output does not match the current output shown here, the switch has not been confirmed. Try another available output.",
     "If a call loses audio after another app or phone call interrupts it, end the call and start it again when safe. No test sound plays automatically.",
 )
+
+
+/** AU3-30: animation state is read in the graphics layer, not composition. */
+private fun Modifier.audioRoutePressScale(): Modifier = composed {
+    val scale = remember { androidx.compose.animation.core.Animatable(1f) }
+    val animationScope = androidx.compose.runtime.rememberCoroutineScope()
+    val feedbackView = LocalView.current
+    this.then(Modifier.graphicsLayer { scaleX = scale.value; scaleY = scale.value })
+        .pointerInputForAudio(scale, animationScope, feedbackView)
+}
+
+private fun Modifier.pointerInputForAudio(
+    scale: androidx.compose.animation.core.Animatable<Float, androidx.compose.animation.core.AnimationVector1D>,
+    animationScope: kotlinx.coroutines.CoroutineScope,
+    feedbackView: android.view.View,
+): Modifier = pointerInput(scale, feedbackView) {
+    var animation: kotlinx.coroutines.Job? = null
+    try {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            ChatyHapticsPort.selection(feedbackView)
+            animation?.cancel()
+            animation = animationScope.launch {
+                scale.animateTo(0.98f, androidx.compose.animation.core.spring(dampingRatio = 0.82f, stiffness = 380f))
+            }
+            waitForUpOrCancellation(pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            animation?.cancel()
+            animation = animationScope.launch {
+                scale.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.82f, stiffness = 380f))
+            }
+        }
+    } finally {
+        animation?.cancel()
+        animationScope.launch { scale.snapTo(1f) }
+    }
+}

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Subscription screen copy (SUB-R3-031). English only; translations to follow. -->
+    <string name="sub_confirm_title">Confirm subscription</string>
+    <string name="sub_confirm_action">Subscribe</string>
+    <string name="sub_cancel">Cancel</string>
+    <string name="sub_free_confirm_title">Activate Free plan?</string>
+    <string name="sub_free_confirm_action">Activate</string>
+    <string name="sub_loading_plans">Loading available workspace plans...</string>
+    <string name="sub_retry_plans">Retry Loading Plans</string>
+    <string name="sub_empty_title">No Subscription Plans Found</string>
+    <string name="sub_load_failed_title">Could not load plans</string>
+    <string name="sub_select_hint">Select a plan to continue</string>
+    <string name="sub_dismiss">Dismiss</string>
+    <string name="sub_monthly_billing">Monthly Billing</string>
+    <string name="sub_annual_billing">Annual Billing</string>
+    <string name="sub_recommended">RECOMMENDED</string>
+</resources>

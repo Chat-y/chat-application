@@ -321,6 +321,10 @@ private class PrivacyPlaneSnapshot {
     var presenceRevision = 0L
     var callRevision = 0L
     var blockedRevision = 0L
+    // Write-in-flight markers: a GET begun during a pending write must not publish old data.
+    var presenceWriteInFlight = false
+    var callWriteInFlight = false
+    var blockedWriteInFlight = false
 }
 
 /** Stable row styling so the hoisted row composables can skip recomposition. */
@@ -598,7 +602,11 @@ fun PrivacyCenterScreen(
                 if (watching) offline = runCatching {
                     val active = cm?.activeNetwork
                     val capabilities = active?.let { cm?.getNetworkCapabilities(it) }
-                    capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) != true
+                    // capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) != true
+                    // An unvalidated network (captive portal, no reachability) now also reads as offline.
+                    capabilities == null ||
+                        !capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                        !capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 }.getOrDefault(false)
             }
         }
@@ -640,10 +648,13 @@ fun PrivacyCenterScreen(
     val currentBlockedLoader by rememberUpdatedState(loadBlocked)
     suspend fun reloadPrivacyPlanes() = coroutineScope {
         currentPresenceLoader?.let { loader -> launch {
+            // Do not start a stale GET mid-write that could complete after the busy flag clears.
+            if (planeCache.presenceWriteInFlight) return@launch
             val requestRevision = ++planeCache.presenceRevision
             try {
                 val loaded = loader()
-                if (preferences.scopeGeneration == accountGeneration && planeCache.presenceRevision == requestRevision) {
+                // if (preferences.scopeGeneration == accountGeneration && planeCache.presenceRevision == requestRevision) {
+                if (preferences.scopeGeneration == accountGeneration && planeCache.presenceRevision == requestRevision && !planeCache.presenceWriteInFlight) {
                     presencePrivacy = loaded; presenceError = null; presenceLoaded = true
                     val nowMs = System.currentTimeMillis(); syncedAtMs = nowMs
                     planeCache.presence = loaded
@@ -655,10 +666,13 @@ fun PrivacyCenterScreen(
             }
         } }
         currentCallLoader?.let { loader -> launch {
+            // Do not start a stale GET mid-write that could complete after the busy flag clears.
+            if (planeCache.callWriteInFlight) return@launch
             val requestRevision = ++planeCache.callRevision
             try {
                 val loaded = loader()
-                if (preferences.scopeGeneration == accountGeneration && planeCache.callRevision == requestRevision) {
+                // if (preferences.scopeGeneration == accountGeneration && planeCache.callRevision == requestRevision) {
+                if (preferences.scopeGeneration == accountGeneration && planeCache.callRevision == requestRevision && !planeCache.callWriteInFlight) {
                     serverCallPolicy = loaded; callError = null
                     val nowMs = System.currentTimeMillis(); syncedAtMs = nowMs
                     planeCache.callPolicy = loaded
@@ -672,10 +686,13 @@ fun PrivacyCenterScreen(
             }
         } }
         currentBlockedLoader?.let { loader -> launch {
+            // Do not start a stale GET mid-write that could complete after the busy flag clears.
+            if (planeCache.blockedWriteInFlight) return@launch
             val requestRevision = ++planeCache.blockedRevision
             try {
                 val loaded = loader()
-                if (preferences.scopeGeneration == accountGeneration && planeCache.blockedRevision == requestRevision) {
+                // if (preferences.scopeGeneration == accountGeneration && planeCache.blockedRevision == requestRevision) {
+                if (preferences.scopeGeneration == accountGeneration && planeCache.blockedRevision == requestRevision && !planeCache.blockedWriteInFlight) {
                     blockedUsers = loaded; blockedError = null
                     val nowMs = System.currentTimeMillis(); syncedAtMs = nowMs
                     planeCache.blocked = loaded
@@ -1048,6 +1065,7 @@ fun PrivacyCenterScreen(
                     val policy = PrivacyOptionsLogic.audiencePolicy(label) ?: return@ServerWhoCanCallMeDialog
                     if (callBusy) return@ServerWhoCanCallMeDialog
                     callBusy = true
+                    planeCache.callWriteInFlight = true
                     ++planeCache.callRevision // Invalidate GETs started before this write.
                     scope.launch {
                         try {
@@ -1057,6 +1075,7 @@ fun PrivacyCenterScreen(
                             if (preferences.scopeGeneration != accountGeneration) return@launch
                             if (saved.policy != policy) {
                                 callError = "The server returned a different policy. Reloading."
+                                planeCache.callWriteInFlight = false // This write is over; let the reload publish.
                                 reloadPrivacyPlanes()
                                 return@launch
                             }
@@ -1072,9 +1091,11 @@ fun PrivacyCenterScreen(
                             modal = null
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) {
-                            snack("Couldn't save the call policy. Check your connection and retry.", long = true)
+                            // snack("Couldn't save the call policy. Check your connection and retry.", long = true)
+                            if (preferences.scopeGeneration == accountGeneration) snack("Couldn't save the call policy. Check your connection and retry.", long = true)
                         } finally {
                             callBusy = false
+                            planeCache.callWriteInFlight = false
                         }
                     }
                 },
@@ -1092,6 +1113,7 @@ fun PrivacyCenterScreen(
                     val olPolicy = PrivacyOptionsLogic.onlinePolicy(onlineLabel) ?: return@LastSeenOnlineDialog
                     if (presenceBusy || savePresencePrivacy == null) return@LastSeenOnlineDialog
                     presenceBusy = true
+                    planeCache.presenceWriteInFlight = true
                     ++planeCache.presenceRevision // Invalidate GETs started before this write.
                     scope.launch {
                         try {
@@ -1102,6 +1124,7 @@ fun PrivacyCenterScreen(
                             if (preferences.scopeGeneration != accountGeneration) return@launch
                             if (saved.lastSeenPolicy != lsPolicy || saved.onlinePolicy != olPolicy) {
                                 presenceError = "The server returned a different policy. Reloading."
+                                planeCache.presenceWriteInFlight = false // This write is over; let the reload publish.
                                 reloadPrivacyPlanes()
                                 return@launch
                             }
@@ -1121,9 +1144,11 @@ fun PrivacyCenterScreen(
                             modal = null
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) {
-                            snack("Couldn't save presence privacy. Check your connection and retry.", long = true)
+                            // snack("Couldn't save presence privacy. Check your connection and retry.", long = true)
+                            if (preferences.scopeGeneration == accountGeneration) snack("Couldn't save presence privacy. Check your connection and retry.", long = true)
                         } finally {
                             presenceBusy = false
+                            planeCache.presenceWriteInFlight = false
                         }
                     }
                 },
@@ -1137,6 +1162,7 @@ fun PrivacyCenterScreen(
                 onUnblock = { entry ->
                     if (unblockBusy || unblockUser == null) return@BlockedContactsDialog
                     unblockBusy = true
+                    planeCache.blockedWriteInFlight = true
                     ++planeCache.blockedRevision // Invalidate GETs started before this write.
                     scope.launch {
                         try {
@@ -1151,9 +1177,11 @@ fun PrivacyCenterScreen(
                             snack("${entry.displayName} unblocked")
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) {
-                            snack("Couldn't unblock. Check your connection and retry.", long = true)
+                            // snack("Couldn't unblock. Check your connection and retry.", long = true)
+                            if (preferences.scopeGeneration == accountGeneration) snack("Couldn't unblock. Check your connection and retry.", long = true)
                         } finally {
                             unblockBusy = false
+                            planeCache.blockedWriteInFlight = false
                         }
                     }
                 },

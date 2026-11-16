@@ -36,7 +36,7 @@ class CallSettingsFontScaleTest {
                         call = CallPresentationState(incomingCallTemplate = "sheet", ongoingCallTemplate = "card"),
                         contacts = emptyList(),
                         onBack = {},
-                        onDynamicIsland = {}, onPictureInPicture = {}, onLowData = {},
+                        onDynamicIsland = { Result.success(Unit) }, onPictureInPicture = { Result.success(Unit) }, onLowData = { Result.success(Unit) },
                         onOpenAudioSettings = {}, onOpenCallBundles = {},
                     )
                 }
@@ -57,3 +57,5 @@ class CallSettingsFontScaleTest {
     @Test fun controlsPresentAtFontScale1x3() { showAt(1.3f); assertKeyControlsPresent() }
     @Test fun controlsPresentAtFontScale2x0() { showAt(2.0f); assertKeyControlsPresent() }
 }
+
+// Previous call-setting preview callbacks returned Unit: onDynamicIsland = {}, onPictureInPicture = {}, onLowData = {}

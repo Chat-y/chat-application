@@ -150,38 +150,38 @@ fun ProfileScreen(
             // section headers or cards. Only existing destinations.
             SettingsTile(
                 icon = Icons.Outlined.AlternateEmail,
-                title = "Username",
+                title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_username),
                 subtitle = "@${user.username}",
             )
             if (user.about.isNotEmpty()) {
                 ProfileRowDivider()
                 SettingsTile(
                     icon = Icons.Outlined.Info,
-                    title = "About",
+                    title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_about),
                     subtitle = user.about,
                 )
             }
             ProfileRowDivider()
             SettingsTile(
                 icon = Icons.Outlined.Settings,
-                title = "Settings",
-                subtitle = "Account, privacy, appearance and app behavior",
+                title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_settings),
+                subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_settings_desc),
                 showChevron = true,
                 onClick = onOpenSettings,
             )
             ProfileRowDivider()
             SettingsTile(
                 icon = Icons.Outlined.NotificationsNone,
-                title = "Notifications",
-                subtitle = "Toasts, alerts and previews",
+                title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_notifications),
+                subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_notifications_desc),
                 showChevron = true,
                 onClick = onOpenNotifications,
             )
             ProfileRowDivider()
             SettingsTile(
                 icon = Icons.Outlined.VisibilityOff,
-                title = "Privacy Center",
-                subtitle = "Presence, receipts and anti-delete options",
+                title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_privacy),
+                subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_privacy_desc),
                 showChevron = true,
                 onClick = onOpenPrivacyCenter,
             )
@@ -189,8 +189,8 @@ fun ProfileScreen(
             SettingsTile(
                 icon = Icons.AutoMirrored.Rounded.Logout,
                 iconTint = Color(theme.dangerColor),
-                title = "Log out",
-                subtitle = "Sign out of Chaty on this device",
+                title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_logout),
+                subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_logout_desc),
                 onClick = { showLogoutConfirm = true },
             )
             Spacer(Modifier.height(24.dp))
@@ -201,9 +201,9 @@ fun ProfileScreen(
         // Exact confirmChatyLogout copy from profile_actions.dart.
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showLogoutConfirm = false },
-            title = { Text("Log out of Chaty?") },
+            title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_logout_title)) },
             text = {
-                Text("Your account will be signed out on this device. Your chats and account data remain on the server.")
+                Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_logout_body))
             },
             confirmButton = {
                 Button(
@@ -212,10 +212,10 @@ fun ProfileScreen(
                         onLogout()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(theme.dangerColor)),
-                ) { Text("Log out") }
+                ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_logout)) }
             },
             dismissButton = {
-                TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showLogoutConfirm = false }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_cancel)) }
             },
         )
     }
@@ -289,7 +289,7 @@ private fun ProfileHeader(
                             contentAlignment = Alignment.Center,
                         ) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                                semanticLabel = "Edit cover photo",
+                                semanticLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_edit_cover),
                                 color = Color(theme.primaryTextColor),
                                 modifier = Modifier.size(17.dp),
                             )
@@ -309,7 +309,7 @@ private fun ProfileHeader(
                             .clip(avatarShapeOf(avatarShape, avatarSize))
                             .clickable(
                                 enabled = !avatarUrl.isNullOrBlank(),
-                                onClickLabel = "View profile photo",
+                                onClickLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_view_photo),
                             ) { showPhoto = true },
                     ) {
                         ChatyAvatar(
@@ -318,7 +318,7 @@ private fun ProfileHeader(
                             url = avatarUrl,
                             size = avatarSize,
                             shape = avatarShape,
-                            a11yLabel = "Profile photo of $displayName",
+                            a11yLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_photo_of, displayName),
                         )
                     }
                 }
@@ -372,11 +372,11 @@ private fun ProfileHeader(
                     .fillMaxWidth()
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(20.dp))
-                    .clickable(onClickLabel = "Close photo") { showPhoto = false },
+                    .clickable(onClickLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_close_photo)) { showPhoto = false },
             ) {
-                ChatyAsyncImage(
+                ProfileSizedImage(
                     url = avatarUrl,
-                    contentDescription = "Profile photo of $displayName",
+                    contentDescription = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_photo_of, displayName),
                     modifier = Modifier.fillMaxSize(),
                     contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                 )
@@ -397,7 +397,7 @@ private fun AddBioPrompt(onEdit: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            "Add a bio",
+            androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_add_bio),
             color = Color(theme.secondaryTextColor),
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
@@ -429,7 +429,7 @@ private fun CompactHeader(
                 .border(1.dp, LocalAppColors.current.borderSubtle, avatarShapeOf(avatarShape, avatarSize))
                 .padding(3.dp),
         ) {
-            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = "Profile photo of $displayName")
+            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_photo_of, displayName))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).padding(top = 2.dp)) {
@@ -447,7 +447,7 @@ private fun CompactHeader(
                 if (onEditBanner != null) {
                     IconButton(onClick = onEditBanner, modifier = Modifier.size(48.dp)) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                            semanticLabel = "Edit cover photo",
+                            semanticLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_edit_cover),
                             color = Color(theme.secondaryTextColor),
                             modifier = Modifier.size(20.dp),
                         )
@@ -512,7 +512,7 @@ private fun CenteredIdentityHeader(
                         .background(Color(theme.surfaceColor).copy(alpha = 0.88f), CircleShape),
                 ) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                        semanticLabel = "Edit cover photo",
+                        semanticLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_edit_cover),
                         color = Color(theme.primaryTextColor),
                     )
                 }
@@ -525,7 +525,7 @@ private fun CenteredIdentityHeader(
                 .border(1.dp, LocalAppColors.current.borderSubtle, avatarShapeOf(avatarShape, avatarSize + 8))
                 .padding(4.dp),
         ) {
-            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = "Profile photo of $displayName")
+            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_photo_of, displayName))
         }
         Spacer(Modifier.height(12.dp))
         Text(
@@ -566,7 +566,7 @@ private fun CenteredIdentityHeader(
                 androidx.compose.material3.OutlinedButton(onClick = onEditBanner) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Banner")
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_banner))
                 }
             }
         }
@@ -584,7 +584,7 @@ internal fun BannerSurface(bannerUrl: String?, height: Int) {
             .background(Color(theme.cardColor))
             .border(1.dp, LocalAppColors.current.borderSubtle, RoundedCornerShape(18.dp)),
     ) {
-        ChatyAsyncImage(
+        ProfileSizedImage(
             url = bannerUrl,
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
@@ -658,7 +658,7 @@ internal fun ChatyAvatar(
     ) {
         // Blank/null URL renders the initials fallback via error ?: placeholder
         // (ChatyAsyncImage contract), matching the Dart errorBuilder rule.
-        ChatyAsyncImage(
+        ProfileSizedImage(
             url = url,
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
@@ -682,16 +682,24 @@ internal fun avatarShapeOf(shape: String, size: Int): RoundedCornerShape = when 
 private fun ProfileStatsGrid(chats: Int, groups: Int, contacts: Int) {
     val theme = LocalThemeConfig.current
     val stats = listOf(
-        Triple("Chats", chats, Icons.Outlined.ChatBubbleOutline),
-        Triple("Groups", groups, Icons.Outlined.Groups),
-        Triple("Contacts", contacts, Icons.Outlined.PeopleOutline),
+        Triple(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_chats), chats, Icons.Outlined.ChatBubbleOutline),
+        Triple(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_groups), groups, Icons.Outlined.Groups),
+        Triple(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_contacts), contacts, Icons.Outlined.PeopleOutline),
     )
     Row(Modifier.padding(horizontal = 12.dp)) {
-        for ((label, value, icon) in stats) {
+        for ((index, stat) in stats.withIndex()) {
+            val (label, value, icon) = stat
+            val countDescription = androidx.compose.ui.res.pluralStringResource(
+                when (index) {
+                    0 -> com.example.chat.R.plurals.profile_home_chat_count
+                    1 -> com.example.chat.R.plurals.profile_home_group_count
+                    else -> com.example.chat.R.plurals.profile_home_contact_count
+                }, value, value,
+            )
             Column(
                 Modifier
                     .weight(1f)
-                    .semantics(mergeDescendants = true) { contentDescription = "$label: $value" }
+                    .semantics(mergeDescendants = true) { contentDescription = countDescription }
                     .padding(horizontal = 4.dp)
                     .background(Color(theme.surfaceColor), RoundedCornerShape(14.dp))
                     .border(1.dp, LocalAppColors.current.borderSubtle, RoundedCornerShape(14.dp))
@@ -743,7 +751,7 @@ internal fun EditPill(onClick: () -> Unit) {
         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = null, color = Color(theme.accentColor), modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(7.dp))
         Text(
-            "Edit profile",
+            androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_edit),
             color = Color(theme.primaryTextColor),
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
@@ -837,3 +845,37 @@ internal fun SettingsTile(
         }
     }
 }
+
+// Previous copy retained for source history:
+//                 title = "Username",
+//                     title = "About",
+//                 title = "Settings",
+//                 subtitle = "Account, privacy, appearance and app behavior",
+//                 title = "Notifications",
+//                 subtitle = "Toasts, alerts and previews",
+//                 title = "Privacy Center",
+//                 subtitle = "Presence, receipts and anti-delete options",
+//                 title = "Log out",
+//                 subtitle = "Sign out of Chaty on this device",
+//             title = { Text("Log out of Chaty?") },
+//                 Text("Your account will be signed out on this device. Your chats and account data remain on the server.")
+//                 ) { Text("Log out") }
+//                 TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") }
+//                                 semanticLabel = "Edit cover photo",
+//                                 onClickLabel = "View profile photo",
+//                             a11yLabel = "Profile photo of $displayName",
+//                     .clickable(onClickLabel = "Close photo") { showPhoto = false },
+//                     contentDescription = "Profile photo of $displayName",
+//             "Add a bio",
+//             ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = "Profile photo of $displayName")
+//                             semanticLabel = "Edit cover photo",
+//                         semanticLabel = "Edit cover photo",
+//             ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = "Profile photo of $displayName")
+//                     Text("Banner")
+//         Triple("Chats", chats, Icons.Outlined.ChatBubbleOutline),
+//         Triple("Groups", groups, Icons.Outlined.Groups),
+//         Triple("Contacts", contacts, Icons.Outlined.PeopleOutline),
+//         for ((label, value, icon) in stats) {
+//                     .semantics(mergeDescendants = true) { contentDescription = "$label: $value" }
+// /** Small bordered "Edit profile" pill with the 120ms press-scale of the
+//             "Edit profile",

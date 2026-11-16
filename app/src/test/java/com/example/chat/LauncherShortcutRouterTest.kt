@@ -38,6 +38,20 @@ class LauncherShortcutRouterTest {
     }
 
     @Test
+    fun `unknown action does not replace a valid pending shortcut`() {
+        tapNewChat()
+        val before = LauncherShortcutRouter.pending.value
+        LauncherShortcutRouter.onShortcutAction("unknown_action", "u1", 1L)
+        assertEquals(before, LauncherShortcutRouter.pending.value)
+    }
+
+    @Test
+    fun `unknown action is ignored while no shortcut is pending`() {
+        LauncherShortcutRouter.onShortcutAction("unknown_action", "u1", 1L)
+        assertNull(LauncherShortcutRouter.pending.value)
+    }
+
+    @Test
     fun `repeated identical taps are distinct emissions`() {
         // MutableStateFlow conflates equal values; the sequence makes each tap a new object.
         tapNewChat(); val first = LauncherShortcutRouter.pending.value!!

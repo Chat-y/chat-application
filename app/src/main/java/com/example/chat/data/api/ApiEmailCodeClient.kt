@@ -11,7 +11,9 @@ class ApiEmailCodeClient(
     private val transport: ApiHttpTransport,
     private val isCurrent: () -> Boolean = { true },
 ) {
-    data class Challenge(val id: String, val email: String, val resendAfterSeconds: Int, val expiresInSeconds: Int)
+    // A local attempt identity and UI resend/resume limits, not a server challenge or expiry.
+    // The server remains the authority on code validity and request throttling.
+    data class Challenge(val id: String, val email: String, val resendAfterSeconds: Int, val expiresInSeconds: Int, val mayResend: Boolean = true)
 
     private fun request(path: String, payload: JSONObject, deviceHeaders: Map<String, String> = emptyMap()): Pair<Int, String> {
         check(isCurrent()) { "Account or workspace changed. Start sign-in again." }
@@ -32,22 +34,20 @@ class ApiEmailCodeClient(
     fun requestCode(email: String): Challenge {
         val normalized = email.trim().lowercase(java.util.Locale.ROOT)
         require(normalized.length <= 254 && normalized.contains('@')) { "Enter a valid email address." }
-        val response = request("auth/email-code/request", JSONObject().put("email", normalized))
+        // Prior contract expected server challenge_id/resend_after_seconds/expires_in_seconds.
+        // code-login/send deliberately returns only an enumeration-safe message.
+        val sendNumber = EmailCodeSendLimiter.reserve(baseUrl, tenantId, normalized)
+        val response = request("auth/email/code-login/send", JSONObject().put("email", normalized))
         if (response.first != 200) throw responseError(response)
-        val root = JSONObject(response.second)
-        val data = root.optJSONObject("data") ?: throw IllegalStateException("Invalid code-request response.")
-        val id = data.optString("challenge_id")
-        require(runCatching { java.util.UUID.fromString(id).toString() == id.lowercase(java.util.Locale.ROOT) }.getOrDefault(false)) { "Invalid code challenge." }
-        val resend = data.optInt("resend_after_seconds", -1)
-        val expires = data.optInt("expires_in_seconds", -1)
-        check(resend in 1..3600 && expires in 30..3600) { "Invalid code-request expiry." }
-        return Challenge(id, normalized, resend, expires)
+        return Challenge(java.util.UUID.randomUUID().toString(), normalized,
+            EmailCodeSendLimiter.delayAfter(sendNumber), CODE_EXPIRY_SECONDS, sendNumber < 5)
     }
 
     fun verifyCode(challenge: Challenge, code: String, deviceHeaders: Map<String, String> = emptyMap()): ApiAuthResult {
         require(code.length == 6 && code.all { it in '0'..'9' }) { "Enter the six-digit code." }
-        val response = request("auth/email-code/verify", JSONObject()
-            .put("challenge_id", challenge.id).put("code", code), deviceHeaders)
+        // Prior: auth/email-code/verify {challenge_id, code}.
+        val response = request("auth/email/code-login/verify", JSONObject()
+            .put("email", challenge.email).put("code", code).put("remember_me", false), deviceHeaders)
         if (response.first != 200) throw responseError(response)
         val result = ApiAuthClient({ baseUrl }, { tenantId }, transport).parseAuthResponse(response.first, response.second)
         check(result.token.isNotBlank() && result.user.id.isNotBlank() && !result.refreshToken.isNullOrBlank()) {
@@ -58,8 +58,42 @@ class ApiEmailCodeClient(
     }
 
     private fun responseError(response: Pair<Int, String>): Exception {
-        val message = runCatching { JSONObject(response.second).optString("detail") }.getOrNull()
-            ?.takeIf { it.isNotBlank() && it.length < 250 }
-        return IllegalStateException(message ?: "Email-code sign-in is unavailable (${response.first}).")
+        // Never display arbitrary server details (which can include identifiers or infrastructure).
+        return IllegalStateException(when (response.first) {
+            401 -> "Invalid or expired code. Request a new code if needed."
+            429 -> "Too many attempts. Wait before trying again."
+            503 -> "Email-code sign-in is unavailable. Try again later."
+            428 -> "Installation verification is required. Start sign-in again."
+            else -> "Email-code sign-in is unavailable (${response.first})."
+        })
+    }
+    companion object {
+        // Local UX guardrails only. These constants do not assert server expiry or rate limits.
+        const val LOCAL_RESEND_DELAY_SECONDS = 60
+        // PR #3 code lifetime. The server may still invalidate a code earlier.
+        const val CODE_EXPIRY_SECONDS = 600
+    }
+}
+
+/** In-process UX limits. Server enforcement still applies across process death/devices.
+ * Failed sends consume a local slot conservatively, rather than enable rapid retries. */
+internal object EmailCodeSendLimiter {
+    private data class Attempt(val at: Long, val delaySeconds: Int)
+    private val attempts = mutableMapOf<List<String>, MutableList<Attempt>>()
+    private fun nowSeconds() = System.nanoTime() / 1_000_000_000L
+    fun delayAfter(sendNumber: Int) = when (sendNumber) { 1 -> 60; 2 -> 120; else -> 300 }
+    @Synchronized fun reserve(base: String, tenant: String, email: String, now: Long = nowSeconds()): Int {
+        attempts.values.forEach { history -> history.removeAll { now - it.at >= 3600L } }
+        attempts.entries.removeAll { it.value.isEmpty() }
+        val key = listOf(base.trimEnd('/'), tenant, email)
+        check(key in attempts || attempts.size < 128) { "Too many sign-in requests. Try again later." }
+        val history = attempts.getOrPut(key) { mutableListOf() }
+        check(history.size < 5) { "The sign-in code request limit was reached. Try again in an hour." }
+        check(history.lastOrNull()?.let { now - it.at >= it.delaySeconds } != false) {
+            "Wait for the resend timer before requesting another code."
+        }
+        val number = history.size + 1
+        history.add(Attempt(now, delayAfter(number)))
+        return number
     }
 }

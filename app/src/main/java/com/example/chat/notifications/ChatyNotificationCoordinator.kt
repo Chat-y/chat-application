@@ -35,15 +35,26 @@ class ChatyNotificationCoordinator(
     private val appLock: AppLockCoordinator,
     private val channelManager: NotificationChannelManager,
     private val isChatVaultLocked: (String) -> Boolean,
+    private val callPresentation: com.example.chat.ui.calls.CallPresentationPreferencesStore? = null,
 ) : ChatyNotificationBridge, ChatyNotificationSink {
 
     private val registry = ChatyActionRegistry<ApiAccountScope>()
     @Volatile private var lastScope: ApiAccountScope? = null
     @Volatile private var lastIncomingCallId: String? = null
+    private val reportedMissed = linkedSetOf<String>()
+    private fun markMissedReported(key: String): Boolean = synchronized(reportedMissed) {
+        val added = reportedMissed.add(key)
+        while (reportedMissed.size > 512) reportedMissed.remove(reportedMissed.first())
+        added
+    }
     /** Foreground incoming-call ring (Bandi's ChatyNotifications.startRinging intent, coordinator-owned):
      *  audible/vibrating ring ONLY while a live incoming call is present and the app is foreground;
      *  backgrounded calls ring through the system notification instead (never both). */
     private val foregroundRinger = ForegroundCallRinger(AndroidRingtonePlayer(context))
+    private data class AlertAdmission(val owner: ApiAccountScope, val callId: String, val quiet: Boolean)
+    @Volatile private var alertAdmission: AlertAdmission? = null
+    private val alertAdmissionLock = Any()
+
     private val stylePrefs get() = context.getSharedPreferences("chaty_notification_style", Context.MODE_PRIVATE)
 
     /** The notification lane. Created ONCE in [start] together with its single daemon thread
@@ -77,11 +88,23 @@ class ChatyNotificationCoordinator(
             if (lastScope !== next) {
                 lastScope = next
                 foregroundRinger.stop()
+                alertAdmission = null
+                synchronized(reportedMissed) { reportedMissed.clear() }
                 registry.clear()
                 lane.cleanupNonCurrent() // enqueue-only: NO sink IPC under the auth lock
             }
         }
-        calls.addStateListener { scope.launch { onCallState() } }
+        // Capture the terminal receipt synchronously: a later coroutine may see the next session.
+        calls.addStateListener {
+            val receipt = snapshotCall()
+            // Enqueue terminal receipt now, before a later Calls-screen clear can overtake it.
+            if (receipt?.missed == true && receipt.account === api.authSnapshot()) {
+                val key = "${receipt.account.generation}:${receipt.callId}"
+                if (markMissedReported(key)) lane.postMissedCall(receipt.account, receipt.callId)
+            }
+            scope.launch { onCallState() }
+            // Prior deferred receipt: scope.launch { onCallState(receipt) }
+        }
         // Re-evaluate on app foreground/background transitions: ScopedCallCoordinator emits no
         // call-state event for these, so without this feed a foreground ring would keep ringing
         // in the background on top of the system full-screen alert (never both, by design).
@@ -111,16 +134,29 @@ class ChatyNotificationCoordinator(
     override fun cancelMessage(tag: String) = ChatyNotificationPoster.cancelMessage(context, tag)
 
     override fun postIncomingCall(tag: String, callerName: String, isVideo: Boolean, declineNonce: String?) {
-        ChatyNotificationPoster.postIncomingCall(context, style, callerName, isVideo, declineNonce, tag)
+        val admission = alertAdmission
+        val quiet = admission?.takeIf { it.owner === api.authSnapshot() && tag == "c:${it.owner.generation}:${it.callId}" }?.quiet
+            ?: (callPresentation != null) // Unknown admission must not leak a ring before preferences restore.
+        ChatyNotificationPoster.postIncomingCall(context, style, callerName, isVideo, declineNonce, tag, quiet = quiet)
     }
 
     override fun cancelIncomingCall(tag: String) = ChatyNotificationPoster.cancelIncomingCall(context, tag)
+    override fun postMissedCall(tag: String, summaryTag: String, group: String) =
+        ChatyNotificationPoster.postMissedCall(context, style, tag, summaryTag, group,
+            // Failed/cold restore cannot expose history on the lock screen.
+            hideOnLockScreen = callPresentation?.let { !it.isInitialized || it.value.hideCallHistoryOnLockScreen } ?: true)
+    fun postCallbackReminder(owner: ApiAccountScope, requestId: String) = lane.postCallbackReminder(owner, requestId)
+    override fun postCallbackReminder(tag: String) = ChatyNotificationPoster.postCallbackReminder(context, style, tag)
+    override fun cancelCallbackReminder(tag: String) = ChatyNotificationPoster.cancelCallbackReminder(context, tag)
+    override fun cancelMissedCall(tag: String) = ChatyNotificationPoster.cancelMissedCall(context, tag)
+    fun clearMissedCallAlerts(expected: ApiAccountScope = api.authSnapshot()) = lane.clearMissedCalls(expected)
+
 
     /** This app's active m:/c:-prefixed tags only; the lifecycle-bound foreground-service notification
      *  (SERVICE_ID=7401, untagged) and any foreign tags never appear here. */
     override fun activeTags(): List<String> {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        return nm.activeNotifications.mapNotNull { it.tag }.filter { it.startsWith("m:") || it.startsWith("c:") }
+        return nm.activeNotifications.mapNotNull { it.tag }.filter { it.startsWith("m:") || it.startsWith("c:") || it.startsWith("mc:") || it.startsWith("cr:") }
     }
 
     /** The live style resolver shared with message/incoming-call posts (style-fix: ongoing-call notification
@@ -173,7 +209,8 @@ class ChatyNotificationCoordinator(
     }
 
     private data class CallSnap(val account: ApiAccountScope, val callId: String, val incoming: Boolean, val outgoing: Boolean,
-        val video: Boolean, val name: String, val muted: Boolean, val route: AudioRouteType, val live: Boolean)
+        val video: Boolean, val name: String, val muted: Boolean, val route: AudioRouteType, val live: Boolean,
+        val missed: Boolean)
 
     /** Snapshot account + session together under the auth guard; build/post/cancel happens outside it. */
     private fun snapshotCall(): CallSnap? {
@@ -182,16 +219,36 @@ class ChatyNotificationCoordinator(
         api.withAuthScope(account) {
             val s = calls.currentSession ?: return@withAuthScope
             snap = CallSnap(account, s.callId, s.state == com.example.chat.data.services.CallSessionState.incoming, s.isOutgoing,
-                s.isVideo, s.remoteDisplayName.trim().ifEmpty { "Chaty contact" }, s.isMuted, s.audioRoute, !s.state.isTerminal)
+                s.isVideo, s.remoteDisplayName.trim().ifEmpty { "Chaty contact" }, s.isMuted, s.audioRoute, !s.state.isTerminal,
+                !s.isDemo && !s.isOutgoing && s.connectedAt == null &&
+                    (s.state == com.example.chat.data.services.CallSessionState.missed || s.state == com.example.chat.data.services.CallSessionState.ended))
         }
         return snap
     }
 
-    private fun onCallState() {
+    private suspend fun onCallState() {
+        val restored = try {
+            // A stalled disk restore must not indefinitely hide Open to answer.
+            // Initialize runs in the store's own scope; timeout only abandons this wait.
+            kotlinx.coroutines.withTimeoutOrNull(3_000L) {
+                callPresentation?.awaitInitialized()
+                true
+            } ?: false
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
+        // Snapshot AFTER restore. A call/account may have changed while the disk load awaited.
         val snap = snapshotCall()
+        val quiet = if (snap != null && snap.live && snap.incoming && !snap.outgoing) synchronized(alertAdmissionLock) {
+            val previous = alertAdmission
+            if (previous != null && previous.owner === snap.account && previous.callId == snap.callId) previous.quiet
+            else (!restored || callPresentation?.value?.quietHours?.activeNow() == true).also {
+                alertAdmission = AlertAdmission(snap.account, snap.callId, it)
+            }
+        } else { alertAdmission = null; false }
         foregroundRinger.onCallSnapshot(
             liveIncomingCall = snap != null && snap.live && snap.incoming && !snap.outgoing,
             appForeground = foreground(),
+            quiet = quiet,
         )
         if (snap == null || !snap.live || !snap.incoming || snap.outgoing) {
             lastIncomingCallId?.let { lane.cancelCallFor(api.authSnapshot(), it) }
@@ -226,6 +283,29 @@ class ChatyNotificationCoordinator(
         return registry.register(snap.account, action, callId = snap.callId) to CallActionView(snap.callId, snap.muted, snap.route == AudioRouteType.speaker)
     }
 
+    /** PiP never receives raw account/call identifiers in its action PendingIntent. */
+    @androidx.annotation.RequiresApi(26)
+    fun pipActions(expected: ApiAccountScope, callId: String): List<android.app.RemoteAction> {
+        var mute: String? = null
+        var hangup: String? = null
+        var muted = false
+        api.withAuthScope(expected) {
+            val session = calls.currentSession ?: return@withAuthScope
+            if (session.callId != callId || !session.isActive) return@withAuthScope
+            muted = session.isMuted
+            mute = registry.register(expected, ChatyNotificationPolicy.ACTION_MUTE, callId = callId)
+            hangup = registry.register(expected, ChatyNotificationPolicy.ACTION_HANGUP, callId = callId)
+        }
+        val muteNonce = mute ?: return emptyList()
+        val hangupNonce = hangup ?: return emptyList()
+        return listOf(
+            ChatyNotificationPoster.pipAction(context, ChatyNotificationPolicy.ACTION_MUTE, muteNonce,
+                if (muted) "Unmute" else "Mute", if (muted) com.example.chat.R.drawable.ic_notif_mic_off else com.example.chat.R.drawable.ic_notif_mic),
+            ChatyNotificationPoster.pipAction(context, ChatyNotificationPolicy.ACTION_HANGUP, hangupNonce,
+                "Hang up", com.example.chat.R.drawable.ic_notif_hangup),
+        )
+    }
+
     private fun callOk(id: String) = ChatyNotificationPolicy.callActionAllowed(id, calls.currentSession?.callId, calls.hasActiveSession)
 
     override suspend fun dispatch(nonce: String?, action: String, replyText: CharSequence?) {
@@ -243,7 +323,12 @@ class ChatyNotificationCoordinator(
                 // Scope-bound send: token/base URL come from the ORIGINAL scope, request cancelled on any auth transition.
                 if (api.sendMessageForScope(account, id, text)) lane.cancelMessageFor(account, id)
             }
-            ChatyNotificationPolicy.ACTION_DISMISS -> e.conversationId?.let { cancelFor(it) } // local only: no read state is sent to the server
+            // Previous implementation retained:
+            // ChatyNotificationPolicy.ACTION_DISMISS -> e.conversationId?.let { cancelFor(it) }
+            // It resnapshotted auth and could dismiss the next account's alert.
+            // Keep the owner captured by this action even if auth changes before the lane drains.
+            // Local dismissal only: no read state is sent to the server.
+            ChatyNotificationPolicy.ACTION_DISMISS -> e.conversationId?.let { lane.cancelMessageFor(account, it) }
             ChatyNotificationPolicy.ACTION_MUTE -> {
                 val id = e.callId ?: return
                 api.withAuthScope(account) { if (callOk(id)) calls.toggleMute() }
@@ -282,8 +367,9 @@ class ForegroundCallRinger(private val player: RingerPlayer) {
     @Volatile private var ringing = false
 
     @Synchronized
-    fun onCallSnapshot(liveIncomingCall: Boolean, appForeground: Boolean) {
-        val shouldRing = liveIncomingCall && appForeground
+    fun onCallSnapshot(liveIncomingCall: Boolean, appForeground: Boolean, quiet: Boolean = false) {
+        // Previous: val shouldRing = liveIncomingCall && appForeground
+        val shouldRing = liveIncomingCall && appForeground && !quiet
         if (shouldRing && !ringing) {
             ringing = true
             // A failed start must not wedge the state: the next snapshot retries.

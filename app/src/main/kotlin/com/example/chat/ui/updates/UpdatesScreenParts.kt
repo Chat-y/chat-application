@@ -820,7 +820,10 @@ internal fun StatusViewersSheet(
 internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    val player = remember(url, lifecycleOwner) { MediaPlayer() }
+    val statusApi = com.example.chat.ServiceLocator.apiBackend
+    val statusOwner = remember { statusApi.authSnapshot() }
+    val player = remember(url, lifecycleOwner, statusOwner) { MediaPlayer() }
+    val playbackScope = rememberCoroutineScope()
     var loading by remember(player) { mutableStateOf(true) }
     var failed by remember(player) { mutableStateOf(false) }
     var playing by remember(player) { mutableStateOf(false) }
@@ -831,6 +834,42 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
     var released by remember(player) { mutableStateOf(false) }
     var focusUnavailable by remember(player) { mutableStateOf(false) }
     var outputDisconnected by remember(player) { mutableStateOf(false) }
+    val playbackGuard = remember(player, statusOwner) {
+        com.example.chat.core.audio.CommunicationPlaybackGuard(
+            arbiter = com.example.chat.ServiceLocator.communicationMediaArbiter,
+            pauseNative = {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                    if (player.isPlaying) player.pause()
+                    playing = false
+                }
+            },
+            disposeNative = {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                    player.setOnPreparedListener(null)
+                    player.setOnCompletionListener(null)
+                    player.setOnErrorListener(null)
+                    player.release()
+                    playing = false
+                }
+            },
+            isOwnerCurrent = { !released && statusApi.authSnapshot() === statusOwner &&
+                lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED) },
+            onCallSuspended = {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                    playing = false
+                    focusUnavailable = true
+                    seekPreview = null
+                }
+            },
+        )
+    }
+    fun pausePlayback() {
+        playbackScope.launch {
+            try { playbackGuard.pause() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { failed = true }
+        }
+    }
     val audioManager = remember(context) {
         context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
     }
@@ -843,7 +882,7 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
             if (!released && (change == android.media.AudioManager.AUDIOFOCUS_LOSS ||
                     change == android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
                     change == android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)) {
-                runCatching { if (player.isPlaying) player.pause() }
+                pausePlayback()
                 playing = false
                 focusUnavailable = true
             }
@@ -886,39 +925,45 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
         positionMs = 0L
         durationMs = 0L
         seekPreview = null
-        try {
-            player.reset()
-            player.setAudioAttributes(audioAttributes)
-            player.setDataSource(url)
-            player.setOnPreparedListener {
-                if (!released && expectedGeneration == sourceGeneration) {
-                    durationMs = it.duration.toLong().coerceAtLeast(0L)
-                    loading = false
+        playbackScope.launch {
+            try {
+                playbackGuard.serializeNativeCleanup {
+                if (released || expectedGeneration != sourceGeneration) return@serializeNativeCleanup
+                player.reset()
+                player.setAudioAttributes(audioAttributes)
+                player.setDataSource(url)
+                player.setOnPreparedListener {
+                    if (!released && expectedGeneration == sourceGeneration) {
+                        durationMs = it.duration.toLong().coerceAtLeast(0L)
+                        loading = false
+                    }
                 }
-            }
-            player.setOnCompletionListener {
-                if (!released && expectedGeneration == sourceGeneration) {
-                    playing = false
-                    abandonFocus()
-                    positionMs = durationMs
+                player.setOnCompletionListener {
+                    if (!released && expectedGeneration == sourceGeneration) {
+                        playing = false
+                        abandonFocus()
+                        positionMs = durationMs
+                    }
                 }
-            }
-            player.setOnErrorListener { _, _, _ ->
-                if (!released && expectedGeneration == sourceGeneration) {
-                    playing = false
-                    abandonFocus()
-                    loading = false
-                    seekPreview = null
-                    failed = true
+                player.setOnErrorListener { _, _, _ ->
+                    if (!released && expectedGeneration == sourceGeneration) {
+                        playing = false
+                        abandonFocus()
+                        loading = false
+                        seekPreview = null
+                        failed = true
+                    }
+                    true
                 }
-                true
+                player.prepareAsync()
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                playing = false
+                abandonFocus()
+                loading = false
+                failed = true
             }
-            player.prepareAsync()
-        } catch (_: Exception) {
-            playing = false
-            abandonFocus()
-            loading = false
-            failed = true
         }
     }
 
@@ -937,7 +982,7 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
                 if (intent.action != android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY || released || !playing) return
-                try { player.pause() } catch (_: IllegalStateException) { failed = true }
+                pausePlayback()
                 playing = false
                 seekPreview = null
                 outputDisconnected = true
@@ -952,47 +997,58 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
     DisposableEffect(player, lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, _ ->
             if (!lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
-                runCatching { if (player.isPlaying) player.pause() }
+                pausePlayback()
                 playing = false
                 abandonFocus()
             }
         }
+        val accountListener: (com.example.chat.data.api.ApiAccountScope) -> Unit = { next ->
+            if (next !== statusOwner) { pausePlayback() }
+        }
+        statusApi.addAuthScopeListener(accountListener)
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            statusApi.removeAuthScopeListener(accountListener)
             lifecycleOwner.lifecycle.removeObserver(observer)
             released = true
             sourceGeneration++
             abandonFocus()
-            player.setOnPreparedListener(null)
-            player.setOnCompletionListener(null)
-            player.setOnErrorListener(null)
-            runCatching { player.release() }
+            playbackGuard.markClosing()
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+                // If native release fails, guard retains its reservation for call-side recovery.
+                runCatching { playbackGuard.dispose() }
+            }
         }
     }
 
     fun togglePlayback() {
         if (released || loading || failed || !lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) return
-        try {
-            if (playing) {
-                player.pause()
+        playbackScope.launch {
+            try {
+                if (playing) {
+                    playbackGuard.pause()
+                    playing = false
+                    abandonFocus()
+                } else {
+                    val allowed = playbackGuard.runNative {
+                        if (!requestFocus()) { focusUnavailable = true; return@runNative }
+                        focusUnavailable = false
+                        outputDisconnected = false
+                        if (durationMs > 0 && positionMs >= durationMs - 250) {
+                            player.seekTo(0)
+                            positionMs = 0L
+                        }
+                        player.start()
+                        playing = true
+                    }
+                    if (!allowed) { playing = false; focusUnavailable = true; abandonFocus() }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
                 playing = false
                 abandonFocus()
-            } else {
-                val granted = requestFocus()
-                if (!granted) { focusUnavailable = true; return }
-                focusUnavailable = false
-                outputDisconnected = false
-                if (durationMs > 0 && positionMs >= durationMs - 250) {
-                    player.seekTo(0)
-                    positionMs = 0L
-                }
-                player.start()
-                playing = true
+                failed = true
             }
-        } catch (_: Exception) {
-            playing = false
-            abandonFocus()
-            failed = true
         }
     }
 
@@ -1062,13 +1118,16 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
                         seekPreview = null
                         if (target != null && !released && !loading && !failed && durationMs > 0 &&
                             lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
-                            try {
-                                val boundedTarget = target.toLong().coerceIn(0L, durationMs)
-                                player.seekTo(boundedTarget.toInt())
-                                positionMs = boundedTarget
-                            } catch (_: IllegalStateException) {
-                                playing = false
-                                failed = true
+                            playbackScope.launch {
+                                try {
+                                    val boundedTarget = target.toLong().coerceIn(0L, durationMs)
+                                    val allowed = playbackGuard.runNative {
+                                        player.seekTo(boundedTarget.toInt())
+                                        positionMs = boundedTarget
+                                    }
+                                    if (!allowed) { playing = false; focusUnavailable = true; abandonFocus() }
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (_: Exception) { playing = false; failed = true; abandonFocus() }
                             }
                         }
                     },
@@ -1141,3 +1200,40 @@ internal fun StatusFittedImage(
             modifier = modifier, contentScale = androidx.compose.ui.layout.ContentScale.Fit)
     }
 }
+
+// Status audio previous consumer paths retained for source history:
+//     val player = remember(url, lifecycleOwner) { MediaPlayer() }
+//                 runCatching { if (player.isPlaying) player.pause() }
+//         } catch (_: Exception) {
+//                 try { player.pause() } catch (_: IllegalStateException) { failed = true }
+//                 runCatching { if (player.isPlaying) player.pause() }
+//             player.setOnPreparedListener(null)
+//             player.setOnCompletionListener(null)
+//             player.setOnErrorListener(null)
+//             runCatching { player.release() }
+//         try {
+//             if (playing) {
+//                 player.pause()
+//             } else {
+//                 val granted = requestFocus()
+//                 if (!granted) { focusUnavailable = true; return }
+//                 focusUnavailable = false
+//                 outputDisconnected = false
+//                 if (durationMs > 0 && positionMs >= durationMs - 250) {
+//                     player.seekTo(0)
+//                     positionMs = 0L
+//                 }
+//                 player.start()
+//                 playing = true
+//             }
+//         } catch (_: Exception) {
+//             playing = false
+//             abandonFocus()
+//             failed = true
+//                             try {
+//                                 val boundedTarget = target.toLong().coerceIn(0L, durationMs)
+//                                 player.seekTo(boundedTarget.toInt())
+//                                 positionMs = boundedTarget
+//                             } catch (_: IllegalStateException) {
+//                                 playing = false
+//                                 failed = true

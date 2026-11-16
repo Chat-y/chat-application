@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_privacy_security">Privacy &amp; security</string>
+    <string name="settings_section_themes_appearance">Themes &amp; appearance</string>
+    <string name="settings_section_chats_notifications">Chats &amp; notifications</string>
+    <string name="settings_section_data_system">Data &amp; system</string>
+</resources>

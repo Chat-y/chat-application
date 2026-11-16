@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -174,7 +175,15 @@ fun ChatyEventToastOverlay(
                 val bg = (typedStyle?.background ?: preferences.gbColor("event_toast_bg"))?.let { Color(it.toInt()) } ?: colors.surface
                 val preset = ChatyNotificationIconPresets.forName(preferences.universal.notificationIcon)
                 val presetColor = Color(preset.colorArgb.toInt())
-                val textTint = (typedStyle?.text ?: shown.textColorArgb)?.let { Color(it.toInt()) }
+                // Previous implementation retained: val textTint = (typedStyle?.text ?: shown.textColorArgb)?.let { Color(it.toInt()) }
+                val requestedText = typedStyle?.text ?: shown.textColorArgb
+                val scheme = androidx.compose.material3.MaterialTheme.colorScheme
+                fun packed(color: Color): Long = color.toArgb().toLong() and 0xFFFFFFFFL
+                val themeForegrounds = listOf(packed(scheme.onSurface), packed(scheme.inverseOnSurface))
+                val titleTint = Color(com.example.chat.ui.kit.ToastContrastPolicy.readable(packed(bg),
+                    requestedText ?: packed(colors.foreground), themeForegrounds))
+                val bodyTint = Color(com.example.chat.ui.kit.ToastContrastPolicy.readable(packed(bg),
+                    requestedText ?: packed(colors.foregroundSecondary), themeForegrounds))
                 val pad = when (position) {
                     "bottom" -> Modifier.padding(start = 14.dp, end = 14.dp, bottom = 92.dp)
                     "center" -> Modifier.padding(horizontal = 20.dp, vertical = 20.dp)
@@ -212,12 +221,14 @@ fun ChatyEventToastOverlay(
                                     if (preferences.notification.showSenderName) shown.title else "Chaty",
                                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     fontWeight = FontWeight.ExtraBold, fontSize = 14.sp,
-                                    color = textTint ?: colors.foreground,
+                                    // Previous implementation retained: color = textTint ?: colors.foreground,
+                                    color = titleTint,
                                 )
                                 if (preferences.notification.showMessagePreview) {
                                     Text(body, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                         fontSize = 12.sp,
-                                        color = textTint ?: colors.foregroundSecondary)
+                                        // Previous implementation retained: color = textTint ?: colors.foregroundSecondary)
+                                        color = bodyTint)
                                 }
                             }
                         }

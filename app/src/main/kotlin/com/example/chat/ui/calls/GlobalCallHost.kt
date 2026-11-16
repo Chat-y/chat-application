@@ -39,6 +39,10 @@ import kotlinx.coroutines.launch
 fun GlobalCallHost(isAuthenticated: Boolean) {
     if (!isAuthenticated) return
     val service = remember { ServiceLocator.callSignaling }
+    val feedback = remember { ServiceLocator.callQualityFeedback }
+    val qualityPrompt by feedback.prompt.collectAsState()
+    var qualitySaveBusy by remember { mutableStateOf(false) }
+
     val presentation = remember { ServiceLocator.callPresentationController }
     remember { ServiceLocator.callLifecycle }
     val prefsStore = remember { ServiceLocator.callPresentationPrefs }
@@ -68,6 +72,42 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
             presentation.removeListener(l)
             prefsStore.removeListener(l)
         }
+    }
+    val feedbackRequest = qualityPrompt
+    val feedbackLocked by ServiceLocator.appLock.lockRequired.collectAsState()
+    val feedbackLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val feedbackLifecycleState by feedbackLifecycle.lifecycle.currentStateFlow.collectAsState()
+    if (feedbackRequest != null && !feedbackLocked &&
+        feedbackRequest.owner === ServiceLocator.apiBackend.authSnapshot() &&
+        feedbackLifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) &&
+        service.currentSession?.state?.isTerminal != false) {
+        com.example.chat.ui.kit.ChatyConfirmationDialog(
+            onDismissRequest = { if (!qualitySaveBusy) feedback.skip(feedbackRequest) },
+            title = { androidx.compose.material3.Text("How was call quality?") },
+            text = { androidx.compose.material3.Text("Optional feedback stays on this device. No call details or answers are uploaded.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(enabled = !qualitySaveBusy, onClick = {
+                    qualitySaveBusy = true
+                    scope.launch { try {
+                        if (!ServiceLocator.appLock.lockRequired.value && feedback.rate(feedbackRequest, true).isFailure)
+                            android.widget.Toast.makeText(hostContext, "Feedback could not be saved.", android.widget.Toast.LENGTH_SHORT).show()
+                    } finally { qualitySaveBusy = false } }
+                }) { androidx.compose.material3.Text("Good") }
+            },
+            dismissButton = {
+                androidx.compose.foundation.layout.Row {
+                    androidx.compose.material3.TextButton(enabled = !qualitySaveBusy, onClick = {
+                        qualitySaveBusy = true
+                        scope.launch { try {
+                            if (!ServiceLocator.appLock.lockRequired.value && feedback.rate(feedbackRequest, false).isFailure)
+                                android.widget.Toast.makeText(hostContext, "Feedback could not be saved.", android.widget.Toast.LENGTH_SHORT).show()
+                        } finally { qualitySaveBusy = false } }
+                    }) { androidx.compose.material3.Text("Poor") }
+                    androidx.compose.material3.TextButton(enabled = !qualitySaveBusy,
+                        onClick = { feedback.skip(feedbackRequest) }) { androidx.compose.material3.Text("Skip") }
+                }
+            },
+        )
     }
     val hostView = androidx.compose.ui.platform.LocalView.current
     DisposableEffect(service, hostView) {
@@ -140,6 +180,37 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
         }
     }
     val session = service.currentSession ?: return
+    var reminderDismissed by remember(session.callId) { mutableStateOf(false) }
+    var reminderBusy by remember(session.callId) { mutableStateOf(false) }
+    val reminderOwner = remember(session.callId) { ServiceLocator.apiBackend.authSnapshot() }
+    // Prior reminder condition omitted lock, foreground and owner admission.
+    if (!session.isDemo && !session.isOutgoing && session.state == CallSessionState.declined && !reminderDismissed &&
+        !feedbackLocked && feedbackRequest == null &&
+        reminderOwner === ServiceLocator.apiBackend.authSnapshot() &&
+        feedbackLifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+        com.example.chat.ui.kit.ChatyConfirmationDialog(
+            onDismissRequest = { if (!reminderBusy) reminderDismissed = true },
+            title = { androidx.compose.material3.Text("Call back later?") },
+            text = { androidx.compose.material3.Text("Set a private reminder in about 15 minutes to review declined calls. Android may delay it. Replaces your pending call-back reminder. No call is made automatically; notifications must be allowed. Chaty must stay running: restarting the app process, signing out or changing the sign-in session cancels this reminder.") },
+            confirmButton = { androidx.compose.material3.TextButton(enabled = !reminderBusy, onClick = {
+                if (ServiceLocator.appLock.lockRequired.value ||
+                    !feedbackLifecycle.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) ||
+                    ServiceLocator.apiBackend.authSnapshot() !== reminderOwner ||
+                    service.currentSession?.callId != session.callId ||
+                    service.currentSession?.state != CallSessionState.declined) return@TextButton
+                reminderBusy = true
+                scope.launch { try {
+                    val result = CallCallbackReminder.schedule(hostContext, reminderOwner)
+                    android.widget.Toast.makeText(hostContext,
+                        if (result.isSuccess) "Call-back reminder scheduled." else "Reminder could not be scheduled.",
+                        android.widget.Toast.LENGTH_LONG).show()
+                    if (result.isSuccess) reminderDismissed = true
+                } finally { reminderBusy = false } }
+            }) { androidx.compose.material3.Text("Remind me") } },
+            dismissButton = { androidx.compose.material3.TextButton(enabled = !reminderBusy,
+                onClick = { reminderDismissed = true }) { androidx.compose.material3.Text("Not now") } },
+        )
+    }
     fun minimizeCall() {
         if (!com.example.chat.CallPipActivity.launch(hostContext)) presentation.minimizeToPipOrIsland()
     }

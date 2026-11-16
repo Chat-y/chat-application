@@ -19,6 +19,8 @@ import com.example.chat.R
  * sound, vibration and DND stay under the user's control in Android settings (never overridden here).
  */
 object ChatyNotificationPoster {
+    private const val CH_MISSED = "chaty_missed_calls_live_v1"
+    private const val MISSED_ID = 7422
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -26,6 +28,12 @@ object ChatyNotificationPoster {
         nm.createNotificationChannel(
             NotificationChannel(ChatyNotificationPolicy.CH_MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "New chat messages"; enableVibration(true); setShowBadge(true)
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_MISSED, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Missed voice and video calls"
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             },
         )
         nm.createNotificationChannel(
@@ -52,6 +60,9 @@ object ChatyNotificationPoster {
 
     private fun broadcast(context: Context, action: String, nonce: String, mutable: Boolean = false): PendingIntent {
         val i = Intent(action).setClass(context, ChatyNotificationActionReceiver::class.java)
+            // Previous identity used nonce.hashCode() alone; extras do not distinguish PendingIntents.
+            // Full opaque nonce in data prevents hash collisions from retargeting an existing action.
+            .setData(android.net.Uri.Builder().scheme("chaty").authority("notification-action").appendPath(nonce).build())
             .putExtra(ChatyNotificationPolicy.EXTRA_NONCE, nonce)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or when {
             !mutable -> PendingIntent.FLAG_IMMUTABLE
@@ -113,7 +124,7 @@ object ChatyNotificationPoster {
 
     /** Incoming call. The only action OPENS the app (accept happens in-app after auth/lock/permissions).
      *  [tag] is the lane's canonical c:<generation>:<callId> tag (null for the fixture/direct calls). */
-    internal fun postIncomingCall(context: Context, style: ChatyNotificationStyle, callerName: String, isVideo: Boolean, declineNonce: String?, tag: String? = null) {
+    internal fun postIncomingCall(context: Context, style: ChatyNotificationStyle, callerName: String, isVideo: Boolean, declineNonce: String?, tag: String? = null, quiet: Boolean = false) {
         if (!canPost(context)) return
         ensureChannels(context)
         val open = openApp(context, ChatyNotificationPolicy.INCOMING_CALL_ID)
@@ -122,12 +133,15 @@ object ChatyNotificationPoster {
             .setContentTitle(callerName)
             .setContentText(if (isVideo) "Incoming video call" else "Incoming voice call")
             .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setOngoing(true).setOnlyAlertOnce(true).setTimeoutAfter(60_000)
+            // Previous implementation retained: .setOngoing(true).setOnlyAlertOnce(true).setTimeoutAfter(60_000)
+            .setOngoing(true).setOnlyAlertOnce(true)
+            .setTimeoutAfter(com.example.chat.data.services.CallRingPolicy.TIMEOUT_MILLIS)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(open)
+            .setSilent(quiet)
         // The live Coordinator path must opt in too; legacy ChatyNotifications
         // is not this poster. Keep its existing normal launch/auth/lock route.
-        if (open != null && (Build.VERSION.SDK_INT < 34 ||
+        if (!quiet && open != null && (Build.VERSION.SDK_INT < 34 ||
                 (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).canUseFullScreenIntent())) {
             b.setFullScreenIntent(open, true)
         }
@@ -136,9 +150,56 @@ object ChatyNotificationPoster {
         try { NotificationManagerCompat.from(context).notify(tag, ChatyNotificationPolicy.INCOMING_CALL_ID, b.build()) } catch (_: SecurityException) {}
     }
 
+    /** Generic copy never exposes a caller identity on locked/shared devices. */
+    internal fun postMissedCall(context: Context, style: ChatyNotificationStyle, tag: String, summaryTag: String, group: String, hideOnLockScreen: Boolean = true) {
+        if (!canPost(context)) return
+        ensureChannels(context)
+        val open = openApp(context, MISSED_ID)
+        fun builder() = NotificationCompat.Builder(context, CH_MISSED)
+            .setSmallIcon(smallIcon(style, call = true)).setColor(style.accentArgb)
+            .setContentTitle("Missed Chaty call").setContentText("Open Chaty to review your calls")
+            // Previous implementation retained: .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setVisibility(if (hideOnLockScreen) NotificationCompat.VISIBILITY_SECRET else NotificationCompat.VISIBILITY_PRIVATE)
+            .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+            .setContentIntent(open).setAutoCancel(true).setGroup(group).setOnlyAlertOnce(true)
+        val manager = NotificationManagerCompat.from(context)
+        manager.notify(tag, MISSED_ID, builder().build())
+        manager.notify(summaryTag, MISSED_ID, builder().setContentTitle("Missed Chaty calls")
+            .setGroupSummary(true).setSilent(true).build())
+    }
+
+    private const val REMINDER_CHANNEL = "chaty_call_callback_reminders_v1"
+    private const val REMINDER_ID = 7423
+    internal fun postCallbackReminder(context: Context, style: ChatyNotificationStyle, tag: String) {
+        if (!canPost(context)) return
+        if (Build.VERSION.SDK_INT >= 26) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(NotificationChannel(REMINDER_CHANNEL, "Call-back reminders", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET })
+        }
+        val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL)
+            .setSmallIcon(smallIcon(style, call = true)).setColor(style.accentArgb)
+            .setContentTitle("Call-back reminder").setContentText("Open Chaty to review your declined calls.")
+            .setContentIntent(openApp(context, REMINDER_ID)).setAutoCancel(true)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET).build()
+        NotificationManagerCompat.from(context).notify(tag, REMINDER_ID, notification)
+    }
+    internal fun cancelCallbackReminder(context: Context, tag: String) {
+        NotificationManagerCompat.from(context).cancel(tag, REMINDER_ID)
+    }
+
+    internal fun cancelMissedCall(context: Context, tag: String) {
+        NotificationManagerCompat.from(context).cancel(tag, MISSED_ID)
+    }
+
     internal fun cancelIncomingCall(context: Context, tag: String? = null) {
         NotificationManagerCompat.from(context).cancel(tag, ChatyNotificationPolicy.INCOMING_CALL_ID)
     }
+
+    @androidx.annotation.RequiresApi(26)
+    internal fun pipAction(context: Context, action: String, nonce: String, title: String, icon: Int): android.app.RemoteAction =
+        android.app.RemoteAction(android.graphics.drawable.Icon.createWithResource(context, icon), title, title,
+            broadcast(context, action, nonce))
 
     /** Mute/Unmute and Hang up on the quiet ongoing-call notification. Speaker/Earpiece toggles the route. */
     fun addOngoingCallActions(context: Context, builder: NotificationCompat.Builder, bridge: ChatyNotificationBridge?) {

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Remove
@@ -61,9 +62,10 @@ import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 
 /** Dedicated GeoLibre viewer. Explicitly opening this screen starts map tile requests, not GPS.
- * The visible provider-attribution control is hidden in the bundled page (user direction,
- * recorded in todo-01M5XXQ89E04GQZKM6X9M8HFMS); licence/provenance notices stay in
- * assets/location-map/THIRD_PARTY_NOTICES.txt and no licence waiver is claimed. No Send path exists. */
+ * Provider-attribution visibility remains unchanged in this patch. Licence/provenance notices
+ * stay in assets/location-map/THIRD_PARTY_NOTICES.txt; no licence waiver is claimed.
+ * MAP-R1-030: no offline-ready or cache-coverage state is exposed; styles and tiles need the
+ * network and nothing in this screen claims otherwise. No Send path exists. */
 @Composable
 fun MapViewerScreen(
     context: Context,
@@ -88,8 +90,21 @@ fun MapViewerScreen(
     var mapActive by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var mapView by remember { mutableStateOf<GeoLibreLocationMapView?>(null) }
     var requestedBefore by rememberSaveable { mutableStateOf(false) }
-    var draft by remember { mutableStateOf<LocationDraft?>(initialCoordinate?.let { LocationDraft(it, LocationSource.manualPin) }) }
-    var status by remember { mutableStateOf("Loading map...") }
+    // MAP-R1-005: the draft is keyed on initialCoordinate so a changed initial coordinate starts a fresh draft.
+    // Prior: var draft by remember { mutableStateOf<LocationDraft?>(initialCoordinate?.let { LocationDraft(it, LocationSource.manualPin) }) }
+    var draft by remember(initialCoordinate) { mutableStateOf(initialCoordinate?.let { LocationDraft(it, LocationSource.manualPin) }) }
+    // MAP-R1-010: renderer and location status are modeled independently so they no longer overwrite each other.
+    // Prior: var status by remember { mutableStateOf("Loading map...") }
+    var rendererStatus by remember { mutableStateOf("Loading map...") }
+    var locationStatus by remember { mutableStateOf("") }
+    // MAP-R1-024/046: a style selection stays pending until the page confirms it.
+    var stylePending by remember { mutableStateOf<String?>(null) }
+    // MAP-R1-045: set when the renderer reports unavailable; drives the Retry control.
+    var rendererFailed by remember { mutableStateOf(false) }
+    // MAP-R1-045: bumped to recreate the renderer on Retry.
+    var mapGeneration by remember { mutableIntStateOf(0) }
+    // MAP-R1-001: latest best-effort camera snapshot (zoom,bearing,pitch,lat,lng).
+    var cameraSnapshot by rememberSaveable { mutableStateOf<String?>(null) }
     var locating by remember { mutableStateOf(false) }
     val capturedScope = remember { accountId to conversationId }
     val liveScope by rememberUpdatedState(currentScope)
@@ -112,7 +127,22 @@ fun MapViewerScreen(
     var rationale by remember { mutableStateOf(false) }
     var locateJob by remember { mutableStateOf<Job?>(null) }
     var friendsMapOpen by remember { mutableStateOf(false) }
+    // MAP-R1-025 / MAP-R5-238: pause this renderer while the friends map dialog owns the screen,
+    // so two live WebView renderers never run at once. Resume only while the host is resumed.
+    DisposableEffect(friendsMapOpen, mapView) {
+        val pausedForFriends = friendsMapOpen
+        if (pausedForFriends) mapView?.pauseMap()
+        onDispose { if (pausedForFriends && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView?.resumeMap() }
+    }
     val gate = remember { LocationSendGate() }
+    // MAP-R1-005: a re-keyed initial coordinate replaces the gate selection and the on-map pin.
+    LaunchedEffect(initialCoordinate) {
+        gate.cancel() // A null replacement must invalidate an older confirmed pin too.
+        initialCoordinate?.let { coordinate ->
+            gate.select(LocationDraft(coordinate, LocationSource.manualPin))
+            mapView?.showPin(coordinate)
+        }
+    }
 
     val activity = remember(context) { context.findMapActivity() }
     val manager = remember(context) { context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
@@ -122,7 +152,7 @@ fun MapViewerScreen(
     fun acquireCurrentFix() {
         stopLocate()
         locating = true
-        status = "Getting current location for this map. Nothing is sent."
+        locationStatus = "Getting current location for this map. Nothing is sent."
         locateJob = scope.launch {
             try {
                 // Recheck immediately before the API call; never use a cached last-known fix.
@@ -148,21 +178,30 @@ fun MapViewerScreen(
                 check(liveScope() == capturedScope) { "Account or conversation changed." }
                 select(value)
                 mapView?.showPin(value.coordinate)
-                status = if (precise) "Current location shown on the map. Nothing is sent." else "Approximate location shown. You can move the pin. Nothing is sent."
+                // MAP-R2-078: show the measured accuracy radius instead of equating a fresh fix with a
+                // precise one; a very poor radius (> 1000 m) is labeled approximate. Display-only policy:
+                // no fix is rejected or hidden based on accuracy.
+                // Prior: locationStatus = if (precise) "Current location shown on the map. Nothing is sent." else "Approximate location shown. You can move the pin. Nothing is sent."
+                val accuracyMeters = fix.accuracy.toInt()
+                locationStatus = when {
+                    fix.accuracy > 1000f -> "Approximate location shown (accuracy about $accuracyMeters m). You can move the pin. Nothing is sent."
+                    precise -> "Current location shown on the map (accuracy about $accuracyMeters m). Nothing is sent."
+                    else -> "Approximate location shown (accuracy about $accuracyMeters m). You can move the pin. Nothing is sent."
+                }
             } catch (timeout: TimeoutCancellationException) {
-                status = "Location timed out. Choose a pin or try again."
+                locationStatus = "Location timed out. Choose a pin or try again."
             } catch (cancelled: CancellationException) {
-                status = "Location request stopped. Choose a pin or try again."
+                locationStatus = "Location request stopped. Choose a pin or try again."
                 throw cancelled
             } catch (error: Exception) {
-                status = error.message ?: "Location is unavailable. Choose a pin instead."
+                locationStatus = error.message ?: "Location is unavailable. Choose a pin instead."
             } finally { locating = false }
         }
     }
     val permissionRequest = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
             if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) acquireCurrentFix()
-        } else status = "Location permission was denied. You can still choose a pin without it."
+        } else locationStatus = "Location permission was denied. You can still choose a pin without it."
     }
     fun requestPermission() {
         requestedBefore = true
@@ -182,22 +221,32 @@ fun MapViewerScreen(
             LocateAction.explainRationale -> rationale = true
             LocateAction.offerAppSettings -> {
                 // Prior: context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
-                status = "Permission is unavailable. You can allow location in app settings, or choose a pin."
+                locationStatus = "Permission is unavailable. You can allow location in app settings, or choose a pin."
                 // MAP-R2-070: guarded so a missing settings handler cannot crash.
                 runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))) }
             }
                 // Prior: context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
             LocateAction.offerLocationSettings -> {
-                status = "Location services are off. Turn them on, then tap Current location again, or choose a pin."
+                locationStatus = "Location services are off. Turn them on, then tap Current location again, or choose a pin."
                 runCatching { context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } // MAP-R2-070
             }
         }
     }
+    val currentFriendsMapOpen by rememberUpdatedState(friendsMapOpen)
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE -> { rendererReady = false; layersOpen = false; stopLocate(); mapActive = false; mapView?.disposeMap(); mapView = null }
-                Lifecycle.Event.ON_RESUME -> { mapActive = true }
+                // MAP-R1-002/022: pause the live page instead of tearing the map down on every pause.
+                // Prior: Lifecycle.Event.ON_PAUSE -> { rendererReady = false; layersOpen = false; stopLocate(); mapActive = false; mapView?.disposeMap(); mapView = null }
+                Lifecycle.Event.ON_PAUSE -> {
+                    layersOpen = false
+                    stopLocate()
+                    // MAP-R1-001: capture a best-effort camera snapshot before pausing.
+                    mapView?.snapshotCamera { saved -> if (saved != null) cameraSnapshot = saved }
+                    mapView?.pauseMap()
+                }
+                // Prior: Lifecycle.Event.ON_RESUME -> { mapActive = true }
+                Lifecycle.Event.ON_RESUME -> { mapActive = true; if (!currentFriendsMapOpen) mapView?.resumeMap() }
                 else -> Unit
             }
         }
@@ -220,16 +269,42 @@ fun MapViewerScreen(
             }
             Box(Modifier.fillMaxWidth().weight(1f).semantics { paneTitle = "Map" }) { // MAP-R4-168
             if (mapActive) {
+                // MAP-R1-045: keying on mapGeneration lets the Retry action recreate a failed renderer.
+                key(mapGeneration) {
                 AndroidView(
                     factory = { viewContext -> GeoLibreLocationMapView(viewContext,
-                        onPinSelected = { point -> stopLocate(); select(LocationDraft(point, LocationSource.manualPin)); status = "Pin selected locally. Nothing is sent." },
-                        onUnavailable = { status = it }, onAttributionLink = onAttributionLink,
-                        onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); if (status == "Loading map...") status = ""; onMapReady() }, nativeLayers = true,
-                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true }, onViewChanged = { buildingsEnabled = it },
+                        onPinSelected = { point ->
+                            stopLocate()
+                            // MAP-R1-028: drop a redundant pin message for the coordinate already selected.
+                            if (draft?.coordinate != point) {
+                                select(LocationDraft(point, LocationSource.manualPin))
+                                locationStatus = "Pin selected locally. Nothing is sent."
+                            }
+                        },
+                        onUnavailable = { rendererStatus = it; rendererFailed = true }, onAttributionLink = onAttributionLink,
+                        onMapReady = {
+                            rendererReady = true
+                            mapView?.selectStyle(selectedStyle)
+                            if (buildingsEnabled) mapView?.control("toggleBuildings")
+                            // MAP-R1-001: restore the last camera snapshot after the page is ready.
+                            mapView?.restoreCamera(cameraSnapshot)
+                            if (rendererStatus == "Loading map...") rendererStatus = ""
+                            onMapReady()
+                        }, nativeLayers = true,
+                        // MAP-R5-233: stylePending now clears when the style load reaches idle (onStyleLoading),
+                        // not on the immediate page ack, so a slow network keeps the switching status visible.
+                        // Prior: onStyleChanged = { selectedStyle = it; styleChosenByUser = true; stylePending = null }
+                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true },
+                        onStyleLoading = { loading -> if (!loading) stylePending = null }, onViewChanged = { enabled ->
+                            buildingsEnabled = enabled
+                            // MAP-R1-047: say what 3D means here; missing building data is not an error.
+                            rendererStatus = if (enabled) "3D buildings show where height data exists. Not satellite imagery." else ""
+                        },
                     ).also { mapView = it; draft?.let { selected -> it.showPin(selected.coordinate) } } },
                     modifier = Modifier.fillMaxSize(),
                     update = { it.setTheme(systemDark) },
                 )
+                }
             }
             Column(Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 FilledIconButton(onClick = { mapView?.control("zoomIn") }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Zoom in" }, shape = androidx.compose.foundation.shape.CircleShape) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.add, semanticLabel = null) }
@@ -245,11 +320,17 @@ fun MapViewerScreen(
                         ChatyDropdownMenuItem(
                             text = { Text(label, color = mapColors.onSurface, fontSize = 15.5.sp, fontWeight = FontWeight.W600) },
                             trailingIcon = { if (selectedStyle == style) com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = "Selected") },
-                            onClick = { layersOpen = false; mapView?.selectStyle(style) },
+                            onClick = {
+                                layersOpen = false
+                                // MAP-R1-024/046: mark the style pending until the page confirms the change.
+                                if (style != selectedStyle) { stylePending = style; mapView?.selectStyle(style) }
+                            },
                         )
                     }
                 }
                 }
+                // MAP-R1-036 / MAP-R5-242: keyboard and switch-accessible pin placement without a map gesture.
+                FilledIconButton(onClick = { mapView?.dropPinAtCenter() }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Drop pin at map center" }, shape = androidx.compose.foundation.shape.CircleShape) { Icon(Icons.Rounded.Place, contentDescription = null) }
             }
             FilledIconButton(
                 onClick = { locate() }, enabled = currentLocationEnabled && !locating,
@@ -263,7 +344,23 @@ fun MapViewerScreen(
             }
             }
             // MAP-R1-034: polite live region
-            if (status.isNotBlank()) Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall)
+            // MAP-R1-010: renderer and location status are announced independently.
+            // Prior: if (status.isNotBlank()) Text(status, modifier = ..., style = MaterialTheme.typography.bodySmall)
+            if (rendererStatus.isNotBlank()) Text(rendererStatus, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall)
+            if (locationStatus.isNotBlank()) Text(locationStatus, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall)
+            // MAP-R1-024/046: pending style is shown until the page confirms the change.
+            if (stylePending != null) Text("Switching map style...", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
+            // MAP-R1-035: textual coordinate summary; the pin is inspectable without reading the map.
+            draft?.let { selected -> Text("Pin: ${"%.5f".format(java.util.Locale.US, selected.coordinate.latitude)}, ${"%.5f".format(java.util.Locale.US, selected.coordinate.longitude)}", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall) }
+            // MAP-R1-045: explicit local retry when the renderer reports unavailable.
+            if (rendererFailed) TextButton(onClick = {
+                mapView?.disposeMap()
+                mapView = null
+                rendererReady = false
+                rendererFailed = false
+                rendererStatus = "Loading map..."
+                mapGeneration += 1
+            }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Retry map") }
         }
     }
     }

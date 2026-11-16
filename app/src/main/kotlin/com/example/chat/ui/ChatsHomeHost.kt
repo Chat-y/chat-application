@@ -178,10 +178,10 @@ fun ChatsHomeHost(
             } finally { endOp(action, chatId) }
         }
     }
-    fun trackedMarkRead(id: String) = runTracked("read", id, true, "Could not mark chat as read. Try again.") { repo.markAsRead(id) }
-    fun trackedMarkUnread(id: String) = runTracked("unread", id, true, "Could not mark chat as unread. Try again.") { repo.markAsUnread(id) }
-    fun trackedMarkAllRead() = runTracked("read_all", "", true, "Could not mark all chats as read. Try again.",
-        onSuccess = { toast("Mark-all-read request completed") }) { repo.markAllAsRead() }
+    fun trackedMarkRead(id: String) = runTracked("read", id, true, "Could not mark chat as read. Try again.") { repo.markAsRead(id, owner) }
+    fun trackedMarkUnread(id: String) = runTracked("unread", id, true, "Could not mark chat as unread. Try again.") { repo.markAsUnread(id, owner) }
+    fun trackedMarkAllRead(ids: List<String>) = runTracked("read_all", "", false, "Could not mark all chats as read. Try again.",
+        onSuccess = { toast("Mark-all-read request completed") }) { repo.markAllAsRead(owner, ids.toSet()) }
     // Manual refresh through the existing scope-guarded API only. That call swallows a failed fetch,
     // so no success or failure is claimed here: the list simply updates if the fetch applied.
     var homeRefreshing by remember(owner) { androidx.compose.runtime.mutableStateOf(false) }
@@ -237,7 +237,7 @@ fun ChatsHomeHost(
             when (key.action) {
                 "read" -> trackedMarkRead(key.chatId)
                 "unread" -> trackedMarkUnread(key.chatId)
-                "read_all" -> trackedMarkAllRead()
+                "read_all" -> toast("Use Mark all as read again to review and authorize its current chat scope.")
             }
         }
     }
@@ -428,7 +428,7 @@ fun ChatsHomeHost(
         onToggleArchive = { id -> find(id)?.let { setState(id, "archived", !it.isArchived) } },
         onMarkRead = { id -> trackedMarkRead(id) },
         onMarkUnread = { id -> trackedMarkUnread(id) },
-        onMarkAllRead = { trackedMarkAllRead() },
+        onMarkAllRead = { ids -> trackedMarkAllRead(ids) },
         onDeleteConversations = { ids ->
             // Dart ChatyDataStore.deleteConversation: custom-backend delete, then the Supabase one.
             if (beginOp("delete", ids.sorted().joinToString(","))) scope.launch {
@@ -1246,3 +1246,11 @@ private fun homeTypedFailureMessage(t: Throwable, kind: com.example.chat.ui.chat
 //     com.example.chat.ui.chats.home.HomeFailureKind.Offline, com.example.chat.ui.chats.home.HomeFailureKind.ServerRejected -> kind.feedback()
 //     else -> homeFailureMessage(t, fallback)
 // }
+
+// Replaced lines retained for source comparison (not executable).
+//     fun trackedMarkRead(id: String) = runTracked("read", id, true, "Could not mark chat as read. Try again.") { repo.markAsRead(id) }
+//     fun trackedMarkUnread(id: String) = runTracked("unread", id, true, "Could not mark chat as unread. Try again.") { repo.markAsUnread(id) }
+//     fun trackedMarkAllRead() = runTracked("read_all", "", true, "Could not mark all chats as read. Try again.",
+//         onSuccess = { toast("Mark-all-read request completed") }) { repo.markAllAsRead() }
+//                 "read_all" -> trackedMarkAllRead()
+//         onMarkAllRead = { trackedMarkAllRead() },

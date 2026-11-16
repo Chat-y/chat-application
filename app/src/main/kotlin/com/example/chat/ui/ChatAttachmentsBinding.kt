@@ -93,6 +93,11 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
     }
     var contactPending by remember { mutableStateOf<CompletableDeferred<Uri?>?>(null) }
     var docPickerPending by remember { mutableStateOf<CompletableDeferred<List<MediaFileDescriptor>?>?>(null) }
+    // Per-flow exclusion: the picker/review flows below share the single slots above (pending,
+    // mediaReview, viewOnceAsk, docPickerPending, contactPending). A second concurrent flow would
+    // overwrite an in-flight deferred and orphan or misroute the first flow's picker result, so a
+    // new flow is refused while one is running (GalleryLeaseRegistry.begin parity: never overwrite).
+    val pickerFlowLock = remember { kotlinx.coroutines.sync.Mutex() }
     // Dart custom_file_picker_screen.dart:33 `final _libraryService = MediaLibraryService();`
     // with path_provider sources (media_library_service.dart:48-51): app documents dir + temp dir.
     val mediaLibrary = remember {
@@ -408,13 +413,21 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
             currentScope = { api.currentUser?.id to liveConversation },
             onDismiss = { locationPickerOpen = false },
             onAttributionLink = { uri ->
-                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+                // MAP-R5-227: guarded so a missing browser cannot crash the picker.
+                // Prior: context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+                runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
             },
         )
     }
-    val onContact: () -> Unit = { scope.launch { controller.shareContact(contactsPort); afterSend() } }
+    val onContact: () -> Unit = { scope.launch {
+        if (!pickerFlowLock.tryLock()) { toast("Finish the current attachment first."); return@launch }
+        // Previous unlocked call: controller.shareContact(contactsPort); afterSend()
+        try { controller.shareContact(contactsPort); afterSend() }
+        finally { pickerFlowLock.unlock() }
+    } }
     val onMedia: (String) -> Unit = { type ->
         scope.launch {
+            if (!pickerFlowLock.tryLock()) { toast("Finish the current attachment first."); return@launch }
             val flowStaged = mutableListOf<java.io.File>()
             try {
             requireAttachmentOwner()
@@ -475,7 +488,7 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
             afterSend()
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { toast("Could not send attachments. Reopen the chat and try again.") }
-            finally { cleanupStaged(flowStaged) }
+            finally { cleanupStaged(flowStaged); pickerFlowLock.unlock() }
         }
     }
     mediaReview?.let { (items, deferred) ->
@@ -524,6 +537,7 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
     // fed by the sheet's own MediaStore grid instead of the system picker.
     val onReviewImages: (List<Uri>) -> Unit = { uris ->
         scope.launch {
+            if (!pickerFlowLock.tryLock()) { toast("Finish the current attachment first."); return@launch }
             val flowStaged = mutableListOf<java.io.File>()
             try {
                 requireAttachmentOwner()
@@ -541,12 +555,13 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
                 afterSend()
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { toast(e.message ?: "Unable to prepare attachment") }
-            finally { cleanupStaged(flowStaged) }
+            finally { cleanupStaged(flowStaged); pickerFlowLock.unlock() }
         }
     }
     // Gallery-sheet direct send: stage and send immediately, no review step.
     val onDirectSendImages: (List<Uri>) -> Unit = { uris ->
         scope.launch {
+            if (!pickerFlowLock.tryLock()) { toast("Finish the current attachment first."); return@launch }
             val flowStaged = mutableListOf<java.io.File>()
             try {
                 requireAttachmentOwner()
@@ -558,7 +573,7 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
                 afterSend()
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { toast(e.message ?: "Unable to send") }
-            finally { cleanupStaged(flowStaged) }
+            finally { cleanupStaged(flowStaged); pickerFlowLock.unlock() }
         }
     }
     val openCaptureSession: (() -> Unit) -> com.example.chat.ui.AttachFlow? = { onCancel ->

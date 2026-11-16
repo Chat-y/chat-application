@@ -281,7 +281,8 @@ fun AppRoot() {
         }
         androidx.compose.runtime.LaunchedEffect(Unit) { try { ServiceLocator.startBadgeSync() } catch (_: Exception) {} }
         // Message notification tapped: open that chat once signed in and unlocked.
-        val notificationRoomId by com.example.chat.notifications.ChatyNotifications.pendingRoomId.collectAsState()
+        // Prior room-id-only state did not carry the originating account.
+        val notificationRoomOpen by com.example.chat.notifications.ChatyNotifications.pendingRoomOpen.collectAsState()
         // androidx.compose.runtime.LaunchedEffect(notificationRoomId, ServiceLocator.apiBackend.isAuthenticated, lockRequired) {
         //     val roomId = notificationRoomId ?: return@LaunchedEffect
         //     val api = ServiceLocator.apiBackend
@@ -300,15 +301,20 @@ fun AppRoot() {
         //     }
         // }
         //
-        androidx.compose.runtime.LaunchedEffect(notificationRoomId, rootAccount, lockRequired, route) {
-            val roomId = notificationRoomId ?: return@LaunchedEffect
+        androidx.compose.runtime.LaunchedEffect(notificationRoomOpen, rootAccount, lockRequired, route) {
+            val request = notificationRoomOpen ?: return@LaunchedEffect
+            val roomId = request.roomId
             val api = ServiceLocator.apiBackend
-            val owner = api.authSnapshot()
+            val owner = request.owner
+            if (api.authSnapshot() !== owner) {
+                com.example.chat.notifications.ChatyNotifications.consumeOpenRoom(request)
+                return@LaunchedEffect
+            }
             val routeAtStart = route
             fun mayOpen() = api.authSnapshot() === owner && api.isAuthenticated &&
                 !ServiceLocator.appLock.lockRequired.value && route == routeAtStart &&
                 route in listOf(AuthRoute.Home, AuthRoute.ChatDetail) &&
-                com.example.chat.notifications.ChatyNotifications.pendingRoomId.value == roomId
+                com.example.chat.notifications.ChatyNotifications.pendingRoomOpen.value === request
             if (!mayOpen()) return@LaunchedEffect
             var conversation = api.conversations.firstOrNull { it.id == roomId }
             if (conversation == null) {
@@ -326,7 +332,7 @@ fun AppRoot() {
             // This is a pre/post-suspend gate, not atomic scoped activation.
             if (mayOpen()) {
                 if (mayOpen()) {
-                    com.example.chat.notifications.ChatyNotifications.consumeOpenRoom()
+                    com.example.chat.notifications.ChatyNotifications.consumeOpenRoom(request)
                     if (target != null) {
                         api.setActiveConversation(target.id)
                         selectedInitialMessageId = null
@@ -365,6 +371,11 @@ fun AppRoot() {
                 com.example.chat.LauncherShortcutPolicy.Decision.OpenNewChat -> {
                     com.example.chat.LauncherShortcutRouter.consume()
                     route = AuthRoute.NewChat
+                }
+                com.example.chat.LauncherShortcutPolicy.Decision.OpenCallSettings -> {
+                    com.example.chat.LauncherShortcutRouter.consume()
+                    pendingSettingsDestination = com.example.chat.ui.settings.SettingsDestination.Calls
+                    route = AuthRoute.Home
                 }
                 com.example.chat.LauncherShortcutPolicy.Decision.Drop ->
                     com.example.chat.LauncherShortcutRouter.consume()
@@ -1663,6 +1674,8 @@ fun AppRoot() {
                                 onLogout = { ServiceLocator.apiBackend.signOut() },
                             )
                         }
+                    } else {
+                        com.example.chat.ui.profile.ProfileLoadingPlaceholder()
                     }
                 }
                 ChatyPushedPage(pushedSettings) {
@@ -1695,21 +1708,24 @@ fun AppRoot() {
                             keywords = { it.searchKeywords },
                             // Dart: def.icon ?? def.category.icon (def.iconName resolved by SettingsIcons).
                             icon = { def ->
-                                com.example.chat.ui.settings.navigation.SettingsIcons.resolve(def.iconName) ?: when (def.category) {
-                                    com.example.chat.ui.settings.registry.SettingsCategory.account -> androidx.compose.material.icons.Icons.Outlined.Person
-                                    com.example.chat.ui.settings.registry.SettingsCategory.privacy -> androidx.compose.material.icons.Icons.Outlined.VisibilityOff
-                                    com.example.chat.ui.settings.registry.SettingsCategory.security -> androidx.compose.material.icons.Icons.Outlined.Lock
-                                    com.example.chat.ui.settings.registry.SettingsCategory.chats -> androidx.compose.material.icons.Icons.Outlined.ChatBubbleOutline
-                                    com.example.chat.ui.settings.registry.SettingsCategory.appearance -> androidx.compose.material.icons.Icons.Outlined.Palette
-                                    com.example.chat.ui.settings.registry.SettingsCategory.homeAndNavigation -> androidx.compose.material.icons.Icons.Outlined.Home
-                                    com.example.chat.ui.settings.registry.SettingsCategory.notifications -> androidx.compose.material.icons.Icons.Outlined.Notifications
-                                    com.example.chat.ui.settings.registry.SettingsCategory.calls -> androidx.compose.material.icons.Icons.Outlined.Call
-                                    com.example.chat.ui.settings.registry.SettingsCategory.storageAndMedia -> androidx.compose.material.icons.Icons.Rounded.Storage
-                                    com.example.chat.ui.settings.registry.SettingsCategory.devices -> androidx.compose.material.icons.Icons.Rounded.Devices
-                                    com.example.chat.ui.settings.registry.SettingsCategory.effects -> androidx.compose.material.icons.Icons.Rounded.Animation
-                                    com.example.chat.ui.settings.registry.SettingsCategory.permissions -> androidx.compose.material.icons.Icons.Outlined.AdminPanelSettings
-                                    com.example.chat.ui.settings.registry.SettingsCategory.about -> androidx.compose.material.icons.Icons.Outlined.Info
-                                }
+                                // SET-ICON-MAP: category fallback now resolves through the single SettingsIcons map (was an inlined duplicate).
+                                // com.example.chat.ui.settings.navigation.SettingsIcons.resolve(def.iconName) ?: when (def.category) {
+                                // com.example.chat.ui.settings.registry.SettingsCategory.account -> androidx.compose.material.icons.Icons.Outlined.Person
+                                // com.example.chat.ui.settings.registry.SettingsCategory.privacy -> androidx.compose.material.icons.Icons.Outlined.VisibilityOff
+                                // com.example.chat.ui.settings.registry.SettingsCategory.security -> androidx.compose.material.icons.Icons.Outlined.Lock
+                                // com.example.chat.ui.settings.registry.SettingsCategory.chats -> androidx.compose.material.icons.Icons.Outlined.ChatBubbleOutline
+                                // com.example.chat.ui.settings.registry.SettingsCategory.appearance -> androidx.compose.material.icons.Icons.Outlined.Palette
+                                // com.example.chat.ui.settings.registry.SettingsCategory.homeAndNavigation -> androidx.compose.material.icons.Icons.Outlined.Home
+                                // com.example.chat.ui.settings.registry.SettingsCategory.notifications -> androidx.compose.material.icons.Icons.Outlined.Notifications
+                                // com.example.chat.ui.settings.registry.SettingsCategory.calls -> androidx.compose.material.icons.Icons.Outlined.Call
+                                // com.example.chat.ui.settings.registry.SettingsCategory.storageAndMedia -> androidx.compose.material.icons.Icons.Rounded.Storage
+                                // com.example.chat.ui.settings.registry.SettingsCategory.devices -> androidx.compose.material.icons.Icons.Rounded.Devices
+                                // com.example.chat.ui.settings.registry.SettingsCategory.effects -> androidx.compose.material.icons.Icons.Rounded.Animation
+                                // com.example.chat.ui.settings.registry.SettingsCategory.permissions -> androidx.compose.material.icons.Icons.Outlined.AdminPanelSettings
+                                // com.example.chat.ui.settings.registry.SettingsCategory.about -> androidx.compose.material.icons.Icons.Outlined.Info
+                                // }
+                                com.example.chat.ui.settings.navigation.SettingsIcons.resolve(def.iconName)
+                                    ?: com.example.chat.ui.settings.navigation.SettingsIcons.resolveOrDefault(def.category.iconName)
                             },
                             onSelect = { def ->
                                 // Dart _destinationForRoute; closing the search precedes navigation.
@@ -1722,6 +1738,7 @@ fun AppRoot() {
                                     "/settings/themes" -> settingsNavigate(com.example.chat.ui.settings.SettingsDestination.ThemeEngine)
                                     "/settings/templates" -> settingsNavigate(com.example.chat.ui.settings.SettingsDestination.TemplateStudio)
                                     "/settings/notifications" -> settingsNavigate(com.example.chat.ui.settings.SettingsDestination.Notifications)
+                                    "/settings/notifications/toasts" -> settingsNavigate(com.example.chat.ui.settings.SettingsDestination.ToastNotifications)
                                     "/settings/calls" -> settingsNavigate(com.example.chat.ui.settings.SettingsDestination.Calls)
                                     "/settings/storage" -> settingsNavigate(com.example.chat.ui.settings.SettingsDestination.StorageMedia)
                                     "/settings/effects" -> settingsNavigate(com.example.chat.ui.settings.SettingsDestination.Effects)
@@ -2238,49 +2255,58 @@ fun AppRoot() {
                     onDispose { attached=false;prefsS.removeListener(changed); searchVault.removeListener(changed) }
                 }
                 @Suppress("UNUSED_EXPRESSION") searchPrivacyRevision
+                fun searchPolicyReady(): Boolean = searchApi.authSnapshot() === searchAccount &&
+                    prefsS.preferencesReady && !searchVault.registryLoading &&
+                    searchVault.registryError == null && !searchVault.isDecoyMode
+                fun canOpenSearchConversation(id: String): Boolean = searchPolicyReady() &&
+                    !prefsS.isConversationHidden(id) && !prefsS.isConversationProtected(id) &&
+                    !searchVault.isConversationLocked(id)
                 val searchSnackbar = androidx.compose.runtime.remember { androidx.compose.material3.SnackbarHostState() }
                 val searchScope = androidx.compose.runtime.rememberCoroutineScope()
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
                 androidx.compose.runtime.key(searchAccount) {
-                com.example.chat.ui.search.GlobalSearchScreen(
+                if (!searchPolicyReady()) {
+                    com.example.chat.ui.search.SearchPolicyUnavailable(
+                        onBack = { if (searchApi.authSnapshot() === searchAccount) navigation.goBack() },
+                    )
+                } else com.example.chat.ui.search.GlobalSearchScreen(
                     searchSessionIdentity = searchAccount,
-                    isSearchSessionCurrent = { searchApi.authSnapshot() === searchAccount },
+                    isSearchSessionCurrent = { searchPolicyReady() },
                     isConversationProtected = { id -> prefsS.isConversationProtected(id) || searchVault.isConversationLocked(id) },
                     // Dart ScaffoldMessenger SnackBar for the search error strings (Material3 SnackbarHost below).
                     onNotify = { msg -> if (searchApi.authSnapshot() === searchAccount) searchScope.launch { searchSnackbar.showSnackbar(msg) } },
                     colors = com.example.chat.ui.core.theme.ChatyColors(resolvedTheme),
                     conversations = ServiceLocator.apiBackend.conversations,
                     searchUsers = { q ->
-                        check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
+                        check(searchPolicyReady()) { "Search privacy settings are unavailable." }
                         val found = searchApi.searchUsers(q, expected = searchAccount)
-                        check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
+                        check(searchPolicyReady()) { "Search privacy settings are unavailable." }
                         found
                     },
                     openDirectConversation = { u ->
-                        check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
-                        check(prefsS.preferencesReady && !searchVault.registryLoading && searchVault.registryError == null && !searchVault.isDecoyMode)
+                        check(searchPolicyReady()) { "Search privacy settings are unavailable." }
                         check(u.id.isNotBlank() && u.id != searchAccount.userId)
                         check(!com.example.chat.ui.search.SearchRecipientRules.hasProtectedDirect(u.id, searchApi.conversations) {
                             prefsS.isConversationHidden(it) || prefsS.isConversationProtected(it) || searchVault.isConversationLocked(it)
                         })
                         val found = searchApi.createOrGetDirectConversation(u.id, expectedScope = searchAccount)
                         check(com.example.chat.ui.search.SearchRecipientRules.validDirectRoom(found, searchAccount.userId, u.id))
-                        check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
+                        check(canOpenSearchConversation(found.id)) { "Search privacy settings changed." }
                         found
                     },
                     verifySecretPhrase = { phrase -> ServiceLocator.localLockService.verifySecretPhrase(phrase) },
                     isConversationHidden = { id -> prefsS.isConversationHidden(id) },
                     onBack = { if (searchApi.authSnapshot() === searchAccount) navigation.goBack() },
-                    onOpenLockedChats = { if (searchApi.authSnapshot() === searchAccount) route = AuthRoute.HiddenVault },
+                    onOpenLockedChats = { if (searchPolicyReady()) route = AuthRoute.HiddenVault },
                     onOpenConversation = { id ->
-                        searchApi.conversations.firstOrNull { it.id == id && searchApi.authSnapshot() === searchAccount }?.let { c ->
+                        searchApi.conversations.firstOrNull { it.id == id && canOpenSearchConversation(it.id) }?.let { c ->
                             ServiceLocator.apiBackend.setActiveConversation(c.id)
                             selectedConversation = c
                             route = AuthRoute.ChatDetail
                         }
                     },
                     onOpenConversationReplace = { id ->
-                        searchApi.conversations.firstOrNull { it.id == id && searchApi.authSnapshot() === searchAccount }?.let { c ->
+                        searchApi.conversations.firstOrNull { it.id == id && canOpenSearchConversation(it.id) }?.let { c ->
                             ServiceLocator.apiBackend.setActiveConversation(c.id)
                             selectedConversation = c
                             route = AuthRoute.ChatDetail
@@ -2923,3 +2949,15 @@ private class RootMainDelivery {
     fun dispatch(block: () -> Unit) { handler.post { if (attached.get()) block() } }
     fun close() { attached.set(false) }
 }
+
+// Previous GlobalSearch policy paths retained for source history:
+//                 com.example.chat.ui.search.GlobalSearchScreen(
+//                     isSearchSessionCurrent = { searchApi.authSnapshot() === searchAccount },
+//                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
+//                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
+//                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
+//                         check(prefsS.preferencesReady && !searchVault.registryLoading && searchVault.registryError == null && !searchVault.isDecoyMode)
+//                         check(searchApi.authSnapshot() === searchAccount) { "Account changed." }
+//                     onOpenLockedChats = { if (searchApi.authSnapshot() === searchAccount) route = AuthRoute.HiddenVault },
+//                         searchApi.conversations.firstOrNull { it.id == id && searchApi.authSnapshot() === searchAccount }?.let { c ->
+//                         searchApi.conversations.firstOrNull { it.id == id && searchApi.authSnapshot() === searchAccount }?.let { c ->

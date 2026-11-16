@@ -113,17 +113,22 @@ typealias TriggerEventNotification = (title: String, body: String, accentColor: 
 /** Dart _buildToastPreview. UNCOMPILED (Compose). */
 @Composable
 private fun ToastPreview(text: String, hasAvatar: Boolean, hasElevation: Boolean, radius: Double, bgColor: Long?, textColor: Long?, defaultBg: Color) {
+    val previewColors = LocalAppColors.current
     val bg = bgColor?.let { Color(it) } ?: defaultBg
-    val fg = textColor?.let { Color(it) } ?: Color.White
+    // val fg = textColor?.let { Color(it) } ?: Color.White
+    // Explicitly selected colors are kept; fallbacks use theme tokens.
+    val fg = textColor?.let { Color(it) } ?: previewColors.foreground
     val shape = RoundedCornerShape(radius.toFloat().dp)
     Row(
-        Modifier.let { if (hasElevation) it.shadow(8.dp, shape, ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.25f)) else it }
+        // Modifier.let { if (hasElevation) it.shadow(8.dp, shape, ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.25f)) else it }
+        Modifier.let { if (hasElevation) it.shadow(8.dp, shape, ambientColor = previewColors.shadow.copy(alpha = 0.25f), spotColor = previewColors.shadow.copy(alpha = 0.25f)) else it }
             .background(bg, shape).padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (hasAvatar) {
-            Box(Modifier.size(24.dp).background(Color.White.copy(alpha = 0.2f), CircleShape), contentAlignment = Alignment.Center) {
-                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null, color = Color.White, modifier = Modifier.size(14.dp))
+            // Box(Modifier.size(24.dp).background(Color.White.copy(alpha = 0.2f), CircleShape), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(24.dp).background(previewColors.foreground.copy(alpha = 0.2f), CircleShape), contentAlignment = Alignment.Center) {
+                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null, color = previewColors.foreground, modifier = Modifier.size(14.dp))
             }
             Spacer(Modifier.width(8.dp))
         }
@@ -168,10 +173,12 @@ fun NotificationSettingsPage(
     fun pickColor(title: String, current: Long?, apply: (Long) -> Unit) =
         pickers.showColor(title, current ?: config.accentColor) { apply(it) }
     fun showPositionModal(current: String, onSelected: (String) -> Unit) = pickers.showRadio(
-        "Position of Toast", listOf("Top of the screen", "Center of screen", "Bottom of screen"), current, onSelected = onSelected,
+        "Position of Toast", com.example.chat.domain.models.NotificationToastContract.positions, current, onSelected = onSelected,
     )
     fun showRingtoneModal(current: String, onSelected: (String) -> Unit) = pickers.showRadio(
-        "Ringtone", listOf("Default Chaty Tone", "Soft Ping", "Pop Bubble", "Chime Bell", "Silent"), current, onSelected = onSelected,
+        // Prior labels retained: Default Chaty Tone, Soft Ping, Pop Bubble, Chime Bell, Silent
+        "Ringtone", com.example.chat.domain.models.NotificationToastContract.ringtoneLabels,
+        com.example.chat.domain.models.NotificationToastContract.knownTone(current)?.label ?: current, onSelected = onSelected,
     )
 
     suspend fun refreshPermissions() {
@@ -420,7 +427,7 @@ fun NotificationSettingsPage(
                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ToastPreview("Bandi Maya Online", p.onlineWithProfilePic, p.onlineElevation, p.onlineRadius, p.onlineBgColor, p.onlineTextColor, Color(0xFF1E2630))
+                        ToastPreview("Bandi Maya Online", p.onlineWithProfilePic, p.onlineElevation, p.onlineRadius, p.onlineBgColor, p.onlineTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
                     }
                     GbSwitchTile(
                         icon = Icons.Rounded.NotificationsNone, title = "Notification in the Notification Bar", subtitle = "Show a notification on the phone's status bar", value = p.onlineInNotificationBar,
@@ -467,7 +474,7 @@ fun NotificationSettingsPage(
                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ToastPreview("Bandi Maya Status", p.storyWithProfilePic, p.storyElevation, p.storyRadius, p.storyBgColor, p.storyTextColor, Color(0xFF1E2630))
+                        ToastPreview("Bandi Maya Status", p.storyWithProfilePic, p.storyElevation, p.storyRadius, p.storyBgColor, p.storyTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
                     }
                     GbSwitchTile(
                         icon = Icons.Rounded.NotificationsNone, title = "Notification in the Notification Bar", subtitle = "Show in status bar", value = p.storyInNotificationBar,
@@ -506,7 +513,7 @@ fun NotificationSettingsPage(
                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ToastPreview("Bandi Maya Profile", p.profileWithProfilePic, p.profileElevation, p.profileRadius, p.profileBgColor, p.profileTextColor, Color(0xFF1E2630))
+                        ToastPreview("Bandi Maya Profile", p.profileWithProfilePic, p.profileElevation, p.profileRadius, p.profileBgColor, p.profileTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
                     }
                     GbSwitchTile(
                         icon = Icons.Rounded.AccountBox, title = "Profile Toast", subtitle = "Know immediately when anyone views your profile via a Toast message", value = p.profileToast,
@@ -541,7 +548,7 @@ fun NotificationSettingsPage(
                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ToastPreview("Bandi Maya Typing...", p.typingWithProfilePic, p.typingElevation, p.typingRadius, p.typingBgColor, p.typingTextColor, Color(0xFF1E2630))
+                        ToastPreview("Bandi Maya Typing...", p.typingWithProfilePic, p.typingElevation, p.typingRadius, p.typingBgColor, p.typingTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
                     }
                     GbSwitchTile(
                         icon = Icons.Rounded.Keyboard, title = "Typing Toast", subtitle = "Know immediately when anyone starts typing to you via a floating toast message", value = p.typingToast,

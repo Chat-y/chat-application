@@ -301,7 +301,8 @@ fun OngoingCallScreen(
                 ) {
                     if (!session.isCameraOff && videoSurfaces != null) {
 // Previous implementation retained:                         LocalVideoSurface(videoSurfaces, mirror = session.isFrontCamera)
-                        LocalVideoSurface(session.callId, videoSurfaces, mirror = session.isFrontCamera)
+                        // Previous: LocalVideoSurface(session.callId, videoSurfaces, mirror = session.isFrontCamera)
+                        LocalVideoSurface(session.callId, videoSurfaces, mirror = videoSurfaces.mirrorLocalPreview)
                     } else {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideoOff,
@@ -363,6 +364,7 @@ fun OngoingCallScreen(
                     .then(if (iosLayout && !session.isVideo) Modifier else topPanelDecoration(template))
                     .then(topPanelPadding(template)),
             ) {
+                CallLowBatteryWarning(session.callId, session.isVideo && session.isActive)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,

@@ -115,7 +115,8 @@ fun SecurityCenterScreen(
     val selected by selectedFlow.collectSettingsState()
     val accountGeneration = selected.first
     var pinLength by remember(preferences, accountGeneration) { mutableIntStateOf(4) }
-    var biometricAvailable by remember { mutableStateOf(false) }
+//     var biometricAvailable by remember { mutableStateOf(false) }
+    var biometricAvailable by remember(preferences, accountGeneration) { mutableStateOf(false) }
     var enrolledClasses by remember(preferences, accountGeneration) { mutableStateOf<List<String>>(emptyList()) }
     var modal by remember(preferences, accountGeneration) { mutableStateOf<Modal?>(null) }
     var active by remember(preferences, accountGeneration) { mutableStateOf(true) }
@@ -145,7 +146,16 @@ fun SecurityCenterScreen(
         biometricAvailable = bio
         enrolledClasses = classes
     }
-    LaunchedEffect(preferences, accountGeneration) { loadCapabilities() }
+//     LaunchedEffect(preferences, accountGeneration) { loadCapabilities() }
+    LaunchedEffect(preferences, accountGeneration) {
+        try { loadCapabilities() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            if (active && preferences.scopeGeneration == accountGeneration) {
+                snackbar.showSnackbar("Could not read device lock support. Reopen this page to retry.")
+            }
+        }
+    }
 
     fun showToast(message: String) {
         scope.launch {
@@ -174,6 +184,9 @@ fun SecurityCenterScreen(
             override fun toast(message: String) = showToast(message)
             override fun isActive() = active && preferences.scopeGeneration == accountGeneration
             override fun applySecurity(lockMethod: String?, appLockEnabled: Boolean?, logTitle: String) {
+//                 val latest = preferences.security
+//                 preferences.updateSecurity(
+                if (!isActive()) return
                 val latest = preferences.security
                 preferences.updateSecurity(
                     latest.copy(
@@ -186,8 +199,26 @@ fun SecurityCenterScreen(
         }
     }
 
+    // Test prompts share the same busy gate as lock-setting flows.
+    fun testNativeMethod(biometric: Boolean) {
+        if (flowBusy || modal != null || !host.isActive()) return
+        flowBusy = true
+        scope.launch {
+            try {
+                val ok = if (biometric) lockService.authenticateBiometric("Test biometric unlock for Chaty")
+                    else lockService.authenticateDeviceCredential("Test your device screen lock for Chaty")
+                if (host.isActive()) showToast(if (ok) "Device authentication works." else "Device authentication failed or was cancelled.")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (host.isActive()) showToast("Device authentication is unavailable. Try again.")
+            } finally { flowBusy = false }
+        }
+    }
+
     fun runFlow(intent: SecurityIntent, target: LockMethodType? = null, setupPinLength: Int? = null) {
-        if (flowBusy) return
+//         if (flowBusy) return
+//         if (flowBusy || !host.isActive()) return
+        if (flowBusy || modal != null || !host.isActive()) return
         flowBusy = true
         scope.launch {
             try { SecurityFlowRunner.run(host, intent, target, setupPinLength, pinLength) }
@@ -273,12 +304,15 @@ fun SecurityCenterScreen(
                             }),
                             badgeText = if (biometricAvailable) "READY" else "UNAVAILABLE",
                             badgeColor = if (biometricAvailable) colors.success else colors.warning,
-                            onTap = {
-                                scope.launch {
-                                    val ok = lockService.authenticateBiometric("Test biometric unlock for Chaty")
-                                    if (active) showToast(if (ok) "Biometric unlock works." else "Biometric failed or was cancelled.")
-                                }
-                            },
+//                             onTap = {
+//                                 scope.launch {
+//                                     val ok = lockService.authenticateBiometric("Test biometric unlock for Chaty")
+// //                                     if (active) showToast(if (ok) "Biometric unlock works." else "Biometric failed or was cancelled.")
+//                                     if (active && preferences.scopeGeneration == accountGeneration) showToast(if (ok) "Biometric unlock works." else "Biometric failed or was cancelled.")
+//                                 }
+//                             },
+                            enabled = !flowBusy,
+                            onTap = { testNativeMethod(true) },
                         )
                     }
 // Superseded source retained below per additive-only review rule.
@@ -288,12 +322,15 @@ fun SecurityCenterScreen(
                             icon = Icons.Rounded.PhonelinkLock,
                             title = "Device screen lock",
                             subtitle = "Use the PIN, pattern, password, or biometric managed by Android",
-                            onTap = {
-                                scope.launch {
-                                    val ok = lockService.authenticateDeviceCredential("Test your device screen lock for Chaty")
-                                    if (active) showToast(if (ok) "Device lock works." else "Device authentication failed or was cancelled.")
-                                }
-                            },
+//                             onTap = {
+//                                 scope.launch {
+//                                     val ok = lockService.authenticateDeviceCredential("Test your device screen lock for Chaty")
+// //                                     if (active) showToast(if (ok) "Device lock works." else "Device authentication failed or was cancelled.")
+//                                     if (active && preferences.scopeGeneration == accountGeneration) showToast(if (ok) "Device lock works." else "Device authentication failed or was cancelled.")
+//                                 }
+//                             },
+                            enabled = !flowBusy,
+                            onTap = { testNativeMethod(false) },
                         )
                     }
                     if (security.lockMethod == "PIN") {
@@ -407,7 +444,8 @@ fun SecurityCenterScreen(
                             title = "Test Lock Screen",
                             trailing = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = colors.foregroundTertiary, modifier = Modifier.size(20.dp)) },
                             subtitle = "Run the same authentication gate used by the application",
-                            onTap = { modal = Modal.TestLock(CompletableDeferred()) },
+//                             onTap = { modal = Modal.TestLock(CompletableDeferred()) },
+                            onTap = { if (!flowBusy && host.isActive()) modal = Modal.TestLock(CompletableDeferred()) },
                         )
                     }
                 }
@@ -430,14 +468,16 @@ fun SecurityCenterScreen(
                     else "$lockedChats conversation${if (lockedChats == 1) "" else "s"} in secure vault",
                     badgeText = "$lockedChats",
                     badgeColor = if (lockedChats > 0) colors.accent else colors.foregroundSecondary,
-                    onTap = onOpenLockedChats,
+//                     onTap = onOpenLockedChats,
+                    onTap = { if (host.isActive()) onOpenLockedChats() },
                 )
                 ChatySettingsRowDivider()
                 ChatySwitchTile(
                     icon = Icons.Outlined.Lock, title = "Hide locked chats",
                     subtitle = "Keep protected conversations out of the normal inbox. Open them from this vault entry.",
                     value = security.hideLockedChats,
-                    onChanged = { preferences.updateSecurity(preferences.security.copy(hideLockedChats = it), logTitle = "Hide locked chats") },
+//                     onChanged = { preferences.updateSecurity(preferences.security.copy(hideLockedChats = it), logTitle = "Hide locked chats") },
+                    onChanged = { if (host.isActive()) preferences.updateSecurity(preferences.security.copy(hideLockedChats = it), logTitle = "Hide locked chats") },
                 )
                 ChatySwitchTile(
                     icon = Icons.Rounded.TouchApp,
@@ -445,7 +485,8 @@ fun SecurityCenterScreen(
 // Superseded source retained below per additive-only review rule.
 //                     subtitle = "Tap the main screen Chaty header to authenticate and open locked chats",
                     subtitle = if (security.hideLockedChats) "Tap the main screen Chaty header to authenticate and open locked chats"
-                        else "Only applies when Hide locked chats is enabled below",
+//                         else "Only applies when Hide locked chats is enabled below",
+                        else "Only applies when Hide locked chats is enabled",
                     value = security.entryByAppTitle,
                     enabled = security.hideLockedChats,
 // onChanged = { v -> preferences.updateSecurity(security.copy(entryByAppTitle = v), logTitle = "Title tap vault entry") },
@@ -459,7 +500,8 @@ fun SecurityCenterScreen(
                     subtitle = "Reveal hidden locked chats only when typing your secret word or emoji in search",
                     value = security.entryBySecretPhrase,
                     onChanged = { v ->
-                        if (!flowBusy) {
+//                         if (!flowBusy) {
+                        if (!flowBusy && host.isActive()) {
                         flowBusy = true
                         scope.launch {
                             try {

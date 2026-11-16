@@ -81,25 +81,46 @@ fun MiniChatWindow(
         val pillWidthDp = 180.dp.coerceAtMost(maxMiniWidth)
         val pillHeightDp = 48.dp.coerceAtMost(maxMiniHeight)
 
-        var offsetX by rememberSaveable(paneKey) {
-            mutableFloatStateOf((windowWidthPx - miniWidthPx).coerceAtLeast(0f) * initialXFraction.coerceIn(0f, 1f))
-        }
-        var offsetY by rememberSaveable(paneKey) {
-            mutableFloatStateOf((windowHeightPx - miniHeightPx).coerceAtLeast(0f) * initialYFraction.coerceIn(0f, 1f))
-        }
+        // SPL-17/18: placement is stored as a fraction of the free room, not pixels, so a density
+        // change or a smaller-then-larger canvas restores the intended relative position.
+        // Prior: pixel offsets captured once from the first composition's canvas size.
+        // var offsetX by rememberSaveable(paneKey) { mutableFloatStateOf((windowWidthPx - miniWidthPx).coerceAtLeast(0f) * initialXFraction.coerceIn(0f, 1f)) }
+        // var offsetY by rememberSaveable(paneKey) { mutableFloatStateOf((windowHeightPx - miniHeightPx).coerceAtLeast(0f) * initialYFraction.coerceIn(0f, 1f)) }
+        var offsetXFraction by rememberSaveable(paneKey) { mutableFloatStateOf(initialXFraction.coerceIn(0f, 1f)) }
+        var offsetYFraction by rememberSaveable(paneKey) { mutableFloatStateOf(initialYFraction.coerceIn(0f, 1f)) }
+        val roomXPx = (windowWidthPx - (if (isMinimized) with(density) { pillWidthDp.toPx() } else miniWidthPx)).coerceAtLeast(0f)
+        val roomYPx = (windowHeightPx - (if (isMinimized) with(density) { pillHeightDp.toPx() } else miniHeightPx)).coerceAtLeast(0f)
+        val offsetX = roomXPx * offsetXFraction
+        val offsetY = roomYPx * offsetYFraction
 
         fun moveWindow(amount: Offset) {
-            val next = SplitChatLayoutPolicy.clampOffset(
-                currentX = offsetX + amount.x,
-                currentY = offsetY + amount.y,
+            // Previous arguments retained:
+            // currentX = visible.first + amount.x,
+            // currentY = visible.second + amount.y,
+            // These used the saved, possibly
+            // offscreen origin after IME/viewport changes. Start at the visible position.
+            val visible = SplitChatLayoutPolicy.clampOffset(
+                currentX = offsetX,
+                currentY = offsetY,
                 windowWidthPx = windowWidthPx,
                 windowHeightPx = windowHeightPx,
                 miniWidthPx = if (isMinimized) with(density) { pillWidthDp.toPx() } else miniWidthPx,
                 miniHeightPx = if (isMinimized) with(density) { pillHeightDp.toPx() } else miniHeightPx,
                 marginPx = with(density) { 12.dp.toPx() },
             )
-            offsetX = next.first
-            offsetY = next.second
+            val next = SplitChatLayoutPolicy.clampOffset(
+                currentX = visible.first + amount.x,
+                currentY = visible.second + amount.y,
+                windowWidthPx = windowWidthPx,
+                windowHeightPx = windowHeightPx,
+                miniWidthPx = if (isMinimized) with(density) { pillWidthDp.toPx() } else miniWidthPx,
+                miniHeightPx = if (isMinimized) with(density) { pillHeightDp.toPx() } else miniHeightPx,
+                marginPx = with(density) { 12.dp.toPx() },
+            )
+            // SPL-17/18: write back as fractions so placement survives density and canvas changes.
+            // Prior: offsetX = next.first and offsetY = next.second stored raw pixels.
+            offsetXFraction = if (roomXPx > 0f) (next.first / roomXPx).coerceIn(0f, 1f) else 0f
+            offsetYFraction = if (roomYPx > 0f) (next.second / roomYPx).coerceIn(0f, 1f) else 0f
         }
 
         fun snapWindow() {
@@ -107,8 +128,12 @@ fun MiniChatWindow(
             val tolerance = with(density) { 12.dp.toPx() }
             val right = (windowWidthPx - miniWidthPx - margin).coerceAtLeast(margin)
             val bottom = (windowHeightPx - miniHeightPx - margin).coerceAtLeast(margin)
-            offsetX = SplitChatLayoutPolicy.snapNear(offsetX, listOf(margin, (windowWidthPx - miniWidthPx) / 2f, right), tolerance)
-            offsetY = SplitChatLayoutPolicy.snapNear(offsetY, listOf(margin, (windowHeightPx - miniHeightPx) / 2f, bottom), tolerance)
+            // SPL-17/18: snap in pixels, then store the fraction.
+            // Prior: offsetX and offsetY were assigned the snapped pixel values directly.
+            val snappedX = SplitChatLayoutPolicy.snapNear(offsetX, listOf(margin, (windowWidthPx - miniWidthPx) / 2f, right), tolerance)
+            val snappedY = SplitChatLayoutPolicy.snapNear(offsetY, listOf(margin, (windowHeightPx - miniHeightPx) / 2f, bottom), tolerance)
+            offsetXFraction = if (roomXPx > 0f) (snappedX / roomXPx).coerceIn(0f, 1f) else 0f
+            offsetYFraction = if (roomYPx > 0f) (snappedY / roomYPx).coerceIn(0f, 1f) else 0f
         }
 
         // Accessibility movement is specified in dp, just like the visible resize controls.

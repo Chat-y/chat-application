@@ -221,10 +221,15 @@ class CallSignalingService(
     private val callExtrasCapability: (String, String, String) -> Boolean = { _, _, _ -> false },
     private val monotonicMillis: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     private val remoteNameFor: (String) -> String? = { null },
+    private val canInitiateCall: () -> Boolean = { true },
 ) {
     private fun remoteName(userId: String, supplied: String?): String =
         remoteNameFor(userId)?.trim()?.takeIf { it.isNotEmpty() }
             ?: supplied?.trim()?.takeIf { it.isNotEmpty() } ?: "Contact"
+
+    /** Incoming display metadata is not identity evidence. Never trust a push/offer's name. */
+    private fun incomingName(userId: String): String =
+        CallIncomingIdentity.displayName(remoteNameFor(userId))
 
     var currentSession: ChatyCallSession? = null
         private set
@@ -240,6 +245,18 @@ class CallSignalingService(
     private var lastNetworkTransport: String? = null
     private var lastAppliedNetworkProfile: CallNetworkProfile? = null
     private var callAccountScope: Any? = null
+
+    /** Account-bound terminal receipt for optional local aggregate feedback; no media or IO. */
+    fun completedCallIdFor(expected: Any?): String? {
+        var id: String? = null
+        accountScopeGuard(expected) {
+            val session = currentSession
+            if (callAccountScope === expected && session != null && !session.isDemo &&
+                session.state.isTerminal && session.connectedAt != null) id = session.callId
+        }
+        return id
+    }
+
 
     private data class RingingIce(val owner: Any?, val callId: String, val started: Long, val result: Deferred<Result<List<Map<String, Any?>>>>)
     private var ringingIce: RingingIce? = null
@@ -491,7 +508,8 @@ class CallSignalingService(
             android.util.Log.w(
                 "ChatyICE",
                 "TURN credentials unavailable; falling back to STUN-only connectivity",
-                error,
+                // Previous implementation retained: error,
+                // Network/provider exceptions can include credential-bearing URLs or response text.
             )
             defaultIceServers()
         }
@@ -614,7 +632,8 @@ class CallSignalingService(
                             "call_id" to callId,
                             "reason" to "already_in_call",
                         ))
-                        onCallWaiting(remoteName(senderId, signal["caller_name"]?.toString()))
+// Previous implementation retained: onCallWaiting(remoteName(senderId, signal["caller_name"]?.toString()))
+                        onCallWaiting(incomingName(senderId))
                         callWaitingListeners.forEach { it() }
                         return@offerGuard
                     }
@@ -658,9 +677,13 @@ class CallSignalingService(
                 currentSession = ChatyCallSession(
                     callId = callId,
                     remoteUserId = senderId,
-                    remoteDisplayName = remoteName(senderId, signal["caller_name"]?.toString()),
-                    remoteAvatarInitials = signal["caller_avatar_initials"]?.toString(),
-                    remoteAvatarColorHex = signal["caller_avatar_color_hex"]?.toString(),
+// Previous implementation retained: remoteDisplayName = remoteName(senderId, signal["caller_name"]?.toString()),
+// Previous implementation retained: remoteAvatarInitials = signal["caller_avatar_initials"]?.toString(),
+// Previous implementation retained: remoteAvatarColorHex = signal["caller_avatar_color_hex"]?.toString(),
+                    remoteDisplayName = incomingName(senderId),
+                    // Initials derive from the resolved name in the UI. The offer cannot impersonate its avatar.
+                    remoteAvatarInitials = null,
+                    remoteAvatarColorHex = null,
                     isVideo = isVideo,
                     isOutgoing = false,
                     state = CallSessionState.incoming,
@@ -672,7 +695,8 @@ class CallSignalingService(
 
                 ringTimeoutJob?.cancel()
                 ringTimeoutJob = scope.launch {
-                    delay(40_000)
+                    // Previous implementation retained: delay(40_000)
+                delay(CallRingPolicy.TIMEOUT_MILLIS)
                     val s = currentSession
                     if (receiveValid() && s?.callId == callId && s.state == CallSessionState.incoming) {
                         receiveGuard { endCall(reason = "no_answer") }
@@ -873,6 +897,8 @@ class CallSignalingService(
             throw IllegalStateException("You are already in another call. Please end it before starting a new one.")
         }
 
+        check(canInitiateCall()) { "No validated internet connection. Connect before calling." }
+
         val callId = UUID.randomUUID().toString()
         var previousPeer: CallMediaController? = null
         if (!accountScopeGuard(expectedAccount) {
@@ -928,7 +954,8 @@ class CallSignalingService(
             if (!guardCall(expectedAccount, callId) {
             ringTimeoutJob?.cancel()
             ringTimeoutJob = scope.launch {
-                delay(40_000)
+                // Previous implementation retained: delay(40_000)
+                    delay(CallRingPolicy.TIMEOUT_MILLIS)
                 val state = currentSession?.state
                 if (!accountScopeValid(expectedAccount) || currentSession?.callId != callId) return@launch
                 if (state == CallSessionState.ringing ||

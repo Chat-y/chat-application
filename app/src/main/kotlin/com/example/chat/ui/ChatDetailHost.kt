@@ -225,8 +225,8 @@ private fun ChatDetailHostContent(
         }
         try {
             if (secureChannel) {
-                repo.loadMessages(conversation.id)
-                repo.markAsRead(conversation.id)
+                repo.loadMessages(conversation.id, secureRoutingAccount)
+                repo.markAsRead(conversation.id, secureRoutingAccount)
             } else {
                 if (api.isAuthenticated) api.loadMessagesIfNeeded(conversation.id, force = loadNonce > 0)
             }
@@ -800,7 +800,7 @@ private fun ChatDetailHostContent(
             if (secureChannel) {
                 // Fail closed: an encrypted chat never falls back to plaintext.
                 try {
-                    repo.sendMessage(conversation.id, text)
+                    repo.sendMessage(conversation.id, text, expectedScope = messageAccountScope)
                 } catch (e: com.example.chat.data.messaging.SecureSendPendingException) {
                     toast("Encryption for this chat is still being set up. The message is queued and sends automatically when ready.")
                 } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e;
@@ -812,6 +812,19 @@ private fun ChatDetailHostContent(
             }
             rt.trackConversation(conversation.id)
         },
+        onSendReply = if (secureChannelResolved && secureChannel) ({ text, target ->
+            requireSendRouting()
+            check(secureChannel) { "Reply routing changed. Draft kept." }
+            try {
+                repo.sendMessage(conversation.id, text, expectedScope = messageAccountScope, replyToMessageId = target.id,
+                    replyToPreviewText = target.text,
+                    replyToSenderName = if (target.senderId == myId) "You" else
+                        api.users.firstOrNull { it.id == target.senderId }?.displayName ?: "Team Member")
+            } catch (_: com.example.chat.data.messaging.SecureSendPendingException) {
+                toast("Encryption setup is pending. Your reply is queued; do not resend it.")
+            }
+            rev++
+        }) else null,
         resolveSenderName = { id ->
             if (id == myId) "You" else (api.users.firstOrNull { it.id == id }?.displayName ?: "Team Member")
         },
@@ -911,9 +924,10 @@ private fun ChatDetailHostContent(
                 // MLS messages are re-encrypted at the current epoch; the
                 // repository never writes their plaintext to the legacy plane.
                 try {
-                    repo.editMessage(conversation.id, id, newText)
+                    repo.editMessage(conversation.id, id, newText, expectedScope = messageAccountScope)
                 } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e;
-                    throw Exception("Secure edit failed. The message was not changed.")
+                    // Previous copy promised rollback even if the server write landed.
+                    throw Exception("Secure edit could not be confirmed. Reopen the conversation to check its current state.")
                 }
                 rev++
             } else if (api.isAuthenticated) {
@@ -925,7 +939,7 @@ private fun ChatDetailHostContent(
                 try { requireSendRouting() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; toast("Action blocked."); return@launch }
                 if (secureChannel) {
                     try {
-                        repo.deleteMessage(conversation.id, id, forEveryone)
+                        repo.deleteMessage(conversation.id, id, forEveryone, expectedScope = messageAccountScope)
                     } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e;
                         toast("Secure delete failed. Reopen the conversation to check its current state.")
                     }
@@ -958,12 +972,20 @@ private fun ChatDetailHostContent(
         onForward = { forwardScope = api.authSnapshot(); forwardMessages = listOf(it) },
         onForwardSelection = { forwardScope = api.authSnapshot(); forwardMessages = it.toList() },
         onClearConversation = {
+            // Capture is the screen's original owner, not whichever account is active at execution.
+            check(api.authSnapshot() === messageAccountScope) { "Account changed; clear cancelled." }
+            check(!secureChannel && secureChannelResolved) { "Clearing secure-routing history is not supported here." }
+            api.clearConversationMessages(conversation.id, messageAccountScope)
+        },
+        /* Previous unconfirmed clear callback retained.
+        onClearConversation = {
             scope.launch {
                 try {
                     if (api.isAuthenticated) api.clearConversationMessages(conversation.id)
                 } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; toast("Unable to clear conversation.") }
             }
         },
+        */
         onRetryMessage = { id ->
             scope.launch {
                 try { requireSendRouting() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; toast("Retry blocked."); return@launch }
@@ -1157,7 +1179,12 @@ private fun ChatDetailHostContent(
         onAudioTap = { attachments.onMedia("audio") },
         onContactTap = { attachments.onContact() },
         onLocationTap = { attachments.onLocation() },
-        onVoiceTap = voice.onVoiceTap,
+        // Previous unguarded callback: onVoiceTap = voice.onVoiceTap,
+        onVoiceTap = {
+            if (api.authSnapshot() !== messageAccountScope) toast("Account changed. Open the chat again.")
+            else if (!secureChannelResolved || secureChannel) toast("Voice notes are not sent in an encrypted chat yet; encrypted media is not wired.")
+            else voice.onVoiceTap()
+        },
         onVoiceHoldStart = {
             if (!secureChannelResolved || secureChannel) toast("Voice notes are not sent in an encrypted chat yet; encrypted media is not wired.")
             else voice.onVoiceHoldStart()
@@ -1496,14 +1523,48 @@ private fun ChatDetailHostContent(
                 finally { ownedExternalBusy = false }
             }
         }
+        // The owned local viewer previously passed no onOwnedSaveToGallery, so its Save action
+        // stayed disabled (gallerySaveAvailable = false for ownedActions without the callback).
+        // Added with the same guarded-callback contract as launchOwnedExternal: viewer and account
+        // identity are rechecked before every gallery publication step inside saveMediaToGallery.
+        val localP2pType = when (localP2pFile.extension.lowercase()) {
+            "mp4", "mkv", "mov", "webm", "m4v", "avi", "3gp", "mpeg", "mpg" -> "video"
+            "jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "bmp" -> "image"
+            else -> "document"
+        }
+        fun launchOwnedGallerySave() {
+            // if (ownedExternalBusy) return
+            if (ownedExternalBusy || api.authSnapshot() !== messageAccountScope) return
+            // val account = api.authSnapshot()
+            val account = messageAccountScope
+            ownedExternalBusy = true
+            scope.launch {
+                try {
+                    val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.example.chat.ui.chats.detail.saveMediaToGallery(
+                            context, localP2pFile.toURI().toString(), localP2pFile.name,
+                            localP2pType == "video",
+                        ) {
+                            p2pLocalViewer == localP2pFile && api.authSnapshot() === account && localP2pFile.isFile
+                        }
+                    }
+                    // Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                    if (p2pLocalViewer == localP2pFile && api.authSnapshot() === account)
+                        Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                // Previous catch showed a failure even after the viewer/account changed.
+                // } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (caughtFailure: Exception) { if (caughtFailure is kotlinx.coroutines.CancellationException) throw caughtFailure; Toast.makeText(context, "Could not save this attachment. Reopen it from the chat and try again.", Toast.LENGTH_LONG).show() }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) {
+                    if (p2pLocalViewer == localP2pFile && api.authSnapshot() === account)
+                        Toast.makeText(context, "Could not save this attachment. Reopen it from the chat and try again.", Toast.LENGTH_LONG).show()
+                }
+                finally { ownedExternalBusy = false }
+            }
+        }
         com.example.chat.ui.chats.detail.MediaViewerScreen(
             theme = theme,
             title = localP2pFile.name,
-            type = when (localP2pFile.extension.lowercase()) {
-                "mp4", "mkv", "mov", "webm", "m4v", "avi", "3gp", "mpeg", "mpg" -> "video"
-                "jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "bmp" -> "image"
-                else -> "document"
-            },
+            type = localP2pType,
             size = com.example.chat.data.services.ChatMediaService.formatBytes(localP2pFile.length()),
             storagePath = localP2pFile.toURI().toString(),
             createSignedUrl = { path, _ -> path },
@@ -1548,6 +1609,7 @@ private fun ChatDetailHostContent(
             // },
             onOwnedOpen = { launchOwnedExternal(false) },
             onOwnedShare = { launchOwnedExternal(true) },
+            onOwnedSaveToGallery = ::launchOwnedGallerySave,
         )
     }
     if (vm != null && va != null) {
@@ -3716,3 +3778,12 @@ private fun ChatDetailHostContent(
 //         )
 //     }
 // }
+
+// Replaced lines retained for source comparison (not executable).
+//                 repo.loadMessages(conversation.id)
+//                 repo.markAsRead(conversation.id)
+//                     repo.sendMessage(conversation.id, text)
+
+// Previous secure edit/delete calls retained (not executable):
+// repo.editMessage(conversation.id, id, newText)
+// repo.deleteMessage(conversation.id, id, forEveryone)

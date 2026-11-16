@@ -52,7 +52,7 @@ fun VoiceLevelMeterBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             for (rawLevel in levels) {
-                val level = rawLevel.coerceIn(0.0, 1.0)
+                val level = if (rawLevel.isFinite()) rawLevel.coerceIn(0.0, 1.0) else 0.0
                 val barHeight by animateDpAsState(
                     targetValue = (4 + 20 * level).dp,
                     animationSpec = tween(durationMillis = durationMs, easing = curve),
@@ -80,3 +80,6 @@ fun VoiceLevelMeterBar(
         }
     }
 }
+
+// Previous source retained for source-only media polish:
+//                 val level = rawLevel.coerceIn(0.0, 1.0)

@@ -1,5 +1,7 @@
 package com.example.chat.ui.calls
 
+import kotlinx.coroutines.ensureActive
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +60,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,6 +110,13 @@ fun CallsScreen(
     val titlePresentedByShell = LocalDestinationTitlePresentation.current ==
         com.example.chat.core.templates.ChatyNavigationDestinationIds.calls
     val context = androidx.compose.ui.platform.LocalContext.current
+    val callsScreenOwner = remember(currentUserId) { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
+    androidx.compose.runtime.LaunchedEffect(callsScreenOwner) {
+        // Previous legacy-only clear: ChatyNotifications.clearMissedCallNotifications(context)
+        // The screen never clears a newer account's alerts if dispatch follows an account switch.
+        if (callsScreenOwner.userId == currentUserId)
+            com.example.chat.ServiceLocator.notificationCoordinator.clearMissedCallAlerts(callsScreenOwner)
+    }
 // Previous implementation retained:     val zone = remember { ZoneId.systemDefault() }
     // CALLS-R2-40: one zone for grouping and displayed times, refreshed after travel.
     var clockRevision by remember { mutableStateOf(0) }
@@ -140,12 +150,20 @@ fun CallsScreen(
 // Previous implementation retained:     var lastRedialTarget by remember { mutableStateOf<String?>(null) }
 // Previous implementation retained:     var lastRedialAtMs by remember { mutableStateOf(0L) }
     val redialCooldown = remember(currentUserId) { CallRedialCooldown() }
+    val redialScope = rememberCoroutineScope()
+    val redialOwner = remember(currentUserId) { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
+    val latestContactFor by androidx.compose.runtime.rememberUpdatedState(contactFor)
+    val latestOnRedial by androidx.compose.runtime.rememberUpdatedState(onRedial)
+    val checkCallPermission = rememberCallPermissionCheck()
+    val callNetworkOnline = rememberCallNetworkOnline()
+    var redialPermissionPending by remember { mutableStateOf(false) }
     var cooldownHint by remember { mutableStateOf<android.widget.Toast?>(null) }
     androidx.compose.runtime.DisposableEffect(currentUserId) {
         onDispose { cooldownHint?.cancel() }
     }
 // Previous implementation retained:     fun tryRedial(id: String, name: String, initials: String?, colorHex: String?, isVideo: Boolean) {
     fun tryRedial(call: CallRecord) {
+        if (redialPermissionPending || !callHasValidatedNetwork(context)) return
         val id = call.participantIds.singleOrNull { it.isNotBlank() && it != currentUserId } ?: return
         // Resolve presentation at tap time, not from the composed row's captured contact.
         val currentContact = contactFor(id)
@@ -164,7 +182,20 @@ fun CallsScreen(
                 context.getString(com.example.chat.R.string.call_log_redial_wait), android.widget.Toast.LENGTH_SHORT).also { it.show() }
             return
         }
-        onRedial(id, name, initials, colorHex, isVideo)
+// Previous implementation retained:         onRedial(id, name, initials, colorHex, isVideo)
+        redialPermissionPending = true
+        redialScope.launch {
+            // Previous captured callback/presentation: if (checkCallPermission(isVideo)) onRedial(id, name, initials, colorHex, isVideo)
+            try {
+                if (checkCallPermission(isVideo) && com.example.chat.ServiceLocator.apiBackend.authSnapshot() === redialOwner) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val fresh = latestContactFor(id)
+                    val freshName = callLogDisplayName(fresh, call, context.getString(com.example.chat.R.string.calls_ui_15))
+                    latestOnRedial(id, freshName, fresh?.avatarInitials?.takeIf { it.isNotBlank() } ?: callInitials(freshName), fresh?.avatarColorHex, isVideo)
+                }
+            }
+            finally { redialPermissionPending = false }
+        }
     }
     // CALLS-R1-19: per-entry delete is a soft delete with Undo; the real delete commits on snackbar timeout.
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
@@ -247,6 +278,11 @@ fun CallsScreen(
             modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth(),
             contentPadding = PaddingValues(bottom = 80.dp),
         ) {
+            if (!callNetworkOnline) item {
+                Text(context.getString(com.example.chat.R.string.call_network_unavailable),
+                    color = Color(theme.secondaryTextColor), modifier = Modifier.padding(16.dp)
+                        .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+            }
             if (!titlePresentedByShell) item {
                 Row(
                     Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
@@ -360,7 +396,8 @@ fun CallsScreen(
                     val contact = contactFor(remoteUserId)
                     val isMissed = call.direction == CallDirection.missed
                     val isVideo = call.type == CallType.video
-                    val canCall = remoteUserId.isNotEmpty()
+                    // Previous: val canCall = remoteUserId.isNotEmpty()
+                    val canCall = remoteUserId.isNotEmpty() && callNetworkOnline
 // Previous implementation retained:                     val name = contact?.displayName?.trim()?.takeIf { it.isNotEmpty() }
 // Previous implementation retained:                         ?: call.remoteDisplayName
 // Previous implementation retained:                         ?: contact?.username?.trim()?.takeIf { it.isNotEmpty() }
@@ -530,7 +567,10 @@ private fun CallEmptyState(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
+        // This helper is a LazyColumn item (empty and unavailable history).
+        // Lazy items are measured with unbounded height; the parent list owns scrolling.
+        // Prior: Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp)
+        modifier = Modifier.fillMaxWidth().padding(28.dp),
     ) {
         icon()
         Spacer(Modifier.height(12.dp))

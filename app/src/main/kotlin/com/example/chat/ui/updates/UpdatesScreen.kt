@@ -160,6 +160,7 @@ fun UpdatesScreen(
     val paneLabel = stringResource(R.string.social_updates_title)
     val loadingLabel = stringResource(R.string.social_updates_loading)
     val ownLabel = stringResource(R.string.social_updates_own)
+    var localQuery by remember(currentUser.id) { mutableStateOf("") }
     val statusAvailable = statusService.isAvailable()
     var measuredImage by remember { mutableStateOf<Pair<String, androidx.compose.ui.geometry.Size>?>(null) }
     val defaultRemoteImage: @Composable (String, Modifier) -> Unit = { url, m ->
@@ -329,6 +330,29 @@ fun UpdatesScreen(
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = colors.foregroundTertiary)
         }
 
+        // Screen-local only: this query is never passed to the feed, directory or publish service.
+        OutlinedTextField(
+            value = localQuery,
+            onValueChange = { localQuery = it },
+            label = { Text(stringResource(R.string.social_updates_search_label)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedTextColor = colors.foreground,
+                unfocusedTextColor = colors.foreground,
+                focusedBorderColor = colors.primary,
+                unfocusedBorderColor = colors.borderSubtle,
+                focusedLabelColor = colors.primary,
+                unfocusedLabelColor = colors.foregroundSecondary,
+                cursorColor = colors.primary,
+            ),
+            trailingIcon = {
+                if (localQuery.isNotEmpty()) androidx.compose.material3.TextButton(onClick = { localQuery = "" }) {
+                    Text(stringResource(R.string.social_updates_search_clear))
+                }
+            },
+        )
+
         // RECENT UPDATES header
         Box(
             modifier = Modifier
@@ -347,6 +371,12 @@ fun UpdatesScreen(
         }
 
         val list = statusList
+        val visibleStatuses = list?.let { source ->
+            StatusLocalSearchRules.filter(source, localQuery) { id ->
+                val person = if (id == currentUser.id) currentUser else getUser(id)
+                person?.let { listOf(it.displayName, it.username) }.orEmpty()
+            }
+        }
         if (!statusAvailable) {
             Text(
                 stringResource(R.string.social_updates_unavailable),
@@ -371,9 +401,18 @@ fun UpdatesScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.social_updates_empty), color = colors.foregroundSecondary, fontSize = 12.5.sp)
             }
+        } else if (visibleStatuses.isNullOrEmpty()) {
+            Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(stringResource(R.string.social_updates_search_no_matches), color = colors.foregroundSecondary,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                androidx.compose.material3.TextButton(onClick = { localQuery = "" }) {
+                    Text(stringResource(R.string.social_updates_search_clear))
+                }
+            }
         } else {
             StatusList(
-                statuses = list,
+                // Previous source retained: statuses = list,
+                statuses = visibleStatuses,
                 template = template,
                 colors = colors,
                 currentUser = currentUser,

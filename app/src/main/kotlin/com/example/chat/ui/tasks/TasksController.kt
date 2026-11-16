@@ -114,7 +114,7 @@ class TasksController(
         val startedFor = captureOwner()
         // TAS-010: a newer load invalidates older in-flight ones.
         val generation = synchronized(lock) { ++loadGeneration }
-        val fetched = client.listTasks() ?: return
+        val fetched = client.listTasks(startedFor.token as? com.example.chat.data.api.ApiAccountScope) ?: return
         synchronized(lock) {
             // Previous guard compared only accountKey().
             if (generation != loadGeneration || !isCurrent(startedFor)) return
@@ -138,7 +138,7 @@ class TasksController(
         dueAtIso: String?,
     ): ChatTask {
         val owner = mutationOwner()
-        val task = client.createTask(title, description, assigneeIds, priority, dueAtIso)
+        val task = client.createTask(title, description, assigneeIds, priority, dueAtIso, owner.token as? com.example.chat.data.api.ApiAccountScope)
         // Previous completion unconditionally inserted into the current cache.
         synchronized(lock) {
             requireCurrent(owner)
@@ -156,7 +156,7 @@ class TasksController(
      *  server did not confirm (TAS-001), so callers can report it. */
     suspend fun updateTaskStatus(taskId: String, status: TaskStatus): Boolean {
         val owner = mutationOwner()
-        val updated = client.updateTaskStatus(taskId, status) ?: return false
+        val updated = client.updateTaskStatus(taskId, status, owner.token as? com.example.chat.data.api.ApiAccountScope) ?: return false
         synchronized(lock) {
             // Previously applied the response even after an account switch.
             requireCurrent(owner)
@@ -174,10 +174,10 @@ class TasksController(
         description: String,
         assigneeIds: List<String>,
         priority: String,
-        dueAtIso: String,
+        dueAtIso: String?,
     ): Boolean {
         val owner = mutationOwner()
-        val updated = client.updateTask(taskId, title, description, assigneeIds, priority, dueAtIso)
+        val updated = client.updateTask(taskId, title, description, assigneeIds, priority, dueAtIso, owner.token as? com.example.chat.data.api.ApiAccountScope)
             ?: return false
         synchronized(lock) {
             // Previously applied the response even after an account switch.
@@ -192,7 +192,7 @@ class TasksController(
     /** Dart deleteTask: remove locally only on 200. */
     suspend fun deleteTask(taskId: String): Boolean {
         val owner = mutationOwner()
-        if (!client.deleteTask(taskId)) return false
+        if (!client.deleteTask(taskId, owner.token as? com.example.chat.data.api.ApiAccountScope)) return false
         // Previous completion removed from whichever cache was current.
         synchronized(lock) { requireCurrent(owner); _tasks.removeAll { it.id == taskId } }
         notifyListeners()

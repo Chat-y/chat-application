@@ -1,5 +1,12 @@
 package com.example.chat.ui.settings
 
+// SET-DUP-HIERARCHY: this whole file is the LEGACY settings hierarchy (own SettingsScreenDestination
+// enum, own 18-entry buildSettingsSearchIndex, own SettingsSearchEntry type). It has ZERO consumers in
+// app/src (main, test) as of c639bc4e: the live settings UI is SettingsRootScreen + SettingsDestination
+// + registry/SettingsRegistry (whose allSettings already merges the expansion and conversation-visual
+// clusters), searched through the generic navigation/SettingsSearchScreen overload. Kept source-only
+// pending owner sign-off on whole-file removal; do not add features here.
+
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -88,6 +95,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.example.chat.ui.settings.state.collectSettingsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -100,6 +108,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.ui.draw.shadow
@@ -181,6 +191,9 @@ fun buildSettingsSearchIndex(): List<SettingsSearchEntry> {
         e("Message Scheduler", "Message Management", "Schedule messages for auto execution", Icons.Rounded.Schedule, SettingsScreenDestination.MessageManagement),
         e("Interactive Click Particles", "Navigation Effects", "Tap particle splash symbols and speed", Icons.Rounded.AutoAwesome, SettingsScreenDestination.NavigationEffects),
         e("Notification Sounds & LED", "Notifications", "Conversation tones, LED colors, and heads-up alerts", Icons.Rounded.NotificationsActive, SettingsScreenDestination.NotificationSettings),
+        SettingsSearchEntry("Toast notifications", "Notifications", "Open Notifications, then Toast notifications to customize toast appearance",
+            Icons.Rounded.NotificationsActive, SettingsScreenDestination.NotificationSettings,
+            listOf("toast", "online toast", "typing toast", "toast colors", "toast radius", "toast position")),
         e("System Permissions & Hardware", "Permissions", "Camera, mic, storage, notification access", Icons.Rounded.Security, SettingsScreenDestination.SystemPermissions),
     )
 }
@@ -196,7 +209,9 @@ private fun SettingsSectionHeader(color: Color, title: String) {
 
 @Composable
 private fun SettingsTile(icon: ImageVector, tint: Color, title: String, subtitle: String, onTap: () -> Unit) =
-    ChatySettingsTile(title = title, icon = icon, iconColor = tint, subtitle = subtitle, onTap = onTap)
+    // SET-R5-036: announce each destination before activation, leaving shared tile behavior alone.
+    ChatySettingsTile(title = title, icon = icon, iconColor = tint, subtitle = subtitle, onTap = onTap,
+        modifier = Modifier.semantics { onClick(label = "Open $title settings") { onTap(); true } })
 
 private fun stripSpoofChars(s: String): String =
     s.filterNot { it in '\u200B'..'\u200F' || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\uFEFF' }
@@ -225,14 +240,24 @@ fun SettingsScreen(
     val colors = LocalAppColors.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    var themeTick by remember { mutableStateOf(0) }
-    DisposableEffect(themeController) {
-        val l: () -> Unit = { themeTick++ }
-        themeController.addListener(l)
-        onDispose { themeController.removeListener(l) }
+    // SET-R1-027 / SET-R3-026 / SET-R5-027: collect only the selected theme,
+    // detach the listener below STARTED, and re-read on resume/controller replacement.
+    val themeFlow = remember(themeController, scope) {
+        com.example.chat.ui.settings.state.settingsSnapshotFlow(
+            scope, { themeController.globalTheme },
+            themeController::addListener, themeController::removeListener,
+        )
     }
-    @Suppress("UNUSED_VARIABLE") val tick = themeTick
-    val theme = themeController.globalTheme
+    val theme by themeFlow.collectSettingsState()
+    // Superseded eager invalidation retained inactive:
+    // var themeTick by remember { mutableStateOf(0) }
+    // DisposableEffect(themeController) {
+    // val l: () -> Unit = { themeTick++ }
+    // themeController.addListener(l)
+    // onDispose { themeController.removeListener(l) }
+    // }
+    // @Suppress("UNUSED_VARIABLE") val tick = themeTick
+    // val theme = themeController.globalTheme
     var sheet by remember { mutableStateOf<SettingsSheet?>(null) }
     // SET-R1-032: static index, built once per composition instead of per search tap
     val searchIndex = remember { buildSettingsSearchIndex() }
@@ -279,7 +304,7 @@ fun SettingsScreen(
                         .minimumInteractiveComponentSize()
                         .background(colors.surfaceSecondary, RoundedCornerShape(18.dp))
                         .border(1.dp, colors.borderSubtle, RoundedCornerShape(18.dp))
-                        .clickable(role = androidx.compose.ui.semantics.Role.Button) { sheet = SettingsSheet.EditProfile }
+                        .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Edit profile") { sheet = SettingsSheet.EditProfile }
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -298,12 +323,15 @@ fun SettingsScreen(
                         Text(
                             if (user.avatarInitials.isNotEmpty()) user.avatarInitials
                             else if (user.displayName.isNotEmpty()) user.displayName.substring(0, 1).uppercase() else "U",
+                            // SET-R3-039: initials are decorative beside the full account name.
+                            modifier = Modifier.clearAndSetSemantics {},
                             fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = primaryText,
                         )
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.minimumInteractiveComponentSize().clickable { sheet = SettingsSheet.EditProfile }, verticalAlignment = Alignment.CenterVertically) {
+                // SET-R3-039 / SET-R5-036: name edit target explicitly, rather than relying on the arrow.
+                Row(Modifier.minimumInteractiveComponentSize().clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Edit profile") { sheet = SettingsSheet.EditProfile }, verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         if (user.displayName.isNotEmpty()) user.displayName
                         else if (user.username.isNotEmpty()) user.username else "User",
@@ -340,7 +368,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(18.dp))
 
-            SettingsSectionHeader(secondaryText, "PRIVACY & SECURITY")
+            // SET-R2-037: previous hardcoded heading: "PRIVACY & SECURITY"
+            SettingsSectionHeader(secondaryText, androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_section_privacy_security))
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {
@@ -353,7 +382,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(18.dp))
 
-            SettingsSectionHeader(secondaryText, "THEMES & APPEARANCE")
+            // SET-R2-037: previous hardcoded heading: "THEMES & APPEARANCE"
+            SettingsSectionHeader(secondaryText, androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_section_themes_appearance))
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {
@@ -368,7 +398,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(18.dp))
 
-            SettingsSectionHeader(secondaryText, "CHATS & NOTIFICATIONS")
+            // SET-R2-037: previous hardcoded heading: "CHATS & NOTIFICATIONS"
+            SettingsSectionHeader(secondaryText, androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_section_chats_notifications))
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {
@@ -385,7 +416,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(18.dp))
 
-            SettingsSectionHeader(secondaryText, "DATA & SYSTEM")
+            // SET-R2-037: previous hardcoded heading: "DATA & SYSTEM"
+            SettingsSectionHeader(secondaryText, androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_section_data_system))
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {

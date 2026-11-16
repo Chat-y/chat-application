@@ -22,6 +22,14 @@ import kotlinx.coroutines.flow.StateFlow
 object LauncherShortcutRouter {
     const val EXTRA_SHORTCUT_ACTION = "com.example.chat.extra.SHORTCUT_ACTION"
     const val ACTION_NEW_CHAT = "new_chat"
+    const val ACTION_CALL_SETTINGS = "call_settings"
+
+    /** Exact allowlist: no query, fragment, userinfo, port, extra path or alternate destination. */
+    fun receiveCallsSettingsLink(uri: String, accountUserId: String?, scopeGeneration: Long): Boolean {
+        if (uri != "chaty://settings/calls") return false
+        onShortcutAction(ACTION_CALL_SETTINGS, accountUserId, scopeGeneration)
+        return true
+    }
 
     /** How long a shortcut tap stays valid while waiting for auth/unlock. */
     const val PENDING_TTL_MILLIS: Long = 120_000L
@@ -47,7 +55,10 @@ object LauncherShortcutRouter {
     private fun nowNanos(): Long = nanoClockForTesting?.invoke() ?: System.nanoTime()
 
     fun onShortcutAction(action: String?, accountUserId: String?, scopeGeneration: Long) {
-        if (action.isNullOrBlank()) return
+        // Previous implementation retained: if (action.isNullOrBlank()) return
+        // Accepted every nonblank action, leaving unknown actions pending until expiry.
+        // Previous: if (action != ACTION_NEW_CHAT) return
+        if (action != ACTION_NEW_CHAT && action != ACTION_CALL_SETTINGS) return
         _pending.value = PendingShortcut(action, accountUserId, scopeGeneration, ++sequence, nowNanos())
     }
 

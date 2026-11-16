@@ -292,6 +292,27 @@ class ApiChatClient(
 
     /** clearConversationMessages: DELETE /chat/rooms/<id>/messages (+ fallback). */
     fun clearMessages(roomId: String) {
+        check(clearMessagesChecked(roomId)) { "Clear was not confirmed by the server." }
+    }
+
+    /** Fixed request identity, including the 404 fallback. No optimistic success. */
+    fun clearMessagesChecked(roomId: String, expectedScope: ApiAccountScope? = null): Boolean {
+        val roomPath = safePathSegment(roomId) ?: return false
+        val requestToken = expectedScope?.token ?: token()
+        if (requestToken.isNullOrBlank()) return false
+        val requestBase = (expectedScope?.baseUrl ?: baseUrl()).trimEnd('/')
+        val headers = mapOf("Authorization" to "Bearer $requestToken",
+            "x-tenant-id" to (expectedScope?.tenantId ?: tenantId()))
+        var response = transport.execute("DELETE", "$requestBase/chat/rooms/$roomPath/messages", headers, null)
+        if (response.first == 404) {
+            response = transport.execute("DELETE", "$requestBase/api/v1/chat/rooms/$roomPath/messages", headers, null)
+        }
+        // 202 means accepted, not completed. Do not erase local state on that response.
+        return response.first == 200 || response.first == 204
+    }
+
+    /* Previous silent/unchecked clear retained.
+    fun clearMessages(roomId: String) {
         if (token() == null) return
         val roomPath = safePathSegment(roomId) ?: return
         try {
@@ -306,6 +327,8 @@ class ApiChatClient(
         } catch (_: Exception) {
         }
     }
+
+    */
 
     /** POST /chat/rooms/<id>/read (+ /api/v1 fallback): marks everything the
      *  server has for this user in the room as read (clears the unread count and,

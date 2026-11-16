@@ -1,5 +1,6 @@
 package com.example.chat.ui.settings
 
+import com.example.chat.ui.settings.state.collectSettingsState
 import androidx.lifecycle.repeatOnLifecycle
 
 import androidx.compose.foundation.background
@@ -43,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import com.example.chat.ui.theme.LocalAppColors
 import androidx.compose.ui.Alignment
@@ -55,7 +57,9 @@ import com.example.chat.data.network.TransferStatus
 
 @Composable
 fun NetworkStatusScreen(onBack: () -> Unit) {
-    val network by ServiceLocator.networkMonitor.state.collectAsState()
+    val networkContext = LocalContext.current
+    // Previous always-active collector: ServiceLocator.networkMonitor.state.collectAsState()
+    val network by ServiceLocator.networkMonitor.state.collectSettingsState()
 
     ChatySettingsPage("Network", "Live connection status", onBack = onBack) {
     Column(Modifier.widthIn(max = 600.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -73,13 +77,26 @@ fun NetworkStatusScreen(onBack: () -> Unit) {
                 if (network.online) {
                     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Downlink estimate")
-                        Text(if (network.downstreamKbps > 0) formatKbps(network.downstreamKbps.toLong()) else "Measuring…")
+                        Text(if (network.downstreamKbps > 0) formatKbps(network.downstreamKbps.toLong()) else "Unavailable")
                     }
                     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Uplink estimate")
-                        Text(if (network.upstreamKbps > 0) formatKbps(network.upstreamKbps.toLong()) else "Measuring…")
+                        Text(if (network.upstreamKbps > 0) formatKbps(network.upstreamKbps.toLong()) else "Unavailable")
                     }
                 }
+                // ND1-19: zero means Android supplied no estimate, not an endless measurement.
+                // Previous unknown label: "Measuring…"
+                // ND1-54: do not imply a metered connection automatically changes upload policy.
+                Text("Metered connections may count toward your provider's data allowance. Check Storage & Data before sending large files.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = {
+                    // ND1-49: let Android explain/manage its own data-saver policy.
+                    val settings = android.content.Intent(android.provider.Settings.ACTION_DATA_SAVER_SETTINGS)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    try { networkContext.startActivity(settings) }
+                    catch (_: Exception) {
+                        android.widget.Toast.makeText(networkContext, "Open Android Settings > Network > Data usage.", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }) { Text("Android data saver settings", color = LocalAppColors.current.primary) }
                 Text("These are Android link estimates. Transfer speeds on the Data Usage page are measured from Chaty traffic.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -92,8 +109,9 @@ fun NetworkStatusScreen(onBack: () -> Unit) {
 @Composable
 fun DataUsageScreen(onBack: () -> Unit) {
     val monitor = ServiceLocator.transferMonitor
-    val transfers by monitor.items.collectAsState()
-    val totals by monitor.totals.collectAsState()
+    // Avoid transfer updates recomposing a stopped settings destination.
+    val transfers by monitor.items.collectSettingsState() // prior collectAsState()
+    val totals by monitor.totals.collectSettingsState() // prior collectAsState()
     // Do not keep the subscriber-gated 1s traffic sampler awake off-screen.
     val trafficOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     val trafficState = ServiceLocator.appTrafficMonitor.state
@@ -282,23 +300,35 @@ private fun TransferCard(item: TransferItem) {
                     // announce each on its own; the visual separator stays out of the semantics tree.
                     Text(
                         if (item.direction == TransferDirection.upload) "Upload" else "Download",
-                        style = MaterialTheme.typography.labelSmall,
+                        // ND1-34: do not shrink transfer direction/status below body-small text.
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
                         "·",
-                        style = MaterialTheme.typography.labelSmall,
+                        // ND1-34: do not shrink transfer direction/status below body-small text.
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.clearAndSetSemantics {},
                     )
                     Text(
                         statusLabel(item.status),
-                        style = MaterialTheme.typography.labelSmall,
+                        // ND1-34: do not shrink transfer direction/status below body-small text.
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            item.progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+            // ND1-33: clamp malformed progress and supply a spoken percentage.
+            // Previous progress-only row: item.progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+            item.progress?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)?.let { progress ->
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        stateDescription = "${(progress * 100).toInt()} percent transferred"
+                    },
+                )
+            }
             val total = item.totalBytes?.let { formatBytes(context, it) } ?: "Unknown"
             Text("${formatBytes(context, item.transferredBytes)} of $total transferred")
             Text(
@@ -336,12 +366,17 @@ private fun formatBytes(context: android.content.Context, value: Long): String =
 //     return String.format(java.util.Locale.getDefault(), "%.1f %s", amount, units[index])
 // }
 
-private fun formatDuration(seconds: Long): String {
-    if (seconds < 60) return "${seconds}s"
-    val minutes = seconds / 60
-    val rest = seconds % 60
-    return if (minutes < 60) "${minutes}m ${rest}s" else "${minutes / 60}h ${minutes % 60}m"
-}
+// ND1-14: elapsed-time notation avoids English-only h/m/s unit abbreviations.
+private fun formatDuration(seconds: Long): String =
+    android.text.format.DateUtils.formatElapsedTime(seconds.coerceAtLeast(0L))
+
+// Superseded unit formatter retained inactive:
+// private fun formatDuration(seconds: Long): String {
+//     if (seconds < 60) return "${seconds}s"
+//     val minutes = seconds / 60
+//     val rest = seconds % 60
+//     return if (minutes < 60) "${minutes}m ${rest}s" else "${minutes / 60}h ${minutes % 60}m"
+// }
 
 private fun transportLabel(transport: String): String = when (transport) {
     "wifi" -> "Wi-Fi"

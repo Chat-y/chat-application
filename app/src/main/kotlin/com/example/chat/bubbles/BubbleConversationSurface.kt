@@ -85,7 +85,7 @@ internal fun BubbleConversationSurface(ticket: ChatBubbleController.Ticket, open
                                 // and the reply is NOT sent (never plaintext).
                                 check(com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) { "Secure routing unavailable." }
                                 if (ChatBubbleController.resolve(ticket.id) == null) return@launch
-                                repo.sendMessage(ticket.roomId, body)
+                                repo.sendMessage(ticket.roomId, body, expectedScope = ticket.scope)
                             } else {
                                 api.sendMessage(ticket.roomId, body, expectedScope = ticket.scope)
                             }
@@ -208,3 +208,6 @@ internal fun BubbleConversationSurface(ticket: ChatBubbleController.Ticket, open
 // /* Previous bubble call retained.
 //                             theme = theme, remoteImage = null)
 // */
+
+// Replaced lines retained for source comparison (not executable).
+//                                 repo.sendMessage(ticket.roomId, body)

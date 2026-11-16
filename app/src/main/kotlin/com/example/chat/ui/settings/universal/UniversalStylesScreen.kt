@@ -372,7 +372,9 @@ fun UniversalStylesScreen(
     if (sheet == 3) {
         androidx.compose.ui.window.Dialog(onDismissRequest = { sheet = 0 }) {
             androidx.compose.material3.Surface(
-                shape = RoundedCornerShape(24.dp),
+                // Owner rule: popup menus/dialogs use the fixed 10dp corner radius (ChatyModalShape).
+                // Prior: shape = RoundedCornerShape(24.dp),
+                shape = com.example.chat.ui.kit.ChatyModalShape,
                 color = colors.background,
                 modifier = Modifier.fillMaxWidth().height((LocalConfiguration.current.screenHeightDp * 0.8f).dp),
             ) {

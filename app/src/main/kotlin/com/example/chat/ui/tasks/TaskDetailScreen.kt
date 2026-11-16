@@ -87,6 +87,9 @@ fun TaskDetailScreen(
     onBack: () -> Unit,
     onEditTask: (ChatTask) -> Unit,
 ) {
+    // Handle system Back here as well as the toolbar so every host returns
+    // to its task list/conversation instead of leaving the destination.
+    androidx.activity.compose.BackHandler(onBack = onBack)
     var currentTask by remember(task) { mutableStateOf(task) }
     var confirmDelete by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
@@ -131,7 +134,8 @@ fun TaskDetailScreen(
         }
     }
 
-    fun formatDate(value: Instant): String {
+    fun formatDate(value: Instant?): String {
+        if (value == null) return "No due date"
         val d = value.atZone(ZoneId.systemDefault())
         return "${d.dayOfMonth.toString().padStart(2, '0')}/" +
             "${d.monthValue.toString().padStart(2, '0')}/${d.year} " +
@@ -182,6 +186,16 @@ fun TaskDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
+            // TAS-008 (loading-state UI, minimal): status/delete actions guard on actionBusy but
+            // showed nothing while in flight; surface the busy state above the error line.
+            if (actionBusy) {
+                Text(
+                    "Working...",
+                    color = colors.foregroundSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+            }
             actionError?.let { msg ->
                 Text(
                     msg,

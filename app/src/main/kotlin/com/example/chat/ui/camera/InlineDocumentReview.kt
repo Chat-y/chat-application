@@ -30,6 +30,8 @@ import kotlinx.coroutines.launch
 /** In-place camera content, not an Activity/navigation destination. */
 @Composable
 fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit) {
+    // Resolve theme tokens during composition, not inside Canvas drawing.
+    val overlayColors = rememberCameraOverlayColors()
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     var bitmap by remember(path){mutableStateOf<Bitmap?>(null)}
@@ -62,15 +64,18 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
         catch(e:OutOfMemoryError) { note=R.string.camera_doc_open_memory }
         finally { pending?.recycle() }
     }
-    Column(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)) {
+    // Previous value: Color.Black
+    Column(Modifier.fillMaxSize().background(overlayColors.backdrop).windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)) {
         // CAM-R4-004 prior: Text("Document · adjust paper corners",color=Color.White)
-        Text(stringResource(R.string.camera_doc_title),color=Color.White)
+        // Previous value: Color.White
+        Text(stringResource(R.string.camera_doc_title),color=overlayColors.content)
         // Original: Text(note,color=Color.LightGray)
         Text(if (bitmap != null && quad.areaFraction < MIN_PAPER_AREA_FRACTION)
             // CAM-R4-004 prior: "Move closer and retake, or expand the corners. Paper must fill at least 5% of the image."
             stringResource(R.string.camera_doc_min_area)
             // CAM-R4-004 prior: else note, color=Color.LightGray)
-            else stringResource(note), color=Color.LightGray)
+            // Previous value: Color.LightGray
+            else stringResource(note), color=overlayColors.contentSecondary)
         val image=bitmap
         // CAM-R4-034 previous gesture-only Canvas modifier:
         // if(image!=null) Canvas(Modifier.fillMaxWidth().weight(1f).semantics { contentDescription = "Adjust paper corners" }.pointerInput(image,busy){
@@ -88,8 +93,10 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
             val scale=minOf(size.width/image.width,size.height/image.height);val w=image.width*scale;val h=image.height*scale;val left=(size.width-w)/2;val top=(size.height-h)/2
             drawImage(image.asImageBitmap(),dstOffset=IntOffset(left.toInt(),top.toInt()),dstSize=IntSize(w.toInt(),h.toInt()))
             val pts=quad.points.map{Offset(left+it.x*w,top+it.y*h)}
-            val color=if(quad.isValid())Color.Yellow else Color.Red
-            for(i in 0..3){drawLine(color,pts[i],pts[(i+1)%4],3.dp.toPx());drawCircle(color,9.dp.toPx(),pts[i]);drawCircle(Color.Black,9.dp.toPx(),pts[i],style=Stroke(1.dp.toPx()))}
+            // Previous value: Color.Yellow / Color.Red
+            val color=if(quad.isValid())overlayColors.warning else overlayColors.danger
+            // Previous value: drawCircle(Color.Black,
+            for(i in 0..3){drawLine(color,pts[i],pts[(i+1)%4],3.dp.toPx());drawCircle(color,9.dp.toPx(),pts[i]);drawCircle(overlayColors.backdrop,9.dp.toPx(),pts[i],style=Stroke(1.dp.toPx()))}
         } else Spacer(Modifier.weight(1f))
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             // CAM-R4-004 prior: Button(modifier = Modifier.cameraActionFocusRing(), shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onRetake,enabled=!busy){Text("Retake")}

@@ -74,6 +74,7 @@ import androidx.compose.material3.TextButton
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -136,9 +137,11 @@ private const val SAMPLE_PROFILE = "Aarav Profile"
 private const val SAMPLE_TYPING = "Aarav Typing..."
 
 // Hoisted option lists: created once, not per recomposition (NTF-R1-029).
-private val TOAST_POSITIONS = listOf("Top of the screen", "Center of screen", "Bottom of screen")
+// Prior inline positions retained: Top of the screen, Center of screen, Bottom of screen
+private val TOAST_POSITIONS = com.example.chat.domain.models.NotificationToastContract.positions
 // Previous implementation retained: private val TOAST_RINGTONES = listOf("Default Chaty Tone", "Soft Ping", "Pop Bubble", "Chime Bell", "Silent")
-private val TOAST_RINGTONES = listOf("Default", "Soft Ping", "Pop Bubble", "Chime Bell", "Silent")
+// Prior inline tones retained: Default, Soft Ping, Pop Bubble, Chime Bell, Silent
+private val TOAST_RINGTONES = com.example.chat.domain.models.NotificationToastContract.ringtoneLabels
 
 private const val TOAST_RADIUS_MIN = 0.0
 private const val TOAST_RADIUS_MAX = 30.0
@@ -178,8 +181,13 @@ private fun ToastPreview(text: String, hasAvatar: Boolean, hasElevation: Boolean
     // Previous implementation retained:     // NTF-R1-008: unset text color follows the background so previews never show unreadable combos.
     // NTF-R1-008: when unset, prefer the theme foreground with the higher contrast against this background.
 // Previous implementation retained:     val fg = textColor?.let { Color(it) } ?: readableTextFor(bg)
-    val targetFg = textColor?.let { Color(it) } ?: readableTextFor(targetBg)
-    val fg by androidx.compose.animation.animateColorAsState(targetFg, animationSpec = androidx.compose.animation.core.tween(200), label = "toast text")
+    // Previous implementation retained: val targetFg = textColor?.let { Color(it) } ?: readableTextFor(targetBg)
+    // Previous implementation retained: val fg by androidx.compose.animation.animateColorAsState(targetFg, animationSpec = androidx.compose.animation.core.tween(200), label = "toast text")
+    // Resolve against each animated background frame; independent color interpolation can lose contrast.
+    val scheme = MaterialTheme.colorScheme
+    fun packed(color: Color): Long = color.toArgb().toLong() and 0xFFFFFFFFL
+    val fg = Color(com.example.chat.ui.kit.ToastContrastPolicy.readable(packed(bg), textColor,
+        listOf(packed(scheme.onSurface), packed(scheme.inverseOnSurface))))
     val animatedRadius by androidx.compose.animation.core.animateFloatAsState(
         radius.coerceIn(TOAST_RADIUS_MIN, TOAST_RADIUS_MAX).toFloat(),
         animationSpec = androidx.compose.animation.core.tween(200), label = "toast radius")
@@ -228,11 +236,14 @@ private fun ToastPaletteButtons(onSelected: (Long, Long) -> Unit) {
     val inverse = scheme.inverseSurface to scheme.inverseOnSurface
     fun argb(color: Color): Long = color.toArgb().toLong() and 0xFFFFFFFFL
     fun ratio(pair: Pair<Color, Color>): Double = com.example.chat.ui.kit.ColorPickerLogic.contrastRatio(argb(pair.first), argb(pair.second))
-    val palettes = listOf(
-        "High contrast" to if (ratio(base) >= ratio(inverse)) base else inverse,
-        "Soft dark" to if (darkTheme) base else inverse,
-        "Soft light" to if (darkTheme) inverse else base,
-    )
+    // Previous implementation retained: palette pairs were allocated on every composition.
+    val palettes = remember(scheme, darkTheme) {
+        listOf(
+            "High contrast" to if (ratio(base) >= ratio(inverse)) base else inverse,
+            "Soft dark" to if (darkTheme) base else inverse,
+            "Soft light" to if (darkTheme) inverse else base,
+        )
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Text("Color presets", style = MaterialTheme.typography.labelLarge)
         palettes.forEach { (name, pair) ->
@@ -499,12 +510,15 @@ private fun ToastRadiusInput(label: String, value: Double, onChanged: (Float) ->
 internal fun ToastCardBody(
     type: ToastCardType, ui: ToastCardUiState, radius: Double, onRadiusChange: (Float) -> Unit,
     onChanged: ((ToastCardUiState) -> ToastCardUiState) -> Unit,
-    pickColor: (String, Long?, (Long) -> Unit) -> Unit,
+    // Previous implementation retained: pickColor: (String, Long?, (Long) -> Unit) -> Unit,
+    pickColor: (String, Long?, Long?, (Long) -> Unit) -> Unit,
     showRingtoneModal: (String, (String) -> Unit) -> Unit,
     showPositionModal: (String, (String) -> Unit) -> Unit,
 // Previous implementation retained:     ringtoneSubtitle: (String) -> String,
 // Previous implementation retained:     colorSubtitle: (Long?, String) -> String,
 ) {
+    val previewBackground = ui.background ?: (MaterialTheme.colorScheme.inverseSurface.toArgb().toLong() and 0xFFFFFFFFL)
+    val colorFallback = com.example.chat.ui.kit.ToastContrastPolicy.needsFallback(previewBackground, ui.foreground)
     val title = when (type) {
         ToastCardType.online -> "Contact Online Toast"
         ToastCardType.story -> "Viewed Story Toast"
@@ -544,6 +558,12 @@ internal fun ToastCardBody(
                             ToastPreview(sample, ui.avatar, ui.elevated, radius, ui.background, ui.foreground, MaterialTheme.colorScheme.inverseSurface)
                         }
                     }
+                    if (colorFallback) Text(
+                        "Saved colors have low contrast. The preview and floating toast use a readable theme text color; your saved color is unchanged.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(12.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                    )
                     // NTF-R1-001: positive phrasing - the switch reads the stored enabled flag directly.
                     ToastSwitchTile(
 // Previous implementation retained:                         icon = Icons.Rounded.NotificationsNone, title = "Show ${type.name} toasts", subtitle = enabledSubtitle, value = ui.enabled,
@@ -591,16 +611,16 @@ internal fun ToastCardBody(
                         icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = ui.backgroundLabel, colorValue = ui.background,
 // Previous implementation retained:                         onTap = { pickColor("Toast Background Color", ui.background) { c -> onChanged { it.copy(background = c) } } },
 // Previous implementation retained:                         onColorTap = { pickColor("Toast Background Color", ui.background) { c -> onChanged { it.copy(background = c) } } },
-                        onTap = { pickColor("$title background color", ui.background) { c -> onChanged { it.copy(background = c) } } },
-                        onColorTap = { pickColor("$title background color", ui.background) { c -> onChanged { it.copy(background = c) } } },
+                        onTap = { pickColor("$title background color", ui.background, ui.foreground) { c -> onChanged { it.copy(background = c) } } },
+                        onColorTap = { pickColor("$title background color", ui.background, ui.foreground) { c -> onChanged { it.copy(background = c) } } },
                     )
                     ToastSettingRow(
 // Previous implementation retained:                         icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = colorSubtitle(ui.foreground, "Auto (readable on background)"), colorValue = ui.foreground,
                         icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = ui.foregroundLabel, colorValue = ui.foreground,
 // Previous implementation retained:                         onTap = { pickColor("Toast Text Color", ui.foreground) { c -> onChanged { it.copy(foreground = c) } } },
 // Previous implementation retained:                         onColorTap = { pickColor("Toast Text Color", ui.foreground) { c -> onChanged { it.copy(foreground = c) } } },
-                        onTap = { pickColor("$title text color", ui.foreground) { c -> onChanged { it.copy(foreground = c) } } },
-                        onColorTap = { pickColor("$title text color", ui.foreground) { c -> onChanged { it.copy(foreground = c) } } },
+                        onTap = { pickColor("$title text color", ui.foreground, previewBackground) { c -> onChanged { it.copy(foreground = c) } } },
+                        onColorTap = { pickColor("$title text color", ui.foreground, previewBackground) { c -> onChanged { it.copy(foreground = c) } } },
                     )
                     }
                     }
@@ -679,6 +699,7 @@ fun NotificationToastSettingsScreen(preferences: ChatyPreferencesController, onB
     }
 // Previous implementation retained:     val p = preferences.toasts
     val p = toastPrefs
+    val saveState by preferences.saveState.collectAsState()
     val onlineCard = remember(toastPrefs) { toastCardSlice(ToastCardType.online, toastPrefs) }
     val storyCard = remember(toastPrefs) { toastCardSlice(ToastCardType.story, toastPrefs) }
     val profileCard = remember(toastPrefs) { toastCardSlice(ToastCardType.profile, toastPrefs) }
@@ -734,8 +755,11 @@ fun NotificationToastSettingsScreen(preferences: ChatyPreferencesController, onB
         if (positionPreview != null) { kotlinx.coroutines.delay(2000); positionPreview = null }
     }
     // NTF-R1-017: force alpha FF on picked colors so a translucent pick cannot break readability.
-    fun pickColor(title: String, current: Long?, apply: (Long) -> Unit) =
-        pickers.showColor(title, current ?: config.accentColor) { if (scopeIsCurrent()) apply(it or 0xFF000000L) } // review fix: stale-scope modal apply ignored
+    // Previous implementation retained: pickers.showColor(title, current ?: config.accentColor) { if (scopeIsCurrent()) apply(it or 0xFF000000L) }
+    fun pickColor(title: String, current: Long?, contrastWith: Long?, apply: (Long) -> Unit) =
+        pickers.showColor(title, current ?: config.accentColor, backgroundContextColor = contrastWith) {
+            if (scopeIsCurrent()) apply(it or 0xFF000000L)
+        }
 // Previous implementation retained:     fun showPositionModal(current: String, onSelected: (String) -> Unit) = pickers.showRadio(
 // Previous implementation retained:         "Position of Toast", TOAST_POSITIONS, current, onSelected = onSelected,
 // Previous implementation retained:     )
@@ -834,6 +858,7 @@ fun NotificationToastSettingsScreen(preferences: ChatyPreferencesController, onB
         // NTF-R1-026/035: one keyed lazy item per card; only nearby cards are composed.
 // Previous implementation retained:         LazyColumn(state = rememberLazyListState(), modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
 // Previous implementation retained:             item(key = "toast_summary", contentType = "toast_summary") {
+        ToastSaveFailureRow(saveState) { if (scopeIsCurrent()) preferences.retrySave() }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 360.dp),
             state = rememberLazyGridState(),
@@ -1371,4 +1396,20 @@ fun NotificationToastSettingsScreen(preferences: ChatyPreferencesController, onB
         )
     }
     pickers.Host()
+}
+
+/** Failed local writes remain visibly pending until Retry/new save succeeds. No silent success or destructive rollback. */
+@Composable
+internal fun ToastSaveFailureRow(state: com.example.chat.core.preferences.SaveState, onRetry: () -> Unit) {
+    if (state !is com.example.chat.core.preferences.SaveState.Failed) return
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Changes aren't saved on this device yet. Try again before leaving.",
+            color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f))
+        TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("Try again") }
+    }
 }

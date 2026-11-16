@@ -76,7 +76,11 @@ fun <T> SettingsSearchScreen(
     val colors = LocalAppColors.current
     var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialQuery) }
     // SET-R2-024: only re-filter when the query or the index changes
-    val results = remember(query, allSettings) { SettingsSearchLogic.filter(query, allSettings, title, category, description, keywords) }
+    // Previous cache omitted selectors: remember(query, allSettings) { ... }
+    // SET-R4-029: update when the supplied/localized index projection changes too.
+    val results = remember(query, allSettings, title, category, description, keywords) {
+        SettingsSearchLogic.filter(query, allSettings, title, category, description, keywords)
+    }
 
     Scaffold(
         containerColor = colors.background,
@@ -155,7 +159,12 @@ fun <T> SettingsSearchScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelect(item) }
+                            // SET-R2-034 / SET-R5-036: TalkBack names the destination before activating it.
+                            // Previous unlabeled activation: .clickable { onSelect(item) }
+                            .clickable(
+                                role = androidx.compose.ui.semantics.Role.Button,
+                                onClickLabel = "Open ${title(item)} settings",
+                            ) { onSelect(item) }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -183,6 +192,9 @@ fun <T> SettingsSearchScreen(
     }
 }
 
+// SET-DUP-HIERARCHY: this legacy overload consumes the dead SettingsScreen.kt hierarchy
+// (SettingsSearchEntry / SettingsScreenDestination). Zero call sites as of c639bc4e; the live caller
+// (AppRoot) uses the generic overload with SettingsRegistry.allSettings. Removal pending owner sign-off.
 /** Convenience overload for the root Settings worker's drop32 contract:
  *  consumes [SettingsSearchEntry] directly; [onSelect] receives the entry's
  *  [SettingsScreenDestination] (same value space as

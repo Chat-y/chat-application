@@ -520,8 +520,8 @@ private fun EmailCodeLoginForm(
     var attempt by remember { mutableStateOf<com.example.chat.data.api.ApiBackendService.EmailCodeAttempt?>(null) }
     var signedInUser by remember { mutableStateOf<String?>(null) }
     val resumeSaver=androidx.compose.runtime.saveable.listSaver<com.example.chat.data.api.EmailCodeResume?,Any>(
-        save={if(it==null) emptyList() else listOf(it.challengeId,it.email,it.tenant,it.baseUrl,it.userId.orEmpty(),it.defaultTenant,it.expiresAtEpochMs,it.resendAfterSeconds,it.ownerTenant)},
-        restore={if(it.isEmpty()) null else com.example.chat.data.api.EmailCodeResume(it[0] as String,it[1] as String,it[2] as String,it[3] as String,(it[4] as String).ifEmpty {null},it[5] as Boolean,it[6] as Long,it[7] as Int,it[8] as String)})
+        save={if(it==null) emptyList() else listOf(it.challengeId,it.email,it.tenant,it.baseUrl,it.userId.orEmpty(),it.defaultTenant,it.expiresAtEpochMs,it.resendAfterSeconds,it.ownerTenant,it.mayResend,it.resendAtEpochMs)},
+        restore={if(it.isEmpty()) null else com.example.chat.data.api.EmailCodeResume(it[0] as String,it[1] as String,it[2] as String,it[3] as String,(it[4] as String).ifEmpty {null},it[5] as Boolean,it[6] as Long,it[7] as Int,it[8] as String,(it.getOrNull(9) as? Boolean) ?: true,(it.getOrNull(10) as? Long) ?: 0L)})
     var resume by androidx.compose.runtime.saveable.rememberSaveable(stateSaver=resumeSaver) {mutableStateOf<com.example.chat.data.api.EmailCodeResume?>(null)}
     androidx.compose.runtime.LaunchedEffect(active,attempt) {
         if(active) onResumeState(attempt!=null || resume!=null)
@@ -560,6 +560,7 @@ private fun EmailCodeLoginForm(
                 onVerified = { onResumeState(false);resume=null;signedInUser?.let(onLoggedIn) ?: throw IllegalStateException(authCopy("Server session was not established.")) },
                 deliveryMessage = authCopy("If an account exists for this email, a sign-in code has been sent."),
                 initialResendSeconds = activeAttempt.challenge.resendAfterSeconds,
+                resendAllowed = activeAttempt.challenge.mayResend,
             )
         }
         return

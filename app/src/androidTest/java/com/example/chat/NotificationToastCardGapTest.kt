@@ -36,7 +36,7 @@ class NotificationToastCardGapTest {
                         model.value = withToastCardSlice(ToastCardType.online, model.value,
                             change(toastCardSlice(ToastCardType.online, model.value)))
                     },
-                    pickColor = { _, _, _ -> }, showRingtoneModal = { _, _ -> },
+                    pickColor = { _, _, _, _ -> }, showRingtoneModal = { _, _ -> },
 // Previous implementation retained:                     showPositionModal = { _, _ -> }, ringtoneSubtitle = { it }, colorSubtitle = { _, fallback -> fallback })
                     showPositionModal = { _, _ -> })
             }
@@ -60,7 +60,7 @@ class NotificationToastCardGapTest {
                 ToastCardBody(type = type.value, ui = toastCardSlice(type.value, model.value), radius = 8.0,
                     onRadiusChange = {}, onChanged = { change ->
                         model.value = withToastCardSlice(type.value, model.value, change(toastCardSlice(type.value, model.value)))
-                    }, pickColor = { _, _, _ -> }, showRingtoneModal = { _, _ -> },
+                    }, pickColor = { _, _, _, _ -> }, showRingtoneModal = { _, _ -> },
 // Previous implementation retained:                     showPositionModal = { _, _ -> }, ringtoneSubtitle = { it }, colorSubtitle = { _, fallback -> fallback })
                     showPositionModal = { _, _ -> })
             }

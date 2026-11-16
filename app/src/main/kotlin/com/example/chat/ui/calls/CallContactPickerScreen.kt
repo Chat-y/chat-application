@@ -237,9 +237,18 @@ fun CallContactPickerScreen(
     }
 
     val scope = rememberCoroutineScope()
+    val checkCallPermission = rememberCallPermissionCheck()
+    val callNetworkOnline = rememberCallNetworkOnline()
+    var callActionGeneration by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    DisposableEffect(currentUserId) {
+        callActionGeneration++
+        onDispose { callActionGeneration++ }
+    }
+    val latestContacts by androidx.compose.runtime.rememberUpdatedState(contacts)
     fun startCall(contact: UserProfile, isVideo: Boolean) {
-        if (startingContactId != null) return
+        if (startingContactId != null || !callHasValidatedNetwork(context)) return
         startingContactId = contact.id
+        val actionGeneration = callActionGeneration
         // CALLS-R1-58: confirm the consequential action with haptics.
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
 // Previous implementation retained:         onStartCall(contact, isVideo)
@@ -248,7 +257,15 @@ fun CallContactPickerScreen(
         scope.launch {
 // Previous implementation retained:             delay(3000)
 // Previous implementation retained:             if (startingContactId == contact.id) startingContactId = null
-            try { onStartCall(contact, isVideo) }
+// Previous implementation retained:             try { onStartCall(contact, isVideo) }
+// Previous implementation retained:             try { if (checkCallPermission(isVideo)) onStartCall(contact, isVideo) }
+            try {
+                if (checkCallPermission(isVideo) && actionGeneration == callActionGeneration) {
+                    // An account/contact change during the system dialog cannot dial an old row.
+                    val latestContact = latestContacts.firstOrNull { it.id == contact.id && it.id != currentUserId }
+                    if (latestContact != null) onStartCall(latestContact, isVideo)
+                }
+            }
             finally { if (startingContactId == contact.id) startingContactId = null }
         }
     }
@@ -364,6 +381,10 @@ fun CallContactPickerScreen(
                 }
                 Spacer(Modifier.width(4.dp))
             }
+
+            if (!callNetworkOnline) Text(context.getString(com.example.chat.R.string.call_network_unavailable),
+                color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
 
             // Owner UI-only change: hide the two dialpad options. Stored sound defaults,
             // current preference reads, tone gating and keypad-collapse behavior stay intact.
@@ -513,6 +534,20 @@ fun CallContactPickerScreen(
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center,
                         )
+                        if (query.isBlank() && contacts.none { it.id != currentUserId }) {
+                            // Reuse the existing app-share entry point. No contact is selected and nothing is sent.
+                            androidx.compose.material3.TextButton(
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                onClick = {
+                                    com.example.chat.ui.settings.ChatyShareService.shareApp(context) { message ->
+                                        showToast(message, true)
+                                    }
+                                },
+                            ) {
+                                Text(context.getString(com.example.chat.R.string.call_picker_invite_friends),
+                                    color = com.example.chat.ui.theme.LocalAppColors.current.primary)
+                            }
+                        }
                     }
                 } else {
                     LazyColumn(
@@ -540,7 +575,7 @@ fun CallContactPickerScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable(enabled = !isThisCallStarting && !isStartingCall) {
+                                    .clickable(enabled = callNetworkOnline && !isThisCallStarting && !isStartingCall) {
                                         startCall(contact, isVideo = false)
                                     }
                                     .padding(horizontal = 8.dp, vertical = 8.dp),
@@ -588,7 +623,7 @@ fun CallContactPickerScreen(
                                     Row {
                                         IconButton(
                                             onClick = { startCall(contact, isVideo = false) },
-                                            enabled = !isStartingCall,
+                                            enabled = callNetworkOnline && !isStartingCall,
                                         ) {
                                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio,
 // Previous implementation retained:                                                 semanticLabel = "Voice call",
@@ -599,7 +634,7 @@ fun CallContactPickerScreen(
                                         }
                                         IconButton(
                                             onClick = { startCall(contact, isVideo = true) },
-                                            enabled = !isStartingCall,
+                                            enabled = callNetworkOnline && !isStartingCall,
                                         ) {
                                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callVideo,
 // Previous implementation retained:                                                 semanticLabel = "Video call",
@@ -730,7 +765,7 @@ fun CallContactPickerScreen(
                                 .semantics(mergeDescendants = true) { contentDescription = context.getString(com.example.chat.R.string.calls_ui_45) }
                                 .clip(CircleShape)
                                 .background(Color(theme.successColor), CircleShape)
-                                .clickable { triggerCall() },
+                                .clickable(enabled = callNetworkOnline && startingContactId == null) { triggerCall() },
                         ) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio,
                                 semanticLabel = null,

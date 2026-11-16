@@ -119,6 +119,7 @@ fun ProfileEditScreen(
     isCurrentPreview: () -> Boolean = { true },
 ) {
     val theme = LocalThemeConfig.current
+    val appContext = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     // Persistent inline save error (P2-02): survives a missed snackbar, cleared on next submit.
@@ -201,9 +202,9 @@ fun ProfileEditScreen(
         isSaving = true
         scope.launch {
             try {
-                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+                check(isCurrentPreview()) { appContext.getString(com.example.chat.R.string.profile_edit_account_changed) }
                 val url = picker(source)
-                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+                check(isCurrentPreview()) { appContext.getString(com.example.chat.R.string.profile_edit_account_changed) }
                 if (url != null) {
                     if (target == "avatar") newAvatarUrl = url else newBannerUrl = url
                 }
@@ -211,10 +212,10 @@ fun ProfileEditScreen(
                 throw cancelled
             } catch (error: Exception) {
                 if (error.message?.contains("cancelled") != true) {
-                    val reason = ProfileErrorMessages.friendly(error, "Please try again.")
+                    val reason = ProfileErrorMessages.friendly(appContext, error, appContext.getString(com.example.chat.R.string.profile_edit_retry))
                     show(
-                        if (target == "avatar") "Could not prepare profile photo. $reason"
-                        else "Could not prepare cover photo. $reason",
+                        if (target == "avatar") appContext.getString(com.example.chat.R.string.profile_edit_prepare_photo_failed, reason)
+                        else appContext.getString(com.example.chat.R.string.profile_edit_prepare_cover_failed, reason),
                     )
                 }
             } finally {
@@ -225,8 +226,7 @@ fun ProfileEditScreen(
 
     // P1-17: use the shared reference-counted guard so overlapping sensitive screens cannot clear each other's flag.
     com.example.chat.ui.kit.ProtectSensitiveWindow()
-    // P5-42: context for string resources used from non-composable save() code.
-    val appContext = androidx.compose.ui.platform.LocalContext.current
+    // P5-42: event handlers use the context captured above.
     fun save() {
         if (isSaving || !isCurrentPreview()) return
         saveError = null
@@ -244,12 +244,12 @@ fun ProfileEditScreen(
             return
         }
         ChatyValidators.validateUsername(username)?.let {
-            show(it)
+            show(ProfileValidationCopy.localize(appContext, it))
             scope.launch { usernameFocus.bringIntoView() }
             return
         }
         ChatyValidators.validateBio(about)?.let {
-            show(it)
+            show(ProfileValidationCopy.localize(appContext, it))
             scope.launch { aboutFocus.bringIntoView() }
             return
         }
@@ -271,9 +271,9 @@ fun ProfileEditScreen(
                     isSaving = false
                     return@launch
                 }
-                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+                check(isCurrentPreview()) { appContext.getString(com.example.chat.R.string.profile_edit_account_changed) }
                 onSave(name, normalized, about.trim(), newAvatarUrl, newBannerUrl)
-                check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+                check(isCurrentPreview()) { appContext.getString(com.example.chat.R.string.profile_edit_account_changed) }
                 isSaving = false
                 justSaved = true
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -283,8 +283,8 @@ fun ProfileEditScreen(
                 throw cancelled
             } catch (error: Exception) {
                 isSaving = false
-                val message = "Could not save profile. " +
-                    ProfileErrorMessages.friendly(error, "Please try again.", isSave = true)
+                val message = appContext.getString(com.example.chat.R.string.profile_edit_save_failed,
+                    ProfileErrorMessages.friendly(appContext, error, appContext.getString(com.example.chat.R.string.profile_edit_retry), isSave = true))
                 saveError = message
                 if (isCurrentPreview()) show(message)
             } finally { isSaving = false }
@@ -299,7 +299,7 @@ fun ProfileEditScreen(
                 navigationIcon = {
                     IconButton(onClick = { attemptBack() }) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
-                            semanticLabel = "Back",
+                            semanticLabel = appContext.getString(com.example.chat.R.string.profile_edit_back),
                             color = Color(theme.primaryTextColor),
                         )
                     }
@@ -312,7 +312,7 @@ fun ProfileEditScreen(
                                 .size(20.dp)
                                 .padding(end = 12.dp)
                                 .semantics {
-                                    contentDescription = "Saving profile"
+                                    contentDescription = appContext.getString(com.example.chat.R.string.profile_edit_saving)
                                     liveRegion = LiveRegionMode.Polite
                                 },
                             strokeWidth = 2.2.dp,
@@ -320,7 +320,7 @@ fun ProfileEditScreen(
                     } else if (justSaved) {
                         // Brief success mark in place of Save (peak-end, P2-44/P5-10).
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check,
-                            semanticLabel = "Saved",
+                            semanticLabel = appContext.getString(com.example.chat.R.string.profile_edit_saved),
                             color = Color(theme.accentColor),
                             modifier = Modifier.padding(end = 12.dp).size(24.dp),
                         )
@@ -383,7 +383,7 @@ fun ProfileEditScreen(
                                 ),
                         )
                     }
-                    ChatyAsyncImage(
+                    ProfileSizedImage(
                         url = activeBannerUrl,
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
@@ -400,7 +400,7 @@ fun ProfileEditScreen(
                                 .background(Color(theme.surfaceColor).copy(alpha = 0.85f), CircleShape),
                         ) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                                semanticLabel = "Edit cover photo",
+                                semanticLabel = appContext.getString(com.example.chat.R.string.profile_edit_cover),
                                 color = Color(theme.primaryTextColor),
                                 modifier = Modifier.size(20.dp),
                             )
@@ -436,7 +436,7 @@ fun ProfileEditScreen(
                                 LocalAvatarDraftPreview(avatarDraft, isCurrentPreview)
                             }
                         } else {
-                            ChatyAsyncImage(
+                            ProfileSizedImage(
                                 url = activeAvatarUrl,
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxSize(),
@@ -451,7 +451,7 @@ fun ProfileEditScreen(
                         enabled = !isSaving,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .semantics { contentDescription = "Edit profile photo" }
+                            .semantics { contentDescription = appContext.getString(com.example.chat.R.string.profile_edit_photo) }
                             .size(48.dp),
                     ) {
                         Box(
@@ -505,7 +505,7 @@ fun ProfileEditScreen(
                     label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_display_name)) },  // was: "Display Name"
                     placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_display_name_hint)) },  // was: "Enter your full name"
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null) },
-                    supportingText = { Text("${displayName.length}/50") },
+                    supportingText = { Text(appContext.getString(com.example.chat.R.string.profile_character_counter, displayName.length, 50)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Words,
@@ -530,9 +530,9 @@ fun ProfileEditScreen(
                     isError = usernameTaken,
                     supportingText = {
                         Text(
-                            if (usernameTaken) "This username is already taken"
-                            else if (usernameCheckLoading) "Checking availability..."
-                            else "${username.length}/30",
+                            if (usernameTaken) appContext.getString(com.example.chat.R.string.profile_edit_username_taken)
+                            else if (usernameCheckLoading) appContext.getString(com.example.chat.R.string.profile_edit_username_checking)
+                            else appContext.getString(com.example.chat.R.string.profile_character_counter, username.length, 30),
                         )
                     },
                     singleLine = true,
@@ -550,7 +550,7 @@ fun ProfileEditScreen(
                     // Announce only at 120 and 140 characters, not per keystroke (P2-45).
                     supportingText = {
                         Text(
-                            "${about.length}/140",
+                            appContext.getString(com.example.chat.R.string.profile_character_counter, about.length, 140),
                             modifier = Modifier.semantics {
                                 if (about.length == 120 || about.length == 140) {
                                     liveRegion = LiveRegionMode.Polite
@@ -571,7 +571,7 @@ fun ProfileEditScreen(
                     modifier = Modifier.padding(bottom = 8.dp).semantics { heading() },
                 )
                 OutlinedTextField(
-                    value = if (user.phone.isBlank()) "Not set" else "${user.phone} · ${if (user.phoneVerified) "Verified" else "Unverified"}",
+                    value = if (user.phone.isBlank()) appContext.getString(com.example.chat.R.string.profile_edit_not_set) else "${user.phone} · ${if (user.phoneVerified) appContext.getString(com.example.chat.R.string.profile_edit_verified) else appContext.getString(com.example.chat.R.string.profile_edit_unverified)}",
                     onValueChange = {},
                     enabled = false,
                     label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_phone)) },  // was: "Phone Number"
@@ -596,7 +596,7 @@ fun ProfileEditScreen(
     sourceSheetFor?.let { target ->
         ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp, containerColor = com.example.chat.ui.theme.LocalAppColors.current.surfaceElevated, shape = com.example.chat.ui.kit.ChatyModalShape, onDismissRequest = { sourceSheetFor = null }) {
             Text(
-                if (target == "avatar") "Change Profile Photo" else "Change Banner Photo",
+                if (target == "avatar") appContext.getString(com.example.chat.R.string.profile_edit_change_photo) else appContext.getString(com.example.chat.R.string.profile_edit_change_banner),
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
@@ -604,7 +604,7 @@ fun ProfileEditScreen(
                     // Previous: .semantics { heading() }
                     .semantics {
                         heading()
-                        paneTitle = if (target == "avatar") "Change Profile Photo" else "Change Banner Photo"
+                        paneTitle = if (target == "avatar") appContext.getString(com.example.chat.R.string.profile_edit_change_photo) else appContext.getString(com.example.chat.R.string.profile_edit_change_banner)
                     }
                     .padding(horizontal = 20.dp, vertical = 8.dp),
             )
@@ -650,6 +650,7 @@ fun ProfileEditScreen(
  * while Compose's renderer might still hold it. No private path/URI is logged or displayed. */
 @Composable
 private fun LocalAvatarDraftPreview(draft: ProfileAvatarDraft, isCurrent: () -> Boolean) {
+    val previewContext = androidx.compose.ui.platform.LocalContext.current
     data class Preview(val bitmap: android.graphics.Bitmap? = null, val failed: Boolean = false)
     val currentCheck = androidx.compose.runtime.rememberUpdatedState(isCurrent)
     val state = androidx.compose.runtime.produceState(Preview(), draft) {
@@ -674,11 +675,11 @@ private fun LocalAvatarDraftPreview(draft: ProfileAvatarDraft, isCurrent: () -> 
     when {
         state.bitmap != null -> androidx.compose.foundation.Image(
             bitmap = state.bitmap.asImageBitmap(),
-            contentDescription = "Local profile photo preview",
+            contentDescription = previewContext.getString(com.example.chat.R.string.profile_preview_label),
             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
-        state.failed -> Text("Photo preview unavailable", fontSize = 12.sp,
+        state.failed -> Text(previewContext.getString(com.example.chat.R.string.profile_preview_unavailable), fontSize = 12.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         else -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
     }
@@ -764,10 +765,47 @@ private fun sanitizeDisplayName(raw: String): String =
 //             } catch (error: Exception) {
 //                 isSaving = false
 //                 val message = "Could not save profile. " +
-//                     ProfileErrorMessages.friendly(error, "Please try again.", isSave = true)
+//                     ProfileErrorMessages.friendly(appContext, error, "Please try again.", isSave = true)
 //                 saveError = message
 //                 show(message)
 //             }
 //         }
 //     }
 //
+
+// Previous resource call sites retained for source history:
+//                  check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+//                  check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+//                      val reason = ProfileErrorMessages.friendly(error, "Please try again.")
+//                          if (target == "avatar") "Could not prepare profile photo. $reason"
+//                          else "Could not prepare cover photo. $reason",
+//      // P5-42: context for string resources used from non-composable save() code.
+//      val appContext = androidx.compose.ui.platform.LocalContext.current
+//                  check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+//                  check(isCurrentPreview()) { "Account changed. Reopen profile settings." }
+//                  val message = "Could not save profile. " +
+//                      ProfileErrorMessages.friendly(error, "Please try again.", isSave = true)
+//                              semanticLabel = "Back",
+//                                      contentDescription = "Saving profile"
+//                              semanticLabel = "Saved",
+//                                  semanticLabel = "Edit cover photo",
+//                              .semantics { contentDescription = "Edit profile photo" }
+//                              if (usernameTaken) "This username is already taken"
+//                              else if (usernameCheckLoading) "Checking availability..."
+//                      value = if (user.phone.isBlank()) "Not set" else "${user.phone} · ${if (user.phoneVerified) "Verified" else "Unverified"}",
+//                  if (target == "avatar") "Change Profile Photo" else "Change Banner Photo",
+//                          paneTitle = if (target == "avatar") "Change Profile Photo" else "Change Banner Photo"
+
+// Previous localization paths retained:
+//                     val reason = ProfileErrorMessages.friendly(error, appContext.getString(com.example.chat.R.string.profile_edit_retry))
+//                     ProfileErrorMessages.friendly(error, appContext.getString(com.example.chat.R.string.profile_edit_retry), isSave = true))
+// //                     ProfileErrorMessages.friendly(error, "Please try again.", isSave = true)
+
+// Previous profile copy retained:
+//             show(it)
+//             show(it)
+//                     supportingText = { Text("${displayName.length}/50") },
+//                             else "${username.length}/30",
+//                             "${about.length}/140",
+//             contentDescription = "Local profile photo preview",
+//         state.failed -> Text("Photo preview unavailable", fontSize = 12.sp,

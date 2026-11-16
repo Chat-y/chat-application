@@ -70,7 +70,8 @@ import com.example.chat.ui.theme.LocalThemeConfig
 // Exact Flutter material color constants used by the Dart screen.
 private val White10 = Color(0x1AFFFFFF)
 private val White12 = Color(0x1FFFFFFF)
-private val White24 = Color(0x3DFFFFFF)
+// White24 was the fixed dark-theme radio/handle tint; chrome now uses theme tokens.
+// private val White24 = Color(0x3DFFFFFF)
 private val White70 = Color(0xB3FFFFFF)
 private val Black12 = Color(0x1F000000)
 private val Black38 = Color(0x61000000)
@@ -186,9 +187,11 @@ fun UniversalChatyIconsScreen(
                     Modifier.background(accent, RoundedCornerShape(20.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, color = Color.Black, modifier = Modifier.size(14.dp))
+                    // On-accent text/icon come from the theme token, not a fixed color.
+                    val onAccent = Color(config.onAccentColor)
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, color = onAccent, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Applied", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.W800)
+                    Text("Applied", color = onAccent, fontSize = 11.sp, fontWeight = FontWeight.W800)
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -245,9 +248,10 @@ fun UniversalChatyIconsScreen(
         }
         Spacer(Modifier.height(20.dp))
 
-        // Available families and honest status rows share the same selector.
+        // Available families share the same selector. Owner decision (2026-11-04):
+        // unavailable packs are removed from the picker, so only selectable themes are counted.
         Text(
-            "${ChatyIconThemeId.entries.size + ChatyIconPackCatalog.blockedPacks.size} ICON PACK OPTIONS",
+            "${ChatyIconThemeId.entries.size} ICON PACK OPTIONS",
             color = secondaryText,
             fontSize = 11.5.sp,
             fontWeight = FontWeight.W800,
@@ -270,7 +274,7 @@ fun UniversalChatyIconsScreen(
                     )
                     .border(
                         width = if (isSelected) 2.dp else 1.dp,
-                        color = if (isSelected) accent else White10,
+                        color = if (isSelected) accent else secondaryText.copy(alpha = 0.25f),
                         shape = RoundedCornerShape(16.dp),
                     )
                     .padding(14.dp),
@@ -306,10 +310,10 @@ fun UniversalChatyIconsScreen(
                                 Spacer(Modifier.width(6.dp))
                                 Text(
                                     "Default",
-                                    Modifier.background(White12, RoundedCornerShape(6.dp))
+                                    Modifier.background(secondaryText.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
                                         .padding(horizontal = 6.dp, vertical = 2.dp),
                                     fontSize = 9.5.sp,
-                                    color = White70,
+                                    color = secondaryText,
                                     fontWeight = FontWeight.W600,
                                 )
                             }
@@ -333,40 +337,20 @@ fun UniversalChatyIconsScreen(
                     } else if (!selectable) {
                         Text("Unavailable", color = secondaryText, fontSize = 10.sp, fontWeight = FontWeight.W700)
                     } else {
-                        Icon(com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.radioOff), contentDescription = null, tint = White24, modifier = Modifier.size(24.dp))
+                        Icon(com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.radioOff), contentDescription = null, tint = secondaryText.copy(alpha = 0.45f), modifier = Modifier.size(24.dp))
                     }
                 }
             }
         }
-        if (ChatyIconPackCatalog.blockedPacks.isNotEmpty()) {
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "REQUESTED PACKS - UNAVAILABLE",
-                color = secondaryText,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.W800,
-                letterSpacing = 0.8.sp,
-            )
-            Spacer(Modifier.height(10.dp))
-            ChatyIconPackCatalog.blockedPacks.forEachIndexed { index, pack ->
-                if (index > 0) Spacer(Modifier.height(8.dp))
-                Column(
-                    Modifier.fillMaxWidth()
-                        .background(surface, RoundedCornerShape(14.dp))
-                        .border(1.dp, White10, RoundedCornerShape(14.dp))
-                        .padding(14.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(pack.title, color = primaryText, fontSize = 14.sp, fontWeight = FontWeight.W600, modifier = Modifier.weight(1f))
-                        Text("Unavailable", color = secondaryText, fontSize = 10.sp, fontWeight = FontWeight.W700)
-                    }
-                    if (pack.reason != null) {
-                        Spacer(Modifier.height(2.dp))
-                        Text(pack.reason, color = secondaryText, fontSize = 11.5.sp)
-                    }
-                }
-            }
-        }
+        // Owner decision (2026-11-04): unavailable packs are removed from the picker and
+        // replaced with more free packs, so the blocked list is no longer displayed. The
+        // provenance data stays in ChatyIconPackCatalog.blockedPacks for the audit trail.
+        // Prior honest-status section (kept for reference, not shown):
+        // if (ChatyIconPackCatalog.blockedPacks.isNotEmpty()) {
+        //     Spacer(Modifier.height(20.dp))
+        //     Text("REQUESTED PACKS - UNAVAILABLE", ...)
+        //     ChatyIconPackCatalog.blockedPacks.forEachIndexed { ... row with title/reason ... }
+        // }
         Spacer(Modifier.height(24.dp))
 
         // SECTION 3: 14 core actions contact sheet.
@@ -387,7 +371,7 @@ fun UniversalChatyIconsScreen(
         Column(
             Modifier.fillMaxWidth()
                 .background(surface, RoundedCornerShape(16.dp))
-                .border(1.dp, White10, RoundedCornerShape(16.dp))
+                .border(1.dp, secondaryText.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
                 .padding(12.dp),
         ) {
             FixedGrid(
@@ -408,7 +392,7 @@ fun UniversalChatyIconsScreen(
                     Box(
                         Modifier.size(38.dp)
                             .background(if (previewIsDark) Black38 else White70, RoundedCornerShape(10.dp))
-                            .border(1.dp, White10, RoundedCornerShape(10.dp)),
+                            .border(1.dp, secondaryText.copy(alpha = 0.25f), RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center,
                     ) {
                         ChatyIcon(iconId, size = previewSize * 0.85f, color = primaryText, themeOverride = activeTheme)
@@ -449,8 +433,8 @@ fun UniversalChatyIconsScreen(
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = surface,
                 unfocusedContainerColor = surface,
-                focusedBorderColor = White10,
-                unfocusedBorderColor = White10,
+                focusedBorderColor = secondaryText.copy(alpha = 0.25f),
+                unfocusedBorderColor = secondaryText.copy(alpha = 0.25f),
             ),
         )
         Spacer(Modifier.height(12.dp))
@@ -466,7 +450,7 @@ fun UniversalChatyIconsScreen(
                     label = {
                         Text(
                             cat,
-                            color = if (isSelected) Color.Black else primaryText,
+                            color = if (isSelected) Color(config.onAccentColor) else primaryText,
                             fontWeight = if (isSelected) FontWeight.W700 else FontWeight.W500,
                             fontSize = 12.5.sp,
                         )
@@ -479,7 +463,7 @@ fun UniversalChatyIconsScreen(
                     border = FilterChipDefaults.filterChipBorder(
                         enabled = true,
                         selected = isSelected,
-                        borderColor = White12,
+                        borderColor = secondaryText.copy(alpha = 0.25f),
                         selectedBorderColor = accent,
                     ),
                     modifier = Modifier.padding(end = 8.dp),
@@ -502,7 +486,7 @@ fun UniversalChatyIconsScreen(
                         detailIcon = iconId
                     }
                     .background(surface, RoundedCornerShape(14.dp))
-                    .border(1.dp, White10, RoundedCornerShape(14.dp)),
+                    .border(1.dp, secondaryText.copy(alpha = 0.25f), RoundedCornerShape(14.dp)),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -555,7 +539,7 @@ fun UniversalChatyIconsScreen(
                 Box(
                     Modifier.align(Alignment.CenterHorizontally)
                         .size(40.dp, 4.dp)
-                        .background(White24, RoundedCornerShape(2.dp)),
+                        .background(scheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp)),
                 )
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -605,7 +589,7 @@ fun UniversalChatyIconsScreen(
                         Box(
                             Modifier.size(48.dp)
                                 .background(scheme.surfaceContainerHighest.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-                                .border(if (isApplied) 2.dp else 1.dp, if (isApplied) scheme.primary else White12, RoundedCornerShape(12.dp)),
+                                .border(if (isApplied) 2.dp else 1.dp, if (isApplied) scheme.primary else scheme.outlineVariant, RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center,
                         ) {
                             ChatyIcon(iconId, size = 24.dp, color = scheme.primary, themeOverride = theme)

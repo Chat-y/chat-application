@@ -26,16 +26,37 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
     var edit by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val stopReader = remember { arrayOfNulls<() -> Unit>(1) }
-    var active by remember { mutableStateOf(true) }
+    val activeState = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
+    fun active(): Boolean = activeState.get()
     val attachment = message.attachment ?: return
     // Parent invokes the registered player stop barrier BEFORE releasing the source, regardless of effect order.
-    DisposableEffect(Unit) { onDispose { active = false; stopReader[0]?.invoke(); releaseConsumerSource(source); edited?.release() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            activeState.set(false)
+            val retainedSource = source
+            val retainedEdited = edited
+            val stop = stopReader[0]
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            // Retry on the main thread. Never drop backing bytes while native teardown is uncertain.
+            fun cleanup(attempt: Int) {
+                val stopped = runCatching { stop?.invoke() }.isSuccess
+                if (!stopped) {
+                    if (attempt < 3) handler.postDelayed({ cleanup(attempt + 1) }, 250L)
+                    return
+                }
+                // Independent release operations: failure of one must not skip the other.
+                runCatching { releaseConsumerSource(retainedSource) }
+                runCatching { retainedEdited?.release() }
+            }
+            cleanup(0)
+        }
+    }
     LaunchedEffect(Unit) {
         var pending: ResolvedSource? = null
         try {
             pending = binding.resolve(message, true)
             coroutineContext.ensureActive()
-            if (active && binding.deliver(pending!!) { source = pending }) pending = null
+            if (active() && binding.deliver(pending!!) { source = pending }) pending = null
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { error = "Attachment unavailable" }
         finally { releaseConsumerSource(pending) }
@@ -43,7 +64,7 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
     // Owned routes bypass MediaViewerScreen's ordinary external-action busy state.
     var operationBusy by remember { mutableStateOf(false) }
     fun external(purpose: ExportPurpose) {
-        if (restricted || !active || operationBusy || edit) return
+        if (restricted || !active() || operationBusy || edit) return
         operationBusy = true
         scope.launch {
             var token: ExportToken? = null
@@ -56,7 +77,7 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
                 if (result !is ExportResult.Granted) { error = "Export unavailable or not permitted"; return@launch }
                 token = result.token
                 coroutineContext.ensureActive()
-                check(active && result.token.isValid())
+                check(active() && result.token.isValid())
                 val intent = if (purpose == ExportPurpose.SHARE) Intent(Intent.ACTION_SEND).apply {
                     type = context.contentResolver.getType(Uri.parse(result.token.uri)) ?: "application/octet-stream"
                     putExtra(Intent.EXTRA_STREAM, Uri.parse(result.token.uri))
@@ -83,7 +104,7 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
         // Previous: if (restricted || galleryBusy) return
         if (restricted || operationBusy || edit) return
         var authorized = false
-        binding.deliverIfCurrent { authorized = active }
+        binding.deliverIfCurrent { authorized = active() }
         if (!authorized) return
         // Previous: galleryBusy = true
         operationBusy = true
@@ -100,9 +121,9 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
                 token = snapshot
                 coroutineContext.ensureActive()
                 fun ownerCurrent(): Boolean {
-                    if (!active || !snapshot.isValid()) return false
+                    if (!active() || !snapshot.isValid()) return false
                     var valid = false
-                    binding.deliverIfCurrent { valid = active && snapshot.isValid() }
+                    binding.deliverIfCurrent { valid = active() && snapshot.isValid() }
                     return valid
                 }
                 val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -130,8 +151,8 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
                 // Previous callback overwrote the old edited token without releasing it.
                 // try { accepted = binding.deliverIfCurrent { edited = token; edit = false } }
                 try { accepted = binding.deliverIfCurrent {
-                    if (active) { replaced = edited; edited = token; edit = false }
-                } && active }
+                    if (active()) { replaced = edited; edited = token; edit = false }
+                } && active() }
                 finally {
                     if (!accepted) token.release()
                     else if (replaced !== token) replaced?.release()
@@ -147,17 +168,22 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
             TextButton(onBack) { Text("Back") }
         } }
         current == null -> Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding()) { CircularProgressIndicator(); TextButton(onBack) { Text("Back") } } }
-        else -> MediaViewerScreen(theme, attachment.name, attachment.type, attachment.size,
+        else -> MediaViewerScreen(theme,
+            if (edited != null) "${attachment.name} (edited)" else attachment.name,
+            attachment.type, if (edited != null) "Edited copy" else attachment.size,
             storagePath = edited?.uri ?: current.consumerUri() ?: "verified-bytes",
             createSignedUrl = { path, _ -> path }, onBack = onBack, sourceBounds = bounds,
             restrictedViewOnce = restricted,
             providedModel = edited?.uri ?: current.consumerModel(), ownedActions = true,
+            ownedActionBusy = operationBusy,
             registerStopReader = { stopReader[0] = it },
             deliverPlayback = binding.deliverIfCurrent,
             onOwnedSaveToGallery = ::gallery,
             // Previous edit callback had no shared operation gate.
-            // onOwnedEdit = { stopReader[0]?.invoke(); edit = true },
-            onOwnedEdit = { if (!restricted && active && !operationBusy && !edit) { stopReader[0]?.invoke(); edit = true } },
+            // onOwnedEdit = { if (runCatching { stopReader[0]?.invoke() }.isSuccess) edit = true
+            //     else error = "Could not stop this attachment for editing. Close it and try again." },
+            onOwnedEdit = { if (!restricted && active() && !operationBusy && !edit) { if (runCatching { stopReader[0]?.invoke() }.isSuccess) edit = true
+                else error = "Could not stop this attachment for editing. Close it and try again." } },
             onOwnedShare = { external(ExportPurpose.SHARE) }, onOwnedOpen = { external(ExportPurpose.OPEN) },
         )
     }
@@ -166,3 +192,20 @@ internal fun BoundAttachmentViewer(theme: ThemeConfig, message: ChatMessage, bin
 /* Previous implementation fragments retained (net227):
 
 */
+
+// Previous source retained for source-only media polish:
+//         else -> MediaViewerScreen(theme, attachment.name, attachment.type, attachment.size,
+
+// Previous cleanup source retained:
+//     var active by remember { mutableStateOf(true) }
+//     DisposableEffect(Unit) { onDispose { active = false; stopReader[0]?.invoke(); releaseConsumerSource(source); edited?.release() } }
+//             if (active && binding.deliver(pending!!) { source = pending }) pending = null
+//         if (restricted || !active || operationBusy || edit) return
+//                 check(active && result.token.isValid())
+//         binding.deliverIfCurrent { authorized = active }
+//                     if (!active || !snapshot.isValid()) return false
+//                     binding.deliverIfCurrent { valid = active && snapshot.isValid() }
+//                     if (active) { replaced = edited; edited = token; edit = false }
+//                 } && active }
+//             // onOwnedEdit = { stopReader[0]?.invoke(); edit = true },
+//             onOwnedEdit = { if (!restricted && active && !operationBusy && !edit) { stopReader[0]?.invoke(); edit = true } },

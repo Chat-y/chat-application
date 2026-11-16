@@ -53,14 +53,24 @@ fun SplitChatWorkspace(
 ) {
     if (!sessionState.isActive) return
 
+    // SPL-33: all active panes must share one account before any layout, focus or dock decision;
+    // the focused pane's account wins (see SplitChatSessionState.singleAccountPanes).
+    val sessionState = sessionState.singleAccountPanes()
+
     val colors = LocalAppColors.current
     val paneStateHolder = rememberSaveableStateHolder()
     val canvasStateHolder = rememberSaveableStateHolder()
     val windowStateHolder = rememberSaveableStateHolder()
     var dockExpanded by rememberSaveable { mutableStateOf(true) }
+    // SPL-29: minimized set hoisted out of the canvas state-holder scope so the top bar can show
+    // a visible minimized count while the dock is collapsed. Keyed on the pane account, as before.
+    val dockKeys = sessionState.paneItems.map { it.stateKey() }
+    var minimizedKeys by rememberSaveable(sessionState.paneItems.firstOrNull()?.accountNamespace) { mutableStateOf(if (sessionState.count == 1 && sessionState.isMiniWindowMinimized) dockKeys else emptyList<String>()) }
     // SPL-23: host contract. paneContent is supplied by the host, which must enforce account and
     // conversation authorization; this container only lays out windows and cannot authorize message access.
     val paneContentCurrent by rememberUpdatedState(paneContent)
+    // SPL-45 verified: contentByPane is local non-snapshot bookkeeping (a plain mutableMapOf pruned
+    // and filled in sessionState.paneItems order on every composition); it holds no Compose state and is deterministic.
     val contentByPane = remember { mutableMapOf<String, @Composable (SplitPaneItem, Modifier) -> Unit>() }
     val activeKeys = sessionState.paneItems.map { it.stateKey() }.toSet()
     contentByPane.keys.retainAll(activeKeys)
@@ -113,9 +123,21 @@ fun SplitChatWorkspace(
                 )
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { dockExpanded = !dockExpanded }, modifier = Modifier.size(48.dp)) {
-                    ChatyIcon(if (dockExpanded) ChatyIconId.chevronDown else ChatyIconId.chevronUp,
-                        color = colors.foregroundSecondary,
-                        semanticLabel = if (dockExpanded) "Hide minimized chat bubbles" else "Show minimized chat bubbles")
+                    // SPL-29: when the dock is collapsed the toggle carries a visible minimized count.
+                    Box {
+                        ChatyIcon(if (dockExpanded) ChatyIconId.chevronDown else ChatyIconId.chevronUp,
+                            color = colors.foregroundSecondary,
+                            semanticLabel = if (dockExpanded) "Hide minimized chat bubbles" else "Show minimized chat bubbles (${minimizedKeys.size})")
+                        if (!dockExpanded && minimizedKeys.isNotEmpty()) {
+                            Text(
+                                "${minimizedKeys.size}",
+                                color = colors.onAccent,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.align(Alignment.TopEnd).clip(CircleShape).background(colors.accent).padding(horizontal = 4.dp, vertical = 1.dp).clearAndSetSemantics { },
+                            )
+                        }
+                    }
                 }
                 IconButton(onClick = onCloseWorkspace, modifier = Modifier.size(48.dp)) {
                     ChatyIcon(ChatyIconId.close, color = colors.foregroundSecondary, semanticLabel = "Close split chat")
@@ -125,8 +147,8 @@ fun SplitChatWorkspace(
             // Reuse the existing mini-window component for one or multiple chats.
             if (sessionState.isActive) {
                 canvasStateHolder.SaveableStateProvider("free-canvas") {
-                    val dockKeys = sessionState.paneItems.map { it.stateKey() }
-                    var minimizedKeys by rememberSaveable(sessionState.paneItems.firstOrNull()?.accountNamespace) { mutableStateOf(if (sessionState.count == 1 && sessionState.isMiniWindowMinimized) dockKeys else emptyList<String>()) }
+                    // SPL-29: dockKeys and minimizedKeys are hoisted above the top bar (see declaration).
+                    // Prior declarations lived inside this state-holder scope.
                     BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                         val canvasWidth = maxWidth.value
                         val canvasHeight = maxHeight.value

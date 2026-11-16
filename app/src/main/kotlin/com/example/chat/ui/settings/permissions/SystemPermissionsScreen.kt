@@ -283,8 +283,12 @@ fun SystemPermissionsScreen(
                 backgrounded = true
                 refreshGeneration[0]++ // Invalidate a suspended platform status response.
                 loading = false
+//                 locationFix = null
+//                 locationJob?.cancel()
+//                 contactReadJob?.cancel()
                 locationFix = null
                 locationJob?.cancel()
+                if (pendingAction == "locationReading") pendingAction = "none"
                 contactReadJob?.cancel()
                 pickedContact = null
             }
@@ -327,14 +331,22 @@ fun SystemPermissionsScreen(
                         kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         if (foregroundGeneration != contactGeneration ||
                             !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@withContext null
-                        context.contentResolver.query(selectedUri,
+                        val querySignal = android.os.CancellationSignal()
+                        // Completion-only callbacks cannot interrupt a still-blocked provider query.
+                        // kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion { querySignal.cancel() }
+                        val cancellationWatcher = launch(kotlinx.coroutines.Dispatchers.Default,
+                            start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                            try { kotlinx.coroutines.awaitCancellation() }
+                            finally { querySignal.cancel() }
+                        }
+                        try { context.contentResolver.query(selectedUri,
                             arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
                                 android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER),
-                            null, null, null)?.use { cursor ->
+                            null, null, null, querySignal)?.use { cursor ->
                             if (!cursor.moveToFirst()) null else
                                 cursor.getString(cursor.getColumnIndexOrThrow(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)).orEmpty() to
                                     cursor.getString(cursor.getColumnIndexOrThrow(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)).orEmpty()
-                        }
+                        } } finally { cancellationWatcher.cancel() }
                     }
                     // if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) pickedContact = selected
                     if (foregroundGeneration == contactGeneration &&
@@ -361,20 +373,44 @@ fun SystemPermissionsScreen(
             context.getSharedPreferences("chaty_permission_requests", Context.MODE_PRIVATE).edit().putBoolean(it.id, true).apply()
         }
         pendingAction = "none"
-        if (completedAction == "locationFetch") {
+//         if (completedAction == "locationFetch") {
+//             if (!results.values.any { it }) snack("Location permission was denied.", colors.error)
+//             else {
+//                 pendingAction = "locationReading"
+//                 locationJob = scope.launch {
+//                     try {
+//                         val fix = withTimeout(15_000) { currentLocation(context) }
+//                         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) locationFix = PermissionLocationFix(fix.latitude, fix.longitude, fix.accuracy)
+//                     } catch (cancelled: CancellationException) {
+//                         if (cancelled !is kotlinx.coroutines.TimeoutCancellationException) throw cancelled
+//                         snack("Location request timed out. Try again.", colors.error)
+//                     } catch (_: Exception) {
+//                         snack("Location is unavailable. Check permission and location services, then retry.", colors.error)
+//                     } finally { pendingAction = "none" }
+//                 }
+//             }
+//         }
+        if (completedAction == "locationFetch" &&
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            val locationGeneration = foregroundGeneration
+            fun stillForeground() = foregroundGeneration == locationGeneration &&
+                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
             if (!results.values.any { it }) snack("Location permission was denied.", colors.error)
             else {
                 pendingAction = "locationReading"
                 locationJob = scope.launch {
                     try {
+                        if (!stillForeground()) return@launch
                         val fix = withTimeout(15_000) { currentLocation(context) }
-                        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) locationFix = PermissionLocationFix(fix.latitude, fix.longitude, fix.accuracy)
+                        if (stillForeground()) locationFix = PermissionLocationFix(fix.latitude, fix.longitude, fix.accuracy)
                     } catch (cancelled: CancellationException) {
                         if (cancelled !is kotlinx.coroutines.TimeoutCancellationException) throw cancelled
-                        snack("Location request timed out. Try again.", colors.error)
+                        if (stillForeground()) snack("Location request timed out. Try again.", colors.error)
                     } catch (_: Exception) {
-                        snack("Location is unavailable. Check permission and location services, then retry.", colors.error)
-                    } finally { pendingAction = "none" }
+                        if (stillForeground()) snack("Location is unavailable. Check permission and location services, then retry.", colors.error)
+                    } finally {
+                        if (foregroundGeneration == locationGeneration && pendingAction == "locationReading") pendingAction = "none"
+                    }
                 }
             }
         }
@@ -419,11 +455,60 @@ fun SystemPermissionsScreen(
     }
 
     // Dart _fetchLocation.
+//     fun fetchLocation() {
+//         if (pendingAction != "none") return
+//         pendingAction = "locationReading"
+//         locationJob = scope.launch {
+//             try {
+//                 val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+//                 val serviceEnabled = manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+//                     manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+//                 if (!serviceEnabled) {
+//                     snack("Location services are turned off on this device.", colors.error)
+//                     return@launch
+//                 }
+//                 val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+//                     PackageManager.PERMISSION_GRANTED ||
+//                     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+//                     PackageManager.PERMISSION_GRANTED
+//                 if (!granted) {
+//                     pendingAction = "locationFetch"
+//                     try {
+//                         // requestLauncher.launch(arrayOf(
+//                         //     Manifest.permission.ACCESS_FINE_LOCATION,
+//                         //     Manifest.permission.ACCESS_COARSE_LOCATION,
+//                         // ))
+//                         requestLauncher.launch(overviewLocationPermissions.toTypedArray())
+//                     } catch (_: Exception) {
+//                         // A launch failure has no result callback to release this guard.
+//                         pendingAction = "none"
+//                         snack("The location permission prompt is unavailable. Try again or use system settings.")
+//                     }
+//                     return@launch
+//                 }
+//                 val fix = withTimeout(15_000) { currentLocation(context) }
+//                 if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) locationFix = PermissionLocationFix(fix.latitude, fix.longitude, fix.accuracy)
+//             } catch (cancelled: CancellationException) {
+//                 if (cancelled !is kotlinx.coroutines.TimeoutCancellationException) throw cancelled
+//                 snack("Location request timed out. Try again.", colors.error)
+//             } catch (e: Exception) {
+//                 snack("Location is unavailable. Check permission and location services, then retry.", colors.error)
+//             } finally {
+//                 if (pendingAction == "locationReading") pendingAction = "none"
+//                 refreshOne("location")
+//             }
+//         }
+//     }
     fun fetchLocation() {
-        if (pendingAction != "none") return
+        if (pendingAction != "none" ||
+            !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
+        val locationGeneration = foregroundGeneration
+        fun stillForeground() = foregroundGeneration == locationGeneration &&
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         pendingAction = "locationReading"
         locationJob = scope.launch {
             try {
+                if (!stillForeground()) return@launch
                 val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
                 val serviceEnabled = manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
                     manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
@@ -451,15 +536,15 @@ fun SystemPermissionsScreen(
                     return@launch
                 }
                 val fix = withTimeout(15_000) { currentLocation(context) }
-                if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) locationFix = PermissionLocationFix(fix.latitude, fix.longitude, fix.accuracy)
+                if (stillForeground()) locationFix = PermissionLocationFix(fix.latitude, fix.longitude, fix.accuracy)
             } catch (cancelled: CancellationException) {
                 if (cancelled !is kotlinx.coroutines.TimeoutCancellationException) throw cancelled
-                snack("Location request timed out. Try again.", colors.error)
+                if (stillForeground()) snack("Location request timed out. Try again.", colors.error)
             } catch (e: Exception) {
-                snack("Location is unavailable. Check permission and location services, then retry.", colors.error)
+                if (stillForeground()) snack("Location is unavailable. Check permission and location services, then retry.", colors.error)
             } finally {
-                if (pendingAction == "locationReading") pendingAction = "none"
-                refreshOne("location")
+                if (pendingAction == "locationReading" && foregroundGeneration == locationGeneration) pendingAction = "none"
+                if (stillForeground()) refreshOne("location")
             }
         }
     }

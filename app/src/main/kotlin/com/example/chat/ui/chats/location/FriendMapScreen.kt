@@ -108,7 +108,18 @@ fun FriendMapScreen(
     var mapView by remember { mutableStateOf<GeoLibreLocationMapView?>(null) }
     var requestedBefore by rememberSaveable { mutableStateOf(false) }
     var ownPin by remember { mutableStateOf<FriendMapOwnPin?>(null) }
-    var status by remember { mutableStateOf("Loading map...") }
+    // MAP-R1-010: renderer and location status are modeled independently (prior: one shared status string).
+    // Prior: var status by remember { mutableStateOf("Loading map...") }
+    var rendererStatus by remember { mutableStateOf("Loading map...") }
+    var locationStatus by remember { mutableStateOf("") }
+    // MAP-R1-024/046: a style selection stays pending until the page confirms it.
+    var stylePending by remember { mutableStateOf<String?>(null) }
+    // MAP-R1-045: set when the renderer reports unavailable; drives the Retry control.
+    var rendererFailed by remember { mutableStateOf(false) }
+    // MAP-R1-045: bumped to recreate the renderer on Retry.
+    var mapGeneration by remember { mutableIntStateOf(0) }
+    // MAP-R1-001: latest best-effort camera snapshot (zoom,bearing,pitch,lat,lng).
+    var cameraSnapshot by rememberSaveable { mutableStateOf<String?>(null) }
     var locating by remember { mutableStateOf(false) }
 
     var buildingsEnabled by remember { mutableStateOf(false) }
@@ -139,7 +150,7 @@ fun FriendMapScreen(
     fun acquireCurrentFix() {
         stopLocate()
         locating = true
-        status = "Getting your location for this map only. Nothing is shared."
+        locationStatus = "Getting your location for this map only. Nothing is shared."
         locateJob = scope.launch {
             try {
                 // Recheck immediately before the API call; never use a cached last-known fix.
@@ -163,21 +174,21 @@ fun FriendMapScreen(
                     accuracyMeters = fix.accuracy.toDouble(), acquiredAtElapsedMs = fix.elapsedRealtimeNanos / 1_000_000)
                 ownPin = pin
                 mapView?.showPin(pin.coordinate)
-                status = if (precise) "Your location is shown on this map only. Nothing is shared." else "Approximate location shown on this map only. Nothing is shared."
+                locationStatus = if (precise) "Your location is shown on this map only. Nothing is shared." else "Approximate location shown on this map only. Nothing is shared."
             } catch (timeout: TimeoutCancellationException) {
-                status = "Location timed out. Try again."
+                locationStatus = "Location timed out. Try again."
             } catch (cancelled: CancellationException) {
-                status = "Location request stopped."
+                locationStatus = "Location request stopped."
                 throw cancelled
             } catch (error: Exception) {
-                status = error.message ?: "Location is unavailable."
+                locationStatus = error.message ?: "Location is unavailable."
             } finally { locating = false }
         }
     }
     val permissionRequest = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
             if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) acquireCurrentFix()
-        } else status = "Location permission was denied. The map still works without it."
+        } else locationStatus = "Location permission was denied. The map still works without it."
     }
     fun requestPermission() {
         requestedBefore = true
@@ -196,12 +207,12 @@ fun FriendMapScreen(
             LocateAction.requestForeground -> requestPermission()
             LocateAction.explainRationale -> rationale = true
             LocateAction.offerAppSettings -> {
-                status = "Permission is unavailable. You can allow location in app settings."
+                locationStatus = "Permission is unavailable. You can allow location in app settings."
                 // MAP-R2-070: guarded so a missing settings handler cannot crash.
                 runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))) }
             }
             LocateAction.offerLocationSettings -> {
-                status = "Location services are off. Turn them on, then tap Current location again."
+                locationStatus = "Location services are off. Turn them on, then tap Current location again."
                 runCatching { context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } // MAP-R2-070
             }
         }
@@ -209,8 +220,17 @@ fun FriendMapScreen(
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE -> { rendererReady = false; layersOpen = false; stopLocate(); mapActive = false; mapView?.disposeMap(); mapView = null }
-                Lifecycle.Event.ON_RESUME -> { mapActive = true }
+                // MAP-R1-002/022: pause the live page instead of tearing the map down on every pause.
+                // Prior: Lifecycle.Event.ON_PAUSE -> { rendererReady = false; layersOpen = false; stopLocate(); mapActive = false; mapView?.disposeMap(); mapView = null }
+                Lifecycle.Event.ON_PAUSE -> {
+                    layersOpen = false
+                    stopLocate()
+                    // MAP-R1-001: capture a best-effort camera snapshot before pausing.
+                    mapView?.snapshotCamera { saved -> if (saved != null) cameraSnapshot = saved }
+                    mapView?.pauseMap()
+                }
+                // Prior: Lifecycle.Event.ON_RESUME -> { mapActive = true }
+                Lifecycle.Event.ON_RESUME -> { mapActive = true; mapView?.resumeMap() }
                 else -> Unit
             }
         }
@@ -230,17 +250,32 @@ fun FriendMapScreen(
             }
             Box(Modifier.fillMaxWidth().weight(1f).semantics { paneTitle = "Friends map preview" }) { // MAP-R4-168
             if (mapActive) {
+                // MAP-R1-045: keying on mapGeneration lets the Retry action recreate a failed renderer.
+                key(mapGeneration) {
                 AndroidView(
                     factory = { viewContext -> GeoLibreLocationMapView(viewContext,
                         // Friend pins are never fabricated; map taps place nothing in this preview.
                         onPinSelected = { },
-                        onUnavailable = { status = it }, onAttributionLink = onAttributionLink,
-                        onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); if (status == "Loading map...") status = ""; onMapReady() }, nativeLayers = true,
-                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true }, onViewChanged = { buildingsEnabled = it },
+                        onUnavailable = { rendererStatus = it; rendererFailed = true }, onAttributionLink = onAttributionLink,
+                        onMapReady = {
+                            rendererReady = true
+                            mapView?.selectStyle(selectedStyle)
+                            if (buildingsEnabled) mapView?.control("toggleBuildings")
+                            // MAP-R1-001: restore the last camera snapshot after the page is ready.
+                            mapView?.restoreCamera(cameraSnapshot)
+                            if (rendererStatus == "Loading map...") rendererStatus = ""
+                            onMapReady()
+                        }, nativeLayers = true,
+                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true; stylePending = null }, onViewChanged = { enabled ->
+                            buildingsEnabled = enabled
+                            // MAP-R1-047: say what 3D means here; missing building data is not an error.
+                            rendererStatus = if (enabled) "3D buildings show where height data exists. Not satellite imagery." else ""
+                        },
                     ).also { mapView = it; ownPin?.let { pin -> it.showPin(pin.coordinate) } } },
                     modifier = Modifier.fillMaxSize(),
                     update = { it.setTheme(systemDark) },
                 )
+                }
             }
             // Honest top chip: friend sharing is not live.
             Surface(
@@ -267,7 +302,11 @@ fun FriendMapScreen(
                         ChatyDropdownMenuItem(
                             text = { Text(label, color = mapColors.onSurface, fontSize = 15.5.sp, fontWeight = FontWeight.W600) },
                             trailingIcon = { if (selectedStyle == style) com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = "Selected") },
-                            onClick = { layersOpen = false; mapView?.selectStyle(style) },
+                            onClick = {
+                                layersOpen = false
+                                // MAP-R1-024/046: mark the style pending until the page confirms the change.
+                                if (style != selectedStyle) { stylePending = style; mapView?.selectStyle(style) }
+                            },
                         )
                     }
                 }
@@ -301,10 +340,38 @@ fun FriendMapScreen(
                             else Icon(Icons.Rounded.MyLocation, contentDescription = null, tint = tint)
                         }
                     }
-                    if (status.isNotBlank()) {
+                    // MAP-R1-010: renderer and location status are announced independently.
+                    // Prior: if (status.isNotBlank()) { ... Text(status, ...) }
+                    if (rendererStatus.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
                         // MAP-R1-034: polite live region so state changes are announced once
-                        Text(status, fontSize = 12.sp, color = mapColors.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+                        Text(rendererStatus, fontSize = 12.sp, color = mapColors.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+                    }
+                    if (locationStatus.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(locationStatus, fontSize = 12.sp, color = mapColors.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+                    }
+                    // MAP-R1-024/046: pending style is shown until the page confirms the change.
+                    if (stylePending != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text("Switching map style...", fontSize = 12.sp, color = mapColors.onSurfaceVariant)
+                    }
+                    // MAP-R1-035: textual coordinate summary for the local-only pin.
+                    ownPin?.let { pin ->
+                        Spacer(Modifier.height(6.dp))
+                        Text("Your pin: ${"%.5f".format(java.util.Locale.US, pin.coordinate.latitude)}, ${"%.5f".format(java.util.Locale.US, pin.coordinate.longitude)}", fontSize = 12.sp, color = mapColors.onSurfaceVariant)
+                    }
+                    // MAP-R1-045: explicit local retry when the renderer reports unavailable.
+                    if (rendererFailed) {
+                        Spacer(Modifier.height(6.dp))
+                        FriendMapDialogAction("Retry map", color = mapColors.primary) {
+                            mapView?.disposeMap()
+                            mapView = null
+                            rendererReady = false
+                            rendererFailed = false
+                            rendererStatus = "Loading map..."
+                            mapGeneration += 1
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                     when (connection) {

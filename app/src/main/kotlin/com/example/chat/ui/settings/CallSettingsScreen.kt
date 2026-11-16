@@ -59,6 +59,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -83,6 +84,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.chat.core.preferences.ChatyPreferencesController
+import com.example.chat.domain.models.PrivacyAudienceValue
 import com.example.chat.ui.calls.CallPresentationPreferences
 import com.example.chat.ui.kit.ChatyHapticsPort
 import com.example.chat.ui.theme.LocalAppColors
@@ -105,13 +107,22 @@ data class CallPresentationState(
 )
 
 // CS3-16: internal (was private) so the audience-mapping unit test can pin the picker contract.
-internal val audienceOptions = listOf("Everyone", "My Contacts", "My Contacts Except…", "Nobody")
+// Previous: internal val audienceOptions = listOf("Everyone", "My Contacts", "My Contacts Except…", "Nobody")
+internal val audienceOptions = PrivacyAudienceValue.entries.map { callAudienceLabel(it) }
+
+/** Stable enum drives selection; this adapter alone owns display/legacy spelling. */
+internal fun callAudienceLabel(value: PrivacyAudienceValue): String = when (value) {
+    PrivacyAudienceValue.EVERYONE -> "Everyone"
+    PrivacyAudienceValue.CONTACTS -> "My Contacts"
+    PrivacyAudienceValue.CONTACTS_EXCEPT -> "My Contacts Except…"
+    PrivacyAudienceValue.NOBODY -> "Nobody"
+}
 private const val exceptAudience = "My Contacts Except…"
 private const val everyoneAudience = "Everyone"
 private const val myContactsAudience = "My Contacts"
 
 /** CS1-19 / CS3-01: dialogs as an enum instead of the retired magic ints 0/1/4. */
-private enum class CallSettingsDialog { None, WhoCanCall, ExcludedContacts, ConfirmEveryone, ResetCallSettings }
+private enum class CallSettingsDialog { None, WhoCanCall, ExcludedContacts, ConfirmEveryone, ResetCallSettings, Help, VideoQuality }
 
 /** CS1-01: count-aware label for the Excluded contacts tile.
  *  CS5-37 (resource plurals) stays open: this codebase keeps strings inline,
@@ -147,9 +158,12 @@ fun CallSettingsScreen(
     call: CallPresentationState,
     contacts: List<CallContactOption>,
     onBack: () -> Unit,
-    onDynamicIsland: (Boolean) -> Unit,
-    onPictureInPicture: (Boolean) -> Unit,
-    onLowData: (Boolean) -> Unit,
+    // Previous: onDynamicIsland: (Boolean) -> Unit,
+    onDynamicIsland: suspend (Boolean) -> Result<Unit>,
+    // Previous: onPictureInPicture: (Boolean) -> Unit,
+    onPictureInPicture: suspend (Boolean) -> Result<Unit>,
+    // Previous: onLowData: (Boolean) -> Unit,
+    onLowData: suspend (Boolean) -> Result<Unit>,
     onOpenAudioSettings: () -> Unit,
     // CS1-17: required, no default no-op (was: onOpenCallBundles: () -> Unit = {}).
     onOpenCallBundles: () -> Unit,
@@ -160,6 +174,15 @@ fun CallSettingsScreen(
     onOpenBlockedContacts: (() -> Unit)? = null,
     // CS4-49: nullable so unhosted callers still compile; the reset row is hidden when absent.
     onResetCallSettings: (suspend () -> Unit)? = null,
+    // Host-observed preference, not a claim about the active hardware route.
+    audioPreferenceSummary: String = "Open audio routing settings",
+    hideCallHistoryOnLockScreen: Boolean = false,
+    onHideCallHistoryOnLockScreen: (suspend (Boolean) -> Result<Unit>)? = null,
+    quietHours: com.example.chat.ui.calls.CallQuietHours = com.example.chat.ui.calls.CallQuietHours(),
+    onSaveQuietHours: (suspend (com.example.chat.ui.calls.CallQuietHours) -> Result<Unit>)? = null,
+    capturePreferences: com.example.chat.ui.calls.CallCapturePreferences = com.example.chat.ui.calls.CallCapturePreferences(),
+    onSaveVideoQuality: (suspend (com.example.chat.ui.calls.CallVideoQuality) -> Result<Unit>)? = null,
+    onSaveCaptureOption: (suspend (com.example.chat.ui.calls.CallCaptureOption, Boolean) -> Result<Unit>)? = null,
 ) {
 // Previous implementation retained:     rememberPreferencesVersion(preferences)
     // CS1-21: observe only the privacy group read by this screen, not every preference.
@@ -177,6 +200,17 @@ fun CallSettingsScreen(
     val colors = LocalAppColors.current
     val context = LocalContext.current
     val view = LocalView.current
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var capabilityRevision by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) capabilityRevision++
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    @Suppress("UNUSED_EXPRESSION") capabilityRevision
+
 // Previous implementation retained:     val privacy = preferences.privacy
     val privacy = observedPrivacy
     val accountGeneration = remember(preferences) { preferences.scopeGeneration }
@@ -189,6 +223,25 @@ fun CallSettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var resetBusy by remember { mutableStateOf(false) }
+    var optionSaveBusy by remember { mutableStateOf(false) }
+    fun saveOption(value: Boolean, save: suspend (Boolean) -> Result<Unit>) {
+        if (optionSaveBusy || resetBusy || !ownsCallSettings()) return
+        optionSaveBusy = true
+        scope.launch {
+            try {
+                val result = save(value)
+                if (ownsCallSettings()) snackbarHostState.showSnackbar(
+                    // Failure may follow persistence (for example a listener failure); do not promise rollback.
+                    // if (result.isSuccess) "Call setting saved" else "Could not save call setting. Your previous choice is unchanged.",
+                    if (result.isSuccess) "Call setting saved" else "Could not save call setting. Check the displayed value and try again.",
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (ownsCallSettings()) snackbarHostState.showSnackbar("Could not save call setting. Check the displayed value and try again.")
+            } finally { optionSaveBusy = false }
+        }
+    }
+
 
     // CS1-12 / CS1-13 / CS1-58: runtime capability checks (recomputed each composition).
     val pipSupported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
@@ -236,7 +289,8 @@ fun CallSettingsScreen(
                 // CS4-33: announce audience changes to TalkBack.
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
-            if (privacy.whoCanCallMe == exceptAudience) {
+            // Previous: if (privacy.whoCanCallMe == exceptAudience) {
+            if (PrivacyAudienceValue.parse(privacy.whoCanCallMe) == PrivacyAudienceValue.CONTACTS_EXCEPT) {
                 ChatySettingsRowDivider()
 // Previous implementation retained:                 ChatySettingsTile(
                 CallSettingsListTile(
@@ -262,6 +316,48 @@ fun CallSettingsScreen(
                     subtitle = "View and manage blocked accounts",
                     onTap = onOpenBlockedContacts,
                 )
+            }
+        }
+        if (onHideCallHistoryOnLockScreen != null) {
+            ChatySettingsSection("Call notification privacy", "Applies to new missed-call alerts on this device. Existing alerts and incoming-call controls are unchanged. Android lock-screen and channel settings still apply.") {
+                ChatySwitchTile(title = "Hide call history on lock screen",
+                    value = hideCallHistoryOnLockScreen, enabled = !optionSaveBusy && !resetBusy,
+                    subtitle = "Ask Android not to show missed-call alerts until the device is unlocked.",
+                    onChanged = { saveOption(it, onHideCallHistoryOnLockScreen) })
+            }
+        }
+        ChatySettingsSection("Ringing", "Unanswered calls stop ringing on this device after ${com.example.chat.data.services.CallRingPolicy.TIMEOUT_SECONDS} seconds. The server or the caller may end them sooner.") {
+            Text("Unanswered incoming calls appear in Calls and, when allowed, in missed-call notifications.",
+                color = colors.foregroundSecondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                style = MaterialTheme.typography.bodyMedium)
+        }
+
+        if (onSaveQuietHours != null) {
+            fun saveSchedule(schedule: com.example.chat.ui.calls.CallQuietHours) {
+                if (schedule.startMinute == schedule.endMinute) {
+                    scope.launch { snackbarHostState.showSnackbar("Choose different start and end times for quiet hours.") }
+                } else saveOption(true) { onSaveQuietHours(schedule) }
+            }
+            fun chooseTime(start: Boolean) {
+                val minute = if (start) quietHours.startMinute else quietHours.endMinute
+                android.app.TimePickerDialog(context, { _, hour, pickedMinute ->
+                    if (ownsCallSettings()) saveSchedule(if (start) quietHours.copy(startMinute = hour * 60 + pickedMinute)
+                        else quietHours.copy(endMinute = hour * 60 + pickedMinute))
+                }, minute / 60, minute % 60, android.text.format.DateFormat.is24HourFormat(context)).show()
+            }
+            ChatySettingsSection("Quiet hours", "Silences sound and vibration for new incoming call alerts on this device, using its current time zone. Calls already ringing are unchanged. Notifications and answering remain available. Android channel settings still apply.") {
+                ChatySwitchTile(
+                    title = "Quiet hours for call alerts",
+                    value = quietHours.enabled,
+                    enabled = !optionSaveBusy && !resetBusy,
+                    onChanged = { saveSchedule(quietHours.copy(enabled = it)) },
+                )
+                ChatySettingsRowDivider()
+                CallSettingsListTile(title = "Start time", subtitle = callQuietTimeLabel(quietHours.startMinute),
+                    onTap = { if (!optionSaveBusy) chooseTime(true) })
+                ChatySettingsRowDivider()
+                CallSettingsListTile(title = "End time", subtitle = callQuietTimeLabel(quietHours.endMinute),
+                    onTap = { if (!optionSaveBusy) chooseTime(false) })
             }
         }
         // Prior sections: "Call experience bundles" / "In-app call presentation".
@@ -290,8 +386,10 @@ fun CallSettingsScreen(
                     "Android is blocking the bubble. Tap to allow 'Display over other apps'."
                 },
                 value = call.dynamicIslandEnabled && overlayAllowed,
+                enabled = !optionSaveBusy && !resetBusy,
                 onChanged = { wanted ->
-                    if (overlayAllowed) onDynamicIsland(wanted) else openOverlaySettings()
+                    // Previous: if (overlayAllowed) onDynamicIsland(wanted) else openOverlaySettings()
+                    if (overlayAllowed) saveOption(wanted, onDynamicIsland) else openOverlaySettings()
                 },
             )
             ChatySettingsRowDivider()
@@ -304,9 +402,11 @@ fun CallSettingsScreen(
                 } else {
                     "Not supported on this device."
                 },
-                enabled = pipSupported,
+                // Previous: enabled = pipSupported,
+                enabled = pipSupported && !optionSaveBusy && !resetBusy,
                 value = call.pictureInPictureEnabled && pipSupported,
-                onChanged = onPictureInPicture,
+                // Previous: onChanged = onPictureInPicture,
+                onChanged = { saveOption(it, onPictureInPicture) },
             )
         }
         // Prior: ChatySettingsSection("Audio & data") {
@@ -316,7 +416,8 @@ fun CallSettingsScreen(
                 title = "Audio & Speakers", // CS1-16: one name with the destination screen (was: "Dual-Speaker & Output Routing")
                 icon = Icons.Rounded.SpeakerGroup,
                 iconColor = colors.primary, // CS4-26 (was: colors.accent)
-                subtitle = "Receiver, speaker, Bluetooth and output routing",
+                // Previous: subtitle = "Receiver, speaker, Bluetooth and output routing",
+                subtitle = audioPreferenceSummary,
                 onTap = onOpenAudioSettings,
             )
             ChatySettingsRowDivider()
@@ -327,8 +428,40 @@ fun CallSettingsScreen(
                 // CS1-14: plain words instead of WebRTC jargon (was: "Optimize WebRTC bandwidth consumption on cellular connections.").
                 subtitle = "Uses less data on mobile networks. Video may look softer.",
                 value = call.lowDataUsageEnabled,
-                onChanged = onLowData,
+                enabled = !optionSaveBusy && !resetBusy,
+                // Previous: onChanged = onLowData,
+                onChanged = { saveOption(it, onLowData) },
             )
+            if (onSaveVideoQuality != null) {
+                ChatySettingsRowDivider()
+                CallSettingsListTile(
+                    title = "Video quality",
+                    subtitle = capturePreferences.videoQuality.label + ". Applies on the next call; actual quality may be lower.",
+                    onTap = { if (!optionSaveBusy && !resetBusy) dialog = CallSettingsDialog.VideoQuality },
+                )
+            }
+            if (onSaveCaptureOption != null) {
+                for (option in com.example.chat.ui.calls.CallCaptureOption.entries) {
+                    ChatySettingsRowDivider()
+                    val title = when (option) {
+                        com.example.chat.ui.calls.CallCaptureOption.FRONT_CAMERA -> "Start with front camera"
+                        com.example.chat.ui.calls.CallCaptureOption.MIRROR_PREVIEW -> "Mirror front camera preview"
+                        com.example.chat.ui.calls.CallCaptureOption.NOISE_SUPPRESSION -> "Noise suppression"
+                        com.example.chat.ui.calls.CallCaptureOption.ECHO_CANCELLATION -> "Echo cancellation (advanced)"
+                    }
+                    ChatySwitchTile(
+                        title = title,
+                        subtitle = when (option) {
+                            com.example.chat.ui.calls.CallCaptureOption.MIRROR_PREVIEW -> "Mirrors only your local front-camera preview. Applies on the next call."
+                            com.example.chat.ui.calls.CallCaptureOption.ECHO_CANCELLATION -> "Keep enabled unless troubleshooting echo. Applies on the next call."
+                            else -> "Applies on the next call; does not change an active call."
+                        },
+                        value = option.selected(capturePreferences),
+                        enabled = !optionSaveBusy && !resetBusy,
+                        onChanged = { wanted -> saveOption(wanted) { onSaveCaptureOption(option, it) } },
+                    )
+                }
+            }
             // CS4-49: user-confirmed reset of the presentation options this screen exposes.
             // Privacy choices (who can call, exceptions) are NOT touched by the host callback.
             if (onResetCallSettings != null) {
@@ -338,25 +471,53 @@ fun CallSettingsScreen(
                     icon = Icons.Rounded.RestartAlt,
                     iconColor = colors.primary,
                     subtitle = "Restore call appearance and data options to their defaults",
-                    onTap = { if (!resetBusy) dialog = CallSettingsDialog.ResetCallSettings },
+                    onTap = { if (!resetBusy && !optionSaveBusy) dialog = CallSettingsDialog.ResetCallSettings },
                     trailing = null,
                 )
             }
+        }
+        val feedbackController = remember { com.example.chat.ServiceLocator.callQualityFeedback }
+        val feedbackState by feedbackController.state.collectAsState()
+        val feedbackOwner = remember { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
+        ChatySettingsSection("Call quality feedback", "Optional prompt after every 20 completed calls while enabled. Only shared device totals and Good/Poor counts are saved across accounts, with no caller details or uploads.") {
+            ChatySwitchTile(title = "Ask about call quality", value = feedbackState.enabled,
+                enabled = feedbackState.ready && !feedbackState.error && !optionSaveBusy && !resetBusy,
+                subtitle = if (feedbackState.error) "Feedback storage is unavailable." else "Off unless you enable it. Skip any prompt.",
+                onChanged = { enabled -> saveOption(enabled) { feedbackController.setEnabled(it, feedbackOwner) } })
         }
         // CS2-15 / CS2-16: permission status rows with a dead-end recovery link.
         ChatySettingsSection("Permissions") {
             val micGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             val camGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
             val contactsGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
-            // CS2-51: summary derived only from the three permission checks in this section;
-            // it is not a call-service, connectivity or "calls are working" guarantee.
+            val notificationManager = context.getSystemService(android.app.NotificationManager::class.java)
+            val notificationsAllowed = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+            val incomingChannelAllowed = android.os.Build.VERSION.SDK_INT < 26 ||
+                // Previous channel was legacy-only: ChatyNotifications.CHANNEL_CALLS
+                notificationManager?.getNotificationChannel(com.example.chat.notifications.ChatyNotificationPolicy.CH_INCOMING_CALL)
+                    // Null channel is not proof notifications are enabled.
+                    // ?.importance != android.app.NotificationManager.IMPORTANCE_NONE
+                    ?.importance?.let { it != android.app.NotificationManager.IMPORTANCE_NONE } == true
+            val fullScreenAllowed = android.os.Build.VERSION.SDK_INT < 34 ||
+                notificationManager?.canUseFullScreenIntent() == true
+            // A permission summary, not a network/service or delivery guarantee.
             Text(
-                if (micGranted && camGranted && contactsGranted) "Microphone, camera and contacts are all allowed."
-                else "Some permissions below need attention.",
+                if (micGranted && camGranted && notificationsAllowed && incomingChannelAllowed)
+                    "Microphone, camera and incoming-call notifications are allowed. This does not check connectivity."
+                else "Some call permissions or notification settings need attention.",
                 color = colors.foregroundSecondary,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 14.dp, top = 2.dp, end = 14.dp, bottom = 6.dp),
             )
+// Previous summary:             // CS2-51: summary derived only from the three permission checks in this section;
+// Previous summary:             // it is not a call-service, connectivity or "calls are working" guarantee.
+// Previous summary:             Text(
+// Previous summary:                 if (micGranted && camGranted && contactsGranted) "Microphone, camera and contacts are all allowed."
+// Previous summary:                 else "Some permissions below need attention.",
+// Previous summary:                 color = colors.foregroundSecondary,
+// Previous summary:                 fontSize = 12.sp,
+// Previous summary:                 modifier = Modifier.padding(start = 14.dp, top = 2.dp, end = 14.dp, bottom = 6.dp),
+// Previous summary:             )
 // Previous implementation retained:             ChatySettingsTile(
             CallSettingsListTile(
                 title = "Microphone",
@@ -383,6 +544,37 @@ fun CallSettingsScreen(
                 subtitle = if (contactsGranted) "Granted" else "Not granted - needed for call exceptions. Tap to open Settings.",
                 onTap = { openAppSettings() },
             )
+            ChatySettingsRowDivider()
+            CallSettingsListTile(
+                title = "Call notifications",
+                icon = Icons.Rounded.RingVolume,
+                iconColor = colors.primary,
+                subtitle = if (notificationsAllowed && incomingChannelAllowed) "Allowed. Tap to review Android notification settings."
+                    // else "Blocked by Android. Incoming call alerts may not appear. Tap to review notification settings.",
+                    else "Incoming call alerts are blocked or not set up yet. Tap to review notification settings.",
+                onTap = {
+                    runCatching { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    }) }.onFailure { openAppSettings() }
+                },
+            )
+            if (android.os.Build.VERSION.SDK_INT >= 34 && !fullScreenAllowed) {
+                ChatySettingsRowDivider()
+                CallSettingsListTile(
+                    title = "Full-screen incoming calls",
+                    icon = Icons.Rounded.RingVolume,
+                    iconColor = colors.primary,
+                    subtitle = "Android has blocked full-screen call alerts. Incoming calls use notifications instead. Tap to review access.",
+                    onTap = {
+                        runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                            data = android.net.Uri.fromParts("package", context.packageName, null)
+                        }) }.onFailure { openAppSettings() }
+                    },
+                )
+            }
+        }
+        TextButton(onClick = { dialog = CallSettingsDialog.Help }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("What do these options do?", color = colors.primary)
         }
         // CS5-46: emergency-calls disclaimer.
         Text(
@@ -402,14 +594,17 @@ fun CallSettingsScreen(
             // CS1-48: say when the change takes effect. updatePrivacy persists locally only
             // (ChatyPreferencesController.updatePrivacy); the server copy is shown in Privacy Center.
             description = "Choose who can reach you via audio and video calls. Your choice is saved on this device right away; Privacy Center shows the copy stored on the server.",
-            value = privacy.whoCanCallMe,
-            options = audienceOptions,
-            labelBuilder = { it },
+            // Previous string-valued selection: value = privacy.whoCanCallMe, options = audienceOptions, labelBuilder = { it }
+            // Null preserves unknown stored choices without silently selecting a default.
+            value = PrivacyAudienceValue.parse(privacy.whoCanCallMe),
+            options = PrivacyAudienceValue.entries.map { it as PrivacyAudienceValue? },
+            labelBuilder = { it?.let(::callAudienceLabel) ?: "Unknown saved audience" },
             // CS1-46: consequence note on the strictest option.
             descriptionBuilder = { option ->
-                if (option == "Nobody") "Nobody can call you in Chaty - including expected calls from deliveries or doctors." else ""
+                if (option == PrivacyAudienceValue.NOBODY) "Nobody can call you in Chaty - including expected calls from deliveries or doctors." else ""
             },
-            onApply = { chosen ->
+            onApply = { chosenValue ->
+                val chosen = chosenValue?.let(::callAudienceLabel) ?: return@ChatySingleChoiceModal
                 // CS1-47 / CS2-50: widening to Everyone asks once; narrowing does not.
                 if (chosen == everyoneAudience && privacy.whoCanCallMe != everyoneAudience) {
                     dialog = CallSettingsDialog.ConfirmEveryone
@@ -465,7 +660,7 @@ fun CallSettingsScreen(
                 // CS1-04: cancelling straight after choosing "My Contacts Except…"
                 // with an empty list restores the previous audience.
                 val previous = audienceBeforeExceptions
-                if (ownsCallSettings() && !save && previous != null && preferences.privacy.whoCanCallMe == exceptAudience && preferences.privacy.whoCanCallMeExceptions.isEmpty()) {
+                if (ownsCallSettings() && !save && previous != null && PrivacyAudienceValue.parse(preferences.privacy.whoCanCallMe) == PrivacyAudienceValue.CONTACTS_EXCEPT && preferences.privacy.whoCanCallMeExceptions.isEmpty()) {
                     preferences.updateCallPrivacy(whoCanCallMe = previous, logTitle = "Who Can Call Me") // CS3-49
                 }
                 audienceBeforeExceptions = null
@@ -625,19 +820,52 @@ fun CallSettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     dialog = CallSettingsDialog.None
-                    if (!resetBusy && ownsCallSettings()) {
+                    if (!resetBusy && !optionSaveBusy && ownsCallSettings()) {
                         resetBusy = true
                         scope.launch {
                             try {
                                 onResetCallSettings?.invoke()
-                                snackbarHostState.showSnackbar("Call settings reset")
+                                // snackbarHostState.showSnackbar("Call settings reset")
+                                if (ownsCallSettings()) snackbarHostState.showSnackbar("Call settings reset")
                             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                            catch (_: Exception) { snackbarHostState.showSnackbar("Could not reset call settings. Some options may have changed. Try again.") }
+                            // catch (_: Exception) { snackbarHostState.showSnackbar("Could not reset call settings. Some options may have changed. Try again.") }
+                            catch (_: Exception) { if (ownsCallSettings()) snackbarHostState.showSnackbar("Could not reset call settings. Some options may have changed. Try again.") }
                             finally { resetBusy = false }
                         }
                     }
                 }, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text("Reset", color = colors.primary)
+                }
+            },
+        )
+        CallSettingsDialog.VideoQuality -> ChatySingleChoiceModal(
+            title = "Video quality",
+            value = capturePreferences.videoQuality,
+            options = com.example.chat.ui.calls.CallVideoQuality.entries,
+            labelBuilder = { it.label },
+            description = "Maximum camera quality for your next call. Network adaptation and low data mode can lower it. This does not change screen sharing.",
+            onApply = { quality ->
+                if (!optionSaveBusy && !resetBusy && ownsCallSettings()) {
+                    dialog = CallSettingsDialog.None
+                    saveOption(true) { onSaveVideoQuality?.invoke(quality) ?: Result.failure(IllegalStateException("No settings host")) }
+                }
+            },
+            onDismiss = { dialog = CallSettingsDialog.None },
+        )
+        CallSettingsDialog.Help -> ChatyConfirmationDialog(
+            shape = com.example.chat.ui.kit.ChatyModalShape,
+            onDismissRequest = { dialog = CallSettingsDialog.None },
+            title = { Text("Call settings help", color = colors.foreground) },
+            text = {
+                Text(
+                    callSettingsHelpText,
+                    color = colors.foregroundSecondary,
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { dialog = CallSettingsDialog.None }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Got it", color = colors.primary)
                 }
             },
         )
@@ -821,3 +1049,36 @@ private fun CallSettingsManyContactsPreview() = CallSettingsContactPreviewFixtur
 //                                 preferences.privacy.copy(whoCanCallMeExceptions = selectedIds.toList()),
 //                                     preferences.updatePrivacy(
 //                                         preferences.privacy.copy(whoCanCallMeExceptions = previousIds),
+
+/** Device-local help, deliberately no claim that the server has accepted a local choice. */
+internal val callSettingsHelpText = """
+Who can call me
+Your choice is saved on this device. The server value shown on the page is the value loaded when this page opened, not a live confirmation after every change. Open Privacy Center to review the server policy. Excluded contacts are people selected under My Contacts Except.
+
+Call experience
+A call experience bundle selects a complete call screen design. Floating call bubble needs Android's Display over other apps permission. Picture-in-picture needs device support and can be blocked in Android Settings.
+
+Audio and data
+Audio & Speakers opens output-routing controls. Low data usage reduces mobile data use; video may look softer. This is not a promise about data charges or network quality.
+
+Permissions
+Microphone is needed for call audio; camera is needed for video. Permission checks do not prove that calls will connect. Android can also restrict notifications and background activity.
+
+During a call
+Preparing means the call is being set up. Ringing means an answer is still awaited. Connected means the call session connected; mute, route and video controls remain subject to device permissions and available media. A failed or ended call is no longer connected. Check the call screen for the current state.
+
+Reset and safety
+Reset restores call appearance and data choices, not who can call you. Chaty cannot make emergency calls. Call recording does not start from this settings page.
+""".trimIndent()
+
+internal fun callAudioPreferenceSummary(mode: com.example.chat.core.audio.AudioPreferenceMode, saveFailed: Boolean): String {
+    val label = when (mode) {
+        com.example.chat.core.audio.AudioPreferenceMode.automatic -> "Automatic"
+        com.example.chat.core.audio.AudioPreferenceMode.preferStereo -> "Standard stereo playback"
+        com.example.chat.core.audio.AudioPreferenceMode.experimentalDualOutput -> "Dual-speaker (experimental)"
+    }
+    return if (saveFailed) "$label - preference could not be saved. Open to retry." else label
+}
+
+internal fun callQuietTimeLabel(minute: Int): String =
+    String.format(java.util.Locale.getDefault(), "%02d:%02d", minute / 60, minute % 60)

@@ -108,10 +108,13 @@ fun TaskCreateEditModal(
         )
     }
     var dueDate by remember {
-        mutableStateOf(
-            initialDraft?.dueAtIso?.let { runCatching { Instant.parse(it) }.getOrNull() }
-                ?: existingTask?.dueAt ?: Instant.now().plus(java.time.Duration.ofDays(3)),
-        )
+        // A saved empty draft means no deadline, not a request for the old default.
+        // Prior Elvis chain silently replaced undated existing tasks with now + 3 days.
+        mutableStateOf<Instant?>(when {
+            initialDraft != null -> runCatching { Instant.parse(initialDraft.dueAtIso) }.getOrNull()
+            existingTask != null -> existingTask.dueAt
+            else -> Instant.now().plus(java.time.Duration.ofDays(3))
+        })
     }
     var isSaving by remember { mutableStateOf(false) }
     if (onDraftChange != null) {
@@ -122,7 +125,7 @@ fun TaskCreateEditModal(
                     description = description,
                     assigneeIds = selectedAssigneeIds,
                     priorityName = priority.name,
-                    dueAtIso = dueDate.toString(),
+                    dueAtIso = dueDate?.toString().orEmpty(),
                 ),
             )
         }
@@ -166,7 +169,7 @@ fun TaskCreateEditModal(
                         description = description.trim(),
                         assigneeIds = selectedAssigneeIds,
                         priority = priority.name,
-                        dueAtIso = dueDate.toString(),
+                        dueAtIso = dueDate?.toString(),
                     )
                     if (!saved) throw Exception("Could not save changes. Please try again.")
                 } else {
@@ -175,7 +178,7 @@ fun TaskCreateEditModal(
                         description = description.trim(),
                         assigneeIds = selectedAssigneeIds,
                         priority = priority.name,
-                        dueAtIso = dueDate.toString(),
+                        dueAtIso = dueDate?.toString(),
                     )
                 }
                 onDismiss()
@@ -301,6 +304,10 @@ fun TaskCreateEditModal(
             // api uses a Wrap here: at large font scale the tiles wrap to the next line instead of crushing "Next Week" to one letter per line.
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 com.example.chat.ui.kit.ChatyChoiceTile(
+                    label = "No due date", selected = dueDate == null, enabled = !isSaving,
+                    onClick = { dueDate = null },
+                )
+                com.example.chat.ui.kit.ChatyChoiceTile(
                     label = "Today 6 PM", enabled = !isSaving,
                     onClick = {
                         val now = java.time.ZonedDateTime.now()
@@ -324,9 +331,9 @@ fun TaskCreateEditModal(
             }
             Spacer(Modifier.height(4.dp))
             val zone = ZoneId.systemDefault()
-            val due = dueDate.atZone(zone)
+            val due = dueDate?.atZone(zone)
             com.example.chat.ui.kit.ChatyChoiceTile(
-                label = "Due ${due.dayOfMonth.toString().padStart(2, '0')}/" +
+                label = if (due == null) "Choose due date" else "Due ${due.dayOfMonth.toString().padStart(2, '0')}/" +
                     "${due.monthValue.toString().padStart(2, '0')}/${due.year} at " +
                     "${due.hour.toString().padStart(2, '0')}:${due.minute.toString().padStart(2, '0')}",
                 onClick = { showDatePicker = true }, enabled = !isSaving, modifier = Modifier.fillMaxWidth(),
@@ -354,7 +361,7 @@ fun TaskCreateEditModal(
     } // key(configuration)
 
     if (showDatePicker) {
-        com.example.chat.ui.kit.ChatyTaskCalendar(dueDate, { showDatePicker = false }) { selected ->
+        com.example.chat.ui.kit.ChatyTaskCalendar(dueDate ?: Instant.now(), { showDatePicker = false }) { selected ->
             dueDate = selected
             showDatePicker = false
         }

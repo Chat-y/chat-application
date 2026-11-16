@@ -159,6 +159,12 @@ fun RegisterOrganizationScreen(
                 .any { it != null } || isLoading
         ) return
 
+        // Prior: only checking acceptanceReady() allowed signup when a configured
+        // legal gate had no published policy. Fail closed without collecting draft consent.
+        if (AuthTemporaryPolicy.registrationBlockedByMissingPolicy()) {
+            errorMessage = authCopy("This workspace requires published terms. The local review draft is not an acceptance document yet.")
+            return
+        }
         if (AuthTemporaryPolicy.acceptanceReady() && !acceptedTerms) {
             errorMessage = authCopy("Please accept the Terms of Use and Privacy Policy to create your organization.")
             return

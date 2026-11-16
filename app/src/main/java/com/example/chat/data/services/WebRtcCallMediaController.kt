@@ -40,6 +40,7 @@ interface CallVideoSurfaceProvider {
     val eglContext: EglBase.Context
     val hasRemoteVideo: Boolean
     val isFrontCamera: Boolean
+    val mirrorLocalPreview: Boolean get() = isFrontCamera
     /** Native track reference identities only, never user/account data. Optional for previews. */
     val localRendererBindingIdentity: Any? get() = null
     val remoteRendererBindingIdentity: Any? get() = null
@@ -63,8 +64,12 @@ class WebRtcCallMediaController(
     private val audioSessions: com.example.chat.core.audio.OwnedCallAudioSessions? = null,
     private val foregroundStillExpected: () -> Boolean = { true },
     communicationArbiter: com.example.chat.core.audio.CommunicationMediaArbiter? = null,
+    private val capturePreferences: () -> com.example.chat.ui.calls.CallCapturePreferences = { com.example.chat.ui.calls.CallCapturePreferences() },
 // Previous implementation retained: ) : CallMediaController, CallVideoSurfaceProvider {
 ) : CallMediaController, CallVideoSurfaceProvider, CallMicrophoneCaptureProvider {
+
+    private var sessionCapturePreferences = com.example.chat.ui.calls.CallCapturePreferences()
+    override val mirrorLocalPreview: Boolean get() = isFrontCamera && sessionCapturePreferences.mirrorFrontPreview
 
     private val mediaLifecycleMutex = kotlinx.coroutines.sync.Mutex()
     private val safetyCleanupScope = kotlinx.coroutines.CoroutineScope(
@@ -210,6 +215,7 @@ class WebRtcCallMediaController(
 // Previous implementation retained:         disposeInternal()
 // Previous implementation retained:         dispose()
         disposeOwned()
+        sessionCapturePreferences = capturePreferences()
         val generation = nativeGeneration
         try {
             checkNotNull(communicationOwnership) { "Call audio coordination is unavailable." }.acquire()
@@ -441,8 +447,10 @@ class WebRtcCallMediaController(
         // Keep voice processing enabled in every network profile; low bandwidth must
         // not mean degraded intelligibility. The adaptive sender bitrate handles load.
         val audioConstraints = MediaConstraints().apply {
-            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            // Previous: mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", sessionCapturePreferences.echoCancellation.toString()))
+            // Previous: mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", sessionCapturePreferences.noiseSuppression.toString()))
             mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
             optional.add(MediaConstraints.KeyValuePair("channelCount", "1"))
         }
@@ -465,7 +473,9 @@ class WebRtcCallMediaController(
             val width = if (lowData) 640 else 1280
             val height = if (lowData) 360 else 720
             val frameRate = if (lowData) 15 else 30
-            capturer.startCapture(width, height, frameRate)
+            // Previous: capturer.startCapture(width, height, frameRate)
+            val captureSize = sessionCapturePreferences.videoQuality.limit(width, height)
+            capturer.startCapture(captureSize.first, captureSize.second, frameRate)
             localVideoTrack = factory.createVideoTrack("chaty_video", videoSource)
             stream.addTrack(localVideoTrack)
         }
@@ -489,7 +499,8 @@ class WebRtcCallMediaController(
 // Previous implementation retained:         for (deviceName in enumerator.deviceNames) {
 // Previous implementation retained:             return enumerator.createCapturer(deviceName, null)
         val names = enumerator.deviceNames.toList()
-        for (deviceName in names.sortedByDescending { enumerator.isFrontFacing(it) }) {
+        // Previous: for (deviceName in names.sortedByDescending { enumerator.isFrontFacing(it) }) {
+        for (deviceName in names.sortedByDescending { enumerator.isFrontFacing(it) == sessionCapturePreferences.frontCamera }) {
             val capturer = enumerator.createCapturer(deviceName, null) ?: continue
             cameraFacingFront = enumerator.isFrontFacing(deviceName)
             return capturer
@@ -572,9 +583,12 @@ class WebRtcCallMediaController(
         val capturer = videoCapturer
         if (capturer != null) {
             runCatching {
-                capturer.changeCaptureFormat(profile.width, profile.height, profile.frameRate)
+                // Previous: capturer.changeCaptureFormat(profile.width, profile.height, profile.frameRate)
+                val captureSize = sessionCapturePreferences.videoQuality.limit(profile.width, profile.height)
+                capturer.changeCaptureFormat(captureSize.first, captureSize.second, profile.frameRate)
             }.onFailure {
-                android.util.Log.w("ChatyWebRTC", "Camera profile update deferred", it)
+                // Previous implementation retained: android.util.Log.w("ChatyWebRTC", "Camera profile update deferred", it)
+                android.util.Log.w("ChatyWebRTC", "Camera profile update deferred")
             }
         }
         val peer = peerConnection ?: return
@@ -595,7 +609,9 @@ class WebRtcCallMediaController(
                     android.util.Log.w("ChatyWebRTC", "$kind sender rejected adaptive bitrate profile")
                 }
             }.onFailure {
-                android.util.Log.w("ChatyWebRTC", "Could not apply adaptive $kind bitrate", it)
+                // Previous implementation retained: android.util.Log.w("ChatyWebRTC", "Could not apply adaptive $kind bitrate", it)
+                // kind is restricted above to audio/video; native exception text is not a safe log field.
+                android.util.Log.w("ChatyWebRTC", "Could not apply adaptive $kind bitrate")
             }
         }
     }

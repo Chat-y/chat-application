@@ -393,13 +393,23 @@ fun ChatEntryBar(
     val style = com.example.chat.core.theme.ConversationEntryStyles.rendererLayout(entryStyle)
     val floatingShape = RoundedCornerShape(24.dp)
     // Previous/default: Box(modifier) { . Only the chrome modifier changes after opt-in.
-    Box(modifier.then(if (appearance.floating) Modifier
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.then(if (appearance.floating) Modifier
         .padding(appearance.floatingMarginDp.dp)
         .shadow(appearance.floatingElevationDp.dp, floatingShape, clip = false,
             ambientColor = Color(theme.primaryTextColor).copy(alpha = 0.18f),
             spotColor = Color(theme.primaryTextColor).copy(alpha = 0.18f))
         .background(colors.inputBg, floatingShape) else Modifier)) {
-        when (style) {
+        // Keep text usable before decorative inline shortcuts consume a narrow pane.
+        // Saved style is unchanged and its original renderer resumes when space permits.
+        val constrainedComposer = maxWidth < 360.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f
+        if (constrainedComposer) Column(Modifier.fillMaxWidth()) {
+            field(radius = stockRadius)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                emojiBtn(); attachBtn(); cameraSlot?.invoke(); sendMic()
+            }
+        } else when (style) {
             com.example.chat.core.theme.ConversationEntryLayout.stock -> {
                 // Current Stock/default follows the user-supplied reference, not a new opt-in style.
                 field(radius = stockRadius, contentPadding = PaddingValues(4.dp),
@@ -1915,3 +1925,7 @@ internal fun composerActionTag(label: String): String = when {
 }
 
 */
+
+// Replaced lines retained for source comparison (not executable).
+//     Box(modifier.then(if (appearance.floating) Modifier
+//         when (style) {

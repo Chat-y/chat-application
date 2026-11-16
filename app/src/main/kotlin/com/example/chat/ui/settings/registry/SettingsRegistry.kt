@@ -368,6 +368,14 @@ object SettingsRegistry {
             category = SettingsCategory.notifications,
             settings = listOf(
             SettingDefinition(
+                id = "notifications_toast_customization", title = "Toast notifications",
+                description = "Customize online, typing, story and profile toast appearance and options",
+                category = SettingsCategory.notifications, subcategory = "Toast appearance",
+                controlType = SettingControlType.navigationLink, iconName = "notifications_outlined",
+                searchKeywords = listOf("toast", "online toast", "typing toast", "toast colors", "toast radius", "toast position"),
+                canonicalRoute = "/settings/notifications/toasts",
+            ),
+            SettingDefinition(
                 id = "notifications_global_enabled", title = "Enable Notifications", description = "Receive push and in-app message alerts",
                 category = SettingsCategory.notifications, subcategory = "Global",
                 controlType = SettingControlType.toggle,

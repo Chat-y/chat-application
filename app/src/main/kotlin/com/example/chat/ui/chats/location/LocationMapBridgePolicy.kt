@@ -19,6 +19,8 @@ class LocationMapBridgePolicy(val session: String = newSession()) {
             "ready" -> if (fields.keys == setOf("version", "type", "session")) LocationMapEvent.Ready else null
             "viewChanged" -> if (fields.keys == setOf("version", "type", "session", "buildings") && fields["buildings"] is Boolean) LocationMapEvent.ViewChanged(fields["buildings"] as Boolean) else null
             "styleChanged" -> if (fields.keys == setOf("version", "type", "session", "style") && fields["style"] in setOf("liberty", "positron", "dark", "bright", "fiord")) LocationMapEvent.StyleChanged(fields["style"] as String) else null
+            // MAP-R5-233/236: page reached idle after a style load (distinct from the immediate styleChanged ack).
+            "styleLoaded" -> if (fields.keys == setOf("version", "type", "session", "style") && fields["style"] in setOf("liberty", "positron", "dark", "bright", "fiord")) LocationMapEvent.StyleLoaded(fields["style"] as String) else null
             "pinSelected" -> {
                 if (fields.keys != setOf("version", "type", "session", "latitude", "longitude")) return null
                 val lat = (fields["latitude"] as? Number)?.toDouble() ?: return null
@@ -42,5 +44,6 @@ sealed class LocationMapEvent {
     data object Ready : LocationMapEvent()
     data class ViewChanged(val buildings: Boolean) : LocationMapEvent()
     data class StyleChanged(val style: String) : LocationMapEvent()
+    data class StyleLoaded(val style: String) : LocationMapEvent()
     data class PinSelected(val coordinate: LocationCoordinate) : LocationMapEvent()
 }

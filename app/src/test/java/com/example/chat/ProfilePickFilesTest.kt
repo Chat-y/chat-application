@@ -23,4 +23,15 @@ class ProfilePickFilesTest {
         val f = file(); val o = ProfilePickFiles(); o.track(f); o.close(); assertFalse(f.exists())
         val late = file(); assertTrue(runCatching { o.track(late) }.isFailure); late.delete()
     }
+    @Test fun discardWhilePreviewReaderIsActiveDefersDeleteAndFencesTransfer() {
+        val f = file(); val o = ProfilePickFiles(); o.track(f); assertTrue(o.tryBegin(f))
+        o.remove(f)
+        assertTrue(f.exists()); assertFalse(o.tryBegin(f)); assertFalse(o.transfer(f))
+        o.end(f); assertFalse(f.exists()); o.close()
+    }
+    @Test fun discardWaitsForEveryPinnedReader() {
+        val f = file(); val o = ProfilePickFiles(); o.track(f); o.begin(f); o.begin(f)
+        o.remove(f); o.end(f); assertTrue(f.exists())
+        o.end(f); assertFalse(f.exists()); o.close()
+    }
 }

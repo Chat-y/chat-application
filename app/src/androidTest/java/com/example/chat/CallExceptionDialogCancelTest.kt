@@ -34,7 +34,7 @@ class CallExceptionDialogCancelTest {
                     call = CallPresentationState(incomingCallTemplate = "sheet", ongoingCallTemplate = "card"),
                     contacts = contacts,
                     onBack = {},
-                    onDynamicIsland = {}, onPictureInPicture = {}, onLowData = {},
+                    onDynamicIsland = { Result.success(Unit) }, onPictureInPicture = { Result.success(Unit) }, onLowData = { Result.success(Unit) },
                     onOpenAudioSettings = {}, onOpenCallBundles = {},
                 )
             }
@@ -87,3 +87,5 @@ class CallExceptionDialogCancelTest {
         }
     }
 }
+
+// Previous call-setting preview callbacks returned Unit: onDynamicIsland = {}, onPictureInPicture = {}, onLowData = {}

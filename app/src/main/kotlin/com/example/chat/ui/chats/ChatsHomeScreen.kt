@@ -46,6 +46,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -208,7 +210,7 @@ fun ChatsHomeScreen(
     onToggleArchive: (String) -> Unit = {},
     onMarkRead: (String) -> Unit = {},
     onMarkUnread: (String) -> Unit = {},
-    onMarkAllRead: () -> Unit = {},
+    onMarkAllRead: (List<String>) -> Unit = {},
     onDeleteConversations: (List<String>) -> Unit = {},
     onStartCall: (Conversation, isVideo: Boolean) -> Unit = { _, _ -> },
     onSnack: (String) -> Unit = {},
@@ -603,6 +605,39 @@ fun ChatsHomeScreen(
         if (selected.map { it.id }.toSet() == selectedIds) HomeSelectionPolicy.validBulkActions(selected)
         else emptySet()
     }
+    // Resume an authorization only while this exact screen/account and action scope still exist.
+    val actionsAlive = remember(accountSessionIdentity) { java.util.concurrent.atomic.AtomicBoolean(true) }
+    DisposableEffect(accountSessionIdentity) { onDispose { actionsAlive.set(false) } }
+    val liveActionChats by rememberUpdatedState(conversations.associateBy { it.id })
+    val liveActionHidden by rememberUpdatedState(isConversationHidden)
+    val liveActionCurtain by rememberUpdatedState(privacyCurtainOn)
+    val liveActionSelection by rememberUpdatedState(selectedIds)
+    val liveActionBulk by rememberUpdatedState(validBulkActions)
+    fun authorizeAction(ids: List<String>, valid: () -> Boolean = { true }, block: () -> Unit) {
+        val targets = ids.distinct()
+        if (targets.isEmpty()) return
+        fun current() = actionsAlive.get() && !liveActionCurtain && valid() &&
+            targets.all { liveActionChats[it] != null && !liveActionHidden(it) }
+        fun authorizeAt(index: Int) {
+            if (!current()) return
+            if (index == targets.size) { block(); return }
+            val target = liveActionChats[targets[index]] ?: return
+            // Each authorization callback is single-use, even if a host retries delivery.
+            val consumed = java.util.concurrent.atomic.AtomicBoolean(false)
+            onAuthorizeConversation(target) {
+                if (consumed.compareAndSet(false, true) && current()) authorizeAt(index + 1)
+            }
+        }
+        authorizeAt(0)
+    }
+    fun runBulkAction(action: HomeBulkAction, block: () -> Unit) {
+        val captured = selectedIds.toSet()
+        if (action in validBulkActions) {
+            // Authorize the full unchanged selection before any effect, never only a subset.
+            authorizeAction(captured.toList(), { liveActionSelection == captured && action in liveActionBulk }, block)
+        } else onSnack("That action does not apply to every selected chat, so nothing was changed.")
+    }
+    /* Previous capability-only gate retained.
     fun runBulkAction(action: HomeBulkAction, block: () -> Unit) {
         if (action in validBulkActions) {
             block()
@@ -610,6 +645,7 @@ fun ChatsHomeScreen(
             onSnack("That action does not apply to every selected chat, so nothing was changed.")
         }
     }
+    */
     val filters = homeFilters(forcedType)
     var selectionScope by remember(accountSessionIdentity) { mutableStateOf(currentViewState to searchQuery) }
     LaunchedEffect(renderedConversationOrder, currentViewState, searchQuery, isSearchOpen) {
@@ -879,27 +915,27 @@ fun ChatsHomeScreen(
                 Column {
                     ChatyTextButton(
                         icon = androidx.compose.material.icons.Icons.Rounded.PushPin,
-                        onClick = { onTogglePin(menuConversation.id); rowMenuConversationId = null },
+                        onClick = { rowMenuConversationId = null; authorizeAction(listOf(menuConversation.id)) { onTogglePin(menuConversation.id) } },
                         label = if (menuConversation.isPinned) "Unpin" else "Pin",
                     )
                     ChatyTextButton(
                         icon = androidx.compose.material.icons.Icons.Rounded.NotificationsOff,
-                        onClick = { onToggleMute(menuConversation.id); rowMenuConversationId = null },
+                        onClick = { rowMenuConversationId = null; authorizeAction(listOf(menuConversation.id)) { onToggleMute(menuConversation.id) } },
                         label = if (menuConversation.isMuted) "Unmute" else "Mute",
                     )
                     ChatyTextButton(
                         icon = androidx.compose.material.icons.Icons.Outlined.Archive,
-                        onClick = { onToggleArchive(menuConversation.id); rowMenuConversationId = null },
+                        onClick = { rowMenuConversationId = null; authorizeAction(listOf(menuConversation.id)) { onToggleArchive(menuConversation.id) } },
                         label = if (menuConversation.isArchived) "Unarchive" else "Archive",
                     )
                     ChatyTextButton(
                         icon = androidx.compose.material.icons.Icons.Outlined.MarkChatRead,
-                        onClick = { onMarkRead(menuConversation.id); rowMenuConversationId = null },
+                        onClick = { rowMenuConversationId = null; authorizeAction(listOf(menuConversation.id)) { onMarkRead(menuConversation.id) } },
                         label = "Mark read",
                     )
                     ChatyTextButton(
                         icon = androidx.compose.material.icons.Icons.Outlined.MarkChatUnread,
-                        onClick = { onMarkUnread(menuConversation.id); rowMenuConversationId = null },
+                        onClick = { rowMenuConversationId = null; authorizeAction(listOf(menuConversation.id)) { onMarkUnread(menuConversation.id) } },
                         label = "Mark unread",
                     )
                 }
@@ -1117,7 +1153,8 @@ fun ChatsHomeScreen(
                                 nav = effectiveNav,
                                 menuPreferences = homePrefs,
                                 onMarkAllAsRead = {
-                                    onMarkAllRead()
+                                    val targets = conversations.filter { !isConversationHidden(it.id) }.map { it.id }
+                                    authorizeAction(targets) { onMarkAllRead(targets) }
                                     // Completion feedback belongs to the host, not the click handler.
                                 },
                                 onMessageANumber = { showMessageNumber = true },
@@ -1416,9 +1453,9 @@ fun ChatsHomeScreen(
                                         selectedIds + conversation.id
                                     }
                                 },
-                                onTogglePin = onTogglePin,
-                                onToggleMute = onToggleMute,
-                                onToggleArchive = onToggleArchive,
+                                onTogglePin = { id -> authorizeAction(listOf(id)) { onTogglePin(id) } },
+                                onToggleMute = { id -> authorizeAction(listOf(id)) { onToggleMute(id) } },
+                                onToggleArchive = { id -> authorizeAction(listOf(id)) { onToggleArchive(id) } },
                                 onStartCall = onStartCall,
                                 listState = listState,
                                 openConversationId = paneConversation?.id,
@@ -4461,3 +4498,15 @@ private fun rawIsTelegram(homeStyle: String): Boolean =
 //
 //
 // */
+
+// Replaced lines retained for source comparison (not executable).
+//     onMarkAllRead: () -> Unit = {},
+//                         onClick = { onTogglePin(menuConversation.id); rowMenuConversationId = null },
+//                         onClick = { onToggleMute(menuConversation.id); rowMenuConversationId = null },
+//                         onClick = { onToggleArchive(menuConversation.id); rowMenuConversationId = null },
+//                         onClick = { onMarkRead(menuConversation.id); rowMenuConversationId = null },
+//                         onClick = { onMarkUnread(menuConversation.id); rowMenuConversationId = null },
+//                                     onMarkAllRead()
+//                                 onTogglePin = onTogglePin,
+//                                 onToggleMute = onToggleMute,
+//                                 onToggleArchive = onToggleArchive,

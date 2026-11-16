@@ -74,6 +74,58 @@ internal object StatusMediaReadRules {
         return bytes
     }
 
+    /** Unknown-size input is staged in app-private cache, then read into one final payload.
+     * The open staging file is unlinked before any content is written. Closing its handle
+     * releases storage on success, failure or cancellation, including process termination.
+     * This is bounded file staging, not streaming upload; the service still needs ByteArray.
+     */
+    fun readSpooling(input: InputStream, cacheDirectory: java.io.File, maxBytes: Long,
+        checkCancellation: () -> Unit): ByteArray {
+        require(maxBytes in 1..Int.MAX_VALUE.toLong())
+        checkCancellation()
+        val temporary = java.io.File.createTempFile("status-pick-", ".tmp", cacheDirectory)
+        try {
+            return java.io.RandomAccessFile(temporary, "rw").use { staging ->
+                // Android app-private cache uses unlink semantics. Fail before writing if unavailable.
+                check(temporary.delete()) { "Could not prepare temporary media storage." }
+                val buffer = ByteArray(64 * 1024)
+                var total = 0L
+                while (total < maxBytes) {
+                    checkCancellation()
+                    val count = input.read(buffer, 0, minOf(buffer.size.toLong(), maxBytes - total).toInt())
+                    if (count < 0) break
+                    if (count == 0) {
+                        checkCancellation()
+                        val next = input.read()
+                        if (next < 0) break
+                        staging.write(next)
+                        total++
+                    } else {
+                        staging.write(buffer, 0, count)
+                        total += count
+                    }
+                }
+                checkCancellation()
+                if (total == maxBytes) check(input.read() < 0) { "Selected media exceeds the storage limit." }
+                checkCancellation()
+                staging.seek(0L)
+                val payload = ByteArray(total.toInt())
+                var offset = 0
+                while (offset < payload.size) {
+                    checkCancellation()
+                    val count = minOf(64 * 1024, payload.size - offset)
+                    staging.readFully(payload, offset, count)
+                    offset += count
+                }
+                checkCancellation()
+                payload
+            }
+        } finally {
+            // Also removes the empty path if opening/unlinking failed. No media is written before unlink.
+            if (temporary.exists()) temporary.delete()
+        }
+    }
+
     /** Display-only bounded basename. Never use the result as a storage key or an authorization identifier. */
     fun displayName(raw: String, maxCodePoints: Int = 160): String {
         require(maxCodePoints > 0)

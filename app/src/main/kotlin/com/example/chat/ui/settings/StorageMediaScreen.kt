@@ -9,6 +9,8 @@ import androidx.compose.material.icons.rounded.Hd
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.UploadFile
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
+import com.example.chat.ui.settings.state.collectSettingsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -65,22 +67,32 @@ fun StorageMediaScreen(
     cacheUsedBytes: Long = 0L,
 ) {
     val colors = LocalAppColors.current
-    var revision by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+    // ST1-20 / ST1-47: collect just the two rendered preferences, only while STARTED.
+    val selectedFlow = remember(preferences, scope) {
+        com.example.chat.ui.settings.state.settingsSnapshotFlow(
+            scope,
+            { preferences.universal.sendImagesFullResolutionMb.coerceIn(1, 6) to preferences.gbInt("Img_share_limit", 30).coerceIn(1, 100) },
+            preferences::addListener, preferences::removeListener,
+        )
+    }
+    val selected by selectedFlow.collectSettingsState()
     var confirmClear by remember { mutableStateOf(false) }
     // ST1-30: spoken/visible result after clearing the cache.
     var clearedNotice by remember { mutableStateOf(false) }
     var pendingLimitMb by remember { mutableStateOf<Int?>(null) }
-    DisposableEffect(preferences) {
-        val listener: () -> Unit = { revision += 1 }
-        preferences.addListener(listener)
-        onDispose { preferences.removeListener(listener) }
-    }
-    @Suppress("UNUSED_EXPRESSION") revision
-
+    // Superseded broad listener retained inactive:
+    // DisposableEffect(preferences) {
+    // val listener: () -> Unit = { revision += 1 }
+    // preferences.addListener(listener)
+    // onDispose { preferences.removeListener(listener) }
+    // }
+    // @Suppress("UNUSED_EXPRESSION") revision
+    //
     val serverLimitMb = ChatMediaService.STORAGE_LIMIT_MB
-    val fullResolutionMb = preferences.universal.sendImagesFullResolutionMb.coerceIn(1, 6)
+    val fullResolutionMb = selected.first // prior inline controller read
     val highResolutionEnabled = fullResolutionMb >= 4
-    val imageShareLimit = preferences.gbInt("Img_share_limit", 30).coerceIn(1, 100)
+    val imageShareLimit = selected.second // prior inline controller read
     val batchShareEnabled = imageShareLimit >= 100
 
     ChatySettingsPage("Storage & Data", "Upload preferences and local media retention", onBack = onBack) {
@@ -125,7 +137,9 @@ fun StorageMediaScreen(
                 icon = Icons.Rounded.UploadFile,
                 iconColor = colors.primary,
                 title = "Upload size limit",
-                subtitle = "Up to $serverLimitMb MB per file right now (server limit)",
+                // Superseded wording kept (see ST1-04 note above: no server-side enforcement is visible in source):
+                // subtitle = "Up to $serverLimitMb MB per file right now (server limit)",
+                subtitle = "Up to $serverLimitMb MB per file (app limit)",
             )
             ChatySettingsRowDivider()
             ChatySwitchTile(
@@ -173,6 +187,7 @@ fun StorageMediaScreen(
                             role = Role.RadioButton,
                             onClick = {
                                 if (mb != cacheLimitMb) {
+                                    clearedNotice = false // stale "cleared" notice must not outlive a limit change
                                     if (mb * 1024L * 1024L < cacheUsedBytes) pendingLimitMb = mb else onCacheLimitChange(mb)
                                 }
                             },
@@ -200,7 +215,8 @@ fun StorageMediaScreen(
             ChatySettingsTile(
                 title = "Clear local media cache",
                 icon = Icons.Rounded.CleaningServices,
-                iconColor = colors.primary,
+                // ST1-36: destructive icon uses the same error token as its action.
+                iconColor = colors.error,
                 subtitle = "Free local disk space without deleting server messages",
                 trailing = { Text("Clear", color = colors.error) },
                 onTap = { confirmClear = true },

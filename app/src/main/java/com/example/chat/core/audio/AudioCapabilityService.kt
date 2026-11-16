@@ -105,6 +105,14 @@ class AudioCapabilityService(
         queried
     }
 
+    /** Requery after a permission change or explicit retry instead of returning a healthy stale cache. */
+    override suspend fun refreshCapabilities(useCase: AudioUseCase): AudioCapabilities = routeMutex.withLock {
+        val queried = kotlinx.coroutines.withContext(routeDispatcher) { platform.getCapabilities(useCase) }
+        cachedCapabilities[useCase] = queried
+        notifyListeners()
+        queried
+    }
+
     /** Active route for communication use case. */
     val activeCommunicationRoute: AudioOutputRoute
         get() = cachedCapabilities[AudioUseCase.communication]?.activeRoute

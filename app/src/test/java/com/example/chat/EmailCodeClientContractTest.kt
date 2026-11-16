@@ -22,14 +22,17 @@ class EmailCodeClientContractTest {
         })
         try { c.check("maya"); fail("Missing available must fail") } catch (_: IllegalStateException) { }
     }
-    @Test fun challengeIsBoundToCapturedTenantAndHasNoBearer() {
+    @Test fun localAttemptIsBoundToCapturedTenantAndHasNoBearer() {
         val c = ApiEmailCodeClient("https://chat.test", "chosen-tenant", ApiHttpTransport { method, url, h, body ->
-            assertEquals("POST", method); assertTrue(url.endsWith("/auth/email-code/request"))
+            assertEquals("POST", method); assertTrue(url.endsWith("/auth/email/code-login/send"))
             assertEquals("chosen-tenant", h["x-tenant-id"]); assertFalse(h.containsKey("Authorization"))
             assertTrue(body!!.contains("maya@example.com"))
-            200 to """{"data":{"challenge_id":"$uuid","resend_after_seconds":60,"expires_in_seconds":300}}"""
+            200 to """{"message":"If an account exists, a code has been sent."}"""
         })
-        assertEquals(uuid, c.requestCode(" Maya@example.com ").id)
+        val attempt = c.requestCode(" Maya@example.com ")
+        assertEquals("maya@example.com", attempt.email)
+        assertTrue(attempt.id.isNotBlank())
+        assertEquals(ApiEmailCodeClient.LOCAL_RESEND_DELAY_SECONDS, attempt.resendAfterSeconds)
     }
     @Test fun changedScopeStopsFallback() {
         var current = true; var calls = 0
@@ -42,7 +45,10 @@ class EmailCodeClientContractTest {
     @Test fun debugCodeStillCallsRealVerify() {
         var calls = 0
         val c = ApiEmailCodeClient("https://chat.test", "tenant", ApiHttpTransport { _, url, _, body ->
-            calls++; assertTrue(url.endsWith("/auth/email-code/verify")); assertTrue(body!!.contains("000000"))
+            calls++; assertTrue(url.endsWith("/auth/email/code-login/verify")); assertTrue(body!!.contains("000000"))
+            val payload = org.json.JSONObject(body)
+            assertEquals("maya@example.com", payload.getString("email"))
+            assertFalse(payload.has("challenge_id"))
             401 to """{"detail":"Invalid or expired code."}"""
         })
         try { c.verifyCode(ApiEmailCodeClient.Challenge(uuid, "maya@example.com", 60, 300), "000000"); fail("No bypass") }

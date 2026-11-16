@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_network_unavailable">Android has not validated an internet connection. Connect before calling.</string>
+</resources>

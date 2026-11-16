@@ -6,5 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface AudioCapabilitySource {
     val communicationCapabilities: StateFlow<AudioCapabilities?>
     suspend fun getCapabilities(useCase: AudioUseCase): AudioCapabilities
+    /** Explicit permission/retry refresh; existing synthetic sources may use their live read. */
+    suspend fun refreshCapabilities(useCase: AudioUseCase): AudioCapabilities = getCapabilities(useCase)
     suspend fun setPreferredRoute(useCase: AudioUseCase, route: AudioOutputRoute): AudioCapabilities
 }

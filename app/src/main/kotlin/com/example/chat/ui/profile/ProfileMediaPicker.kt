@@ -85,6 +85,7 @@ import com.example.chat.ui.theme.LocalThemeConfig
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
@@ -250,12 +251,12 @@ fun rememberProfileMediaPicker(
             val file = try {
                 copyPickToCache(context, uri, state.value?.pendingSquare ?: square, files)
             } catch (tooLarge: PickTooLargeException) {
-                if (active()) onError(tooLarge.message ?: "That photo is too large.")
+                if (active()) onError(context.getString(com.example.chat.R.string.profile_pick_too_large))
                 return@launch
             }
             if (!active()) { files.close(); return@launch }
             if (file == null) {
-                onError("The selected image is no longer accessible.")
+                onError(context.getString(com.example.chat.R.string.profile_pick_inaccessible))
             } else {
                 pendingCrop = PendingCrop(file, tagIsAvatar, tagTitle)
             }
@@ -287,10 +288,10 @@ fun rememberProfileMediaPicker(
                         files.track(captured)
                         val bounded = boundPickedFile(context, captured, state.value?.pendingSquare ?: square, files)
                         if (!active()) { files.close(); return@launch }
-                        if (bounded == null) onError("The captured image could not be read.")
+                        if (bounded == null) onError(context.getString(com.example.chat.R.string.profile_pick_capture_unreadable))
                         else pendingCrop = PendingCrop(bounded, state.value?.pendingIsAvatar ?: true, state.value?.pendingTitle ?: "Crop Avatar Photo")
                     } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                    catch (error: Exception) { if (active()) onError(cameraErrorMessage(error)) }
+                    catch (error: Exception) { if (active()) onError(cameraErrorMessage(context, error)) }
                 }
 
             },
@@ -374,10 +375,10 @@ private fun flattenOnWhite(bitmap: Bitmap): Bitmap {
     } catch (failure: Throwable) { out.recycle(); throw failure }
 }
 
-private fun cameraErrorMessage(error: Exception): String = when (error) {
-    is android.content.ActivityNotFoundException -> "No camera app is available on this device."
-    is SecurityException -> "Camera permission is needed to take a photo. You can allow it in Settings."
-    else -> ProfileErrorMessages.friendly(error, "Could not capture profile photo.")
+private fun cameraErrorMessage(context: Context, error: Exception): String = when (error) {
+    is android.content.ActivityNotFoundException -> context.getString(com.example.chat.R.string.profile_camera_unavailable)
+    is SecurityException -> context.getString(com.example.chat.R.string.profile_camera_permission)
+    else -> ProfileErrorMessages.friendly(context, error, context.getString(com.example.chat.R.string.profile_camera_failure))
 }
 
 /** Camera-capture variant (Dart image_picker bounds camera captures the same way). */
@@ -454,17 +455,44 @@ private fun ProfileImageCropperOwnedDialog(
     var userScale by remember { mutableFloatStateOf(1f) }
     var userOffset by remember { mutableStateOf(Offset.Zero) }
 
-    // Decode once, bounded for display (Dart instantiates at 1280 target).
-    val image: ImageBitmap? = remember(sourceFile) {
-        runCatching {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(sourceFile.absolutePath, bounds)
-            var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) > 1280) sample *= 2
-            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-            BitmapFactory.decodeFile(sourceFile.absolutePath, opts)?.asImageBitmap()
-        }.getOrNull()
-    }
+    // Decode away from Main and pin the source against concurrent discard/account teardown.
+    val currentPreviewCheck = androidx.compose.runtime.rememberUpdatedState(isCurrent)
+    val preview = androidx.compose.runtime.produceState<Pair<ImageBitmap?, Boolean>>(null to false, sourceFile, files) {
+        value = null to false // produceState retains its old value when a key changes.
+        var unpublished: Bitmap? = null
+        var pinned = false
+        try {
+            if (files != null) {
+                if (!files.tryBegin(sourceFile)) {
+                    if (currentPreviewCheck.value()) value = null to true
+                    return@produceState
+                }
+                pinned = true
+            }
+            withContext(Dispatchers.IO) {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(sourceFile.absolutePath, bounds)
+                check(bounds.outWidth > 0 && bounds.outHeight > 0)
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) > 1280) sample *= 2
+                unpublished = BitmapFactory.decodeFile(sourceFile.absolutePath,
+                    BitmapFactory.Options().apply { inSampleSize = sample })
+                checkNotNull(unpublished)
+            }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (currentPreviewCheck.value()) {
+                value = checkNotNull(unpublished).asImageBitmap() to false
+                // Published pixels may still be held by Compose; only unpublished pixels are recycled here.
+                unpublished = null
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { if (currentPreviewCheck.value()) value = null to true }
+        finally {
+            unpublished?.let { if (!it.isRecycled) it.recycle() }
+            if (pinned) files?.end(sourceFile)
+        }
+    }.value
+    val image = preview.first
     val srcW = image?.width?.toFloat() ?: 1f
     val srcH = image?.height?.toFloat() ?: 1f
 
@@ -484,10 +512,10 @@ private fun ProfileImageCropperOwnedDialog(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { if (!isProcessing) onDone(null) }) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close", color = colors.foreground)
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = context.getString(com.example.chat.R.string.profile_crop_close), color = colors.foreground)
                 }
                 Text(
-                    title,
+                    context.getString(if (isAvatar) com.example.chat.R.string.profile_crop_avatar_title else com.example.chat.R.string.profile_crop_banner_title),
                     color = colors.foreground,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
@@ -498,10 +526,10 @@ private fun ProfileImageCropperOwnedDialog(
                     userOffset = Offset.Zero
                     quarterRotations = 0
                 }) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.reset, semanticLabel = "Reset", color = colors.foregroundSecondary)
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.reset, semanticLabel = context.getString(com.example.chat.R.string.profile_crop_reset), color = colors.foregroundSecondary)
                 }
                 IconButton(enabled = !isProcessing, onClick = { quarterRotations = (quarterRotations + 1) % 4 }) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.rotateRight, semanticLabel = "Rotate 90°", color = colors.foreground)
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.rotateRight, semanticLabel = context.getString(com.example.chat.R.string.profile_crop_rotate), color = colors.foreground)
                 }
             }
 
@@ -510,8 +538,8 @@ private fun ProfileImageCropperOwnedDialog(
                 // P3-50: step cue added (pick is step 1, crop is step 2).
                 // if (isAvatar) "Pinch or drag to position inside the circular avatar"
                 // else "Pinch or drag to frame the banner",
-                if (isAvatar) "Step 2 of 2: pinch or drag to position inside the circular avatar"
-                else "Step 2 of 2: pinch or drag to frame the banner",
+                if (isAvatar) context.getString(com.example.chat.R.string.profile_crop_avatar_instruction)
+                else context.getString(com.example.chat.R.string.profile_crop_banner_instruction),
                 textAlign = TextAlign.Center,
                 color = colors.foregroundSecondary,
                 fontSize = 13.sp,
@@ -554,16 +582,16 @@ private fun ProfileImageCropperOwnedDialog(
                         .semantics {
                             testTagsAsResourceId = true
                             // Switch/TalkBack users can zoom without pinching (P1-36).
-                            stateDescription = "Zoom " + "%.1f".format(userScale) + "x"
+                            stateDescription = context.getString(com.example.chat.R.string.profile_crop_zoom_value, userScale)
                             customActions = listOf(
-                                CustomAccessibilityAction("Zoom in") {
+                                CustomAccessibilityAction(context.getString(com.example.chat.R.string.profile_crop_zoom_in)) {
                                     if (isProcessing) return@CustomAccessibilityAction false
                                     val next = (userScale + 0.5f).coerceAtMost(4f)
                                     userScale = next
                                     userOffset = clampOffset(userOffset, next)
                                     true
                                 },
-                                CustomAccessibilityAction("Zoom out") {
+                                CustomAccessibilityAction(context.getString(com.example.chat.R.string.profile_crop_zoom_out)) {
                                     if (isProcessing) return@CustomAccessibilityAction false
                                     val next = (userScale - 0.5f).coerceAtLeast(1f)
                                     userScale = next
@@ -613,6 +641,13 @@ private fun ProfileImageCropperOwnedDialog(
                             }
                         },
                 ) {
+                    if (image == null) {
+                        if (preview.second) Text(
+                            context.getString(com.example.chat.R.string.profile_crop_preview_failure),
+                            color = colors.foreground,
+                            modifier = Modifier.align(Alignment.Center).padding(16.dp),
+                        ) else CircularProgressIndicator(Modifier.align(Alignment.Center), color = colors.primary)
+                    }
                     if (image != null) {
                         Image(
                             bitmap = image,
@@ -645,7 +680,7 @@ private fun ProfileImageCropperOwnedDialog(
                 Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Zoom", color = colors.foregroundSecondary, fontSize = 13.sp)
+                Text(context.getString(com.example.chat.R.string.profile_crop_zoom), color = colors.foregroundSecondary, fontSize = 13.sp)
                 Slider(
                     value = userScale,
                     onValueChange = {
@@ -661,7 +696,7 @@ private fun ProfileImageCropperOwnedDialog(
                     modifier = Modifier
                         .weight(1f)
                         .padding(start = 12.dp)
-                        .semantics { stateDescription = "%.1fx".format(userScale) },
+                        .semantics { stateDescription = context.getString(com.example.chat.R.string.profile_crop_zoom_value, userScale) },
                 )
             }
             Spacer(Modifier.height(12.dp))
@@ -675,12 +710,12 @@ private fun ProfileImageCropperOwnedDialog(
                         .weight(1f)
                         .height(50.dp),
                 ) {
-                    Text("Cancel", fontWeight = FontWeight.SemiBold)
+                    Text(context.getString(com.example.chat.R.string.profile_crop_cancel), fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.width(14.dp))
                 Button(
                     onClick = {
-                        if (isProcessing) return@Button
+                        if (isProcessing || image == null) return@Button
                         isProcessing = true
                         scope.launch {
                             try {
@@ -701,11 +736,11 @@ private fun ProfileImageCropperOwnedDialog(
                             } catch (e: kotlinx.coroutines.CancellationException) {
                                 throw e
                             } catch (e: Throwable) {
-                                if (isCurrent()) onError("Failed to save cropped image. " + ProfileErrorMessages.friendly(e, "Please try again."))
+                                if (isCurrent()) onError(context.getString(com.example.chat.R.string.profile_crop_failure, ProfileErrorMessages.friendly(context, e, context.getString(com.example.chat.R.string.profile_retry))))
                             } finally { isProcessing = false }
                         }
                     },
-                    enabled = !isProcessing,
+                    enabled = !isProcessing && image != null,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = colors.primary,
                         contentColor = colors.onPrimary,
@@ -726,7 +761,7 @@ private fun ProfileImageCropperOwnedDialog(
                     }
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (isProcessing) "Cropping…" else "Crop & Use",
+                        if (isProcessing) context.getString(com.example.chat.R.string.profile_crop_processing) else context.getString(com.example.chat.R.string.profile_crop_use),
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -761,13 +796,13 @@ private suspend fun captureCrop(
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(sourceFile.absolutePath, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-        throw Exception("The selected image is no longer accessible.")
+        throw Exception(context.getString(com.example.chat.R.string.profile_pick_inaccessible))
     }
     var sample = 1
     while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) > 4096) sample *= 2
     val opts = BitmapFactory.Options().apply { inSampleSize = sample }
     val raw = BitmapFactory.decodeFile(sourceFile.absolutePath, opts)
-        ?: throw Exception("The selected image is no longer accessible.")
+        ?: throw Exception(context.getString(com.example.chat.R.string.profile_pick_inaccessible))
     bitmaps.add(raw)
     val bitmap = ProfileImageCompressor.applyOrientation(raw, sourceFile.readBytes())
     bitmaps.add(bitmap)
@@ -799,12 +834,12 @@ private suspend fun captureCrop(
     val png = java.io.ByteArrayOutputStream()
     if (!output.compress(Bitmap.CompressFormat.PNG, 100, png)) {
         output.recycle()
-        throw Exception("Unable to encode cropped image bytes")
+        throw Exception(context.getString(com.example.chat.R.string.profile_crop_encode_failure))
     }
     output.recycle()
     val buffer = png.toByteArray()
     if (buffer.isEmpty()) {
-        throw Exception("The crop is empty. Reposition the image inside the frame.")
+        throw Exception(context.getString(com.example.chat.R.string.profile_crop_empty))
     }
     val tag = if (isAvatar) "avatar" else "banner"
     val file = File(
@@ -814,7 +849,7 @@ private suspend fun captureCrop(
     files?.track(file); files?.begin(file)
     try { file.writeBytes(buffer) } finally { files?.end(file) }
     if (file.length() == 0L) {
-        throw Exception("The crop could not be saved. Try again.")
+        throw Exception(context.getString(com.example.chat.R.string.profile_crop_save_failure))
     }
     file
     } finally {
@@ -1627,3 +1662,48 @@ private suspend fun captureCrop(
 }
 
 */
+
+// Previous localization paths retained:
+//                 if (active()) onError(tooLarge.message ?: "That photo is too large.")
+//                 onError("The selected image is no longer accessible.")
+//                         if (bounded == null) onError("The captured image could not be read.")
+//                     catch (error: Exception) { if (active()) onError(cameraErrorMessage(error)) }
+// private fun cameraErrorMessage(error: Exception): String = when (error) {
+//     is android.content.ActivityNotFoundException -> "No camera app is available on this device."
+//     is SecurityException -> "Camera permission is needed to take a photo. You can allow it in Settings."
+//     else -> ProfileErrorMessages.friendly(error, "Could not capture profile photo.")
+//                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close", color = colors.foreground)
+//                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.reset, semanticLabel = "Reset", color = colors.foregroundSecondary)
+//                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.rotateRight, semanticLabel = "Rotate 90°", color = colors.foreground)
+//                 if (isAvatar) "Step 2 of 2: pinch or drag to position inside the circular avatar"
+//                 else "Step 2 of 2: pinch or drag to frame the banner",
+//                             stateDescription = "Zoom " + "%.1f".format(userScale) + "x"
+//                                 CustomAccessibilityAction("Zoom in") {
+//                                 CustomAccessibilityAction("Zoom out") {
+//                 Text("Zoom", color = colors.foregroundSecondary, fontSize = 13.sp)
+//                         .semantics { stateDescription = "%.1fx".format(userScale) },
+//                     Text("Cancel", fontWeight = FontWeight.SemiBold)
+//                                 if (isCurrent()) onError("Failed to save cropped image. " + ProfileErrorMessages.friendly(e, "Please try again."))
+//                         if (isProcessing) "Cropping…" else "Crop & Use",
+//         throw Exception("The selected image is no longer accessible.")
+//         ?: throw Exception("The selected image is no longer accessible.")
+
+// Previous profile copy retained:
+//         throw Exception("Unable to encode cropped image bytes")
+//         throw Exception("The crop is empty. Reposition the image inside the frame.")
+//         throw Exception("The crop could not be saved. Try again.")
+
+// Previous Main-thread crop preview decode retained:
+//     // Decode once, bounded for display (Dart instantiates at 1280 target).
+//     val image: ImageBitmap? = remember(sourceFile) {
+//         runCatching {
+//             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+//             BitmapFactory.decodeFile(sourceFile.absolutePath, bounds)
+//             var sample = 1
+//             while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) > 1280) sample *= 2
+//             val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+//             BitmapFactory.decodeFile(sourceFile.absolutePath, opts)?.asImageBitmap()
+//         }.getOrNull()
+//     }
+//                         if (isProcessing) return@Button
+//                     enabled = !isProcessing,

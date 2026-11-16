@@ -257,18 +257,24 @@ object ServiceLocator {
             // back into this lazy block during construction.
             service.onAttachmentsGone = { refs -> invalidateMediaFor(refs) }
             service.secureMessageIngest = { data ->
+                // Capture before dispatch: an old event cannot adopt the next login.
+                val owner = service.authSnapshot()
                 appScope.launch {
-                    runCatching { conversationsRepository.ingestSecureEnvelope(data) }
+                    runCatching { conversationsRepository.ingestSecureEnvelope(data, owner) }
                 }
             }
             service.secureMessageEditIngest = { data ->
+                // Capture before dispatch: an old event cannot adopt the next login.
+                val owner = service.authSnapshot()
                 appScope.launch {
-                    runCatching { conversationsRepository.applySecureEdit(data) }
+                    runCatching { conversationsRepository.applySecureEdit(data, owner) }
                 }
             }
             service.secureMessageDeleteIngest = { data ->
+                // Capture before dispatch: an old event cannot adopt the next login.
+                val owner = service.authSnapshot()
                 appScope.launch {
-                    runCatching { conversationsRepository.applyRemoteDeleteForEveryone(data) }
+                    runCatching { conversationsRepository.applyRemoteDeleteForEveryone(data, owner) }
                 }
             }
             service.onDurableCallInboxWake = { owner ->
@@ -678,6 +684,7 @@ object ServiceLocator {
             context = requireContext(), scope = appScope, api = apiBackend, calls = callSignaling,
             prefs = preferencesController, appLock = appLock, channelManager = notificationChannelManager,
             isChatVaultLocked = { id -> hiddenVaultService.isConversationLocked(id) },
+            callPresentation = callPresentationPrefs,
         )
     }
 
@@ -1067,6 +1074,11 @@ object ServiceLocator {
         com.example.chat.ui.calls.CallPresentationPreferencesStore(
             com.example.chat.ui.calls.AndroidCallPresentationPrefsStorage(requireContext()), appScope)
     }
+    val callQualityFeedback: com.example.chat.ui.calls.CallQualityFeedback by lazy {
+        com.example.chat.ui.calls.CallQualityFeedback(
+            com.example.chat.ui.calls.AndroidCallPresentationPrefsStorage(requireContext()), callSignaling,
+            appScope, { apiBackend.authSnapshot() }, { listener -> apiBackend.addAuthScopeListener(listener) })
+    }
     val callSignaling: com.example.chat.data.services.CallSignalingService by lazy {
         com.example.chat.data.services.CallSignalingService(
             scope = appScope,
@@ -1083,6 +1095,7 @@ object ServiceLocator {
             },
             currentUserDisplayName = { apiBackend.currentUser?.displayName ?: "User" },
             remoteNameFor = { id -> apiBackend.callDisplayNameFor(id) },
+            canInitiateCall = { com.example.chat.data.services.CallNetworkAdmission.online(requireContext()) },
             currentUserAvatarInitials = { apiBackend.currentUser?.avatarInitials },
             currentUserAvatarColorHex = { apiBackend.currentUser?.avatarColorHex },
             signalSender = com.example.chat.data.services.CallSignalSender { targetUserId, data ->
@@ -1105,6 +1118,7 @@ object ServiceLocator {
 // Previous implementation retained:                 com.example.chat.data.services.WebRtcCallMediaController(requireContext(), callAudioSessions).also { media ->
                 val expectedMediaCallId = callSignaling.currentSession?.callId
                 com.example.chat.data.services.WebRtcCallMediaController(requireContext(), callAudioSessions,
+                    capturePreferences = { callPresentationPrefs.value.capture },
                     communicationArbiter = communicationMediaArbiter,
                     foregroundStillExpected = {
                         expectedMediaCallId != null && callSignaling.currentSession?.let {
@@ -1642,3 +1656,8 @@ private class ConnectionHealthSinkAdapter(
     override fun notifyRealtimeStatus(status: com.example.chat.domain.models.RealtimeSocketStatus) =
         service.notifyRealtimeStatus(status)
 }
+
+// Previous asynchronous ingest calls retained for source comparison (not executable):
+// runCatching { conversationsRepository.ingestSecureEnvelope(data) }
+// runCatching { conversationsRepository.applySecureEdit(data) }
+// runCatching { conversationsRepository.applyRemoteDeleteForEveryone(data) }

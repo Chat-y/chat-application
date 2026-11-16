@@ -1,5 +1,9 @@
 package com.example.chat.ui.camera
 
+import kotlinx.coroutines.delay
+
+import androidx.compose.foundation.rememberScrollState
+
 import androidx.compose.ui.res.stringResource
 
 import android.util.Log
@@ -14,7 +18,6 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
@@ -58,7 +61,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.core.content.ContextCompat
 import androidx.camera.core.CameraState
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -1466,7 +1468,8 @@ fun ChatyCameraCaptureScreen(
                 onCropped = { path -> if(ownedFiles.own(File(path))) { documentReviewPath = null; stagePickedOrCaptured(path) } },
             )
         } else if (capturedPath == null) {
-            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+            // Previous value: androidx.compose.ui.graphics.Color.Black
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(rememberCameraOverlayColors().backdrop)) {
             // Capture before nested layout receivers hide BoxWithConstraintsScope.
             val cameraPaneHeight = maxHeight
             CameraCaptureViewfinder(
@@ -1648,7 +1651,8 @@ fun ChatyCameraCaptureScreen(
                         .heightIn(max = maxHeight)
                         .windowInsetsPadding(WindowInsets.safeDrawing)
                         .verticalScroll(rememberScrollState())
-                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .35f)),
+                        // Previous value: androidx.compose.ui.graphics.Color.Black.copy(alpha = .35f)
+                        .background(rememberCameraOverlayColors().backdrop.copy(alpha = .35f)),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                 if (lensesDisabled && captureViewMode == CaptureViewMode.lenses) androidx.compose.material3.Text(
@@ -1656,9 +1660,11 @@ fun ChatyCameraCaptureScreen(
                     modifier = Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
                         .padding(horizontal = 12.dp, vertical = 8.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
                 // CAM-R4-004 prior: if (portraitActive) androidx.compose.material3.Text("Portrait · device background blur",color=androidx.compose.ui.graphics.Color.White)
-                if (portraitActive) androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_portrait_active),color=androidx.compose.ui.graphics.Color.White)
+                // Previous value: color=androidx.compose.ui.graphics.Color.White
+                if (portraitActive) androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_portrait_active),color=rememberCameraOverlayColors().content)
                 // CAM-R4-004 prior: if (nightActive) androidx.compose.material3.Text("Night · hold still while capturing",color=androidx.compose.ui.graphics.Color.White)
-                if (nightActive) androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_night_active),color=androidx.compose.ui.graphics.Color.White)
+                // Previous value: color=androidx.compose.ui.graphics.Color.White
+                if (nightActive) androidx.compose.material3.Text(stringResource(com.example.chat.R.string.camera_night_active),color=rememberCameraOverlayColors().content)
                 val videoZoomReady = videoState is VideoSessionState.Ready || videoTimerActive
                 CameraZoomControls(zoomRatio,minZoom,effectiveZoomMax(maxZoom,workingMaxZoom),enabled = phase == CameraPhase.ready && !capturing && (!videoOpen || videoZoomReady),forceSlider = videoTimerActive) { requested ->
                     // Previous unthrottled slider/preset handler retained inactive:
@@ -1803,7 +1809,8 @@ fun ChatyCameraCaptureScreen(
             val lease = videoAuth
             val review = videoState as? VideoSessionState.Review
             if (review != null && lease != null) {
-                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+                // Previous value: androidx.compose.ui.graphics.Color.Black
+                Box(Modifier.fillMaxSize().background(rememberCameraOverlayColors().backdrop)) {
                     VideoCaptureReview(review.video, lease,
                         registerStop = { videoStopPlayback = it },
                         onConfirm = if (onVideoResult != null) ({

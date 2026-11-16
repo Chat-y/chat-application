@@ -99,6 +99,7 @@ fun OtpVerificationScreen(
     onSkip: (() -> Unit)? = null,
     deliveryMessage: String? = null,
     initialResendSeconds: Int = OtpVerificationLogic.RESEND_COUNTDOWN_SECONDS,
+    resendAllowed: Boolean = true,
 ) {
     val authCopy = com.example.chat.core.i18n.rememberAuthCopy()
     val authFormat=com.example.chat.core.i18n.rememberAuthFormat()
@@ -174,7 +175,7 @@ fun OtpVerificationScreen(
     }
 
     fun handleResend() {
-        if (isLoading || resendIn > 0) return
+        if (isLoading || !resendAllowed || resendIn > 0) return
         isLoading = true
         errorMessage = null
         resendMessage = null
@@ -267,7 +268,7 @@ fun OtpVerificationScreen(
                     ) {
                         TextButton(
                             onClick = { handleResend() },
-                            enabled = !isLoading && resendIn <= 0,
+                            enabled = resendAllowed && !isLoading && resendIn <= 0,
                             modifier = Modifier.padding(ChatyUiTokens.touchGap / 2).heightIn(min = AuthCapsuleTokens.tapTarget),
                         ) {
                             Text(

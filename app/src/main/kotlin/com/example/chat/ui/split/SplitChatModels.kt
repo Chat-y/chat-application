@@ -115,3 +115,22 @@ fun SplitChatSessionState.forAccount(account: String?): SplitChatSessionState {
             ?: matching.first().conversationId,
     )
 }
+
+/**
+ * SPL-33: active panes must share one account. The focused pane's account wins; panes from any
+ * other account are dropped from the presentation and focus is re-pointed if needed.
+ * Presentation only: mounting a room still requires the host's authorization (SPL-23).
+ */
+fun SplitChatSessionState.singleAccountPanes(): SplitChatSessionState {
+    if (paneItems.isEmpty()) return this
+    val account = paneItems.firstOrNull { it.conversationId == focusedConversationId }?.accountNamespace
+        ?: paneItems.first().accountNamespace
+    val matching = paneItems.filter { it.accountNamespace == account }
+    if (matching.size == paneItems.size) return this
+    if (matching.isEmpty()) return SplitChatSessionState()
+    return copy(
+        paneItems = matching,
+        focusedConversationId = focusedConversationId?.takeIf { id -> matching.any { it.conversationId == id } }
+            ?: matching.first().conversationId,
+    )
+}

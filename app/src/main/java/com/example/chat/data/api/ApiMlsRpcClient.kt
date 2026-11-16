@@ -26,6 +26,17 @@ class ApiMlsRpcClient(
     private val transport: ApiHttpTransport,
 ) : SupabaseRpc {
 
+    /** A per-operation client freezes routing/auth references for both primary and fallback requests.
+     * No secret is persisted, logged, copied out or refreshed through a different account. */
+    override fun forScope(expectedScope: Any?): SupabaseRpc {
+        if (expectedScope == null) return this
+        val owner = expectedScope as? ApiAccountScope
+            ?: error("Unsupported account scope.")
+        check(!owner.userId.isNullOrBlank() && !owner.token.isNullOrBlank()) { "Authentication required." }
+        return ApiMlsRpcClient(baseUrl = { owner.baseUrl }, tenantId = { owner.tenantId },
+            token = { owner.token }, transport = transport)
+    }
+
     private fun endpointFor(function: String): String = when (function) {
         "register_mls_device_v1" -> "e2ee/devices/register"
         "claim_mls_conversation_key_packages_v1" -> "e2ee/key-packages/claim"

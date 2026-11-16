@@ -28,6 +28,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -58,7 +61,7 @@ internal suspend fun readAttachmentGallery(context: Context): List<AttachmentGal
 internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAction) -> Unit,
     onCamera: () -> Unit, onReviewImages: ((List<Uri>) -> Unit)?,
     onDirectSendImages: ((List<Uri>) -> Unit)? = null, maxSelection: Int = 30,
-    secondReference: Boolean = false, onVoiceNote: () -> Unit = {},
+    secondReference: Boolean = false, onVoiceNote: (() -> Unit)? = null,
     // Host-driven: opens half screen; the sheet grows when the user pulls up.
     heightFraction: Float = 0.5f,
     // Deterministic fixture injection. Production never provides items here.
@@ -76,10 +79,24 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                canRead = allowed()
+                reload++ // Reconcile limited-library changes and revoked access too.
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(maxSelection) {
+        selected = selected.take(maxSelection.coerceIn(1, 100))
+    }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { canRead = allowed(); reload++ }
     LaunchedEffect(canRead, reload, fixtureItems) {
-        if (fixtureItems != null) { images = fixtureItems; return@LaunchedEffect }
-        if (!canRead) { images = emptyList(); selected = emptyList(); return@LaunchedEffect }
+        if (fixtureItems != null) { images = fixtureItems; loading = false; failed = false; return@LaunchedEffect }
+        if (!canRead) { images = emptyList(); selected = emptyList(); loading = false; failed = false; return@LaunchedEffect }
         loading = true; failed = false
         try { images = readAttachmentGallery(context); selected = selected.filter { uri -> images.any { it.uri == uri } } }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -93,8 +110,9 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
         .navigationBarsPadding().imePadding().semantics { contentDescription = "Attachment gallery sheet" }) {
         Box(Modifier.padding(10.dp).size(32.dp, 4.dp).align(Alignment.CenterHorizontally)
             .background(Color(theme.secondaryTextColor).copy(alpha = 0.4f), CircleShape))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Gallery", color = foreground, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Gallery", color = foreground, style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = { onAction(AttachmentAction.image) }) { Text("Browse") }
             if (selected.isNotEmpty()) {
                 if (onReviewImages != null) OutlinedButton(onClick = { onReviewImages(selected.toList()) }) { Text("Review (${selected.size})") }
@@ -102,24 +120,18 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
             }
         }
 
-        if (!canRead && fixtureItems == null) {
-            Text("Choose photos with Browse, or allow gallery access to see recent photos here.", color = foreground,
-                modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { request.launch(if (Build.VERSION.SDK_INT >= 34) arrayOf(permission, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED") else arrayOf(permission)) }) { Text("Allow gallery access") }
-        }
-        if (failed) Text("Gallery unavailable. Use Browse to choose photos.", color = foreground, modifier = Modifier.padding(12.dp))
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (secondReference) {
             val capsules = listOf(Triple("Gallery", Icons.Rounded.PhotoLibrary, AttachmentAction.image),
                 Triple("Camera", Icons.Rounded.PhotoCamera, null), Triple("Location", Icons.Rounded.LocationOn, AttachmentAction.location),
                 Triple("Contact", Icons.Rounded.Person, AttachmentAction.contact), Triple("Document", Icons.Rounded.InsertDriveFile, AttachmentAction.document),
                 Triple("Poll", Icons.Rounded.Poll, AttachmentAction.poll), Triple("Audio", Icons.Rounded.GraphicEq, AttachmentAction.audio),
-                Triple("Voice note", Icons.Rounded.Mic, null))
+                Triple("Voice note", Icons.Rounded.Mic, null)).filter { it.first != "Voice note" || onVoiceNote != null }
             // Wrap at large fonts rather than forcing four clipped labels into a narrow viewport.
             androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(8.dp),
                 maxItemsInEachRow = 4, horizontalArrangement = Arrangement.SpaceEvenly) {
                 for ((label, icon, action) in capsules) Column(Modifier.widthIn(min = 72.dp).clickable {
-                    when (label) { "Camera" -> onCamera(); "Voice note" -> onVoiceNote(); "Gallery" -> reload++; else -> action?.let(onAction) }
+                    when (label) { "Camera" -> onCamera(); "Voice note" -> onVoiceNote?.invoke(); "Gallery" -> reload++; else -> action?.let(onAction) }
                 }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Surface(shape = RoundedCornerShape(attachmentRadius), color = Color(theme.cardColor),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(theme.dividerColor))) {
@@ -132,6 +144,16 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
         // Supplied reference: fixed three-column media grid (was adaptive 100.dp).
         LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.weight(1f).fillMaxWidth().semantics { contentDescription = "Recent attachment photos" },
             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            item(key = "gallery-status", span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+        if (!canRead && fixtureItems == null) {
+            Text("Choose photos with Browse, or allow gallery access to see recent photos here.", color = foreground,
+                modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { request.launch(if (Build.VERSION.SDK_INT >= 34) arrayOf(permission, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED") else arrayOf(permission)) }) { Text("Allow gallery access") }
+        }
+        if (failed) Text("Gallery unavailable. Use Browse to choose photos.", color = foreground, modifier = Modifier.padding(12.dp))
+                }
+            }
             item(key = "camera") {
                 Box(Modifier.fillMaxWidth().aspectRatio(1f).background(Color(theme.cardColor)).clickable(onClick = onCamera)
                     .semantics { contentDescription = "Open camera" }, contentAlignment = Alignment.Center) {
@@ -153,16 +175,20 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
                     }) {
                     AsyncImage(thumbnailRequest, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     Surface(Modifier.align(Alignment.TopEnd).padding(6.dp).size(28.dp), shape = CircleShape,
-                        color = if (index >= 0) accent else Color.Black.copy(alpha = 0.45f), border = androidx.compose.foundation.BorderStroke(1.dp, Color.White)) {
-                        Box(contentAlignment = Alignment.Center) { Text(if (index >= 0) "${index + 1}" else "", color = if (index >= 0) Color(theme.onAccentColor) else Color.White) }
+                        color = if (index >= 0) accent else Color(theme.surfaceColor).copy(alpha = 0.85f), border = androidx.compose.foundation.BorderStroke(1.dp, Color(theme.primaryTextColor))) {
+                        Box(contentAlignment = Alignment.Center) { Text(if (index >= 0) "${index + 1}" else "", color = if (index >= 0) Color(theme.onAccentColor) else Color(theme.primaryTextColor)) }
                     }
                 }
             }
         }
         if (selected.size >= maxSelection.coerceIn(1, 100)) Text("Selection limit reached. Review or remove a photo.", color = foreground,
             style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp))
-        if (!secondReference) TextButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = onVoiceNote) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = null); Text("Record voice note") }
-        if (!secondReference) Row(Modifier.padding(8.dp).fillMaxWidth().semantics { contentDescription = "Attachment type options" }.clip(RoundedCornerShape(attachmentRadius)).background(Color(theme.cardColor))
+        if (!secondReference && onVoiceNote != null) TextButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = onVoiceNote) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = null); Text("Record voice note") }
+        if (!secondReference) BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // Five primary actions fit the initial viewport; additional actions still scroll.
+        // Keep a 48dp touch target in exceptionally narrow split windows.
+        val optionWidth = ((maxWidth - 24.dp) / 5).coerceAtLeast(48.dp)
+        Row(Modifier.padding(8.dp).fillMaxWidth().semantics { contentDescription = "Attachment type options" }.clip(RoundedCornerShape(attachmentRadius)).background(Color(theme.cardColor))
             .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp)) {
             val actions = listOf(Triple("Gallery", Icons.Rounded.PhotoLibrary, AttachmentAction.image),
                 Triple("File", Icons.Rounded.InsertDriveFile, AttachmentAction.document), Triple("Location", Icons.Rounded.LocationOn, AttachmentAction.location),
@@ -173,7 +199,7 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
             // Keep original dock styling/spacing. Direct gets enough width for its
             // longer label at large fonts; the existing horizontal scroll reveals it.
             val directWidth = (104f * androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)).dp
-            for ((label, icon, action) in actions) Column(Modifier.widthIn(min = if (action == AttachmentAction.chatyDirect) directWidth else 76.dp)
+            for ((label, icon, action) in actions) Column(Modifier.width(if (action == AttachmentAction.chatyDirect) directWidth else optionWidth)
                 .semantics { contentDescription = "Attachment option $label" }
                 .clickable { if (action == AttachmentAction.image) reload++ else onAction(action) }
                 .padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -181,5 +207,30 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
                 Text(label, color = if (action == AttachmentAction.image) accent else foreground, style = MaterialTheme.typography.labelMedium)
             }
         }
+        } // Measured primary-action dock.
     }
 }
+
+// Previous source retained for source-only media polish:
+//         if (fixtureItems != null) { images = fixtureItems; return@LaunchedEffect }
+//         if (!canRead) { images = emptyList(); selected = emptyList(); return@LaunchedEffect }
+//         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+//             Text("Gallery", color = foreground, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+//         if (!canRead && fixtureItems == null) {
+//             Text("Choose photos with Browse, or allow gallery access to see recent photos here.", color = foreground,
+//                 modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+//             TextButton(onClick = { request.launch(if (Build.VERSION.SDK_INT >= 34) arrayOf(permission, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED") else arrayOf(permission)) }) { Text("Allow gallery access") }
+//         }
+//         if (failed) Text("Gallery unavailable. Use Browse to choose photos.", color = foreground, modifier = Modifier.padding(12.dp))
+//                         color = if (index >= 0) accent else Color.Black.copy(alpha = 0.45f), border = androidx.compose.foundation.BorderStroke(1.dp, Color.White)) {
+//                         Box(contentAlignment = Alignment.Center) { Text(if (index >= 0) "${index + 1}" else "", color = if (index >= 0) Color(theme.onAccentColor) else Color.White) }
+
+// Previous source retained for source-only media polish:
+//         if (!secondReference) Row(Modifier.padding(8.dp).fillMaxWidth().semantics { contentDescription = "Attachment type options" }.clip(RoundedCornerShape(attachmentRadius)).background(Color(theme.cardColor))
+//             for ((label, icon, action) in actions) Column(Modifier.widthIn(min = if (action == AttachmentAction.chatyDirect) directWidth else 76.dp)
+
+// Previous inert-voice affordance source retained:
+//     secondReference: Boolean = false, onVoiceNote: () -> Unit = {},
+//                 Triple("Voice note", Icons.Rounded.Mic, null))
+//                     when (label) { "Camera" -> onCamera(); "Voice note" -> onVoiceNote(); "Gallery" -> reload++; else -> action?.let(onAction) }
+//         if (!secondReference) TextButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = onVoiceNote) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = null); Text("Record voice note") }

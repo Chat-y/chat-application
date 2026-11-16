@@ -206,6 +206,9 @@ fun NewChatScreen(
     var queryLoading by remember { mutableStateOf(false) }
     var contactsLoading by remember { mutableStateOf(false) }
     var isSubmittingGroup by remember { mutableStateOf(false) }
+    // Session-only uncertainty. The owner can inspect chats and explicitly release it.
+    var roomCreationBlocked by remember(configOwner) { mutableStateOf(false) }
+    val roomUncertainMessage = "Group or broadcast creation was not confirmed. Check chats first. Creating again may make a duplicate room."
     var isOpeningDirect by remember(configOwner) { mutableStateOf(false) }
     val isLoading = queryLoading || contactsLoading || isSubmittingGroup || isOpeningDirect
     val operationLabel = stringResource(when {
@@ -403,6 +406,7 @@ fun NewChatScreen(
     fun finishGroupCreation() {
         val title = NewChatRules.effectiveGroupTitle(groupName, isBroadcast, selectedMembers.size)
         if (!NewChatRules.canCreateGroup(groupName, isBroadcast, selectedMembers.size, isLoading)) return
+        if (roomCreationBlocked) { createError = roomUncertainMessage; return }
         if (!groupDetails || !selectionEligible || isSubmittingGroup || configApi.authSnapshot() !== configOwner) return
         if (!NewChatRules.validFinalTitle(groupName, isBroadcast, selectedMembers.size, titleLimit)) { createError = configContext.getString(R.string.social_newchat_name_too_long); return }
         val creator = NewChatRules.creatorFor(isBroadcast, createGroup, createBroadcast)
@@ -415,15 +419,28 @@ fun NewChatScreen(
                 check(validateRecipients(capturedMembers.toSet()))
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (configApi.authSnapshot() !== configOwner) return@launch
+                // Reserve immediately before calling the non-idempotent creator.
+                roomCreationBlocked = true
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() !== configOwner) return@launch
+                val conversation = creator(title, capturedMembers)
+                check(NewChatRules.validConversation(conversation, configOwner.userId, capturedMembers.toSet(), group = true))
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() === configOwner) {
+                    roomCreationBlocked = false
+                    if (configApi.authSnapshot() === configOwner) onOpenConversation(conversation)
+                }
+                /* Previous unreserved creation path retained.
                 val conversation = creator(title, capturedMembers)
                 check(NewChatRules.validConversation(conversation, configOwner.userId, capturedMembers.toSet(), group = true))
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (configApi.authSnapshot() === configOwner) onOpenConversation(conversation)
+                */
             } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel } catch (error: Exception) {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (configApi.authSnapshot() !== configOwner) return@launch
-                createError = errorText(error)
-                snackbar.showSnackbar(errorText(error))
+                createError = if (roomCreationBlocked) roomUncertainMessage else errorText(error)
+                snackbar.showSnackbar(createError!!)
             } finally { isSubmittingGroup = false }
         }
     }
@@ -482,7 +499,16 @@ fun NewChatScreen(
             if (selectedMembers.isNotEmpty() && !selectionEligible) Text(
                 stringResource(R.string.social_newchat_restore_unavailable), color = colors.error,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-            createError?.let { Text(it, color = colors.error) }
+            if (roomCreationBlocked) {
+                Text(roomUncertainMessage, color = colors.error)
+                Column {
+                    TextButton(enabled = !isSubmittingGroup, onClick = { onBack() }) { Text("Check chats") }
+                    TextButton(enabled = !isSubmittingGroup, onClick = {
+                        // Explicit release only, never automatically submit from this button.
+                        roomCreationBlocked = false; createError = null
+                    }) { Text("Create anyway") }
+                }
+            } else createError?.let { Text(it, color = colors.error) }
         }
     }
     val searchSection: @Composable () -> Unit = {

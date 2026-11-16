@@ -48,7 +48,8 @@ data class ChatTask(
     val assigneeIds: List<String>,
     val status: TaskStatus = TaskStatus.inbox,
     val priority: TaskPriority = TaskPriority.medium,
-    val dueAt: Instant,
+    // Prior dueAt: Instant forced missing API dates to become artificial deadlines.
+    val dueAt: Instant?,
     val reminderAt: Instant? = null,
     val labels: List<String> = emptyList(),
     val createdAt: Instant,
@@ -59,7 +60,7 @@ data class ChatTask(
     val isOverdue: Boolean
         get() = status != TaskStatus.completed &&
             status != TaskStatus.archived &&
-            dueAt.isBefore(Instant.now())
+            (dueAt?.isBefore(Instant.now()) == true)
 
     val completedChecklistCount: Int
         get() = checklistItems.count { it.isCompleted }
@@ -68,7 +69,7 @@ data class ChatTask(
         get() {
             val zone = ZoneId.systemDefault()
             val now = ZonedDateTime.now(zone)
-            val due = dueAt.atZone(zone)
+            val due = dueAt?.atZone(zone) ?: return "No due date"
             val today = now.toLocalDate()
             val dueDay = due.toLocalDate()
             val diffDays = java.time.temporal.ChronoUnit.DAYS.between(today, dueDay).toInt()
@@ -116,10 +117,13 @@ data class ChatTask(
                 description = json["description"]?.toString() ?: "",
                 creatorId = json["created_by_id"]?.toString() ?: "",
                 assigneeIds = (json["assigned_to_ids"] as? List<*>)?.mapNotNull { it?.toString() }
+                    // Prior list-only parser dropped the current API's single assignee.
+                    ?: (json["assigned_to_id"] as? String)?.takeIf { it.isNotBlank() }?.let { listOf(it) }
                     ?: emptyList(),
                 status = parseStatus(json["status"]?.toString()),
                 priority = parsePriority(json["priority"]?.toString()),
-                dueAt = parseIsoToInstant(json["due_date"]?.toString()) ?: Instant.now(),
+                // Prior missing/null due_date fell back to Instant.now(), falsely marking it overdue.
+                dueAt = parseIsoToInstant(json["due_date"]?.toString()),
                 createdAt = parseIsoToInstant(json["created_at"]?.toString()) ?: Instant.now(),
                 updatedAt = parseIsoToInstant(json["updated_at"]?.toString()) ?: Instant.now(),
                 checklistItems = emptyList(),

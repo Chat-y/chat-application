@@ -193,6 +193,8 @@ fun EffectGlyph(id: String, category: EffectCategory, color: Color, size: Dp = 2
 /** Exact port of _DocumentGuidePainter (corner brackets + inner frame). */
 @Composable
 fun DocumentGuideOverlay(modifier: Modifier = Modifier) {
+    // Resolve theme tokens during composition, not inside Canvas drawing.
+    val overlayColors = rememberCameraOverlayColors()
     Canvas(modifier = modifier) {
         val pageWidth = min(size.width * 0.78f, size.height * 0.58f / 1.414f)
         val pageHeight = pageWidth * 1.414f
@@ -202,7 +204,8 @@ fun DocumentGuideOverlay(modifier: Modifier = Modifier) {
         val bottom = top + pageHeight
         val cornerLength = min(28f, pageWidth * 0.12f)
         val stroke = Stroke(width = 3f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        val color = Color(0xFFF8FAFC)
+        // Previous value: Color(0xFFF8FAFC)
+        val color = overlayColors.content
 
         val corners = Path().apply {
             moveTo(left, top + cornerLength); lineTo(left, top); lineTo(left + cornerLength, top)
@@ -213,7 +216,8 @@ fun DocumentGuideOverlay(modifier: Modifier = Modifier) {
         drawPath(corners, color, style = stroke)
 
         drawRoundRect(
-            color = Color(0xFF60A5FA).copy(alpha = 0.7f),
+            // Previous value: Color(0xFF60A5FA).copy(alpha = 0.7f)
+            color = overlayColors.info.copy(alpha = 0.7f),
             topLeft = Offset(left + 5, top + 5),
             size = Size(pageWidth - 10, pageHeight - 10),
             cornerRadius = CornerRadius(3f, 3f),

@@ -673,3 +673,24 @@ private fun highlightSearchMatch(value: String, rawQuery: String): androidx.comp
         }
     }
 }
+
+/** Fail closed while the host cannot establish current account privacy policy.
+ * The results composable is removed, which cancels work and drops its in-memory query/results.
+ */
+@Composable
+fun SearchPolicyUnavailable(onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    Column(
+        Modifier.fillMaxSize().background(colors.background).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(stringResource(R.string.social_search_policy_unavailable),
+            color = colors.foreground,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        androidx.compose.material3.TextButton(onClick = onBack) {
+            Text(stringResource(R.string.social_search_back))
+        }
+    }
+}

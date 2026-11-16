@@ -150,8 +150,8 @@ class TasksRepository(
                 assigneeIds = stringList(row["assignee_ids"]),
                 status = taskStatusFromDatabase(row["status"]?.toString()),
                 priority = taskPriorityFromDatabase(row["priority"]?.toString()),
-                dueAt = parseIsoToInstant(row["due_at"]?.toString())
-                    ?: createdAt.plus(java.time.Duration.ofDays(3)),
+                // Prior fallback invented a three-day deadline for a stored undated task.
+                dueAt = parseIsoToInstant(row["due_at"]?.toString()),
                 labels = stringList(row["labels"]),
                 createdAt = createdAt,
                 updatedAt = parseIsoToInstant(row["updated_at"]?.toString()) ?: createdAt,

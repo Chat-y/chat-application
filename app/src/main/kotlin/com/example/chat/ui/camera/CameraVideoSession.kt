@@ -95,6 +95,11 @@ class CameraVideoSession(
     private var generation = 0
     private var stabilized = false
     private var binding = false
+    private var bindSequence = 0
+    private var stopSequence = 0
+    // True only while a discard-triggered stop is being scheduled; consumed by stop().
+    private var discardPending = false
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var boundFront = false
     // Retain real bind capabilities across discard/stale completion/preflight recovery.
     private var boundSnapshotAvailable = false
@@ -120,6 +125,17 @@ class CameraVideoSession(
         checkMain()
         if (!auth.isCurrent() || closed || capture != null || binding) return
         binding = true
+        // Preparing watchdog (photo path parity: the 15s init watchdog in CameraCaptureScreen).
+        // A wedged provider future must not leave the session in Preparing forever; the
+        // sequence guard keeps an older timer from failing a newer bind.
+        val bindTicket = ++bindSequence
+        mainHandler.postDelayed({
+            if (!closed && binding && capture == null && bindTicket == bindSequence) {
+                binding = false
+                bindSequence++
+                publish(VideoSessionState.Error("The camera did not open. Close another app using it, then try again."))
+            }
+        }, 15_000L)
         if (ContextCompat.checkSelfPermission(app, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             binding = false
             publish(VideoSessionState.Error("Camera permission is needed to record video.")); return
@@ -127,6 +143,8 @@ class CameraVideoSession(
         publish(VideoSessionState.Preparing)
         val future = ProcessCameraProvider.getInstance(app)
         fun finishBinding() {
+            // An old provider completion must not consume a newer bind's busy flag.
+            if (bindTicket != bindSequence || !binding) return
             // Recheck after any debug timing suspension, and also on the ordinary path.
             if (!auth.isCurrent() || closed || capture != null || !binding ||
                 ContextCompat.checkSelfPermission(app, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
@@ -229,8 +247,8 @@ class CameraVideoSession(
             if(barrier == null) finishBinding()
             else owner.lifecycleScope.launch {
                 try { barrier(); finishBinding() }
-                catch(cancelled:kotlinx.coroutines.CancellationException) { binding=false; throw cancelled }
-                catch(error:Throwable) { binding=false; throw error }
+                catch(cancelled:kotlinx.coroutines.CancellationException) { if (bindTicket == bindSequence) binding=false; throw cancelled }
+                catch(error:Throwable) { if (bindTicket == bindSequence) binding=false; throw error }
             }
         }, main)
     }
@@ -295,16 +313,21 @@ class CameraVideoSession(
             if (audio) pending = pending.withAudioEnabled()
             if (!auth.isCurrent()) { busy = false; activeFile = null; file.delete(); return }
             recorderPhase = CameraRecorderPhase.Starting
-            recording = pending.start(main) { event ->
+            recording = pending.start(main) recordingEvent@{ event ->
+                // A timed-out/retired recording must never clear a replacement's handle or phase.
+                if (activeFile !== file) {
+                    if (event is VideoRecordEvent.Finalize && !io.isShutdown) io.execute { file.delete() }
+                    return@recordingEvent
+                }
                 // Pause/resume UI changes follow native acknowledgement, not merely a request.
                 // Previous Start handler published Recording without a command phase.
-                if (event is VideoRecordEvent.Start && recorderPhase == CameraRecorderPhase.Starting && !closed && auth.isCurrent()) {
+                if (event is VideoRecordEvent.Start && ticket == generation && recorderPhase == CameraRecorderPhase.Starting && !closed && auth.isCurrent()) {
                     recorderPhase = CameraRecorderPhase.Recording; recordingAudio = audio; publish(VideoSessionState.Recording(audio))
                 }
-                if (event is VideoRecordEvent.Pause && recorderPhase == CameraRecorderPhase.Pausing && !closed && auth.isCurrent()) {
+                if (event is VideoRecordEvent.Pause && ticket == generation && recorderPhase == CameraRecorderPhase.Pausing && !closed && auth.isCurrent()) {
                     recorderPhase = CameraRecorderPhase.Paused; publish(VideoSessionState.Paused(recordingAudio))
                 }
-                if (event is VideoRecordEvent.Resume && recorderPhase == CameraRecorderPhase.Resuming && !closed && auth.isCurrent()) {
+                if (event is VideoRecordEvent.Resume && ticket == generation && recorderPhase == CameraRecorderPhase.Resuming && !closed && auth.isCurrent()) {
                     recorderPhase = CameraRecorderPhase.Recording; publish(VideoSessionState.Recording(recordingAudio))
                 }
                 if (event is VideoRecordEvent.Finalize) {
@@ -315,8 +338,9 @@ class CameraVideoSession(
                         // Previous: val metadata = if (!event.hasError()) validatedMetadata(file) else null
                         val expectedLimit = event.error == VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED
                         val metadata = if (!event.hasError() || expectedLimit) validatedMetadata(file) else null
-                        main.execute {
+                        main.execute finalizeResult@{
                             if (closed) io.shutdown()
+                            if (activeFile !== file) { file.delete(); return@finalizeResult }
                             busy = false; activeFile = null
                             if (!auth.isCurrent() || closed || ticket != generation || metadata == null) {
                                 file.delete()
@@ -332,6 +356,21 @@ class CameraVideoSession(
                     }
                 }
             }
+            // Start watchdog: native Start/Finalize must arrive; otherwise recover instead of
+            // wedging in Starting, where stop() refuses and the user cannot end the capture.
+            // Start timeout follows the file identity, including a discard during Starting.
+            mainHandler.postDelayed({
+                if (recorderPhase == CameraRecorderPhase.Starting && activeFile === file) {
+                    runCatching { recording?.close() }
+                    recording = null
+                    recorderPhase = CameraRecorderPhase.Idle
+                    busy = false
+                    activeFile = null
+                    generation++
+                    if (!io.isShutdown) io.execute { file.delete(); if (closed) io.shutdown() }
+                    if (!closed) publish(VideoSessionState.Error("Recording could not start. Please try again."))
+                }
+            }, 10_000L)
         } catch (e: Exception) {
             recorderPhase = CameraRecorderPhase.Idle
             busy = false; activeFile = null; file.delete()
@@ -411,6 +450,8 @@ class CameraVideoSession(
     }
     fun stop() = recorderTransition {
         if (storagePreflightPending) { generation++; storagePreflightPending = false }
+        val wasDiscard = discardPending
+        discardPending = false
         val active = recording ?: return@recorderTransition
         if (!canStopCameraRecorder(recorderPhase)) return@recorderTransition
         recorderPhase = CameraRecorderPhase.Stopping
@@ -420,13 +461,34 @@ class CameraVideoSession(
             runCatching { active.close() }
             if (com.example.chat.BuildConfig.DEBUG) android.util.Log.d("CameraRecorder", "stop-rejected")
         }
+        // Finalize watchdog: a wedged native finalize must not wedge the session (busy forever,
+        // draft never cleanable, active file never reclaimed). Identity is the stop sequence,
+        // not the generation, so a discard between stop and fire still recovers; the published
+        // state follows whether the user discarded (back to Ready) or stopped (honest failure).
+        val stopTicket = ++stopSequence
+        val stopGeneration = generation
+        mainHandler.postDelayed({
+            if (recorderPhase == CameraRecorderPhase.Stopping && stopTicket == stopSequence) {
+                runCatching { active.close() }
+                recording = null
+                recorderPhase = CameraRecorderPhase.Idle
+                val stranded = activeFile
+                activeFile = null
+                busy = false
+                if (!closed) {
+                    if (wasDiscard || stopGeneration != generation) publish(retainedReadyState())
+                    else { generation++; publish(VideoSessionState.Error("Video was not saved. Please record again.")) }
+                }
+                if (!io.isShutdown) io.execute { stranded?.delete(); if (closed) io.shutdown() }
+            }
+        }, 20_000L)
     }
     fun discard() {
         checkMain()
         if (closed) return
         generation++
         reviewFile?.delete(); reviewFile = null
-        if (busy) { publish(VideoSessionState.Finalizing); stop() }
+        if (busy) { discardPending = true; publish(VideoSessionState.Finalizing); stop() }
         else publish(retainedReadyState())
     }
     /** Only transfers a finalized local video after explicit review confirmation. */

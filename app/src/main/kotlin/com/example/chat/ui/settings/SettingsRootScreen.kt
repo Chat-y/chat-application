@@ -74,6 +74,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import com.example.chat.ui.settings.state.collectSettingsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -110,7 +111,7 @@ enum class SettingsDestination {
     LinkedDevices, Privacy, Security, ThemeEngine, TemplateStudio, HomeScreen,
     Conversation, Effects, Universal, HomeShortcuts, Notifications, Automation,
     Calls, StorageMedia, Permissions, BackupRestore, WasteCleaning, About, DynamicIsland,
-    PrivacyPolicy, ShareChaty,
+    PrivacyPolicy, ShareChaty, ToastNotifications,
     EditProfile, SearchSettings, QrCode, NetworkUsage, DataUsage,
 }
 
@@ -201,11 +202,20 @@ fun SettingsRootScreen(
     onPickBanner: suspend (ProfileMediaSource) -> Unit,
     onLogout: () -> Unit,
 ) {
-    rememberPreferencesVersion(preferences)
+    // Superseded broad preference invalidation: rememberPreferencesVersion(preferences)
     val colors = LocalAppColors.current
     val suppressDuplicateTitle = !canGoBack && com.example.chat.ui.navigation.LocalDestinationTitlePresentation.current ==
         com.example.chat.core.templates.ChatyNavigationDestinationIds.settings
-    val theme = themeController.globalTheme
+    // SET-R5-027: listener lifetime follows STARTED and only theme changes recompose.
+    val themeScope = rememberCoroutineScope()
+    val themeFlow = remember(themeController, themeScope) {
+        com.example.chat.ui.settings.state.settingsSnapshotFlow(
+            themeScope, { themeController.globalTheme },
+            themeController::addListener, themeController::removeListener,
+        )
+    }
+    val theme by themeFlow.collectSettingsState()
+    // Previous unobserved read: val theme = themeController.globalTheme
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -213,7 +223,16 @@ fun SettingsRootScreen(
     var pickTarget by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(RootPick.None) }
     // CS4-50: the Calls row advertises the current call audience as its subtitle.
     // Derived at render; the static allRootGroups/rootGroups lists are unchanged.
-    val callAudience = preferences.privacy.whoCanCallMe
+    // SET-R3-010 / SET-R5-027: observe only the two preferences this root renders.
+    val rootPreferencesFlow = remember(preferences, scope) {
+        com.example.chat.ui.settings.state.settingsSnapshotFlow(
+            scope, { preferences.privacy.whoCanCallMe to preferences.home.myNameOverride },
+            preferences::addListener, preferences::removeListener,
+        )
+    }
+    val rootPreferences by rootPreferencesFlow.collectSettingsState()
+    // Previous broad controller read: val callAudience = preferences.privacy.whoCanCallMe
+    val callAudience = rootPreferences.first
     val renderedRootGroups = remember(callAudience) {
         rootGroups.map { group ->
             RootGroup(group.title, group.rows.map { row ->
@@ -221,7 +240,8 @@ fun SettingsRootScreen(
             })
         }
     }
-    val override = preferences.home.myNameOverride.trim()
+    // Previous direct read: val override = preferences.home.myNameOverride.trim()
+    val override = rootPreferences.second.trim()
     val effectiveOverride = override
     val rawName = user.displayName.trim()
     val displayName = when {
@@ -282,77 +302,26 @@ fun SettingsRootScreen(
             // R2/R3: grouped lists capped at 720dp centered on larger
             // windows (approved responsive plan 8 Nov 2026).
             // Width cap must constrain fillMaxWidth rather than inherit its exact width.
-            Column(Modifier.weight(1f).widthIn(max = 720.dp).fillMaxWidth().align(Alignment.CenterHorizontally).verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })) {
-                Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    val bannerWidthDp = (minOf(LocalConfiguration.current.screenWidthDp, 720) - 32).coerceAtLeast(0)
-                    // SET-R1-007/R2-045: use the capped container width; cap height on wide windows
-                    val bannerHeight = (if (bannerWidthDp > 480) 180f else bannerWidthDp * 9f / 16f).dp
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
-                        Box(
-                            Modifier.fillMaxWidth().height(bannerHeight)
-                                .background(colors.surface, RoundedCornerShape(24.dp)) // SET-R3-041: one card radius (24dp)
-                                .border(1.dp, colors.borderSubtle, RoundedCornerShape(24.dp))
-                                .clip(RoundedCornerShape(23.dp)),
-                        ) {
-                            val banner = user.bannerUrl?.trim().orEmpty()
-                            if (banner.isEmpty()) {
-                                Box(
-                                    Modifier.fillMaxSize().background(Brush.linearGradient(listOf(accent.copy(alpha = 0.30f), colors.surface, colors.background))),
-                                    contentAlignment = Alignment.Center,
-                                ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(34.dp), color = accent.copy(alpha = 0.65f)) }
-                            } else {
-                                val model = if (banner.startsWith("http://") || banner.startsWith("https://") || banner.startsWith("content://")) banner else "file://" + banner.removePrefix("file://")
-                                val fallback: @Composable () -> Unit = {
-                                    Box(Modifier.fillMaxSize().background(colors.surfaceElevated), contentAlignment = Alignment.Center) {
-                                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(30.dp), color = colors.foregroundSecondary)
-                                    }
-                                }
-                                ChatyAsyncImage(model, "", Modifier.fillMaxSize(), placeholder = fallback, error = fallback)
-                            }
-                        }
-                        Box(
-                            Modifier.align(Alignment.TopEnd).padding(10.dp).size(48.dp).clip(CircleShape)
-                                .background(colors.surface.copy(alpha = 0.92f)).border(1.dp, colors.borderSubtle, CircleShape).clickable { pickTarget = RootPick.Banner }, // SET-R1-053: border keeps the button visible on busy banners
-                            contentAlignment = Alignment.Center,
-                        ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = "Change account banner", modifier = Modifier.size(19.dp), color = colors.foreground) }
-                        // Dart Positioned(bottom: -40): 4dp padding ring around an 84dp avatar.
-                        Box(
-                            Modifier.offset(y = 40.dp).size(92.dp)
-                                .background(colors.background, CircleShape)
-                                .border(1.dp, colors.borderSubtle, CircleShape)
-                                .padding(4.dp).clip(CircleShape)
-                                .semantics { contentDescription = "Change profile photo" }
-                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { pickTarget = RootPick.Avatar },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            val fallback: @Composable () -> Unit = {
-                                Box(Modifier.fillMaxSize().background(colors.surfaceElevated), contentAlignment = Alignment.Center) {
-                                    Text(if (user.avatarInitials.isNotEmpty()) user.avatarInitials else "U", color = colors.foreground, fontSize = AvatarInitialsTextSizeSp.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            if (!user.avatarUrl.isNullOrEmpty()) ChatyAsyncImage(user.avatarUrl, "Change profile photo", Modifier.fillMaxSize(), error = fallback)
-                            else fallback()
-                        }
-                    }
-                    Spacer(Modifier.height(48.dp))
-                    Row(
-                        Modifier.clip(RoundedCornerShape(12.dp)).clickable { onNavigate(SettingsDestination.EditProfile) }.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(displayName, Modifier.weight(1f, fill = false), color = colors.foreground, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.35).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.width(4.dp))
-                        // SET-R1-049: chevron-right matches the row's real destination (was KeyboardArrowDown)
-                        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    Text(handle, color = colors.foregroundSecondary, fontSize = 13.sp)
-                    if (user.about.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(user.about, Modifier.padding(horizontal = 20.dp), color = colors.foregroundSecondary, fontSize = 12.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-                    }
+            // Column(Modifier.weight(1f).widthIn(max = 720.dp).fillMaxWidth().align(Alignment.CenterHorizontally).verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })) {
+            // SET-LAZY-ROOT: LazyColumn root; each rounded group surface stays whole inside single items.
+            val rootListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            androidx.compose.foundation.lazy.LazyColumn(
+                state = rootListState,
+                modifier = Modifier.weight(1f).widthIn(max = 720.dp).fillMaxWidth().align(Alignment.CenterHorizontally),
+            ) {
+                item {
+                    SettingsProfileHeader(
+                        user = user,
+                        displayName = displayName,
+                        handle = handle,
+                        accent = accent,
+                        onEditProfile = { onNavigate(SettingsDestination.EditProfile) },
+                        onPickTarget = { pickTarget = it },
+                    )
                 }
-                HorizontalDivider(thickness = 1.dp, color = colors.divider)
-                Spacer(Modifier.height(8.dp))
+                item { HorizontalDivider(thickness = 1.dp, color = colors.divider) }
+                item { Spacer(Modifier.height(8.dp)) }
+                item {
                 Column(
                     Modifier.fillMaxWidth()
                         .background(colors.surfaceSecondary, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
@@ -397,6 +366,7 @@ fun SettingsRootScreen(
                         Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_log_out_of_chaty), color = colors.error, fontSize = 15.sp, fontWeight = FontWeight.Bold) // was: "Log Out of Chaty"
                     }
                 }
+                }
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
@@ -439,7 +409,11 @@ fun SettingsRootScreen(
                 }
             },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(
+                    // The confirmation dialog already scrolls its body. Nesting another
+                    // verticalScroll under it is measured with infinite height and can crash.
+                    // Previous: Modifier.verticalScroll(rememberScrollState())
+                ) {
                     Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_your_privacy_is_our_priority), color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 14.sp) // was: "Your Privacy is Our Priority"
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -475,7 +449,11 @@ fun SettingsRootScreen(
                 }
             },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(
+                    // The confirmation dialog already scrolls its body. Nesting another
+                    // verticalScroll under it is measured with infinite height and can crash.
+                    // Previous: Modifier.verticalScroll(rememberScrollState())
+                ) {
                     Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_chaty), color = colors.foreground, fontWeight = FontWeight.Bold) // was: "Chaty"
                     Spacer(Modifier.height(4.dp))
                     // SET-R1-016/028: one guarded lookup per dialog open, not per recomposition
@@ -487,7 +465,10 @@ fun SettingsRootScreen(
                             "Version ${info.versionName ?: "Unknown"} · Build $code"
                         } catch (e: Exception) { "Version Unknown" }
                     }
-                    Text(versionText, color = colors.foregroundSecondary, fontSize = 12.sp)
+                    // SET-R5-037: version/build can be copied for support.
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(versionText, color = colors.foregroundSecondary, fontSize = 12.sp)
+                    }
                     Spacer(Modifier.height(12.dp))
                     Text(
                         "Chaty is a messaging app with optional cross-app island features. Notification access lets the island show other apps' notifications and media controls. Overlay access, or the optional accessibility host, lets it appear above other apps. These are your choices, not requirements for ordinary messaging. Open the island permission settings to see access status and turn it off. Standard chats are not end-to-end encrypted in this version.\n\nPackage: ${context.packageName}",
@@ -502,6 +483,100 @@ fun SettingsRootScreen(
             },
         )
     }
+}
+
+/** SET-PROFILE-HEADER: profile header extracted from SettingsRootScreen (banner, avatar, name, handle, about). */
+@Composable
+private fun SettingsProfileHeader(
+    user: UserProfile,
+    displayName: String,
+    handle: String,
+    accent: Color,
+    onEditProfile: () -> Unit,
+    onPickTarget: (RootPick) -> Unit,
+) {
+    val colors = LocalAppColors.current
+    // The header is a separate composable after the CI extraction; density belongs here.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+                Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    // val bannerWidthDp = (minOf(LocalConfiguration.current.screenWidthDp, 720) - 32).coerceAtLeast(0)
+                    // SET-R1-007/R2-045: use the capped container width; cap height on wide windows
+                    // val bannerHeight = (if (bannerWidthDp > 480) 180f else bannerWidthDp * 9f / 16f).dp
+                    // Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                    // SET-NARROW: measure the real container width so narrow panes and split-screen size the banner correctly.
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                        val bannerWidth = maxWidth.coerceAtLeast(0.dp)
+                        val bannerHeight = if (bannerWidth > 480.dp) 180.dp else bannerWidth * 9f / 16f
+                        Box(
+                            Modifier.fillMaxWidth().height(bannerHeight)
+                                .background(colors.surface, RoundedCornerShape(24.dp)) // SET-R3-041: one card radius (24dp)
+                                .border(1.dp, colors.borderSubtle, RoundedCornerShape(24.dp))
+                                .clip(RoundedCornerShape(23.dp)),
+                        ) {
+                            val banner = user.bannerUrl?.trim().orEmpty()
+                            if (banner.isEmpty()) {
+                                Box(
+                                    Modifier.fillMaxSize().background(Brush.linearGradient(listOf(accent.copy(alpha = 0.30f), colors.surface, colors.background))),
+                                    contentAlignment = Alignment.Center,
+                                ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(34.dp), color = accent.copy(alpha = 0.65f)) }
+                            } else {
+                                val model = if (banner.startsWith("http://") || banner.startsWith("https://") || banner.startsWith("content://")) banner else "file://" + banner.removePrefix("file://")
+                                val fallback: @Composable () -> Unit = {
+                                    Box(Modifier.fillMaxSize().background(colors.surfaceElevated), contentAlignment = Alignment.Center) {
+                                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(30.dp), color = colors.foregroundSecondary)
+                                    }
+                                }
+                                // SET-R1-033 / SET-R3-030: avoid decoding original banner pixels
+                                // into a capped preview. Previous call omitted requestSize.
+                                val decodeSize = with(density) {
+                                    coil.size.Size(bannerWidth.roundToPx().coerceAtLeast(1), bannerHeight.roundToPx().coerceAtLeast(1))
+                                }
+                                ChatyAsyncImage(model, "", Modifier.fillMaxSize(), placeholder = fallback, error = fallback, requestSize = decodeSize)
+                            }
+                        }
+                        Box(
+                            Modifier.align(Alignment.TopEnd).padding(10.dp).size(48.dp).clip(CircleShape)
+                                .background(colors.surface.copy(alpha = 0.92f)).border(1.dp, colors.borderSubtle, CircleShape).clickable { onPickTarget(RootPick.Banner) }, // SET-R1-053: border keeps the button visible on busy banners
+                            contentAlignment = Alignment.Center,
+                        ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = "Change account banner", modifier = Modifier.size(19.dp), color = colors.foreground) }
+                        // Dart Positioned(bottom: -40): 4dp padding ring around an 84dp avatar.
+                        Box(
+                            Modifier.offset(y = 40.dp).size(92.dp)
+                                .background(colors.background, CircleShape)
+                                .border(1.dp, colors.borderSubtle, CircleShape)
+                                .padding(4.dp).clip(CircleShape)
+                                .semantics { contentDescription = "Change profile photo" }
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { onPickTarget(RootPick.Avatar) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val fallback: @Composable () -> Unit = {
+                                Box(Modifier.fillMaxSize().background(colors.surfaceElevated), contentAlignment = Alignment.Center) {
+                                    Text(if (user.avatarInitials.isNotEmpty()) user.avatarInitials else "U", color = colors.foreground, fontSize = AvatarInitialsTextSizeSp.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            // SET-R1-033: decode the avatar at its 84dp display diameter.
+                            val avatarPixels = with(density) { 84.dp.roundToPx().coerceAtLeast(1) }
+                            if (!user.avatarUrl.isNullOrEmpty()) ChatyAsyncImage(user.avatarUrl, "Change profile photo", Modifier.fillMaxSize(), error = fallback, requestSize = coil.size.Size(avatarPixels, avatarPixels))
+                            else fallback()
+                        }
+                    }
+                    Spacer(Modifier.height(48.dp))
+                    Row(
+                        Modifier.clip(RoundedCornerShape(12.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Edit profile") { onEditProfile() }.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(displayName, Modifier.weight(1f, fill = false), color = colors.foreground, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.35).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.width(4.dp))
+                        // SET-R1-049: chevron-right matches the row's real destination (was KeyboardArrowDown)
+                        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    Text(handle, color = colors.foregroundSecondary, fontSize = 13.sp)
+                    if (user.about.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(user.about, Modifier.padding(horizontal = 20.dp), color = colors.foregroundSecondary, fontSize = 12.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                    }
+                }
 }
 
 /** Dart _SettingsItemTile: 44dp icon box, title 16/w700, subtitle 13 (height 1.25), chevron 20. */

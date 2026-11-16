@@ -137,7 +137,8 @@ fun CameraCaptureViewfinder(
         Modifier
             .fillMaxSize()
             .clipToBounds()
-            .background(Color.Black)
+            // Previous value: Color.Black
+            .background(rememberCameraOverlayColors().backdrop)
             .onGloballyPositioned {
                 onViewport(LensSize(it.size.width.toFloat(), it.size.height.toFloat()))
             },
@@ -191,7 +192,8 @@ fun CameraCaptureViewfinder(
                     Modifier
                         .offset { IntOffset((focusRing.x - 34.dp.toPx()).coerceIn(0f, (maxWidth.toPx() - 68.dp.toPx()).coerceAtLeast(0f)).roundToInt(), (focusRing.y - 34.dp.toPx()).coerceIn(0f, (maxHeight.toPx() - 68.dp.toPx()).coerceAtLeast(0f)).roundToInt()) }
                         .size(68.dp)
-                        .border(2.dp, Color.White.copy(alpha = 0.9f), CircleShape)
+                        // Previous value: Color.White.copy(alpha = 0.9f)
+                        .border(2.dp, rememberCameraOverlayColors().content.copy(alpha = 0.9f), CircleShape)
                         // CAM-R4-004 prior: .semantics { contentDescription = "Focusing here" },
                         .semantics { contentDescription = focusingLabel },
                 )
@@ -243,12 +245,14 @@ fun CameraCaptureViewfinder(
             Text(
                 // CAM-R4-004 prior: "Filter can't be recorded; video captures the unfiltered camera",
                 stringResource(R.string.camera_filter_not_recorded),
-                color = Color.White,
+                // Previous value: Color.White
+                color = rememberCameraOverlayColors().content,
                 fontSize = 12.sp,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 118.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                    // Previous value: Color.Black.copy(alpha = 0.55f)
+                    .background(rememberCameraOverlayColors().scrimStrong, RoundedCornerShape(10.dp))
                     // CAM-R4-030 previous spacing: .padding(horizontal = 10.dp, vertical = 4.dp),
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
@@ -257,12 +261,14 @@ fun CameraCaptureViewfinder(
             Text(
                 // CAM-R4-004 prior: "Lens can't be recorded on this device",
                 stringResource(R.string.camera_lens_not_recorded),
-                color = Color.White,
+                // Previous value: Color.White
+                color = rememberCameraOverlayColors().content,
                 fontSize = 12.sp,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 96.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                    // Previous value: Color.Black.copy(alpha = 0.55f)
+                    .background(rememberCameraOverlayColors().scrimStrong, RoundedCornerShape(10.dp))
                     // CAM-R4-030 previous spacing: .padding(horizontal = 10.dp, vertical = 4.dp),
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
@@ -346,7 +352,8 @@ fun CameraCaptureViewfinder(
         }
         // ShutterOverlay parity: brief white flash on photo capture.
         if (captureFlashAlpha > 0f) {
-            Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = captureFlashAlpha)))
+            // Previous value: Color.White.copy(alpha = captureFlashAlpha)
+            Box(Modifier.fillMaxSize().background(rememberCameraOverlayColors().captureFlash.copy(alpha = captureFlashAlpha)))
         }
         // CAM-R1-028: 200 ms crossfade scrim over the frozen preview while a
         // flip-triggered rebind is in flight; static (no fade) under
@@ -382,7 +389,8 @@ internal fun CameraCaptureRoundAction(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(if (highlighted) Color.White.copy(alpha = 0.28f) else Color(0x99000000))
+            // Previous value: Color.White.copy(alpha = 0.28f) / Color(0x99000000)
+            .background(if (highlighted) rememberCameraOverlayColors().content.copy(alpha = 0.28f) else rememberCameraOverlayColors().scrim)
             // CAM-R4-034 previous: .clickable(onClick = onClick)
             .cameraActionFocusRing().clickable(onClick = onClick)
             .semantics { contentDescription = label; actionState?.let { stateDescription=it } },
@@ -391,14 +399,16 @@ internal fun CameraCaptureRoundAction(
         if (kind == "hdr") {
             androidx.compose.material3.Text(
                 "HDR",
-                color = Color.White,
+                // Previous value: Color.White
+                color = rememberCameraOverlayColors().content,
                 // CAM-R4-028 prior small text: fontSize = 11.sp,
                 style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp,
             )
         } else {
-            CameraGlyph(kind = kind, color = Color.White, size = 21.dp)
+            // Previous value: Color.White
+            CameraGlyph(kind = kind, color = rememberCameraOverlayColors().content, size = 21.dp)
         }
     }
 }
@@ -420,12 +430,14 @@ internal fun CameraCaptureNoCameraPane(
             modifier = Modifier.verticalScroll(rememberScrollState()).padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            CameraGlyph(kind = "camera", color = Color(0x8AFFFFFF), size = 46.dp)
+            // Previous value: Color(0x8AFFFFFF)
+            CameraGlyph(kind = "camera", color = rememberCameraOverlayColors().contentSecondary, size = 46.dp)
             // CAM-R4-030 previous spacing: Spacer(Modifier.height(14.dp))
             Spacer(Modifier.height(16.dp))
             Text(
                 title,
-                color = Color.White,
+                // Previous value: Color.White
+                color = rememberCameraOverlayColors().content,
                 fontSize = 17.sp,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.W800,
                 textAlign = TextAlign.Center,
@@ -433,16 +445,19 @@ internal fun CameraCaptureNoCameraPane(
             Spacer(Modifier.height(8.dp))
             Text(
                 message,
-                color = Color(0x99FFFFFF),
+                // Previous value: Color(0x99FFFFFF)
+                color = rememberCameraOverlayColors().contentSecondary,
                 textAlign = TextAlign.Center,
                 lineHeight = 19.5.sp,
             )
             Spacer(Modifier.height(20.dp))
             OutlinedButton(modifier = Modifier.cameraActionFocusRing().heightIn(min = 48.dp).focusRequester(actionFocus), shape = com.example.chat.ui.kit.ChatyActionShape, onClick = onAction) {
-                CameraGlyph(kind = "filters", color = Color.White, size = 18.dp)
+                // Previous value: Color.White
+                CameraGlyph(kind = "filters", color = rememberCameraOverlayColors().content, size = 18.dp)
                 // CAM-R4-030 previous spacing: Spacer(Modifier.width(6.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(actionLabel, color = Color.White)
+                // Previous value: Color.White
+                Text(actionLabel, color = rememberCameraOverlayColors().content)
             }
             if (secondaryActionLabel != null) {
                 androidx.compose.material3.FilledTonalButton(
@@ -520,7 +535,8 @@ fun CameraCaptureBottomControls(
                 // net233: root scrolling belongs to the bounded Screen parent, not this unbounded Column child.
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, Color(0xDE000000), Color.Black),
+                        // Previous value: Color.Transparent / Color(0xDE000000) / Color.Black
+                        listOf(rememberCameraOverlayColors().backdrop.copy(alpha = 0f), rememberCameraOverlayColors().backdrop.copy(alpha = 0.87f), rememberCameraOverlayColors().backdrop),
                     ),
                 )
                 // CAM-R4-030 conditional-spacing correction: .padding(bottom = (if (tight) 6 else 12).dp, top = (if (tight) 8 else 14).dp),
@@ -534,7 +550,8 @@ fun CameraCaptureBottomControls(
                 Text(
                     // CAM-R4-004 prior: "DOCUMENT · Capture, then adjust paper corners",
                     stringResource(R.string.camera_document_instruction),
-                    color = Color.White,
+                    // Previous value: Color.White
+                    color = rememberCameraOverlayColors().content,
                     // CAM-R4-028 prior small text: fontSize = 11.sp,
                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     letterSpacing = 1.0.sp,
@@ -594,7 +611,8 @@ fun CameraCaptureBottomControls(
                                     )
                                     .border(
                                         width = (if (isSelected) 2.5 else 1.2).dp,
-                                        color = if (isSelected) Color.White else Color(0x4DFFFFFF),
+                                        // Previous value: Color.White / Color(0x4DFFFFFF)
+                                        color = if (isSelected) rememberCameraOverlayColors().content else rememberCameraOverlayColors().contentDisabled,
                                         shape = CircleShape,
                                     ),
                                 contentAlignment = Alignment.Center,
@@ -602,14 +620,16 @@ fun CameraCaptureBottomControls(
                                 EffectGlyph(
                                     id = effect.id,
                                     category = effect.category,
-                                    color = if (isSelected) Color.Black else Color.White,
+                                    // Previous value: Color.Black / Color.White
+                                    color = if (isSelected) rememberCameraOverlayColors().contentInverse else rememberCameraOverlayColors().content,
                                     size = (if (tight) 20 else 22).dp,
                                 )
                             }
                             Spacer(Modifier.height(3.dp))
                             Text(
                                 effect.name,
-                                color = if (isSelected) Color.White else Color(0x99FFFFFF),
+                                // Previous value: Color.White / Color(0x99FFFFFF)
+                                color = if (isSelected) rememberCameraOverlayColors().content else rememberCameraOverlayColors().contentSecondary,
                                 // CAM-R4-028 prior small text: fontSize = 10.sp,
                                 style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                                 fontWeight = if (isSelected) {
@@ -696,7 +716,8 @@ fun CameraCaptureBottomControls(
                 ) {
                     Text(
                         lensManager.selected.name,
-                        color = Color.White,
+                        // Previous value: Color.White
+                        color = rememberCameraOverlayColors().content,
                         fontSize = 13.sp,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.W700,
                         letterSpacing = 0.15.sp,
@@ -710,7 +731,8 @@ fun CameraCaptureBottomControls(
                             .background(
                                 if (lensManager.selected.requiresFaceTracking &&
                                     faceHealth == TrackingHealth.tracked
-                                ) Color(0xFF7CFAAE) else Color(0x61FFFFFF),
+                                // Previous value: Color(0xFF7CFAAE) / Color(0x61FFFFFF)
+                                ) rememberCameraOverlayColors().success else rememberCameraOverlayColors().content.copy(alpha = 0.38f),
                             ),
                     )
                     // CAM-R4-030 previous spacing: Spacer(Modifier.width(6.dp))
@@ -726,7 +748,8 @@ fun CameraCaptureBottomControls(
                             // CAM-R4-004 prior: TrackingHealth.lost -> "Find a face"
                             TrackingHealth.lost -> stringResource(R.string.camera_find_face)
                         },
-                        color = Color(0xB3FFFFFF),
+                        // Previous value: Color(0xB3FFFFFF)
+                        color = rememberCameraOverlayColors().content.copy(alpha = 0.70f),
                         // CAM-R4-028 prior small text: fontSize = 11.sp,
                         style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                         overflow = TextOverflow.Ellipsis,
@@ -769,7 +792,8 @@ fun CameraCaptureBottomControls(
                     ) {
                         CameraGlyph(
                             kind = "flip",
-                            color = if (ready) Color.White else Color(0x4DFFFFFF),
+                            // Previous value: Color.White / Color(0x4DFFFFFF)
+                            color = if (ready) rememberCameraOverlayColors().content else rememberCameraOverlayColors().contentDisabled,
                             size = 22.dp,
                         )
                     }
@@ -778,14 +802,16 @@ fun CameraCaptureBottomControls(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape)
-                            .background(Color(0x33FFFFFF))
+                            // Previous value: Color(0x33FFFFFF)
+                            .background(rememberCameraOverlayColors().content.copy(alpha = 0.20f))
                             // CAM-R4-034 previous: .clickable(onClick = onBrowseLenses)
                             .cameraActionFocusRing().clickable(onClick = onBrowseLenses)
                             // CAM-R4-004 prior: .semantics { contentDescription = "Browse all lenses" },
                             .semantics { contentDescription = browseLensesLabel },
                         contentAlignment = Alignment.Center,
                     ) {
-                        CameraGlyph(kind = "browse_grid", color = Color.White, size = 20.dp)
+                        // Previous value: Color.White
+                        CameraGlyph(kind = "browse_grid", color = rememberCameraOverlayColors().content, size = 20.dp)
                     }
                 }
                 }
@@ -829,7 +855,8 @@ fun CameraCaptureBottomControls(
                                 .padding(start = (if (tight) 12 else 16).dp)
                                 .size(48.dp)
                                 .clip(CircleShape)
-                                .border(3.dp, Color.White, CircleShape)
+                                // Previous value: Color.White
+                                .border(3.dp, rememberCameraOverlayColors().content, CircleShape)
                                 // CAM-R4-034 previous: .clickable(onClick = onSnapshot)
                                 .cameraActionFocusRing().clickable(onClick = onSnapshot)
                                 // CAM-R4-004 prior: .semantics { contentDescription = "Take snapshot while recording" },
@@ -851,7 +878,8 @@ fun CameraCaptureBottomControls(
                         com.example.chat.ui.icons.ChatyIcon(
                             if (videoPaused) com.example.chat.ui.icons.ChatyIconId.playArrow
                             else com.example.chat.ui.icons.ChatyIconId.pause,
-                            color = Color.White, size = 18.dp,
+                            // Previous value: Color.White
+                            color = rememberCameraOverlayColors().content, size = 18.dp,
                         )
                     }
                 }
@@ -927,7 +955,8 @@ fun CameraCaptureBottomControls(
                 ) {
                     CameraGlyph(
                         kind = "flip",
-                        color = if (ready) Color.White else Color(0x4DFFFFFF),
+                        // Previous value: Color.White / Color(0x4DFFFFFF)
+                        color = if (ready) rememberCameraOverlayColors().content else rememberCameraOverlayColors().contentDisabled,
                         size = 27.dp,
                     )
                 }
@@ -974,7 +1003,8 @@ internal fun CameraCaptureModeButton(
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            color = if (selected) CameraModeActiveYellow else if(enabled) Color(0x99FFFFFF) else Color(0x4DFFFFFF),
+            // Previous value: Color(0x99FFFFFF) / Color(0x4DFFFFFF)
+            color = if (selected) CameraModeActiveYellow else if(enabled) rememberCameraOverlayColors().contentSecondary else rememberCameraOverlayColors().contentDisabled,
             fontSize = (if (tight) 12 else 13).sp,
             // CAM-R1-055: reinforce existing underline/weight with a theme-token shadow.
             style = androidx.compose.material3.MaterialTheme.typography.labelLarge.copy(
@@ -1017,7 +1047,8 @@ internal fun CameraCaptureShutter(enabled: Boolean, capturing: Boolean, videoAct
         modifier = Modifier
             .size(76.dp)
             .clip(CircleShape)
-            .border(4.dp, Color.White, CircleShape)
+            // Previous value: Color.White
+            .border(4.dp, rememberCameraOverlayColors().content, CircleShape)
             // CAM-R4-034 previous: .clickable(enabled = enabled && !capturing, onClick = { if (!capturing) onClick() })
             .cameraActionFocusRing().clickable(enabled = enabled && !capturing, onClick = { if (!capturing) onClick() })
             .padding(5.dp)
@@ -1028,7 +1059,8 @@ internal fun CameraCaptureShutter(enabled: Boolean, capturing: Boolean, videoAct
     ) {
         if (capturing) {
             CircularProgressIndicator(
-                color = Color.White,
+                // Previous value: Color.White
+                color = rememberCameraOverlayColors().content,
                 strokeWidth = 3.dp,
                 modifier = Modifier.padding(16.dp),
             )
@@ -1048,14 +1080,16 @@ internal fun CameraCaptureShutter(enabled: Boolean, capturing: Boolean, videoAct
                 Modifier
                     .fillMaxSize()
                     .clip(CircleShape)
-                    .background(if (enabled) CameraRecordingRed else Color(0x61FF0000)),
+                    // Previous value: Color(0x61FF0000)
+                    .background(if (enabled) CameraRecordingRed else rememberCameraOverlayColors().danger.copy(alpha = 0.38f)),
             )
         } else if (!hollow) {
             Box(
                 Modifier
                     .fillMaxSize()
                     .clip(CircleShape)
-                    .background(if (enabled) Color.White else Color(0x61FFFFFF)),
+                    // Previous value: Color.White / Color(0x61FFFFFF)
+                    .background(if (enabled) rememberCameraOverlayColors().content else rememberCameraOverlayColors().content.copy(alpha = 0.38f)),
             )
         }
         // hollow (lenses mode): only the white ring - the centered selected lens
@@ -1086,7 +1120,8 @@ fun CameraCaptureTimerTop(seconds: Int, modifier: Modifier = Modifier, remaining
             // Previous label showed time only, even when actual recording had no audio.
             (if (remainingLabel == null) elapsedLabel else stringResource(R.string.camera_recording_time_remaining, elapsedLabel, remainingLabel)) +
                 (if (muted) " · " + stringResource(R.string.camera_recording_muted_label) else ""),
-            color = Color.White,
+            // Previous value: Color.White
+            color = rememberCameraOverlayColors().content,
             fontSize = 14.sp,
             style = androidx.compose.material3.LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
             fontWeight = FontWeight.W600,
@@ -1117,7 +1152,8 @@ fun CameraCaptureConfirmPane(
     val discardLabel = stringResource(R.string.camera_discard_photo)
     val confirmLabel = stringResource(if (isChat) R.string.camera_send_photo else R.string.camera_post_status)
     val preparingLabel = stringResource(R.string.camera_preparing_photo)
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
+    // Previous value: Color.Black
+    Column(Modifier.fillMaxSize().background(rememberCameraOverlayColors().backdrop)) {
         // Prior preview Box omitted clipping, so transformed content could cover caption/actions.
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds(), contentAlignment = Alignment.Center) {
             // InteractiveViewer(maxScale: 4)
@@ -1170,7 +1206,8 @@ fun CameraCaptureConfirmPane(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                // Previous value: Color.Black
+                .background(rememberCameraOverlayColors().backdrop)
                 .navigationBarsPadding()
                 .imePadding()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
@@ -1188,7 +1225,8 @@ fun CameraCaptureConfirmPane(
                     .semantics { contentDescription = discardLabel },
                 contentAlignment = Alignment.Center,
             ) {
-                CameraGlyph(kind = "close", color = Color.White, size = 26.dp)
+                // Previous value: Color.White
+                CameraGlyph(kind = "close", color = rememberCameraOverlayColors().content, size = 26.dp)
             }
             // CAM-R4-030 previous spacing: Spacer(Modifier.width(10.dp))
             Spacer(Modifier.width(12.dp))
@@ -1203,15 +1241,20 @@ fun CameraCaptureConfirmPane(
                     Text(
                         // CAM-R4-004 prior: if (isChat && contactName != null) "Message $contactName…" else "Add a caption…",
                         if (isChat && contactName != null) stringResource(R.string.camera_message_contact, contactName) else stringResource(R.string.camera_caption_placeholder),
-                        color = Color(0x8AFFFFFF),
+                        // Previous value: Color(0x8AFFFFFF)
+                        color = rememberCameraOverlayColors().contentSecondary,
                     )
                 },
                 shape = RoundedCornerShape(26.dp),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color(0x1FFFFFFF),
-                    unfocusedContainerColor = Color(0x1FFFFFFF),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
+                    // Previous value: Color(0x1FFFFFFF)
+                    focusedContainerColor = rememberCameraOverlayColors().content.copy(alpha = 0.12f),
+                    // Previous value: Color(0x1FFFFFFF)
+                    unfocusedContainerColor = rememberCameraOverlayColors().content.copy(alpha = 0.12f),
+                    // Previous value: Color.White
+                    focusedTextColor = rememberCameraOverlayColors().content,
+                    // Previous value: Color.White
+                    unfocusedTextColor = rememberCameraOverlayColors().content,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                 ),

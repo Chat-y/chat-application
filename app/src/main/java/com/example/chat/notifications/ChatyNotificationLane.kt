@@ -32,6 +32,10 @@ interface ChatyNotificationSink {
     fun cancelMessage(tag: String)
     fun postIncomingCall(tag: String, callerName: String, isVideo: Boolean, declineNonce: String?)
     fun cancelIncomingCall(tag: String)
+    fun postMissedCall(tag: String, summaryTag: String, group: String) { throw UnsupportedOperationException("Missed-call sink unavailable") }
+    fun cancelMissedCall(tag: String) { throw UnsupportedOperationException("Missed-call sink unavailable") }
+    fun postCallbackReminder(tag: String) { throw UnsupportedOperationException("Call-reminder sink unavailable") }
+    fun cancelCallbackReminder(tag: String) { throw UnsupportedOperationException("Call-reminder sink unavailable") }
     /** Currently-active notification tags owned by this app, filtered by the Coordinator impl to this
      *  app's m:/c:-prefixed tags on the v1 message/call channels ONLY. The foreground-service
      *  notification (CallForegroundService SERVICE_ID=7401) is lifecycle-bound and MUST NOT appear here
@@ -46,7 +50,7 @@ class ChatyNotificationLane(
     private val sink: ChatyNotificationSink,
     private val executor: SerialDeferredExecutor,
 ) {
-    private enum class Kind { MESSAGE, CALL }
+    private enum class Kind { MESSAGE, CALL, MISSED, REMINDER }
 
     private class Record(val kind: Kind, val generation: Long)
 
@@ -86,6 +90,8 @@ class ChatyNotificationLane(
             when (kind) {
                 Kind.MESSAGE -> sink.cancelMessage(tag)
                 Kind.CALL -> sink.cancelIncomingCall(tag)
+                Kind.MISSED -> sink.cancelMissedCall(tag)
+                Kind.REMINDER -> sink.cancelCallbackReminder(tag)
             }
         }.isSuccess
         if (ok) {
@@ -98,6 +104,8 @@ class ChatyNotificationLane(
     }
 
     private fun kindFromPrefix(tag: String): Kind? = when {
+        tag.startsWith("cr:") -> Kind.REMINDER
+        tag.startsWith("mc:") -> Kind.MISSED
         tag.startsWith("m:") -> Kind.MESSAGE
         tag.startsWith("c:") -> Kind.CALL
         else -> null
@@ -115,6 +123,38 @@ class ChatyNotificationLane(
             pendingCancel.remove(tag) // A4: a later admitted post with the same tag clears its pending mark
             runCatching { sink.postMessage(tag, title, body, whenEpochMs, replyNonce, dismissNonce) }
             // P2: on throw, tag + nonces REMAIN (a partial post stays cancellable); no retry.
+        }
+    }
+
+    /** Terminal receipts retain owner admission but do not require a still-live call ID. */
+    fun postMissedCall(owner: ApiAccountScope, callId: String) {
+        submit {
+            if (!admitted(owner)) return@submit
+            val tag = "mc:${owner.generation}:call:$callId"
+            val summary = "mc:${owner.generation}:summary"
+            records[tag] = Record(Kind.MISSED, owner.generation)
+            records[summary] = Record(Kind.MISSED, owner.generation)
+            pendingCancel.remove(tag)
+            pendingCancel.remove(summary)
+            runCatching { sink.postMissedCall(tag, summary, "chaty.missed:${owner.generation}") }
+        }
+    }
+
+    fun postCallbackReminder(owner: ApiAccountScope, requestId: String) {
+        submit {
+            if (!admitted(owner)) return@submit
+            val tag = "cr:${owner.generation}:$requestId"
+            records[tag] = Record(Kind.REMINDER, owner.generation)
+            pendingCancel.remove(tag)
+            runCatching { sink.postCallbackReminder(tag) }
+        }
+    }
+
+    fun clearMissedCalls(owner: ApiAccountScope) {
+        submit {
+            if (!admitted(owner)) return@submit
+            records.filter { (_, record) -> record.kind == Kind.MISSED && record.generation == owner.generation }
+                .keys.toList().forEach { cancelTracked(it) }
         }
     }
 
@@ -206,6 +246,8 @@ class ChatyNotificationLane(
                     when (kind) {
                         Kind.MESSAGE -> sink.cancelMessage(tag)
                         Kind.CALL -> sink.cancelIncomingCall(tag)
+                        Kind.MISSED -> sink.cancelMissedCall(tag)
+                        Kind.REMINDER -> sink.cancelCallbackReminder(tag)
                     }
                 }.isSuccess
                 if (!ok) {

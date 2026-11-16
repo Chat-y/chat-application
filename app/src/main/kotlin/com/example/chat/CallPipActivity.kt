@@ -29,10 +29,13 @@ class CallPipActivity : ComponentActivity() {
     private var surfaceReady = false
     private var preparingPip = false
     private var internalNavigation = false
+    private var pipActionMuteState: Boolean? = null
+    private var pipActionVideoState: Boolean? = null
+    private var autoPipReady = false
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val changed: () -> Unit = { handler.post { revision++; if (!valid()) finishAndRemoveTask() }; Unit }
+    private val changed: () -> Unit = { handler.post { revision++; if (!valid()) { disableAutoPip(); finishAndRemoveTask() } else { configureAutoPip(); refreshPipActions() } }; Unit }
     private val authChanged: (ApiAccountScope) -> Unit = { changed() }
-    private val preferencesChanged: () -> Unit = { handler.post { if (!isDestroyed) revision++ }; Unit }
+    private val preferencesChanged: () -> Unit = { handler.post { if (!isDestroyed) { revision++; configureAutoPip() } }; Unit }
 
 
     private fun valid(): Boolean = com.example.chat.ui.calls.CallPipSessionPolicy.allows(
@@ -59,6 +62,7 @@ class CallPipActivity : ComponentActivity() {
 // Previous implementation retained:         if (ServiceLocator.preferencesController.security.protectFromScreenshots)
 // Previous implementation retained:             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         ServiceLocator.preferencesController.addListener(preferencesChanged)
+        ServiceLocator.callPresentationPrefs.addListener(preferencesChanged)
 
         setContent {
             @Suppress("UNUSED_EXPRESSION") revision
@@ -88,7 +92,8 @@ class CallPipActivity : ComponentActivity() {
                         ServiceLocator.callSignaling.setAudioRoute(if (current.audioRoute == AudioRouteType.speaker) AudioRouteType.earpiece else AudioRouteType.speaker)
                     } }, onHangup = { action { ServiceLocator.callSignaling.endCall() } },
 // Previous implementation retained:                     onReady = { surfaceReady = true; if (enterWhenReady) requestPip() })
-                    onReady = { surfaceReady = true; if (enterWhenReady) requestPip() },
+                    // Previous: onReady = { surfaceReady = true; if (enterWhenReady) requestPip() },
+                    onReady = { surfaceReady = true; configureAutoPip(); if (enterWhenReady) requestPip() },
                     microphoneCapture = ServiceLocator.callSignaling.activeMedia as? com.example.chat.data.services.CallMicrophoneCaptureProvider)
                 }
             }
@@ -126,41 +131,97 @@ class CallPipActivity : ComponentActivity() {
         window.decorView.postOnAnimation {
             window.decorView.postOnAnimation {
                 preparingPip = false
-                if (isFinishing || isDestroyed || !valid()) return@postOnAnimation
+                if (isFinishing || isDestroyed || internalNavigation || !valid() ||
+                    !ServiceLocator.callPresentationPrefs.value.pictureInPictureEnabled) {
+                    compact = ServiceLocator.nativeCallPip.isActive(this)
+                    return@postOnAnimation
+                }
                 val video = ServiceLocator.callSignaling.currentSession?.isVideo == true
-                if (!ServiceLocator.nativeCallPip.enter(this, if (video) 9 else 1, if (video) 16 else 1)) {
+                if (!ServiceLocator.nativeCallPip.enter(this, if (video) 9 else 1, if (video) 16 else 1, currentPipActions())) {
                     compact = false
                     pipUnavailable = "Floating call is unavailable. If picture-in-picture is blocked, allow it in Android settings. The call continues."
                     if (intent.getBooleanExtra(EXTRA_ENTER, false)) {
                         android.widget.Toast.makeText(this, "Call continues in the background. Open the call notification to allow picture-in-picture.", android.widget.Toast.LENGTH_LONG).show()
                         moveTaskToBack(true)
                     }
-                } else pipUnavailable = null
+                } else {
+                    pipUnavailable = null
+                    pipActionMuteState = ServiceLocator.callSignaling.currentSession?.isMuted
+                    pipActionVideoState = video
+                }
             }
         }
     }
 
+    /** API31 auto-entry applies only to this ready, call-only task, never the main navigation task. */
+    private fun configureAutoPip() {
+        if (Build.VERSION.SDK_INT < 31) return
+        if (isFinishing || isDestroyed || !surfaceReady || !valid() || internalNavigation ||
+            !ServiceLocator.callPresentationPrefs.value.pictureInPictureEnabled) { disableAutoPip(); return }
+        val video = ServiceLocator.callSignaling.currentSession?.isVideo == true
+        try {
+            setPictureInPictureParams(android.app.PictureInPictureParams.Builder()
+                .setAspectRatio(android.util.Rational(if (video) 9 else 1, if (video) 16 else 1))
+                .setActions(currentPipActions()).setAutoEnterEnabled(true).build())
+            autoPipReady = true
+        } catch (_: Exception) { disableAutoPip() }
+    }
+
+    private fun disableAutoPip() {
+        autoPipReady = false
+        if (Build.VERSION.SDK_INT >= 31) runCatching {
+            setPictureInPictureParams(android.app.PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
+        }
+    }
+
+    private fun currentPipActions(): List<android.app.RemoteAction> {
+        if (Build.VERSION.SDK_INT < 26 || !valid()) return emptyList()
+        val expected = owner ?: return emptyList()
+        val id = callId ?: return emptyList()
+        return ServiceLocator.notificationCoordinator.pipActions(expected, id)
+    }
+
+    private fun refreshPipActions() {
+        if (Build.VERSION.SDK_INT < 26 || !valid() || !ServiceLocator.nativeCallPip.isActive(this)) return
+        val session = ServiceLocator.callSignaling.currentSession ?: return
+        if (pipActionMuteState == session.isMuted && pipActionVideoState == session.isVideo) return
+        val updated = if (Build.VERSION.SDK_INT >= 31) {
+            configureAutoPip()
+            autoPipReady
+        } else ServiceLocator.nativeCallPip.updateActions(this, if (session.isVideo) 9 else 1,
+                if (session.isVideo) 16 else 1, currentPipActions())
+        if (updated) {
+            pipActionMuteState = session.isMuted
+            pipActionVideoState = session.isVideo
+        }
+    }
+
     private fun openPipSettings() {
+        disableAutoPip()
         if (Build.VERSION.SDK_INT < 26) return
         try { internalNavigation = true; startActivity(Intent("android.settings.PICTURE_IN_PICTURE_SETTINGS", Uri.parse("package:$packageName"))) }
         catch (_: Exception) { pipUnavailable = "Picture-in-picture settings are unavailable on this device. The call continues." }
     }
 
     private fun returnToApp() {
+        disableAutoPip()
         if (valid()) ServiceLocator.callPresentationController.showFullScreen()
         internalNavigation = true
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         finishAndRemoveTask()
     }
 
-    override fun onUserLeaveHint() { if (!internalNavigation && valid()) requestPip(); super.onUserLeaveHint() }
-    override fun onResume() { super.onResume(); internalNavigation = false }
+    override fun onUserLeaveHint() { if (!internalNavigation && valid() && !autoPipReady) requestPip(); super.onUserLeaveHint() }
+    override fun onResume() { super.onResume(); internalNavigation = false; configureAutoPip() }
     override fun onPictureInPictureModeChanged(active: Boolean, config: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(active, config)
         compact = active
+        if (active) refreshPipActions() // Restore actions after Activity recreation while already in PiP.
         // Do not publish this separate task's PiP mode into MainActivity's navigation presentation.
     }
     override fun onDestroy() {
+        disableAutoPip()
+        ServiceLocator.callPresentationPrefs.removeListener(preferencesChanged)
         ServiceLocator.callSignaling.removeStateListener(changed)
         ServiceLocator.preferencesController.removeListener(preferencesChanged)
         ServiceLocator.apiBackend.removeAuthScopeListener(authChanged)

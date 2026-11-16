@@ -10,6 +10,7 @@ internal class ProfilePickFiles(
     private val delete: (File) -> Unit = { it.delete(); Unit },
 ) : Closeable {
     private val owned = linkedMapOf<File, Int>()
+    private val pendingRemoval = linkedSetOf<File>()
     private var retired = false
     @Synchronized fun isActive() = !retired
     @Synchronized fun track(file: File) {
@@ -18,33 +19,48 @@ internal class ProfilePickFiles(
         owned.putIfAbsent(file, 0)
     }
     @Synchronized fun tryBegin(file: File): Boolean {
-        if (retired || !owned.containsKey(file)) return false
+        if (retired || file in pendingRemoval || !owned.containsKey(file)) return false
         owned[file] = owned.getValue(file) + 1
         return true
     }
     @Synchronized fun begin(file: File) {
-        check(!retired && owned.containsKey(file)) { "Profile picker was closed." }
+        check(!retired && file !in pendingRemoval && owned.containsKey(file)) { "Profile picker was closed." }
         owned[file] = owned.getValue(file) + 1
     }
     @Synchronized fun end(file: File) {
         val count = owned[file] ?: return
         check(count > 0)
         owned[file] = count - 1
-        if (retired && count == 1) { delete(file); owned.remove(file) }
+        if ((retired || file in pendingRemoval) && count == 1) {
+            delete(file); owned.remove(file); pendingRemoval.remove(file)
+        }
     }
     @Synchronized fun remove(file: File) {
-        check((owned[file] ?: 0) == 0) { "Profile file still in use." }
+        if ((owned[file] ?: 0) > 0) {
+            // A preview decoder may still own a read. Fence new readers and let the final reader delete.
+            pendingRemoval.add(file)
+            return
+        }
         delete(file)
         owned.remove(file)
+        pendingRemoval.remove(file)
     }
     @Synchronized fun transfer(file: File): Boolean {
-        if (retired || owned[file] != 0) return false
+        if (retired || file in pendingRemoval || owned[file] != 0) return false
         owned.remove(file)
         return true
     }
     override fun close() = synchronized(this) {
         retired = true
-        owned.filterValues { it == 0 }.keys.toList().forEach { delete(it); owned.remove(it) }
+        owned.filterValues { it == 0 }.keys.toList().forEach { delete(it); owned.remove(it); pendingRemoval.remove(it) }
         Unit
     }
 }
+
+// Previous immediate-delete paths retained:
+//         if (retired || !owned.containsKey(file)) return false
+//         check(!retired && owned.containsKey(file)) { "Profile picker was closed." }
+//         if (retired && count == 1) { delete(file); owned.remove(file) }
+//         check((owned[file] ?: 0) == 0) { "Profile file still in use." }
+//         if (retired || owned[file] != 0) return false
+//         owned.filterValues { it == 0 }.keys.toList().forEach { delete(it); owned.remove(it) }
