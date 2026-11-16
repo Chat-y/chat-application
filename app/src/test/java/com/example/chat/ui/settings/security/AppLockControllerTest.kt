@@ -4,6 +4,8 @@ import com.example.chat.data.e2ee.SecureKeyValueStore
 import com.example.chat.data.services.LocalLockService
 import com.example.chat.data.services.LockBiometrics
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -47,7 +49,7 @@ class AppLockControllerTest {
         val (c, svc) = make("Password") { n++ }
         svc.setCredential("Password", "secret1")
         repeat(5) { c.verifySecret("Password", "bad") }
-        assertEquals("Too many failed attempts. Try again in 30 seconds.", c.state.value.errorMessage)
+        assertEquals("Too many failed attempts. Try again in 0:30.", c.state.value.errorMessage)
         c.verifySecret("Password", "secret1")
         assertEquals(0, n)
         clock += 31_000
@@ -87,4 +89,30 @@ class AppLockControllerTest {
         c.loadCapabilities()
         assertFalse(c.state.value.hasConfiguredCredential)
     }
+    // Added during source-only work. Not executed in that checkpoint.
+    @Test fun disposedOverlayRejectsLateNativeSuccess() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val result = CompletableDeferred<Boolean>()
+        var unlocks = 0
+        val bio = object : LockBiometrics {
+            override suspend fun canCheckBiometrics() = true
+            override suspend fun availableBiometrics() = listOf("face")
+            override suspend fun isDeviceSupported() = true
+            override suspend fun authenticateBiometricOnly(reason: String): Boolean {
+                started.complete(Unit)
+                return result.await()
+            }
+            override suspend fun authenticateWithDeviceCredential(reason: String) = true
+        }
+        val (controller, _) = make("Biometric", bio) { unlocks++ }
+        val pending = async { controller.startNativeMethodIfNeeded() }
+        started.await()
+        controller.dispose()
+        result.complete(true)
+        pending.await()
+        assertEquals(0, unlocks)
+        assertFalse(controller.state.value.busy)
+        assertEquals("", controller.state.value.enteredPin)
+    }
+
 }

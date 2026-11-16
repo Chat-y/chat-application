@@ -40,6 +40,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -113,8 +114,10 @@ fun FriendMapScreen(
     var rendererReady by remember { mutableStateOf(false) }
     var layersOpen by remember { mutableStateOf(false) }
     var selectedStyle by remember { mutableStateOf(if (systemDark) "dark" else "positron") }
+    // MAP-R1-003: an explicit style choice survives system theme changes.
+    var styleChosenByUser by remember { mutableStateOf(false) }
     LaunchedEffect(systemDark) {
-        selectedStyle = if (systemDark) "dark" else "positron"
+        if (!styleChosenByUser) selectedStyle = if (systemDark) "dark" else "positron"
         buildingsEnabled = false
         mapView?.setTheme(systemDark)
         mapView?.selectStyle(selectedStyle)
@@ -216,7 +219,7 @@ fun FriendMapScreen(
                 Text("Friends map", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.size(48.dp))
             }
-            Box(Modifier.fillMaxWidth().weight(1f)) {
+            Box(Modifier.fillMaxWidth().weight(1f).semantics { paneTitle = "Friends map preview" }) { // MAP-R4-168
             if (mapActive) {
                 AndroidView(
                     factory = { viewContext -> GeoLibreLocationMapView(viewContext,
@@ -224,7 +227,7 @@ fun FriendMapScreen(
                         onPinSelected = { },
                         onUnavailable = { status = it }, onAttributionLink = onAttributionLink,
                         onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); status = ""; onMapReady() }, nativeLayers = true,
-                        systemDark = systemDark, onStyleChanged = { selectedStyle = it }, onViewChanged = { buildingsEnabled = it },
+                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true }, onViewChanged = { buildingsEnabled = it },
                     ).also { mapView = it; ownPin?.let { pin -> it.showPin(pin.coordinate) } } },
                     modifier = Modifier.fillMaxSize(),
                     update = { it.setTheme(systemDark) },
@@ -269,7 +272,8 @@ fun FriendMapScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = panelMaxHeight),
             ) {
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Box(Modifier.align(Alignment.CenterHorizontally).size(width = 36.dp, height = 4.dp).background(mapColors.onSurfaceVariant.copy(alpha = 0.4f), CircleShape))
+                    // MAP-R4-197: drag-handle look removed (tray is not draggable); commented out, not deleted.
+                    // Box(Modifier.align(Alignment.CenterHorizontally).size(width = 36.dp, height = 4.dp).background(mapColors.onSurfaceVariant.copy(alpha = 0.4f), CircleShape))
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {

@@ -15,4 +15,11 @@ object ReferenceLayoutMetrics {
     const val identityCenterOffsetDp = actionBarHeightDp / 2
     const val identityIconSizeDp = 38
     const val identityTextSizeSp = 30
+
+    // R1-47: opt-in compact Home identity geometry; existing shared metrics stay
+    // unchanged for other screens. Use the height as a minimum and allow text
+    // to grow at large font scales rather than clipping personalization.
+    const val homeCompactIdentityMinHeightDp = 64
+    const val homeCompactIdentityIconSizeDp = 28
+    const val homeCompactIdentityTextSizeSp = 20
 }

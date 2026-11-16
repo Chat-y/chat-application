@@ -42,32 +42,43 @@ fun CameraOptionsPanel(
     onChange: (CameraCaptureOptions) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    showPhotoTimer: Boolean = true,
+    frontCamera: Boolean = false,
 ) {
-    Column(modifier.background(Color(0xEE101010), RoundedCornerShape(10.dp))
+    Column(modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surface, RoundedCornerShape(10.dp))
         .heightIn(max = 350.dp).verticalScroll(rememberScrollState())
         .semantics { contentDescription="Camera options panel" }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-            Text("Camera options",color=Color.White,modifier=Modifier.weight(1f))
-            androidx.compose.material3.TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onClose){Text("Close",color=Color.White)}
+            Text("Camera options",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface,modifier=Modifier.weight(1f))
+            androidx.compose.material3.TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onClose){Text("Close",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurface)}
         }
-        Text("Ratio",color=Color.LightGray)
+        Text("Capture", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+        Text("Ratio",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CaptureAspect.entries.forEach { aspect ->
                 OptionChip(aspect.label, options.aspect == aspect, { onChange(options.copy(aspect = aspect)) }, Modifier.weight(1f))
             }
         }
-        Text("Timer",color=Color.LightGray)
+        if (showPhotoTimer) {
+        Text("Timer",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(0, 3, 5, 10).forEach { seconds ->
                 OptionChip(if (seconds == 0) "Off" else "${seconds}s", options.timerSeconds == seconds,
                     { onChange(options.copy(timerSeconds = seconds)) }, Modifier.weight(1f))
             }
         }
-        Text("Capture",color=Color.LightGray)
+        }
+        if (showPhotoTimer) {
+            OptionChip(if (frontCamera) "Mirror saved selfies" else "Mirror selfies · front camera only",
+                options.mirrorSelfies, { onChange(options.copy(mirrorSelfies = !options.mirrorSelfies)) },
+                Modifier.fillMaxWidth(), frontCamera)
+        }
+        Text("Overlays", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OptionChip("Grid lines", options.grid, { onChange(options.copy(grid = !options.grid)) }, Modifier.weight(1f))
             OptionChip("Level", options.level, { onChange(options.copy(level = !options.level)) }, Modifier.weight(1f))
         }
+        Text("Video / preview", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
         OptionChip(if (stabilizationSupported) "Preview stabilization" else "Stabilization unavailable on this camera",
             options.stabilization && stabilizationSupported, { if (stabilizationSupported) onChange(options.copy(stabilization = !options.stabilization)) }, Modifier.fillMaxWidth(), stabilizationSupported)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -76,14 +87,16 @@ fun CameraOptionsPanel(
         }
         OptionChip(if (nightSupported) "Night mode · hold still" else "Night mode unavailable on this camera",
             options.night && nightSupported, { if (nightSupported) onChange(options.copy(night = !options.night)) }, Modifier.fillMaxWidth(), nightSupported)
-        Text("Night uses the phone maker's supported multi-frame mode. It cannot see in total darkness. Timer, grid and level still work. Face lenses and preview stabilization are off during Night.",color=Color.LightGray)
-        Text("Clarity adjusts photo contrast only. Stabilization affects preview where supported; it does not restore blurred detail. Document scanning has its own crop review.", color = Color.LightGray)
+        Text("Night and Portrait replace HDR while active; these extension modes do not stack.",
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Night uses the phone maker's supported multi-frame mode. It cannot see in total darkness. Timer, grid and level still work. Face lenses and preview stabilization are off during Night.",color=androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Clarity adjusts photo contrast only. Stabilization affects preview where supported; it does not restore blurred detail. Document scanning has its own crop review.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun OptionChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier, enabled: Boolean = true) {
-    Box(modifier.heightIn(min=48.dp).clip(com.example.chat.ui.kit.ChatyActionShape).background(if (selected) androidx.compose.material3.MaterialTheme.colorScheme.primary else Color(0xFF292929), com.example.chat.ui.kit.ChatyActionShape)
+    Box(modifier.heightIn(min=48.dp).clip(com.example.chat.ui.kit.ChatyActionShape).background(if (selected) androidx.compose.material3.MaterialTheme.colorScheme.primary else androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant, com.example.chat.ui.kit.ChatyActionShape)
         .clearAndSetSemantics {
             this.text = AnnotatedString(text)
             this.selected = selected
@@ -91,7 +104,7 @@ private fun OptionChip(text: String, selected: Boolean, onClick: () -> Unit, mod
             if(!enabled) disabled() else onClick { onClick(); true }
         }
         .clickable(enabled = enabled, onClick = onClick).padding(horizontal=10.dp,vertical=12.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.onPrimary else if (enabled) Color.White else Color.Gray)
+        Text(text, color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.onPrimary else if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.material3.MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
     }
 }
 

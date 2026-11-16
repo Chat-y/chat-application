@@ -88,6 +88,7 @@ fun LockCredentialSetupSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surface,
         shape = com.example.chat.ui.kit.ChatyModalShape,
+        properties = androidx.compose.material3.ModalBottomSheetProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
     ) {
         LockCredentialSetupContent(method, pinLength, service, replaceExisting, onResult)
     }
@@ -101,36 +102,56 @@ fun LockCredentialSetupContent(
     replaceExisting: Boolean,
     onResult: (Boolean) -> Unit,
 ) {
+    com.example.chat.ui.kit.ProtectSensitiveWindow()
     val cs = MaterialTheme.colorScheme
-    val flow = remember(method, pinLength, replaceExisting) { LockCredentialSetupFlow(method, pinLength, service, replaceExisting) }
+    val flow = remember(method, pinLength, replaceExisting, service) { LockCredentialSetupFlow(method, pinLength, service, replaceExisting) }
     var tick by remember(flow) { mutableIntStateOf(0) }
     DisposableEffect(flow) {
         val l: () -> Unit = { tick += 1 }
         flow.addListener(l)
-        onDispose { flow.removeListener(l) }
+        onDispose { flow.removeListener(l); flow.clearSensitiveState() }
     }
     @Suppress("UNUSED_EXPRESSION") tick
     val scope = rememberCoroutineScope()
     LaunchedEffect(flow) { flow.init() }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(flow, lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                flow.clearSensitiveState()
+                onResult(false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
-    val pins = remember(pinLength) { mutableStateListOf<String>().apply { repeat(pinLength) { add("") } } }
-    val focusRequesters = remember(pinLength) { List(pinLength) { FocusRequester() } }
-    var focusedPin by remember { mutableIntStateOf(-1) }
-    var text by remember { mutableStateOf("") }
-    var obscure by remember { mutableStateOf(true) }
-    val padState = remember { PatternLockPadState() }
+    val pins = remember(flow, pinLength) { mutableStateListOf<String>().apply { repeat(pinLength) { add("") } } }
+    val focusRequesters = remember(flow, pinLength) { List(pinLength) { FocusRequester() } }
+    var focusedPin by remember(flow) { mutableIntStateOf(-1) }
+    var text by remember(flow) { mutableStateOf("") }
+    var obscure by remember(flow) { mutableStateOf(true) }
+    val padState = remember(flow) { PatternLockPadState() }
 
     fun clearPin() { for (i in pins.indices) pins[i] = ""; runCatching { focusRequesters.first().requestFocus() } }
     fun apply(o: SetupOutcome) {
+        if (!flow.initialized) return
         when (o) {
             SetupOutcome.clearPin -> clearPin()
             SetupOutcome.clearText -> text = ""
             SetupOutcome.resetPad -> padState.reset()
-            SetupOutcome.saved -> onResult(true)
+            SetupOutcome.saved -> {
+                for (i in pins.indices) pins[i] = ""
+                text = ""
+                padState.reset()
+                flow.clearSensitiveState()
+                onResult(true)
+            }
             SetupOutcome.none -> {}
         }
     }
     fun doContinue() {
+        if (!flow.initialized || flow.busy) return
         scope.launch {
             val input = if (flow.isPin) pins.joinToString("") else text
             apply(flow.handleContinue(input))
@@ -195,7 +216,7 @@ fun LockCredentialSetupContent(
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = { padState.reset() }, enabled = !flow.busy, modifier = Modifier.weight(1f)) { Text("Clear") }
+                    OutlinedButton(onClick = { padState.reset() }, enabled = flow.initialized && !flow.busy, modifier = Modifier.weight(1f)) { Text("Clear") }
                     Button(
                         onClick = { scope.launch { apply(flow.handlePatternContinue()) } },
                         enabled = flow.canContinuePattern,
@@ -217,7 +238,7 @@ fun LockCredentialSetupContent(
                 Spacer(Modifier.height(18.dp))
                 Button(
                     onClick = { scope.launch { apply(flow.verifyNativeMethod()) } },
-                    enabled = !flow.busy,
+                    enabled = flow.initialized && !flow.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (flow.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -236,11 +257,11 @@ fun LockCredentialSetupContent(
                         OutlinedTextField(
                             value = pins.joinToString(""),
                             onValueChange = { raw ->
-                                val digits = raw.filter { it.isDigit() }.take(pinLength)
+                                val digits = raw.filter { it in '0'..'9' }.take(pinLength)
                                 for (index in pins.indices) pins[index] = digits.getOrNull(index)?.toString() ?: ""
                                 if (digits.length == pinLength) doContinue()
                             },
-                            enabled = !flow.busy,
+                            enabled = flow.initialized && !flow.busy,
                             label = { Text("$pinLength-digit PIN") },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
@@ -264,8 +285,9 @@ fun LockCredentialSetupContent(
                             ) {
                                 BasicTextField(
                                     value = pins[index],
+                                    enabled = flow.initialized && !flow.busy,
                                     onValueChange = { raw ->
-                                        val v = raw.filter { it.isDigit() }.takeLast(1)
+                                        val v = raw.filter { it in '0'..'9' }.takeLast(1)
                                         pins[index] = v
                                         if (v.isNotEmpty()) {
                                             if (index < pinLength - 1) focusRequesters[index + 1].requestFocus()
@@ -285,7 +307,7 @@ fun LockCredentialSetupContent(
                     }
                 }
                 Spacer(Modifier.height(24.dp))
-                Button(onClick = { doContinue() }, enabled = !flow.busy, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { doContinue() }, enabled = flow.initialized && !flow.busy, modifier = Modifier.fillMaxWidth()) {
                     if (flow.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     else Text(if (flow.step == SetupStep.confirmNew) "Confirm PIN" else "Continue")
                 }
@@ -294,7 +316,7 @@ fun LockCredentialSetupContent(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    enabled = !flow.busy,
+                    enabled = flow.initialized && !flow.busy,
                     singleLine = true,
                     visualTransformation = if (obscure) PasswordVisualTransformation() else VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
@@ -326,7 +348,7 @@ fun LockCredentialSetupContent(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { doContinue() }, enabled = !flow.busy, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { doContinue() }, enabled = flow.initialized && !flow.busy, modifier = Modifier.fillMaxWidth()) {
                     if (flow.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     else Text(if (flow.step == SetupStep.confirmNew) "Save Password" else "Continue")
                 }

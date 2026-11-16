@@ -29,13 +29,13 @@ object LocalConversationSearch {
         query: String,
         isHidden: (String) -> Boolean,
     ): List<Conversation> {
-        val lower = query.trim().lowercase()
+        val lower = query.trim().lowercase(java.util.Locale.ROOT)
         if (lower.isEmpty()) return emptyList()
         return conversations.filter { conversation ->
             // Privacy rule: Exclude hidden locked chats from global search
             if (isHidden(conversation.id)) return@filter false
-            conversation.title.lowercase().contains(lower) ||
-                conversation.lastMessageText.lowercase().contains(lower)
+            conversation.title.lowercase(java.util.Locale.ROOT).contains(lower) ||
+                conversation.lastMessageText.lowercase(java.util.Locale.ROOT).contains(lower)
         }
     }
 }

@@ -7,10 +7,13 @@ enum class SelectionAction { forward, copy, delete, star }
 
 /** Shared capability intersection. No translation action until a real provider exists. */
 object SelectionActionPolicy {
+    /** Only absent or explicit Boolean false is a normal message. Unexpected encodings fail closed. */
+    internal fun hasProtectedViewOnceFlag(value: Any?): Boolean = value != null && value != false
+
     fun available(messages: List<ChatMessage>): Set<SelectionAction> {
         if (messages.isEmpty()) return emptySet()
         val actions = linkedSetOf(SelectionAction.delete)
-        val standard = messages.all { it.type != MessageType.system && !it.isDeletedForEveryone && !it.isDeletedForMe && !it.isRevokedBySender && it.metadata["view_once"] != true }
+        val standard = messages.all { it.type != MessageType.system && !it.isDeletedForEveryone && !it.isDeletedForMe && !it.isRevokedBySender && !hasProtectedViewOnceFlag(it.metadata["view_once"]) }
         if (standard) {
             actions += SelectionAction.forward
             actions += SelectionAction.star

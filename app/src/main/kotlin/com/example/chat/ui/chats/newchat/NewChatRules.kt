@@ -56,12 +56,14 @@ object NewChatRules {
     }
 
     /** New-message lookup is an exact username, never a name/email search. */
-    fun normalizedUsername(value: String): String = value.trim().removePrefix("@").lowercase(java.util.Locale.ROOT)
+    fun usernameKey(value: String): String = value.lowercase(java.util.Locale.ROOT)
+
+    fun normalizedUsername(value: String): String = usernameKey(value.trim().removePrefix("@"))
 
     fun exactUsernameMatch(users: List<UserProfile>, query: String, selfId: String?): List<UserProfile> {
         val target = normalizedUsername(query)
         if (target.isEmpty()) return emptyList()
-        val matches = users.filter { it.id != selfId && it.username.lowercase(java.util.Locale.ROOT) == target }
+        val matches = users.filter { it.id != selfId && usernameKey(it.username) == target }
             .distinctBy { it.id }
         check(matches.size <= 1) { "This username matched more than one account. Try again later." }
         return matches

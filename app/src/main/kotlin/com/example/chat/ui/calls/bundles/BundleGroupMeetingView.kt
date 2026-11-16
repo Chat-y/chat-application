@@ -14,6 +14,7 @@ import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -86,7 +87,7 @@ fun BundleGroupMeetingView(
                         color = Color.White,
                     )
                     Text(
-                        text = "${participants.size} Participants • ${durationSeconds / 60}:${String.format("%02d", durationSeconds % 60)}",
+                        text = "${participants.size} Participants • ${com.example.chat.ui.calls.formatCallDuration(durationSeconds)}",
                         fontSize = 12.sp,
                         color = tokens.secondaryText,
                     )
@@ -118,7 +119,7 @@ fun BundleGroupMeetingView(
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                text = activeSpeaker.displayName.take(1).uppercase(),
+                                text = com.example.chat.ui.calls.callInitials(activeSpeaker.displayName),
                                 fontSize = 38.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
@@ -173,7 +174,7 @@ fun BundleGroupMeetingView(
                                                 .background(tokens.primaryAccent.copy(alpha = 0.3f), CircleShape),
                                             contentAlignment = Alignment.Center,
                                         ) {
-                                            Text(p.displayName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
+                                            Text(com.example.chat.ui.calls.callInitials(p.displayName), color = Color.White, fontWeight = FontWeight.Bold)
                                         }
                                         Spacer(Modifier.height(6.dp))
                                         Text(p.displayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -200,9 +201,11 @@ fun BundleGroupMeetingView(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ControlIconButton(Icons.Rounded.Mic, false, tokens.primaryAccent, {})
-                    ControlIconButton(Icons.Rounded.Videocam, false, tokens.primaryAccent, {})
-                    ControlIconButton(Icons.Rounded.VolumeUp, true, tokens.primaryAccent, {})
+                    // CALL-R1-54: inert concept controls are dimmed so they read as disabled,
+                    // not as live buttons that ignore taps.
+                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Mic, false, tokens.primaryAccent, {}) }
+                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.Videocam, false, tokens.primaryAccent, {}) }
+                    androidx.compose.foundation.layout.Box(Modifier.alpha(0.4f)) { ControlIconButton(Icons.Rounded.VolumeUp, true, tokens.primaryAccent, {}) }
                     ControlIconButton(Icons.Rounded.CallEnd, true, tokens.declineColor, onLeaveMeeting)
                 }
             }
@@ -301,12 +304,14 @@ fun BundleParticipantInviteSheet(
                                 .background(tokens.primaryAccent),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(contact.displayName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(com.example.chat.ui.calls.callInitials(contact.displayName), color = Color.White, fontWeight = FontWeight.Bold)
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(contact.displayName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text("@${contact.id.take(8)}", color = tokens.secondaryText, fontSize = 12.sp)
+                            // CALL-R1-55: raw opaque ids are not handles; CallContactOption has no
+                            // username field yet, so the line is dropped instead of faked.
+                            // Text("@${contact.id.take(8)}", color = tokens.secondaryText, fontSize = 12.sp)
                         }
 
                         Button(

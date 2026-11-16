@@ -59,7 +59,13 @@ data class CallPresentationPreferences(
     val callExperienceBundleId: String = "apple_ios",
     /** Empty means preserve existing message design until explicitly selected. */
     val messageExperienceBundleId: String = "",
-)
+) {
+    companion object {
+        /** Single source of truth for defaults (CS1-59): CallSettingsScreen's
+         *  CallPresentationState references this instead of duplicating literals. */
+        val defaults: CallPresentationPreferences = CallPresentationPreferences()
+    }
+}
 
 /** Persistence seam so the store stays JVM-testable; the Android adapter
  *  (SharedPreferences) lives in CallPresentationAndroid.kt. */

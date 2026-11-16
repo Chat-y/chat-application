@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,10 +62,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -231,7 +240,12 @@ fun rememberProfileMediaPicker(
             return
         }
         scope.launch {
-            val file = copyPickToCache(context, uri, state.value?.pendingSquare ?: square, files)
+            val file = try {
+                copyPickToCache(context, uri, state.value?.pendingSquare ?: square, files)
+            } catch (tooLarge: PickTooLargeException) {
+                if (active()) onError(tooLarge.message ?: "That photo is too large.")
+                return@launch
+            }
             if (!active()) { files.close(); return@launch }
             if (file == null) {
                 onError("The selected image is no longer accessible.")
@@ -241,8 +255,9 @@ fun rememberProfileMediaPicker(
         }
     }
 
+    // System photo picker: no storage permission, privacy-preserving (P1-06).
     val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent(),
+        ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         val s = state.value ?: return@rememberLauncherForActivityResult
         ingest(uri, s.pendingIsAvatar, s.pendingTitle)
@@ -251,7 +266,9 @@ fun rememberProfileMediaPicker(
     if (state.value == null) {
         // One-time init; launchers are captured by reference and stable.
         state.value = ProfileMediaPickerState(
-            launchGallery = { check(active()); galleryLauncher.launch("image/*") },
+            launchGallery = { check(active()); galleryLauncher.launch(
+                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            ) },
             launchCamera = {
                 check(active())
                 scope.launch {
@@ -266,7 +283,7 @@ fun rememberProfileMediaPicker(
                         if (bounded == null) onError("The captured image could not be read.")
                         else pendingCrop = PendingCrop(bounded, state.value?.pendingIsAvatar ?: true, state.value?.pendingTitle ?: "Crop Avatar Photo")
                     } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                    catch (error: Exception) { if (active()) onError(error.message ?: "Could not capture profile photo.") }
+                    catch (error: Exception) { if (active()) onError(cameraErrorMessage(error)) }
                 }
 
             },
@@ -304,11 +321,55 @@ fun rememberProfileMediaPicker(
  *  applied, matching what Image.file shows. */
 private suspend fun copyPickToCache(context: Context, uri: Uri, square: Int, files: ProfilePickFiles): File? =
     withContext(Dispatchers.IO) {
-        val bytes = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-        }.getOrNull() ?: return@withContext null
+        // Bounded read: reject oversized sources before decoding (P1-15).
+        var picked: ByteArray? = null
+        try {
+            picked = context.contentResolver.openInputStream(uri)?.use { stream ->
+                readCapped(stream, MAX_PICK_BYTES) ?: throw PickTooLargeException()
+            }
+        } catch (tooLarge: PickTooLargeException) {
+            throw tooLarge
+        } catch (_: Exception) {
+            picked = null
+        }
+        val bytes = picked ?: return@withContext null
         boundImageBytesToCache(context, bytes, square, files)
     }
+
+private const val MAX_PICK_BYTES = 20L * 1024 * 1024
+
+private class PickTooLargeException : Exception("That photo is too large. Choose one under 20 MB.")
+
+/** Reads [stream] fully, or returns null as soon as it exceeds [max] bytes. */
+private fun readCapped(stream: java.io.InputStream, max: Long): ByteArray? {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    var total = 0L
+    while (true) {
+        val n = stream.read(buffer)
+        if (n < 0) break
+        total += n
+        if (total > max) return null
+        out.write(buffer, 0, n)
+    }
+    return out.toByteArray()
+}
+
+/** Draws [bitmap] onto opaque white so alpha never turns black when JPEG-encoded (P2-18). */
+private fun flattenOnWhite(bitmap: Bitmap): Bitmap {
+    if (!bitmap.hasAlpha()) return bitmap
+    val out = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(out)
+    canvas.drawColor(android.graphics.Color.WHITE)
+    canvas.drawBitmap(bitmap, 0f, 0f, null)
+    return out
+}
+
+private fun cameraErrorMessage(error: Exception): String = when (error) {
+    is android.content.ActivityNotFoundException -> "No camera app is available on this device."
+    is SecurityException -> "Camera permission is needed to take a photo. You can allow it in Settings."
+    else -> ProfileErrorMessages.friendly(error, "Could not capture profile photo.")
+}
 
 /** Camera-capture variant (Dart image_picker bounds camera captures the same way). */
 private suspend fun boundPickedFile(context: Context, file: File, square: Int, files: ProfilePickFiles): File? =
@@ -325,6 +386,7 @@ private fun boundImageBytesToCache(context: Context, bytes: ByteArray, square: I
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+            // Memory bound (P4-05): long edge <= square*1.8 (avatar ~922px, banner ~2304px), ~4 bytes/px ARGB.
             val maxDim = (square * 1.8).toInt()
             var sample = 1
             while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) > maxDim) sample *= 2
@@ -333,13 +395,15 @@ private fun boundImageBytesToCache(context: Context, bytes: ByteArray, square: I
                 ?: return@runCatching null
             // Orientation flag lives on the ORIGINAL bytes.
             val oriented = ProfileImageCompressor.applyOrientation(decoded, bytes)
+            val flat = flattenOnWhite(oriented)
             val file = File(
                 context.cacheDir,
                 "chaty_pick_${System.currentTimeMillis()}.jpg",
             )
             files.track(file); files.begin(file)
-            try { file.outputStream().use { oriented.compress(Bitmap.CompressFormat.JPEG, 95, it) } }
+            try { file.outputStream().use { flat.compress(Bitmap.CompressFormat.JPEG, 95, it) } }
             finally { files.end(file) }
+            if (flat !== oriented) flat.recycle()
             if (oriented !== decoded) oriented.recycle()
             decoded.recycle()
             file
@@ -369,6 +433,8 @@ private fun ProfileImageCropperOwnedDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    val accentStroke = remember(theme.accentColor) { Color(theme.accentColor).copy(alpha = 0.8f) }
 
     var quarterRotations by remember { mutableIntStateOf(0) }
     var isProcessing by remember { mutableStateOf(false) }
@@ -412,7 +478,7 @@ private fun ProfileImageCropperOwnedDialog(
                     color = Color.White,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).semantics { heading() },
                 )
                 IconButton(onClick = {
                     userScale = 1f
@@ -442,8 +508,9 @@ private fun ProfileImageCropperOwnedDialog(
             // Crop frame sizing (Dart MediaQuery width - 48; banner 16:9).
             val cropBoxWidthDp = (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp - 48).dp
             val cropBoxHeightDp = if (isAvatar) cropBoxWidthDp else cropBoxWidthDp * 9 / 16
-            val cropWpx = with(density) { cropBoxWidthDp.toPx() }
-            val cropHpx = with(density) { cropBoxHeightDp.toPx() }
+            // Cached px values (P4-18): recomputed only when density or frame size changes.
+            val cropWpx = remember(density, cropBoxWidthDp) { with(density) { cropBoxWidthDp.toPx() } }
+            val cropHpx = remember(density, cropBoxHeightDp) { with(density) { cropBoxHeightDp.toPx() } }
 
             // Cover-fit display sizing and clamp - the Dart formulas, JVM-tested
             // in ProfileCropGeometryTest.
@@ -468,7 +535,25 @@ private fun ProfileImageCropperOwnedDialog(
                     Modifier
                         // Rendered-bounds marker for ProfileCropAspectProofTest: the
                         // export contract is 2.5x of this rendered crop window.
-                        .semantics { testTagsAsResourceId = true }
+                        .semantics {
+                            testTagsAsResourceId = true
+                            // Switch/TalkBack users can zoom without pinching (P1-36).
+                            stateDescription = "Zoom " + "%.1f".format(userScale) + "x"
+                            customActions = listOf(
+                                CustomAccessibilityAction("Zoom in") {
+                                    val next = (userScale + 0.5f).coerceAtMost(4f)
+                                    userScale = next
+                                    userOffset = clampOffset(userOffset, next)
+                                    true
+                                },
+                                CustomAccessibilityAction("Zoom out") {
+                                    val next = (userScale - 0.5f).coerceAtLeast(1f)
+                                    userScale = next
+                                    userOffset = clampOffset(userOffset, next)
+                                    true
+                                },
+                            )
+                        }
                         .testTag("profile-crop-window")
                         // Dart BoxShadow blur 24 spread 8 black 0.6 (approximation:
                         // Compose shadow has no spread radius).
@@ -483,10 +568,23 @@ private fun ProfileImageCropperOwnedDialog(
                         .background(Color(0xFF1E293B), RoundedCornerShape(if (isAvatar) cropBoxWidthDp / 2 else 16.dp))
                         .border(
                             2.5.dp,
-                            Color(theme.accentColor).copy(alpha = 0.8f),
+                            accentStroke,
+                            RoundedCornerShape(if (isAvatar) cropBoxWidthDp / 2 else 16.dp),
+                        )
+                        // Thin white outer edge so the frame stays visible on dark photos (P1-56).
+                        .border(
+                            1.dp,
+                            Color.White.copy(alpha = 0.9f),
                             RoundedCornerShape(if (isAvatar) cropBoxWidthDp / 2 else 16.dp),
                         )
                         .clip(RoundedCornerShape(if (isAvatar) cropBoxWidthDp / 2 else 14.dp))
+                        // Double-tap resets zoom and position (P1-07).
+                        .pointerInput(Unit) {
+                            detectTapGestures(onDoubleTap = {
+                                userScale = 1f
+                                userOffset = Offset.Zero
+                            })
+                        }
                         .pointerInput(quarterRotations) {
                             detectTransformGestures { _, pan, zoom, _ ->
                                 val newScale = (userScale * zoom).coerceIn(1f, 4f)
@@ -522,7 +620,31 @@ private fun ProfileImageCropperOwnedDialog(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            // Slider alternative to pinch-zoom (WCAG 2.5.1 pointer gestures, P1-07).
+            Row(
+                Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Zoom", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                Slider(
+                    value = userScale,
+                    onValueChange = {
+                        userScale = it
+                        userOffset = clampOffset(userOffset, it)
+                    },
+                    valueRange = 1f..4f,
+                    enabled = !isProcessing,
+                    colors = SliderDefaults.colors(
+                        thumbColor = accentStroke,
+                        activeTrackColor = accentStroke,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp)
+                        .semantics { stateDescription = "%.1fx".format(userScale) },
+                )
+            }
+            Spacer(Modifier.height(12.dp))
             Row(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
                 OutlinedButton(
                     onClick = { if (!isProcessing) onDone(null) },
@@ -554,12 +676,13 @@ private fun ProfileImageCropperOwnedDialog(
                                     files = files,
                                 )
                                 isProcessing = false
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (isCurrent()) onDone(out) else files?.close()
                             } catch (e: kotlinx.coroutines.CancellationException) {
                                 throw e
                             } catch (e: Throwable) {
                                 isProcessing = false
-                                onError("Failed to save cropped image: ${e.message ?: e}")
+                                onError("Failed to save cropped image. " + ProfileErrorMessages.friendly(e, "Please try again."))
                             }
                         }
                     },
@@ -636,6 +759,7 @@ private suspend fun captureCrop(
     val (outW, outH) = ProfileCropGeometry.captureSize(cropWpx, cropHpx)
     val output = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(output)
+    canvas.drawColor(android.graphics.Color.WHITE)
     canvas.scale(2.5f, 2.5f)
     canvas.translate(cropWpx / 2f + userOffset.x, cropHpx / 2f + userOffset.y)
     canvas.scale(userScale, userScale)

@@ -105,8 +105,10 @@ object ImageFxBaker {
                     applied = false
                     canvas.drawBitmap(image,0f,0f,Paint())
                 } else {
-                    drawSegmentedBackground(canvas, image, mask, effect.shaderKey, intensity)
-                    mask.recycle()
+                    // Original success-only mask recycle leaked on compositing failure.
+                    // drawSegmentedBackground(canvas, image, mask, effect.shaderKey, intensity); mask.recycle()
+                    try { drawSegmentedBackground(canvas, image, mask, effect.shaderKey, intensity) }
+                    finally { if (!mask.isRecycled) mask.recycle() }
                 }
             } else if (effect.shaderKey == "pixelate") {
                 // Original pixelate bake: downscale to the block grid, upscale
@@ -117,9 +119,13 @@ object ImageFxBaker {
                 val smallW = maxOf(1, (image.width * scale).toInt())
                 val smallH = maxOf(1, (image.height * scale).toInt())
                 val small = Bitmap.createScaledBitmap(image, smallW, smallH, false)
-                val pixelPaint = Paint().apply { isFilterBitmap = false }
-                canvas.drawBitmap(small, null, Rect(0, 0, image.width, image.height), pixelPaint)
-                small.recycle()
+                // Original success-only small.recycle() also assumed scaling never aliases input.
+                // val pixelPaint = Paint().apply { isFilterBitmap = false }
+                // canvas.drawBitmap(small, null, Rect(0, 0, image.width, image.height), pixelPaint); small.recycle()
+                try {
+                    val pixelPaint = Paint().apply { isFilterBitmap = false }
+                    canvas.drawBitmap(small, null, Rect(0, 0, image.width, image.height), pixelPaint)
+                } finally { if (small !== image && !small.isRecycled) small.recycle() }
             } else {
                 canvas.drawBitmap(image,0f,0f,Paint().apply { colorFilter=ColorMatrixColorFilter(ColorMatrix(matrix)) })
             }
@@ -142,26 +148,51 @@ object ImageFxBaker {
     ) {
         val w = image.width
         val h = image.height
-        // Bilinear mask scale doubles as edge feathering.
-        val scaledMask = Bitmap.createScaledBitmap(mask, w, h, true)
-        val background = when (shaderKey) {
-            "segment_bg_gradient" -> studioGradientScene(w, h)
-            "segment_bg_office" -> officeScene(w, h)
-            else -> approxBlur(image, intensity)
+        // Original success-only compositing retained for review:
+        //         // Bilinear mask scale doubles as edge feathering.
+        //         val scaledMask = Bitmap.createScaledBitmap(mask, w, h, true)
+        //         val background = when (shaderKey) {
+        //             "segment_bg_gradient" -> studioGradientScene(w, h)
+        //             "segment_bg_office" -> officeScene(w, h)
+        //             else -> approxBlur(image, intensity)
+        //         }
+        //         canvas.drawBitmap(background, 0f, 0f, Paint())
+        //         // Person cutout: sharp image gated by the mask alpha.
+        //         val cutout = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        //         val cutCanvas = Canvas(cutout)
+        //         cutCanvas.drawBitmap(image, 0f, 0f, Paint())
+        //         cutCanvas.drawBitmap(
+        //             scaledMask, 0f, 0f,
+        //             Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) },
+        //         )
+        //         canvas.drawBitmap(cutout, 0f, 0f, Paint())
+        //         scaledMask.recycle()
+        //         cutout.recycle()
+        //         background.recycle()
+        //     }
+        val intermediates = mutableListOf<Bitmap>()
+        fun own(bitmap: Bitmap): Bitmap {
+            if (bitmap !== image && bitmap !== mask && intermediates.none { it === bitmap }) intermediates += bitmap
+            return bitmap
         }
-        canvas.drawBitmap(background, 0f, 0f, Paint())
-        // Person cutout: sharp image gated by the mask alpha.
-        val cutout = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val cutCanvas = Canvas(cutout)
-        cutCanvas.drawBitmap(image, 0f, 0f, Paint())
-        cutCanvas.drawBitmap(
-            scaledMask, 0f, 0f,
-            Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) },
-        )
-        canvas.drawBitmap(cutout, 0f, 0f, Paint())
-        scaledMask.recycle()
-        cutout.recycle()
-        background.recycle()
+        try {
+            // Bilinear mask scale doubles as edge feathering.
+            val scaledMask = own(Bitmap.createScaledBitmap(mask, w, h, true))
+            val background = own(when (shaderKey) {
+                "segment_bg_gradient" -> studioGradientScene(w, h)
+                "segment_bg_office" -> officeScene(w, h)
+                else -> approxBlur(image, intensity)
+            })
+            canvas.drawBitmap(background, 0f, 0f, Paint())
+            val cutout = own(Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888))
+            val cutCanvas = Canvas(cutout)
+            cutCanvas.drawBitmap(image, 0f, 0f, Paint())
+            cutCanvas.drawBitmap(scaledMask, 0f, 0f,
+                Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) })
+            canvas.drawBitmap(cutout, 0f, 0f, Paint())
+        } finally {
+            intermediates.forEach { if (!it.isRecycled) it.recycle() }
+        }
     }
 
     /** Free original blur approximation: aggressive downscale + filtered upscale. */
@@ -170,8 +201,16 @@ object ImageFxBaker {
         val small = Bitmap.createScaledBitmap(
             src, maxOf(1, src.width / divisor), maxOf(1, src.height / divisor), true,
         )
-        return Bitmap.createScaledBitmap(small, src.width, src.height, true).also {
-            if (it !== small) small.recycle()
+        // Original success-only cleanup:
+        // return Bitmap.createScaledBitmap(small, src.width, src.height, true).also {
+        //     if (it !== small) small.recycle()
+        // }
+        var enlarged: Bitmap? = null
+        try {
+            return Bitmap.createScaledBitmap(small, src.width, src.height, true).also { enlarged = it }
+        } finally {
+            // Scaling may return the input. Never recycle borrowed src or the returned bitmap.
+            if (small !== src && small !== enlarged && !small.isRecycled) small.recycle()
         }
     }
 

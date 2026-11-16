@@ -3,6 +3,8 @@ package com.example.chat.ui.settings.security
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -81,10 +83,14 @@ fun LockMethodSelectorContent(
     onResult: (LockMethodType?) -> Unit,
 ) {
     val colors = LocalAppColors.current
-    var biometricAvailable by remember { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(Unit) { biometricAvailable = availability.canUseBiometrics() }
+    var biometricAvailable by remember(availability) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(availability) {
+        biometricAvailable = try { availability.canUseBiometrics() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
+    }
 
-    Column(Modifier.navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
+    Column(Modifier.navigationBarsPadding().verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
         Text("Choose a lock type", color = colors.foreground, fontSize = 20.sp, fontWeight = FontWeight.W800, letterSpacing = (-0.3).sp)
         Spacer(Modifier.height(4.dp))
         Text("You will set it up in the next step. You can change it later.", color = colors.foregroundSecondary, fontSize = 13.sp)
@@ -93,7 +99,7 @@ fun LockMethodSelectorContent(
         Spacer(Modifier.height(10.dp))
         MethodCard(Icons.Rounded.Pattern, "Pattern", "Draw a gesture on a 3\u00d73 grid", currentMethod == LockMethodType.pattern) { onResult(LockMethodType.pattern) }
         Spacer(Modifier.height(10.dp))
-        MethodCard(Icons.Rounded.Password, "Password", "At least 6 characters, letters and symbols allowed", currentMethod == LockMethodType.password) { onResult(LockMethodType.password) }
+        MethodCard(Icons.Rounded.Password, "Password", "At least 8 characters. Spaces and Unicode are allowed.", currentMethod == LockMethodType.password) { onResult(LockMethodType.password) }
         Spacer(Modifier.height(10.dp))
         OsAuthCard(
             Icons.Rounded.Fingerprint, "Biometric",
@@ -108,7 +114,7 @@ fun LockMethodSelectorContent(
         Spacer(Modifier.height(10.dp))
         OsAuthCard(
             Icons.Rounded.PhonelinkLock, "Device lock",
-            "The PIN / pattern / password managed by Android or iOS",
+            "The PIN, pattern or password managed by Android",
             enabled = true,
             selected = currentMethod == LockMethodType.deviceCredential,
         ) { onResult(LockMethodType.deviceCredential) }
@@ -177,7 +183,7 @@ private fun OsAuthCard(icon: ImageVector, title: String, subtitle: String, enabl
         CardBody(icon, title, subtitle, selected, enabled) {
             if (!enabled) {
                 Box(Modifier.clip(RoundedCornerShape(999.dp)).background(colors.warning.copy(alpha = 0.15f)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                    Text("UNAVAILABLE", color = colors.warning, fontSize = 10.sp, fontWeight = FontWeight.W800, letterSpacing = 0.4.sp)
+                    Text("UNAVAILABLE", color = colors.warning, fontSize = 12.sp, fontWeight = FontWeight.W800, letterSpacing = 0.4.sp)
                 }
             } else RadioIcon(selected)
         }

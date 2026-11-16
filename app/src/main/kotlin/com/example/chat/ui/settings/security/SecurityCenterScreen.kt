@@ -96,20 +96,22 @@ fun SecurityCenterScreen(
         preferences.addListener(l)
         onDispose { preferences.removeListener(l) }
     }
-    var pinLength by remember { mutableIntStateOf(4) }
+    val accountGeneration = preferences.scopeGeneration
+    var pinLength by remember(preferences, accountGeneration) { mutableIntStateOf(4) }
     var biometricAvailable by remember { mutableStateOf(false) }
-    var modal by remember { mutableStateOf<Modal?>(null) }
-    var active by remember { mutableStateOf(true) }
-    DisposableEffect(Unit) { onDispose { active = false } }
+    var modal by remember(preferences, accountGeneration) { mutableStateOf<Modal?>(null) }
+    var active by remember(preferences, accountGeneration) { mutableStateOf(true) }
+    var flowBusy by remember(preferences, accountGeneration) { mutableStateOf(false) }
+    DisposableEffect(preferences, accountGeneration) { onDispose { active = false } }
 
     suspend fun loadCapabilities() {
         val pl = lockService.getPinLength()
         val bio = lockService.canUseBiometrics()
-        if (!active) return
+        if (!active || preferences.scopeGeneration != accountGeneration) return
         pinLength = pl
         biometricAvailable = bio
     }
-    LaunchedEffect(Unit) { loadCapabilities() }
+    LaunchedEffect(preferences, accountGeneration) { loadCapabilities() }
 
     fun showToast(message: String) {
         scope.launch {
@@ -118,7 +120,7 @@ fun SecurityCenterScreen(
         }
     }
 
-    val host = remember(preferences, lockService) {
+    val host = remember(preferences, lockService, accountGeneration) {
         object : SecurityFlowHost {
             override fun currentLockMethod() = preferences.security.lockMethod
             override fun isAppLockEnabled() = preferences.security.isAppLockEnabled
@@ -136,7 +138,7 @@ fun SecurityCenterScreen(
             }
             override suspend fun reloadCapabilities() = loadCapabilities()
             override fun toast(message: String) = showToast(message)
-            override fun isActive() = active
+            override fun isActive() = active && preferences.scopeGeneration == accountGeneration
             override fun applySecurity(lockMethod: String?, appLockEnabled: Boolean?, logTitle: String) {
                 val latest = preferences.security
                 preferences.updateSecurity(
@@ -151,17 +153,25 @@ fun SecurityCenterScreen(
     }
 
     fun runFlow(intent: SecurityIntent, target: LockMethodType? = null, setupPinLength: Int? = null) {
-        scope.launch { SecurityFlowRunner.run(host, intent, target, setupPinLength, pinLength) }
+        if (flowBusy) return
+        flowBusy = true
+        scope.launch {
+            try { SecurityFlowRunner.run(host, intent, target, setupPinLength, pinLength) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { showToast("Could not update the lock setting. Try again.") }
+            finally { flowBusy = false; modal = null }
+        }
     }
 
     @Suppress("UNUSED_EXPRESSION") version
     val security = preferences.security
+    com.example.chat.ui.kit.ProtectSensitiveWindow(active = security.isAppLockEnabled)
     val lockedChats = security.lockedConversationIds.size
 
     Box(Modifier.fillMaxSize()) {
         ChatySettingsPage(
             title = "Security & App Lock",
-            subtitle = "Local Authentication & Message Security",
+            subtitle = "Control who can open Chaty on this device",
             onBack = onBack,
         ) {
             ChatySettingsSection(
@@ -171,18 +181,18 @@ fun SecurityCenterScreen(
                 Text(
                     "HTTPS protects traffic in transit between Chaty and the service. It does not prevent the service from accessing standard message content. App Lock protects access to this device only; it does not encrypt server-side chat data.",
                     color = colors.foregroundSecondary,
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                 )
             }
             ChatySettingsSection(
                 title = "Chaty App Lock",
-                description = "Require a local credential or operating-system authentication before Chaty can be used.",
+                description = "App Lock opens Chaty. Chat Lock protects selected conversations. A secret phrase finds the vault but is not a replacement for its authentication.",
             ) {
                 val rows = mutableListOf<@Composable () -> Unit>()
                 rows += {
                     ChatySwitchTile(
                         icon = Icons.Rounded.Lock,
-                        iconColor = colors.warning,
+                        iconColor = colors.accent,
                         title = "Enable Chaty Lock",
                         subtitle = if (security.isAppLockEnabled) "App lock active (${security.lockMethod})"
                         else "Protect the application with biometrics, PIN, pattern, password, or device lock",
@@ -220,7 +230,7 @@ fun SecurityCenterScreen(
                         ChatySettingsTile(
                             icon = Icons.Rounded.PhonelinkLock,
                             title = "Device screen lock",
-                            subtitle = "Use the PIN, pattern, password, or biometric managed by Android/iOS",
+                            subtitle = "Use the PIN, pattern, password, or biometric managed by Android",
                             onTap = {
                                 scope.launch {
                                     val ok = lockService.authenticateDeviceCredential("Test your device screen lock for Chaty")
@@ -303,7 +313,7 @@ fun SecurityCenterScreen(
                     rows += {
                         ChatySettingsTile(
                             icon = Icons.Rounded.LockOpen,
-                            iconColor = colors.error,
+                            iconColor = colors.accent,
                             title = "Test Lock Screen",
                             subtitle = "Run the same authentication gate used by the application",
                             onTap = { modal = Modal.TestLock(CompletableDeferred()) },
@@ -344,17 +354,27 @@ fun SecurityCenterScreen(
                     subtitle = "Reveal hidden locked chats only when typing your secret word or emoji in search",
                     value = security.entryBySecretPhrase,
                     onChanged = { v ->
+                        if (!flowBusy) {
+                        flowBusy = true
                         scope.launch {
+                            try {
                             if (v) {
+                                if (preferences.security.isAppLockEnabled &&
+                                    !SecurityFlowRunner.verifyCurrent(host, SecurityFlowRunner.methodTypeOf(preferences.security.lockMethod))) return@launch
                                 val d = CompletableDeferred<String?>()
                                 modal = Modal.SecretPhrase(d)
                                 val phrase = d.await().also { modal = null }
-                                if (phrase.isNullOrEmpty() || !active) return@launch
+                                if (phrase.isNullOrEmpty() || !host.isActive()) return@launch
                                 lockService.setSecretPhrase(phrase)
-                                preferences.updateSecurity(security.copy(entryBySecretPhrase = true), logTitle = "Secret search phrase entry")
+                                if (!host.isActive()) return@launch
+                                preferences.updateSecurity(preferences.security.copy(entryBySecretPhrase = true), logTitle = "Secret search phrase entry")
                             } else {
-                                preferences.updateSecurity(security.copy(entryBySecretPhrase = false), logTitle = "Secret search phrase disabled")
+                                preferences.updateSecurity(preferences.security.copy(entryBySecretPhrase = false), logTitle = "Secret search phrase disabled")
                             }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (_: Exception) { showToast("Could not save the secret phrase. Your choice was not changed.") }
+                            finally { flowBusy = false; modal = null }
+                        }
                         }
                     },
                 )
@@ -369,20 +389,21 @@ fun SecurityCenterScreen(
                 ChatySettingsRowDivider()
                 ChatySettingsTile(
                     icon = Icons.Outlined.VerifiedUser,
-                    title = "Lock Authentication Method",
+                    title = "Choose authentication method",
                     subtitle = "Uses ${security.lockMethod}. Chat Lock protects specific chats even if full App Lock is off.",
-                    onTap = { runFlow(SecurityIntent.changeCredential, SecurityFlowRunner.methodTypeOf(security.lockMethod)) },
+                    onTap = { runFlow(SecurityIntent.changeMethod) },
                 )
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 
+    val setupAdapter = remember(lockService) { LockSetupServiceAdapter(lockService) }
     when (val m = modal) {
         is Modal.Verify -> LockOverlayDialog(preferences, lockService, "Confirm it's you", "Verify your current lock to continue", m.result)
         is Modal.TestLock -> LockOverlayDialog(preferences, lockService, "Test Chaty Lock", "Authenticate to verify your Chaty Lock configuration", m.result) { modal = null }
-        is Modal.Pick -> LockMethodSelectorSheet(LockSetupServiceAdapter(lockService), m.current) { m.result.complete(it) }
-        is Modal.Setup -> LockCredentialSetupSheet(m.method, m.pinLength, LockSetupServiceAdapter(lockService), replaceExisting = true) { m.result.complete(it) }
+        is Modal.Pick -> LockMethodSelectorSheet(setupAdapter, m.current) { m.result.complete(it) }
+        is Modal.Setup -> LockCredentialSetupSheet(m.method, m.pinLength, setupAdapter, replaceExisting = true) { m.result.complete(it) }
         is Modal.SecretPhrase -> SecretPhraseDialog(m.result)
         null -> {}
     }
@@ -399,7 +420,7 @@ private fun LockOverlayDialog(
 ) {
     Dialog(
         onDismissRequest = { result.complete(false); onClosed() },
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false, securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn),
     ) {
         Box(Modifier.fillMaxSize()) {
             AppLockOverlay(
@@ -417,6 +438,7 @@ private fun LockOverlayDialog(
 private fun SecretPhraseDialog(result: CompletableDeferred<String?>) {
     val colors = LocalAppColors.current
     var text by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
     AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
         onDismissRequest = { result.complete(null) },
         title = {
@@ -437,14 +459,22 @@ private fun SecretPhraseDialog(result: CompletableDeferred<String?>) {
                     value = text,
                     onValueChange = { text = it },
                     label = { Text("Secret Word or Emoji") },
-                    placeholder = { Text("e.g. sesame, vault, \uD83D\uDD12") },
+                    placeholder = { Text("A private phrase with 6 or more characters") },
                     singleLine = true,
+                    supportingText = { Text(CredentialStrength.phraseError(text) ?: "Keep this phrase private.") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                 )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = confirmation, onValueChange = { confirmation = it },
+                    label = { Text("Confirm private phrase") }, singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    isError = confirmation.isNotEmpty() && confirmation != text,
+                    supportingText = { if (confirmation.isNotEmpty() && confirmation != text) Text("Phrases do not match.") })
             }
         },
         dismissButton = { TextButton(onClick = { result.complete(null) }) { Text("Cancel") } },
         confirmButton = {
-            Button(onClick = { val t = text.trim(); if (t.isNotEmpty()) result.complete(t) }) { Text("Save Word") }
+            Button(enabled = CredentialStrength.phraseError(text) == null && text == confirmation, onClick = { val t = text.trim(); if (CredentialStrength.phraseError(t) == null && text == confirmation) { text = ""; confirmation = ""; result.complete(t) } }) { Text("Save Word") }
         },
     )
 }

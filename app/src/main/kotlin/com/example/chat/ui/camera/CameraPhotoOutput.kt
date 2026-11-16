@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 
 /** Creates a derived local image; never changes the source or invents detail. */
 object CameraPhotoOutput {
-    fun process(context: Context, source: String, options: CameraCaptureOptions, fullRatio: Float): String {
+    fun process(context: Context, source: String, options: CameraCaptureOptions, fullRatio: Float, frontCapture: Boolean = false): String {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(source, bounds)
         check(bounds.outWidth > 0 && bounds.outHeight > 0) { "Cannot decode capture" }
@@ -41,9 +41,10 @@ object CameraPhotoOutput {
             upright = oriented
             val ratio = options.aspect.portraitRatio ?: fullRatio.coerceIn(.3f, 3f)
             val orientedRatio = if (oriented.width > oriented.height && ratio < 1f) 1f / ratio else ratio
+            val mirror = options.mirrorSelfies && frontCapture
             val box = centerCropBounds(oriented.width, oriented.height, orientedRatio)
             if (box[0] == 0 && box[1] == 0 && box[2] == oriented.width && box[3] == oriented.height &&
-                !options.clarity && !options.watermark) {
+                !options.clarity && !options.watermark && !mirror) {
                 return source
             }
             val rendered = Bitmap.createBitmap(box[2], box[3], Bitmap.Config.ARGB_8888)
@@ -55,7 +56,11 @@ object CameraPhotoOutput {
                 paint.colorFilter = ColorMatrixColorFilter(ColorMatrix(floatArrayOf(c,0f,0f,0f,offset, 0f,c,0f,0f,offset, 0f,0f,c,0f,offset, 0f,0f,0f,1f,0f)))
             }
             val canvas = Canvas(rendered)
+            // Mirror image pixels after orientation/crop, before the readable watermark.
+            val saveCount = canvas.save()
+            if (mirror) { canvas.translate(rendered.width.toFloat(), 0f); canvas.scale(-1f, 1f) }
             canvas.drawBitmap(oriented, Rect(box[0],box[1],box[0]+box[2],box[1]+box[3]), Rect(0,0,box[2],box[3]), paint)
+            canvas.restoreToCount(saveCount)
             if (options.watermark) {
                 val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = (rendered.width / 35f).coerceAtLeast(14f); setShadowLayer(3f, 0f, 1f, Color.BLACK) }
                 canvas.drawText("Chaty", rendered.width * .04f, rendered.height * .95f, text)

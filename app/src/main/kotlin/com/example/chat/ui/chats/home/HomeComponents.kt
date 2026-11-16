@@ -14,8 +14,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import com.example.chat.ui.theme.ChatyAsyncImage
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -82,7 +85,7 @@ fun HomeAvatar(
                 Text(
                     initials,
                     maxLines = 1,
-                    color = Color.White,
+                    color = Color(com.example.chat.ui.auth.AuthPresentationPolicy.readableText(android.graphics.Color.WHITE,color.toArgb())) ,
                     fontWeight = FontWeight.W600,
                     fontSize = (size * 0.38f).sp,
                 )
@@ -109,7 +112,7 @@ fun HomeAvatar(
         Text(
             initials,
             maxLines = 1,
-            color = Color.White,
+            color = Color(com.example.chat.ui.auth.AuthPresentationPolicy.readableText(android.graphics.Color.WHITE,color.toArgb())) ,
             fontWeight = FontWeight.W600,
             fontSize = (size * 0.38f).sp,
         )
@@ -142,7 +145,7 @@ fun HomeCountBadge(count: Int, color: Color, textColor: Color) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            count.toString(),
+            if(count>99) "99+" else count.toString(),
             color = textColor,
             fontSize = 12.sp,
             fontWeight = FontWeight.W700,
@@ -169,6 +172,8 @@ fun HomeTimeLabel(text: String, highlight: Boolean, color: Color, highlightColor
 fun HomeSectionHeader(text: String, color: Color, fontSize: Float = 11.5f) {
     Text(
         text.uppercase(),
+        // A11Y: lets TalkBack heading navigation jump between Home sections.
+        modifier = Modifier.semantics { heading() },
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         color = color,

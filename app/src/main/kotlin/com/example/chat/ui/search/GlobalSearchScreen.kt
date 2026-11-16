@@ -2,6 +2,18 @@ package com.example.chat.ui.search
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.LocalContext
+import com.example.chat.R
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,10 +25,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.platform.testTag
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AlternateEmail
 import androidx.compose.material.icons.rounded.ChevronLeft
@@ -54,6 +81,7 @@ import com.example.chat.ui.core.theme.ChatyColors
 import com.example.chat.ui.tasks.TaskAvatar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 /** Exact port of lib/features/search/global_search_screen.dart.
  *
@@ -79,7 +107,7 @@ fun GlobalSearchScreen(
     openDirectConversation: suspend (UserProfile) -> Conversation,
     modifier: Modifier = Modifier,
     verifySecretPhrase: suspend (String) -> Boolean = { false },
-    isConversationHidden: (String) -> Boolean = { false },
+    isConversationHidden: (String) -> Boolean,
     onBack: () -> Unit = {},
     onOpenLockedChats: () -> Unit = {},
     onOpenConversation: (String) -> Unit = {},
@@ -87,42 +115,81 @@ fun GlobalSearchScreen(
     onNotify: (String) -> Unit = {},
     // Ordinary search never renders protected chat content. The owner must
     // supply the real account-scoped privacy predicate and session identity.
-    isConversationProtected: (String) -> Boolean = { false },
-    searchSessionIdentity: Any? = null,
-    isSearchSessionCurrent: () -> Boolean = { true },
+    isConversationProtected: (String) -> Boolean,
+    searchSessionIdentity: Any,
+    isSearchSessionCurrent: () -> Boolean,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val paneLabel = stringResource(R.string.social_search_title)
+    val inputLabel = stringResource(R.string.social_search_input_label)
+    val busyLabel = stringResource(R.string.social_search_busy)
+    val openingLabel = stringResource(R.string.social_search_opening)
+    // Suspended work must read current host policy/callbacks after it resumes.
+    val currentSessionIdentity by androidx.compose.runtime.rememberUpdatedState(searchSessionIdentity)
+    val currentSessionCheck by androidx.compose.runtime.rememberUpdatedState(isSearchSessionCurrent)
+    val currentHiddenCheck by androidx.compose.runtime.rememberUpdatedState(isConversationHidden)
+    val currentProtectedCheck by androidx.compose.runtime.rememberUpdatedState(isConversationProtected)
+    val currentReplace by androidx.compose.runtime.rememberUpdatedState(onOpenConversationReplace)
+    val currentNotify by androidx.compose.runtime.rememberUpdatedState(onNotify)
+    val currentUnlock by androidx.compose.runtime.rememberUpdatedState(onOpenLockedChats)
+    val currentVerifier by androidx.compose.runtime.rememberUpdatedState(verifySecretPhrase)
+    val currentDirectory by androidx.compose.runtime.rememberUpdatedState(searchUsers)
+    fun isCurrentSearchSession(): Boolean = currentSessionIdentity == searchSessionIdentity && currentSessionCheck()
     val requestGuard = remember(searchSessionIdentity) { SearchRequestGuard() }
     var query by remember(searchSessionIdentity) { mutableStateOf("") }
+    var resultFilter by remember(searchSessionIdentity) { mutableStateOf("All") }
+    var localOnly by remember(searchSessionIdentity) { mutableStateOf(false) }
+    var showPrivacyInfo by remember { mutableStateOf(false) }
     var matchedUsers by remember(searchSessionIdentity) { mutableStateOf<List<UserProfile>>(emptyList()) }
+    var directoryTruncated by remember(searchSessionIdentity) { mutableStateOf(false) }
     // Derive local matches from the live list on every composition, not a
     // snapshot taken when the query changed. Privacy can change mid-search.
-    val matchedConversations = if (isSearchSessionCurrent()) {
+    val matchedConversations = if (isCurrentSearchSession()) {
         LocalConversationSearch.filter(conversations, query) { id ->
             isConversationHidden(id) || isConversationProtected(id)
         }
     } else emptyList()
     var isSearching by remember(searchSessionIdentity) { mutableStateOf(false) }
+    var searchFailed by remember(searchSessionIdentity) { mutableStateOf(false) }
     var isOpeningChat by remember(searchSessionIdentity) { mutableStateOf(false) }
+    var openingUserId by remember(searchSessionIdentity) { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
 
-    fun cleanError(error: Throwable): String =
-        (error.message ?: error.toString()).removePrefix("Exception: ")
-
+    var remoteJob by remember(searchSessionIdentity) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     fun performRemoteSearch(searchQuery: String, requestId: Int) {
-        if (!isSearchSessionCurrent()) return
-        scope.launch {
+        if (!isCurrentSearchSession()) return
+        remoteJob = scope.launch {
             try {
-                val users = searchUsers(searchQuery)
-                if (!requestGuard.isCurrent(requestId) || !isSearchSessionCurrent()) return@launch
-                matchedUsers = requestGuard.deduplicate(users) { it.id }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!requestGuard.isCurrent(requestId) || !isCurrentSearchSession()) return@launch
+                val users = kotlinx.coroutines.withTimeout(10_000L) { currentDirectory(searchQuery) }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!requestGuard.isCurrent(requestId) || !isCurrentSearchSession()) return@launch
+                val window = SearchResultWindow.first(users) { it.id }
+                matchedUsers = window.items
+                directoryTruncated = window.truncated
                 isSearching = false
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (requestGuard.isCurrent(requestId) && isCurrentSearchSession()) {
+                    isSearching = false
+                    searchFailed = true
+                    matchedUsers = emptyList()
+                    directoryTruncated = false
+                    currentNotify(context.getString(R.string.social_search_timeout))
+                }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
-            } catch (error: Throwable) {
-                if (!requestGuard.isCurrent(requestId) || !isSearchSessionCurrent()) return@launch
+            } catch (error: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!requestGuard.isCurrent(requestId) || !isCurrentSearchSession()) return@launch
                 isSearching = false
-                onNotify("Search failed: ${cleanError(error)}")
+                matchedUsers = emptyList()
+                directoryTruncated = false
+                searchFailed = true
+                currentNotify(context.getString(R.string.social_search_unavailable))
             }
         }
     }
@@ -132,77 +199,108 @@ fun GlobalSearchScreen(
     // then debounce 280ms.
     var debounceJob by remember(searchSessionIdentity) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     fun queueSearch(raw: String) {
+        searchFailed = false
         debounceJob?.cancel()
+        remoteJob?.cancel()
         val trimmed = raw.trim()
         val requestId = requestGuard.begin()
-        matchedUsers = emptyList()
-        if (!isSearchSessionCurrent()) { isSearching = false; return }
+        // Keep the previous section stable while the next query loads, but disable its actions.
+        if (trimmed.length < 2 || localOnly) { matchedUsers = emptyList(); directoryTruncated = false }
+        if (!isCurrentSearchSession()) { isSearching = false; return }
 
         if (trimmed.isEmpty()) { isSearching = false; return }
-        isSearching = trimmed.length >= 2
+        isSearching = trimmed.length >= 2 && !localOnly
         debounceJob = scope.launch {
+            delay(280)
+            if (!requestGuard.isCurrent(requestId) || !isCurrentSearchSession()) return@launch
             // A vault secret is not a remote username. Wait for local
             // verification before any remote search, even if it is slow.
             val isMatch = try {
-                verifySecretPhrase(trimmed)
+                kotlinx.coroutines.withTimeout(10_000L) { currentVerifier(trimmed) }
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (requestGuard.isCurrent(requestId) && isCurrentSearchSession()) {
+                    isSearching = false
+                    searchFailed = true
+                    matchedUsers = emptyList()
+                    directoryTruncated = false
+                    currentNotify(context.getString(R.string.social_search_unavailable))
+                }
+                return@launch // Fail closed: never send the unverified query to the directory.
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (requestGuard.isCurrent(requestId) && isSearchSessionCurrent()) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (requestGuard.isCurrent(requestId) && isCurrentSearchSession()) {
                     isSearching = false
-                    onNotify("Unable to check private search. Try again.")
+                    searchFailed = true
+                    matchedUsers = emptyList()
+                    directoryTruncated = false
+                    currentNotify(context.getString(R.string.social_search_private_failure))
                 }
                 return@launch
             }
-            if (!requestGuard.isCurrent(requestId) || !isSearchSessionCurrent()) return@launch
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!requestGuard.isCurrent(requestId) || !isCurrentSearchSession()) return@launch
             if (isMatch) {
                 requestGuard.begin()
                 query = ""
                 matchedUsers = emptyList()
+                directoryTruncated = false
                 isSearching = false
-                onOpenLockedChats()
+                currentUnlock()
                 return@launch
             }
-            if (trimmed.length < 2) { isSearching = false; return@launch }
-            delay(280)
-            if (requestGuard.isCurrent(requestId) && isSearchSessionCurrent()) {
+            if (trimmed.length < 2 || localOnly) { isSearching = false; return@launch }
+            if (requestGuard.isCurrent(requestId) && isCurrentSearchSession()) {
                 performRemoteSearch(trimmed, requestId)
             }
         }
     }
 
+    var openingJob by remember(searchSessionIdentity) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     fun startConversationWith(user: UserProfile) {
-        if (isOpeningChat || !isSearchSessionCurrent()) return
+        if (isOpeningChat || isSearching || !(currentSessionIdentity == searchSessionIdentity && currentSessionCheck())) return
         isOpeningChat = true
-        scope.launch {
+        openingUserId = user.id
+        openingJob = scope.launch {
             try {
                 val conversation = openDirectConversation(user)
-                if (isSearchSessionCurrent() && !isConversationHidden(conversation.id) &&
-                    !isConversationProtected(conversation.id)) {
-                    onOpenConversationReplace(conversation.id)
-                } else {
-                    isOpeningChat = false
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (currentSessionIdentity == searchSessionIdentity && currentSessionCheck() && !currentHiddenCheck(conversation.id) &&
+                    !currentProtectedCheck(conversation.id)) {
+                    currentReplace(conversation.id)
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
-            } catch (error: Throwable) {
-                if (!isSearchSessionCurrent()) return@launch
+            } catch (_: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (currentSessionIdentity == searchSessionIdentity && currentSessionCheck()) currentNotify(context.getString(R.string.social_search_open_failure))
+            } finally {
+                // Cancellation and host-navigation exceptions must not leave a busy row.
                 isOpeningChat = false
-                onNotify("Unable to open chat: ${cleanError(error)}")
+                openingUserId = null
             }
         }
     }
 
     androidx.compose.runtime.DisposableEffect(searchSessionIdentity) {
-        onDispose { requestGuard.begin(); debounceJob?.cancel() }
+        onDispose {
+            requestGuard.begin()
+            debounceJob?.cancel()
+            remoteJob?.cancel()
+            openingJob?.cancel()
+        }
     }
+
+    BackHandler(onBack = onBack)
 
     LaunchedEffect(Unit) {
         androidx.compose.runtime.withFrameNanos { }
         runCatching { focusRequester.requestFocus() }
     }
 
-    Column(modifier = modifier.fillMaxSize().background(colors.background)) {
+    Column(modifier = modifier.widthIn(max = 840.dp).fillMaxSize().background(colors.background).semantics { paneTitle = paneLabel }) {
         // ChatyAppBar equivalent: back + the 40dp pill search field + the
         // progress/clear action.
         Row(
@@ -210,13 +308,13 @@ fun GlobalSearchScreen(
             modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
         ) {
             IconButton(onClick = onBack) {
-                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = colors.foreground)
+                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = stringResource(R.string.social_search_back), color = colors.foreground)
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .height(40.dp)
+                    .heightIn(min = 48.dp)
                     .clip(CircleShape)
                     .background(colors.inputFill)
                     .padding(horizontal = 16.dp),
@@ -234,14 +332,18 @@ fun GlobalSearchScreen(
                         queueSearch(it)
                     },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrect = false),
+                    keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                     textStyle = TextStyle(color = colors.foreground, fontSize = 15.sp),
                     cursorBrush = SolidColor(colors.primary),
-                    modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                    modifier = Modifier.weight(1f).testTag("global-search-input").focusRequester(focusRequester).semantics {
+                        contentDescription = inputLabel
+                    },
                     decorationBox = { inner ->
                         Box {
                             if (query.isEmpty()) {
                                 Text(
-                                    "Search @username, people, groups...",
+                                    stringResource(R.string.social_search_hint),
                                     color = colors.foreground.copy(alpha = 0.5f),
                                     fontSize = 12.sp,
                                 )
@@ -253,26 +355,66 @@ fun GlobalSearchScreen(
             }
             if (isSearching || isOpeningChat) {
                 CircularProgressIndicator(
-                    modifier = Modifier.padding(16.dp).size(18.dp),
+                    modifier = Modifier.padding(16.dp).size(18.dp).semantics {
+                        contentDescription = if (isOpeningChat) openingLabel else busyLabel
+                    },
                     strokeWidth = 2.dp,
                 )
-            } else if (query.isNotEmpty()) {
+            }
+            if (query.isNotEmpty()) {
                 IconButton(onClick = {
                     query = ""
                     queueSearch("")
+                    runCatching { focusRequester.requestFocus() }
                 }) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.clear, semanticLabel = "Clear", color = colors.foreground)
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.clear, semanticLabel = stringResource(R.string.social_search_clear), color = colors.foreground)
                 }
             } else {
                 Spacer(Modifier.width(48.dp))
             }
         }
 
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).toggleable(value = localOnly, role = Role.Checkbox, onValueChange = {
+                localOnly = it
+                queueSearch(query)
+            }), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(checked = localOnly, onCheckedChange = null)
+                Text(stringResource(R.string.social_search_local_only), color = colors.foreground)
+            }
+            ChatyTextButton(onClick = { showPrivacyInfo = true }, label = stringResource(R.string.social_search_privacy_title))
+        }
+        if (localOnly) Text(stringResource(R.string.social_search_local_explanation), color = colors.foregroundSecondary, modifier = Modifier.padding(horizontal = 16.dp))
+        if (showPrivacyInfo) androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showPrivacyInfo = false },
+            title = { Text(stringResource(R.string.social_search_privacy_title)) },
+            text = { Text(stringResource(R.string.social_search_privacy_body)) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { showPrivacyInfo = false }) { Text(stringResource(R.string.social_search_close)) } },
+        )
+        if (query.isNotBlank()) {
+            androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(listOf("All", "People", "Chats", "Groups"), key = { it }) { filter ->
+                    FilterChip(selected = resultFilter == filter, onClick = { resultFilter = filter }, label = { Text(stringResource(when (filter) {
+                        "People" -> R.string.social_search_filter_people
+                        "Chats" -> R.string.social_search_filter_chats
+                        "Groups" -> R.string.social_search_filter_groups
+                        else -> R.string.social_search_filter_all
+                    })) })
+                }
+            }
+            Text(
+                if (isSearching) stringResource(R.string.social_search_busy) else stringResource(R.string.social_search_result_summary,
+                    pluralStringResource(R.plurals.social_search_people_count, matchedUsers.size, matchedUsers.size),
+                    pluralStringResource(R.plurals.social_search_conversation_count, matchedConversations.size, matchedConversations.size)),
+                color = colors.foregroundSecondary,
+                modifier = Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
         if (query.trim().isEmpty()) {
             // _buildEmptyPrompt
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(40.dp),
+                modifier = Modifier.fillMaxWidth().padding(40.dp).semantics(mergeDescendants = true) {},
             ) {
                 Icon(
                     Icons.Rounded.AlternateEmail,
@@ -281,62 +423,67 @@ fun GlobalSearchScreen(
                     modifier = Modifier.size(40.dp),
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("Username Discovery", color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(stringResource(R.string.social_search_discovery), color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.semantics { heading() })
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Type an @username to find and message another Chaty user without exposing phone numbers.",
+                    stringResource(R.string.social_search_discovery_body),
                     color = colors.foreground.copy(alpha = 0.65f),
                     fontSize = 12.5.sp,
                 )
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                if (isSearchSessionCurrent() && matchedUsers.isNotEmpty()) {
-                    item {
-                        SearchSection("People & Usernames", colors) {
-                            matchedUsers.forEach { user ->
-                                UserTile(
-                                    user = user,
-                                    colors = colors,
-                                    isOpeningChat = isOpeningChat,
-                                    onMessage = { startConversationWith(user) },
-                                )
-                            }
+            LazyColumn(Modifier.fillMaxSize().imePadding().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                if (searchFailed) item(key = "search-failure", contentType = "feedback") {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                        Text(stringResource(R.string.social_search_failure), color = colors.foregroundSecondary)
+                        ChatyTextButton(onClick = { queueSearch(query) }, label = stringResource(R.string.social_search_retry))
+                    }
+                }
+                if (directoryTruncated && !isSearching && resultFilter in listOf("All", "People")) {
+                    item(key = "directory-truncated", contentType = "feedback") {
+                        Text(stringResource(R.string.social_search_truncated), color = colors.foregroundSecondary,
+                            modifier = Modifier.padding(vertical = 8.dp))
+                    }
+                }
+                if (resultFilter in listOf("All", "People") && isCurrentSearchSession() && matchedUsers.isNotEmpty()) {
+                    item(key = "people_header", contentType = "header") {
+                        Text(stringResource(R.string.social_search_people_header), color = colors.foregroundSecondary,
+                            modifier = Modifier.padding(vertical = 8.dp).semantics { heading() })
+                    }
+                    items(matchedUsers, key = { "person:${it.id}" }, contentType = { "person" }) { user ->
+                        UserTile(user, colors, openingUserId == user.id, query = query, enabled = !isOpeningChat && !isSearching) { startConversationWith(user) }
+                    }
+                }
+                val visibleConversations = matchedConversations.filter {
+                    resultFilter == "All" || resultFilter == "Chats" ||
+                        (resultFilter == "Groups" && it.type == com.example.chat.domain.models.ConversationType.group)
+                }.takeUnless { resultFilter == "People" }.orEmpty()
+                if (visibleConversations.isNotEmpty()) {
+                    item(key = "chats_header", contentType = "header") {
+                        Text(stringResource(R.string.social_search_chats_header), color = colors.foregroundSecondary,
+                            modifier = Modifier.padding(vertical = 8.dp).semantics { heading() })
+                    }
+                    items(visibleConversations, key = { "conversation:${it.id}" }, contentType = { "conversation" }) { conversation ->
+                        ConversationTile(conversation, colors, query) {
+                            if (isCurrentSearchSession() && !isConversationHidden(conversation.id) &&
+                                !isConversationProtected(conversation.id)) onOpenConversation(conversation.id)
                         }
                     }
                 }
-                if (matchedConversations.isNotEmpty()) {
-                    item {
-                        SearchSection("Chats & Groups", colors) {
-                            matchedConversations.forEach { conversation ->
-                                ConversationTile(
-                                    conversation = conversation,
-                                    colors = colors,
-                                    onOpen = {
-                                        if (isSearchSessionCurrent() && !isConversationHidden(conversation.id) &&
-                                            !isConversationProtected(conversation.id)) {
-                                            onOpenConversation(conversation.id)
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                if (!isSearching && matchedUsers.isEmpty() && matchedConversations.isEmpty()) {
+                if (!isSearching && !searchFailed && (resultFilter !in listOf("All", "People") || matchedUsers.isEmpty()) && visibleConversations.isEmpty()) {
                     item {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
                         ) {
                             Text(
-                                "No results for \"${query.trim()}\"",
+                                if (!localOnly && query.trim().length < 2 && resultFilter in listOf("All", "People")) stringResource(R.string.social_search_keep_typing) else stringResource(R.string.social_search_no_matches),
                                 color = colors.foreground,
                                 fontWeight = FontWeight.Bold,
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "No usernames, contacts, or conversations match your search.",
+                                stringResource(R.string.social_search_no_matches_body),
                                 color = colors.foregroundSecondary,
                                 fontSize = 12.5.sp,
                             )
@@ -345,8 +492,9 @@ fun GlobalSearchScreen(
                                 onClick = {
                                     query = ""
                                     queueSearch("")
+                                    runCatching { focusRequester.requestFocus() }
                                 },
-                                label = "Clear search",
+                                label = stringResource(R.string.social_search_clear_search),
                             )
                         }
                     }
@@ -387,20 +535,26 @@ private fun UserTile(
     user: UserProfile,
     colors: ChatyColors,
     isOpeningChat: Boolean,
+    query: String,
+    enabled: Boolean,
     onMessage: () -> Unit,
 ) {
+    val messageLabel = stringResource(R.string.social_search_message_person, user.displayName, user.username)
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().background(colors.surfaceElevated)
+            .semantics {
+                customActions = if (enabled) listOf(CustomAccessibilityAction(messageLabel) { onMessage(); true }) else emptyList()
+            }.padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         TaskAvatar(user.avatarInitials, user.avatarColorHex, 42, colors)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    user.displayName,
+                    highlightSearchMatch(user.displayName, query),
                     overflow = TextOverflow.Ellipsis,
-                    maxLines = 1,
+                    maxLines = 2,
                     color = colors.foreground,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
@@ -408,26 +562,27 @@ private fun UserTile(
                 )
                 if (user.isVerified) {
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Rounded.Verified, contentDescription = null, tint = colors.primary, modifier = Modifier.size(15.dp))
+                    Icon(Icons.Rounded.Verified, contentDescription = stringResource(R.string.social_search_verified), tint = colors.primary, modifier = Modifier.size(15.dp))
                 }
             }
             Text(
-                "@${user.username}${if (user.about.isNotEmpty()) " • ${user.about}" else ""}",
-                maxLines = 1,
+                highlightSearchMatch("@${user.username}${if (user.about.isNotEmpty()) " • ${user.about}" else ""}", query),
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = colors.foreground.copy(alpha = 0.6f),
+                color = colors.foregroundSecondary,
                 fontSize = 12.sp,
             )
         }
         Spacer(Modifier.width(8.dp))
         ChatyActionButton(
             onClick = onMessage,
-            modifier = Modifier.width(90.dp),
+            enabled = enabled,
+            modifier = Modifier.semantics { contentDescription = messageLabel },
         ) {
             if (isOpeningChat) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
             } else {
-                Text("Message", fontSize = 13.sp)
+                Text(stringResource(R.string.social_search_message), fontSize = 13.sp)
             }
         }
     }
@@ -437,26 +592,31 @@ private fun UserTile(
 private fun ConversationTile(
     conversation: Conversation,
     colors: ChatyColors,
+    query: String,
     onOpen: () -> Unit,
 ) {
+    val openLabel = stringResource(R.string.social_search_open_conversation)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpen)
+            .semantics { customActions = listOf(CustomAccessibilityAction(openLabel) { onOpen(); true }) }
+            .clickable(role = Role.Button, onClick = onOpen)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         TaskAvatar(conversation.avatarInitials ?: "CH", conversation.avatarColorHex ?: "0xFF6366F1", 42, colors)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                conversation.title,
+                highlightSearchMatch(conversation.title, query),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 color = colors.foreground,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
             )
             Text(
-                conversation.lastMessageText,
+                highlightSearchMatch(conversation.lastMessageText, query),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = colors.foreground.copy(alpha = 0.6f),
@@ -467,5 +627,21 @@ private fun ConversationTile(
             semanticLabel = null,
             color = colors.foreground.copy(alpha = 0.35f),
         )
+    }
+}
+
+/** Presentation-only matching. This never changes search identity or permission checks. */
+private fun highlightSearchMatch(value: String, rawQuery: String): androidx.compose.ui.text.AnnotatedString {
+    val term = rawQuery.trim()
+    if (term.isEmpty()) return androidx.compose.ui.text.AnnotatedString(value)
+    return androidx.compose.ui.text.buildAnnotatedString {
+        append(value)
+        var from = 0
+        while (from < value.length) {
+            val index = value.indexOf(term, startIndex = from, ignoreCase = true)
+            if (index < 0) break
+            addStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold), index, index + term.length)
+            from = index + term.length
+        }
     }
 }

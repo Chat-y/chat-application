@@ -15,6 +15,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +27,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeGestures
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -57,6 +63,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -104,6 +111,11 @@ internal fun PresetNavigationShell(
     unreadCounts: Map<String, Int> = emptyMap(),
     /** OneUI center-button dock: the raised circle in the dock middle. */
     onCenterAction: () -> Unit = {},
+    /** R2-25 placement pass-through: mirrors ContextualNavigationFab's
+     *  leftHandedCompose. False (default) keeps the FAB slot bottom-end;
+     *  true moves it bottom-start with horizontal gesture-inset clearance.
+     *  The action never moves unless a caller deliberately enables this. */
+    leftHandedCompose: Boolean = false,
 ) {
     val accent = colors.primary
     val foreground = colors.foreground
@@ -120,7 +132,7 @@ internal fun PresetNavigationShell(
         isBasic -> 56f
         isIos -> 56f
         isBubbles -> 56f
-        isOneUi -> 56f
+        isOneUi -> 64f + (LocalDensity.current.fontScale - 1f).coerceAtLeast(0f) * 32f
         else -> 64f
     }
     val horizontalPadding = 0f
@@ -133,6 +145,8 @@ internal fun PresetNavigationShell(
         else -> colors.surface
     }
 
+    val dockTextMeasurer = rememberTextMeasurer()
+    val dockTextStyle = androidx.compose.material3.LocalTextStyle.current
     val activeId = navItemIds.getOrNull(selectedIndex)
     val collapseRangePx = with(LocalDensity.current) { ReferenceLayoutMetrics.compactIdentityHeightDp.dp.toPx() }
     var headerOffsetPx by remember(activeId, mode) { mutableFloatStateOf(0f) }
@@ -235,18 +249,42 @@ internal fun PresetNavigationShell(
                     when {
                         isOneUi -> Column(selectedModifier, horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(label, color = tint, fontSize = 16.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 val unread = unreadCounts[id] ?: 0
-                                if (unread > 0) Box(Modifier.background(accent, CircleShape).padding(horizontal = 5.dp, vertical = 1.dp), contentAlignment = Alignment.Center) {
-                                    Text(if (unread > 99) "99+" else unread.toString(), color = colors.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                val badgeLabel = if (unread > 99) "99+" else unread.toString()
+                                val labelWidth = dockTextMeasurer.measure(label, style = dockTextStyle.copy(
+                                    fontSize = 16.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                ), maxLines = 1, softWrap = false).size.width
+                                val badgeWidth = if (unread > 0) dockTextMeasurer.measure(badgeLabel,
+                                    style = dockTextStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    maxLines = 1, softWrap = false).size.width else 0
+                                val useCompactIcon = with(LocalDensity.current) {
+                                    labelWidth + badgeWidth + (if (unread > 0) 14.dp.toPx() else 0f) > maxWidth.toPx()
+                                }
+                                if (useCompactIcon) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    // Keep the full spoken destination name without shrinking scaled text.
+                                    NavDestinationIcon(id, size = 22, tint = tint, selected = selected)
+                                    if (unread > 0) Box(Modifier.background(accent, CircleShape).padding(horizontal = 5.dp, vertical = 1.dp), contentAlignment = Alignment.Center) {
+                                        Text(badgeLabel, color = colors.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(label, color = tint, fontSize = 16.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        val unread = unreadCounts[id] ?: 0
+                                        if (unread > 0) Box(Modifier.background(accent, CircleShape).padding(horizontal = 5.dp, vertical = 1.dp), contentAlignment = Alignment.Center) {
+                                            Text(if (unread > 99) "99+" else unread.toString(), color = colors.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(4.dp))
                             // Fixed geometry keeps selection from shifting the label.
-                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(modifier = Modifier.width(24.dp).height(3.dp)
+                                .background(if (selected) tint else Color.Transparent, RoundedCornerShape(999.dp)),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                 repeat(5) { Box(Modifier.size(2.dp).background(
                                     if (selected) tint else Color.Transparent, CircleShape)) }
                             }
@@ -319,7 +357,18 @@ internal fun PresetNavigationShell(
                 }
             }
         }
-        Box(Modifier.align(Alignment.BottomEnd).padding(bottom = (barHeight + 16).dp, end = 16.dp)) { fab() }
+        Box(
+            Modifier
+                .align(if (leftHandedCompose) Alignment.BottomStart else Alignment.BottomEnd)
+                .padding(bottom = (barHeight + 16).dp)
+                .then(
+                    if (leftHandedCompose) Modifier
+                        // Keep the left-placed action clear of the edge back-gesture zone.
+                        .windowInsetsPadding(WindowInsets.safeGestures.only(WindowInsetsSides.Horizontal))
+                        .padding(start = 16.dp)
+                    else Modifier.padding(end = 16.dp),
+                ),
+        ) { fab() }
     }
 }
 }
@@ -343,6 +392,8 @@ internal fun BottomShell(
     raisedCenterScrollDock: Boolean = false,
     fab: @Composable () -> Unit,
     content: @Composable () -> Unit,
+    /** R2-25 placement pass-through: see PresetNavigationShell.leftHandedCompose. */
+    leftHandedCompose: Boolean = false,
 ) {
     val accent = colors.primary
     val sideMargin = when (styleName) {
@@ -544,7 +595,18 @@ internal fun BottomShell(
                     modifier = Modifier.size(24.dp))
             }
         }
-        Box(Modifier.align(Alignment.BottomEnd).padding(bottom = (barHeight + bottomMargin + 16).dp, end = 16.dp)) { fab() }
+        Box(
+            Modifier
+                .align(if (leftHandedCompose) Alignment.BottomStart else Alignment.BottomEnd)
+                .padding(bottom = (barHeight + bottomMargin + 16).dp)
+                .then(
+                    if (leftHandedCompose) Modifier
+                        // Keep the left-placed action clear of the edge back-gesture zone.
+                        .windowInsetsPadding(WindowInsets.safeGestures.only(WindowInsetsSides.Horizontal))
+                        .padding(start = 16.dp)
+                    else Modifier.padding(end = 16.dp),
+                ),
+        ) { fab() }
     }
 }
 

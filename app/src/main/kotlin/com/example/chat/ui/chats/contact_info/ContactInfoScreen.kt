@@ -58,6 +58,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
@@ -113,15 +127,30 @@ fun ContactInfoScreen(
     onDeletedPopToRoot: () -> Unit,
     onBack: () -> Unit,
     presenceLabelOverride: String? = null,
+    /** R1-05/R2-41: optional result-bearing conversation delete. Returns true only after the delete
+     *  is acknowledged. When null, the old fire-and-forget [onDeleteConversation] path is used. */
+    onDeleteConversationAwaited: (suspend () -> Boolean)? = null,
 ) {
     var showAllMedia by remember(conversation.id, contact.id) { mutableStateOf(false) }
-    if (showAllMedia) ConversationMediaDialog(messages.map(hydrateMessage), onOpenMedia, onClose = { showAllMedia = false })
     val colors = LocalAppColors.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var confirmAction by remember { mutableStateOf<String?>(null) }
+    // R1-36: a new notice replaces the current one, so failures cannot build a queue.
+    suspend fun showNotice(message: String) {
+        snackbar.currentSnackbarData?.dismiss()
+        snackbar.showSnackbar(message)
+    }
 
-    val hydrated = remember(messages) { messages.map(hydrateMessage) }
+    // R1-03/R1-35: the hydrator is part of the cache key, so a policy or hydrator change recomputes.
+    val hydrated = remember(messages, hydrateMessage) { messages.map(hydrateMessage) }
+    // R1-04: the dialog reuses the same hydrated snapshot as the summary (was messages.map(hydrateMessage) again).
+    if (showAllMedia) ConversationMediaDialog(hydrated, onOpenMedia, onClose = { showAllMedia = false })
+    val contactName = ContactInfoLogic.safeDisplayName(contact.displayName)
+    // R1-07/R5-45: one contact action at a time, independent of the parent's busy flag.
+    var actionInFlight by remember(conversation.id, contact.id) { mutableStateOf(false) }
+    // R1-06: remember a finished first step so a retry does not repeat it.
+    var contactRemoved by remember(conversation.id, contact.id) { mutableStateOf(false) }
     val media = remember(hydrated) { ContactInfoLogic.sharedMedia(hydrated) }
     val documents = remember(hydrated) { ContactInfoLogic.sharedDocuments(hydrated) }
     val links = remember(hydrated) { ContactInfoLogic.extractLinks(hydrated) }
@@ -132,7 +161,8 @@ fun ContactInfoScreen(
     // covered by the full-height scrolling details. Dart ChatyScaffold owns
     // this toolbar and SafeArea separately from its ListView body.
     Column(Modifier.fillMaxSize().background(colors.background)
-        .windowInsetsPadding(WindowInsets.safeDrawing)) {
+        .windowInsetsPadding(WindowInsets.safeDrawing)
+        .semantics { paneTitle = "Contact info for $contactName" }) {
         // GB contact-info top bar: back chevron only, no title (user reference 2026-11-03).
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             androidx.compose.material3.IconButton(onClick = onBack) {
@@ -147,7 +177,8 @@ fun ContactInfoScreen(
         ) { padding ->
         if (loading) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(strokeWidth = 2.2.dp, color = colors.primary)
+                CircularProgressIndicator(strokeWidth = 2.2.dp, color = colors.primary,
+                    modifier = Modifier.semantics { contentDescription = "Loading contact info" })
             }
             return@Scaffold
         }
@@ -185,21 +216,25 @@ fun ContactInfoScreen(
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                contact.displayName,
+                // R3-20/R3-21/R3-22/R4-29: untrusted name, cleaned and bounded.
+                contactName,
                 color = colors.foreground,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().semantics { heading() },
             )
             Spacer(Modifier.height(2.dp))
-            Text(
-                "@${contact.username}",
-                color = colors.foregroundSecondary,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            // R1-09: no bare "@" when the username is missing (was "@${contact.username}").
+            ContactInfoLogic.usernameLine(contact.username)?.let { handle ->
+                Text(
+                    handle,
+                    color = colors.foregroundSecondary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             Spacer(Modifier.height(4.dp))
             Text(
                 presenceLabelOverride ?: ContactInfoLogic.presenceLabel(
@@ -277,21 +312,30 @@ fun ContactInfoScreen(
 
             // GB "Media, links, and docs" row: label left, total count + chevron right.
             Row(
-                Modifier.fillMaxWidth().clickable { showAllMedia = true }.padding(horizontal = 4.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                    .clickable(role = Role.Button) { showAllMedia = true }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Media, links, and docs, ${ContactInfoLogic.loadedItemCount(media.size, documents.size, links.size)} loaded items"
+                    }
+                    .padding(horizontal = 4.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Media, links, and docs", color = colors.foregroundSecondary, fontSize = 13.sp)
                 Spacer(Modifier.weight(1f))
-                Text("${media.size + documents.size + links.size}", color = colors.foregroundSecondary, fontSize = 13.sp)
+                Text("${ContactInfoLogic.loadedItemCount(media.size, documents.size, links.size)}", color = colors.foregroundSecondary, fontSize = 13.sp)
                 Spacer(Modifier.width(4.dp))
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = colors.foregroundSecondary, modifier = Modifier.size(18.dp))
             }
+            // R1-53: the count covers loaded chat data only, not the full history.
+            Text("Counts include loaded messages only.", color = colors.foregroundSecondary, fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 4.dp))
             Spacer(Modifier.height(6.dp))
             Column(Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp))) {
                 if (media.isEmpty() && links.isEmpty() && documents.isEmpty()) {
                     Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                         Text(
-                            "No shared media, links or documents yet.",
+                            // R1-54: scoped wording (was "No shared media, links or documents yet.")
+                            "No shared media, links or documents loaded.",
                             color = colors.foregroundSecondary,
                             fontSize = 12.sp,
                         )
@@ -306,16 +350,18 @@ fun ContactInfoScreen(
                             fontSize = 13.sp,
                         )
                         Spacer(Modifier.height(8.dp))
-                        Row(Modifier.height(80.dp).horizontalScroll(rememberScrollState())) {
-                            media.forEachIndexed { index, message ->
-                                if (index > 0) Spacer(Modifier.width(8.dp))
+                        // R1-25: lazy row so a long history is not composed eagerly (was Row + horizontalScroll over every item).
+                        LazyRow(Modifier.height(80.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                            items(media, key = { it.id }) { message ->
                                 val attachment = message.attachment!!
+                                val kindLabel = if (attachment.type == "video") "Video" else "Photo"
                                 Column(
                                     Modifier
                                         .width(110.dp)
                                         .height(80.dp)
                                         .background(colors.surfaceSecondary, RoundedCornerShape(12.dp))
-                                        .clickable { onOpenMedia(message) }
+                                        .clickable(onClickLabel = "Open $kindLabel", role = Role.Button) { onOpenMedia(message) }
+                                        .semantics(mergeDescendants = true) { contentDescription = "$kindLabel, ${attachment.name.ifBlank { kindLabel }}" }
                                         .padding(8.dp),
                                 ) {
                                     Icon(
@@ -355,14 +401,17 @@ fun ContactInfoScreen(
                 documents.take(5).forEach { message ->
                     val attachment = message.attachment!!
                     Row(
-                        Modifier.fillMaxWidth().clickable { onOpenMedia(message) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                        Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                            .clickable(onClickLabel = "Open document", role = Role.Button) { onOpenMedia(message) }
+                            .semantics(mergeDescendants = true) {}
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(Icons.Outlined.Description, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
-                                attachment.name,
+                                attachment.name.ifBlank { "Document" }, // R1-57
                                 color = colors.foreground,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp,
@@ -398,20 +447,23 @@ fun ContactInfoScreen(
                     onDismissRequest = { dlPicker = false },
                     title = { Text("Media auto-download") },
                     text = {
-                        Column {
+                        Column(Modifier.selectableGroup()) {
                             listOf(
                                 com.example.chat.data.media.AutoDownloadPolicy.Override.DEFAULT to "Follow default",
                                 com.example.chat.data.media.AutoDownloadPolicy.Override.ALWAYS to "Always download",
                                 com.example.chat.data.media.AutoDownloadPolicy.Override.NEVER to "Never (tap to download)",
                             ).forEach { (value, label) ->
                                 Row(
-                                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable {
-                                        com.example.chat.ServiceLocator.mediaAutoDownloadGate.setOverride(conversation.id, value)
-                                        dlOverride = value; dlPicker = false
-                                    },
+                                    Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                                        selected = dlOverride == value, role = Role.RadioButton,
+                                        onClick = {
+                                            com.example.chat.ServiceLocator.mediaAutoDownloadGate.setOverride(conversation.id, value)
+                                            dlOverride = value; dlPicker = false
+                                        },
+                                    ),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    androidx.compose.material3.RadioButton(selected = dlOverride == value, onClick = null)
+                                    androidx.compose.material3.RadioButton(selected = dlOverride == value, onClick = null) // row owns the click (R1-41)
                                     Spacer(Modifier.width(12.dp))
                                     Text(label, color = colors.foreground)
                                 }
@@ -433,19 +485,25 @@ fun ContactInfoScreen(
                             tint = colors.error,
                         )
                     },
-                    title = if (blocked) "Unblock ${contact.displayName}" else "Block ${contact.displayName}",
+                    title = if (blocked) "Unblock $contactName" else "Block $contactName",
                     titleColor = colors.error,
                     subtitle = if (blocked) "Allow messages from this contact again." else "Stop receiving messages from this contact.",
                     onClick = {
                         // Dart _toggleBlock: the confirm dialog only gates
                         // blocking; unblocking applies directly.
-                        if (busy) return@InfoTile
+                        if (busy || actionInFlight) return@InfoTile
                         if (blocked) {
+                            actionInFlight = true
                             scope.launch {
                                 try {
                                     onSetBlocked(false)
+                                } catch (error: CancellationException) {
+                                    throw error
                                 } catch (error: Exception) {
-                                    snackbar.showSnackbar("$error")
+                                    // R1-16/R3-39: no raw exception text (was showNotice("$error")).
+                                    showNotice("Couldn't unblock this contact. Try again.")
+                                } finally {
+                                    actionInFlight = false
                                 }
                             }
                         } else {
@@ -458,14 +516,14 @@ fun ContactInfoScreen(
                     title = "Delete Conversation",
                     titleColor = colors.error,
                     subtitle = "Remove this chat and all message history.",
-                    onClick = { if (!busy) confirmAction = "deleteConversation" },
+                    onClick = { if (!busy && !actionInFlight) confirmAction = "deleteConversation" },
                 )
                 InfoTile(
                     icon = { Icon(Icons.Rounded.PersonRemove, contentDescription = null, tint = colors.error) },
                     title = "Delete Contact & Chat",
                     titleColor = colors.error,
-                    subtitle = "Remove ${contact.displayName} and all conversations.",
-                    onClick = { if (!busy) confirmAction = "deleteUser" },
+                    subtitle = "Remove $contactName and all conversations.",
+                    onClick = { if (!busy && !actionInFlight) confirmAction = "deleteUser" },
                 )
             }
             Spacer(Modifier.height(12.dp))
@@ -480,46 +538,92 @@ fun ContactInfoScreen(
     // delete user, with the exact Dart copy.
     when (confirmAction) {
         "block" -> ConfirmDialog(
-            title = "Block ${contact.displayName}?",
+            title = "Block $contactName?",
             message = "You will stop receiving new messages from this person, and they cannot message you until you unblock them.",
             confirmLabel = "Block",
             onConfirm = {
                 confirmAction = null
+                if (actionInFlight) return@ConfirmDialog
+                actionInFlight = true
                 scope.launch {
                     try {
                         onSetBlocked(true)
+                    } catch (error: CancellationException) {
+                        throw error
                     } catch (error: Exception) {
-                        snackbar.showSnackbar("$error")
+                        showNotice("Couldn't block this contact. Try again.")
+                    } finally {
+                        actionInFlight = false
                     }
                 }
             },
             onDismiss = { confirmAction = null },
         )
         "deleteConversation" -> ConfirmDialog(
-            title = "Delete chat with ${contact.displayName}?",
+            title = "Delete chat with $contactName?",
             message = "This removes this conversation and all message history.",
             confirmLabel = "Delete",
             onConfirm = {
                 confirmAction = null
-                // Dart: deleteConversation is fire-and-forget, then pop to root.
-                onDeleteConversation()
-                onDeletedPopToRoot()
+                val awaited = onDeleteConversationAwaited
+                if (awaited == null) {
+                    // Dart: deleteConversation is fire-and-forget, then pop to root.
+                    onDeleteConversation()
+                    onDeletedPopToRoot()
+                } else if (!actionInFlight) {
+                    // R1-05: navigate only after the delete is acknowledged.
+                    actionInFlight = true
+                    scope.launch {
+                        try {
+                            if (awaited()) onDeletedPopToRoot()
+                            else showNotice("Couldn't delete this chat. Try again.")
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            showNotice("Couldn't delete this chat. Try again.")
+                        } finally {
+                            actionInFlight = false
+                        }
+                    }
+                }
             },
             onDismiss = { confirmAction = null },
         )
         "deleteUser" -> ConfirmDialog(
-            title = "Delete ${contact.displayName}?",
-            message = "This removes ${contact.displayName} from your contacts, directory, and deletes the conversation.",
+            title = "Delete $contactName?",
+            message = "This removes $contactName from your contacts, directory, and deletes the conversation.",
             confirmLabel = "Delete User",
             onConfirm = {
                 confirmAction = null
+                if (actionInFlight) return@ConfirmDialog
+                actionInFlight = true
                 scope.launch {
                     try {
-                        onDeleteUser()
-                        onDeleteConversation()
+                        // R1-06/R2-42: if removing the contact fails, stop here (no conversation delete, no navigation).
+                        if (!contactRemoved) {
+                            onDeleteUser()
+                            contactRemoved = true
+                        }
+                        val awaited = onDeleteConversationAwaited
+                        if (awaited != null) {
+                            if (!awaited()) {
+                                showNotice("Contact removed, but the chat wasn't deleted. Try again to finish.")
+                                return@launch
+                            }
+                        } else {
+                            onDeleteConversation()
+                        }
                         onDeletedPopToRoot()
+                    } catch (error: CancellationException) {
+                        throw error
                     } catch (error: Exception) {
-                        snackbar.showSnackbar("Failed to delete user: $error")
+                        // Was "Failed to delete user: $error" (raw exception text).
+                        showNotice(
+                            if (contactRemoved) "Contact removed, but the chat wasn't deleted. Try again to finish."
+                            else "Couldn't delete this contact. Try again.",
+                        )
+                    } finally {
+                        actionInFlight = false
                     }
                 }
             },
@@ -536,7 +640,9 @@ private fun QuickAction(icon: ImageVector, label: String, onTap: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onTap)
+            // R1-44: at least 48dp in both directions, exposed as a button.
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .clickable(role = Role.Button, onClick = onTap)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Box(
@@ -559,7 +665,7 @@ internal fun SectionTitle(title: String, colors: com.example.chat.ui.theme.AppCo
         color = colors.foregroundSecondary,
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp).semantics { heading() }, // R1-40
     )
 }
 
@@ -576,7 +682,7 @@ internal fun InfoTile(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.defaultMinSize(minHeight = 48.dp).clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -72,6 +72,12 @@ class ChatyNotificationService(
         fireListeners()
     }
 
+    /** Clear only the records reviewed by a confirmation dialog; preserve later arrivals. */
+    fun clear(ids: Set<String>) {
+        val changed = synchronized(notificationsLock) { _notifications.removeAll { it.id in ids } }
+        if (changed) fireListeners()
+    }
+
     fun clearAll() {
         val changed = synchronized(notificationsLock) {
             if (_notifications.isEmpty()) false else {

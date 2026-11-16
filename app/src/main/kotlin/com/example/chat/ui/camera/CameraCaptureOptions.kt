@@ -13,4 +13,6 @@ data class CameraCaptureOptions(
     val watermark: Boolean = false,
     val clarity: Boolean = false,
     val night: Boolean = false,
+    // Opt-in only: preserve existing unmirrored output unless explicitly enabled in the panel.
+    val mirrorSelfies: Boolean = false,
 )

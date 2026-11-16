@@ -264,14 +264,14 @@ class TasksControllerParityTest {
         // Server rejects the status PUT (500): the board must stay on the persisted status, no fake move.
         transport.status = 500
         transport.body = "{}"
-        c.moveTask(task, TaskStatus.inProgress)
+        val result = c.moveTask(task, TaskStatus.inProgress)
+        assertTrue(result is TasksController.MoveResult.Failed)
+        assertTrue(c.historyFor("t1").isEmpty())
         assertEquals(TaskStatus.inbox, c.tasks.single().status)
         val put = transport.calls.last()
         assertEquals("PUT", put.method)
         assertTrue(put.url.endsWith("/tasks/t1"))
         assertEquals("{\"status\":\"in_progress\"}", put.body)
-        // NOTE (parity, not asserted): api's updateTaskStatus also ignores non-200, so moveTask still returns Moved
-        // and records history; the user sees no error. Decide separately whether to deviate from api.
     }
 
     @Test fun moveTaskTransportExceptionKeepsPersistedStatus() = runBlocking {

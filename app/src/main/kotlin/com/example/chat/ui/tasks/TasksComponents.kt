@@ -85,10 +85,13 @@ fun TaskPriorityBadge(priority: TaskPriority, colors: TaskColors) {
  *  the tasks surfaces never show it). */
 @Composable
 fun TaskAvatar(initials: String, colorHex: String?, size: Int, colors: TaskColors) {
-    val parsed = runCatching {
-        val clean = (colorHex ?: "").replace("#", "").replace("0x", "")
-        Color((if (clean.length == 6) "FF$clean" else clean).toLong(16))
-    }.getOrNull() ?: colors.primary
+    // TAS-034: parse once per input instead of on every recomposition.
+    val parsed = androidx.compose.runtime.remember(colorHex, colors.primary) {
+        runCatching {
+            val clean = (colorHex ?: "").replace("#", "").replace("0x", "")
+            Color((if (clean.length == 6) "FF$clean" else clean).toLong(16))
+        }.getOrNull() ?: colors.primary
+    }
     Box(
         modifier = Modifier.size(size.dp).clip(CircleShape).background(parsed),
         contentAlignment = Alignment.Center,

@@ -124,7 +124,7 @@ fun RegisterOrganizationScreen(
         val clean = raw.trim().lowercase()
         if (clean.isEmpty()) return authCopy("Workspace ID is required")
         if (clean.length < 3) return authCopy("Workspace ID must be at least 3 characters")
-        if (!Regex("^[a-z0-9_-]+$").matches(clean)) return authCopy("Use lowercase letters, numbers, and hyphens only")
+        if (!Regex("^[a-z0-9_-]+$").matches(clean)) return authCopy("Use lowercase letters, numbers, hyphens, and underscores only")
         return null
     }
 

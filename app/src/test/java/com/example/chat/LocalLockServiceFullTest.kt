@@ -52,13 +52,15 @@ class LocalLockServiceFullTest {
         try { l.setSecretPhrase("  "); fail() } catch (_: IllegalArgumentException) {}
     }
 
-    @Test fun secretPhraseUsesSameFailedAttemptCooldownAsOtherCredentials() = runBlocking {
+    @Test fun secretPhraseThrottleDoesNotLockAppLock() = runBlocking {
         val l = svc(MemStore())
         l.setSecretPhrase("private phrase")
         repeat(4) { assertFalse(l.verifySecretPhrase("wrong phrase")) }
         assertEquals(0, l.getRemainingCooldownSeconds())
         assertFalse(l.verifySecretPhrase("wrong phrase")) // fifth failure starts 30-second cooldown
-        assertEquals(30, l.getRemainingCooldownSeconds())
+        assertEquals(0, l.getRemainingCooldownSeconds())
+        assertEquals(30, l.getSecretPhraseRemainingCooldownSeconds())
+        assertEquals(0, l.getFailedAttempts())
         assertFalse(l.verifySecretPhrase("private phrase")) // correct phrase cannot bypass active cooldown
         clock += 31_000
         assertTrue(l.verifySecretPhrase("private phrase"))
@@ -83,9 +85,23 @@ class LocalLockServiceFullTest {
     @Test fun clearAllAndNormalize() = runBlocking {
         val s = MemStore(); val l = svc(s)
         l.setCredential("PIN", "123456", 6); l.setCredential("pattern", "0-1-2-3"); l.setCredential("password", "abcdef")
-        l.setSecretPhrase("x")
+        l.setSecretPhrase("safe phrase")
         l.clearAll()
         assertTrue(s.m.isEmpty())
         assertEquals(4, l.getPinLength())
     }
+    // Source-only regression addition. Not executed in this checkpoint.
+    @Test fun setupPresenceDistinguishesAbsentAndCorruptStorage() = runBlocking {
+        val store = MemStore()
+        val lock = svc(store)
+        assertFalse(lock.hasCredentialForSetup("PIN"))
+        lock.setCredential("pin", "1357", 4)
+        assertTrue(lock.hasCredentialForSetup("PIN"))
+        val saltKey = store.m.keys.first { it.endsWith(".pin.salt") }
+        store.m.remove(saltKey)
+        assertTrue(runCatching { lock.hasCredentialForSetup("PIN") }.isFailure)
+        store.m[saltKey] = "not base64"
+        assertTrue(runCatching { lock.hasCredentialForSetup("PIN") }.isFailure)
+    }
+
 }

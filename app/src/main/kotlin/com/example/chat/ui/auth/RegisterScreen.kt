@@ -271,7 +271,7 @@ fun RegisterScreen(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(listOf(errorMessage, emailError, usernameError, passwordError, contactNumberError, workspaceError)) {
+    androidx.compose.runtime.LaunchedEffect(errorMessage, emailError, usernameError, passwordError, contactNumberError, workspaceError) {
         if (listOf(errorMessage, emailError, usernameError, passwordError, contactNumberError, workspaceError).any { !it.isNullOrBlank() }) com.example.chat.ui.kit.ChatyHapticsPort.error(feedbackView)
     }
 

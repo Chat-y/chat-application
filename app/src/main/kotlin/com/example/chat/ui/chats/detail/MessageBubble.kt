@@ -1183,13 +1183,14 @@ private fun MessageMetaRow(
         if (isMe) {
             Box(Modifier.width(4.dp))
             Box(
-                Modifier.testTag("message_delivery_status").pointerInput(message.id, message.deliveryState) {
-                    if (message.deliveryState == DeliveryState.failed &&
-                        onRetry != null
-                    ) {
-                        detectTapGestures(onTap = { onRetry() })
-                    }
-                },
+                Modifier.testTag("message_delivery_status").then(
+                    if (message.deliveryState == DeliveryState.failed && onRetry != null) {
+                        Modifier.size(48.dp)
+                            .semantics(mergeDescendants = true) { }
+                            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Retry message") { onRetry() }
+                    } else Modifier,
+                ),
+                contentAlignment = Alignment.Center,
             ) {
                 DeliveryStatusIcon(
                     style = theme.deliveryTickStyle,

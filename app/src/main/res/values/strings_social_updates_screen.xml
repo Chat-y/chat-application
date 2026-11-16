@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_updates_error">Unable to complete this update. Please try again.</string>
+    <string name="social_updates_posted">Status posted.</string>
+    <string name="social_updates_post_failure">Unable to post this status. Try again.</string>
+    <string name="social_updates_capture_failure">Unable to capture this status. Try again.</string>
+    <string name="social_updates_camera_confirm_title">Post this status?</string>
+    <string name="social_updates_camera_confirm_body">This photo will be shared with your contacts for 24 hours.</string>
+    <string name="social_updates_send">Send</string>
+    <string name="social_updates_composer_summary">Share photo, video, audio or thought</string>
+    <string name="social_updates_capture_photo">Capture photo for status</string>
+    <string name="social_updates_recent_heading">RECENT UPDATES</string>
+    <string name="social_updates_unavailable">Status is unavailable for this account connection. Nothing has been sent.</string>
+    <string name="social_updates_feed_failure">Unable to load updates.</string>
+    <string name="social_updates_retry_feed">Retry updates</string>
+    <string name="social_updates_empty">No recent updates</string>
+    <string name="social_updates_caption">\n\nCaption: %1$s</string>
+    <string name="social_updates_title">Updates</string>
+    <string name="social_updates_loading">Loading updates</string>
+    <string name="social_updates_own">My Status</string>
+    <string name="social_updates_contact">Contact</string>
+    <string name="social_updates_type_text">Text update</string>
+    <string name="social_updates_type_image">Image update</string>
+    <string name="social_updates_type_video">Video update</string>
+    <string name="social_updates_type_audio">Audio update</string>
+    <string name="social_updates_type_file">File update</string>
+    <string name="social_updates_type_unknown">Media update</string>
+</resources>

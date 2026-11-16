@@ -1,6 +1,9 @@
 package com.example.chat.ui.kit
 
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 
 import androidx.compose.foundation.selection.toggleable
 
@@ -218,6 +221,7 @@ fun GbSliderTile(
             Text(subtitle, color = Color(config.secondaryTextColor), fontSize = 12.sp)
         }
         Slider(
+            modifier = Modifier.semantics { stateDescription = "${value.toInt()}${unit ?: suffix}" },
             value = value.coerceIn(min, max),
             onValueChange = onChanged,
             valueRange = min..max,
@@ -269,7 +273,7 @@ fun GbCardContainer(
     if (!headerText.isNullOrEmpty()) {
         Column {
             Text(
-                headerText, Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 4.dp),
+                headerText, Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 4.dp).semantics { heading() },
                 color = Color(config.accentColor), fontSize = 13.sp, fontWeight = FontWeight.W700, letterSpacing = 0.4.sp,
             )
             card()

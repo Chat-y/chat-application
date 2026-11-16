@@ -2,6 +2,11 @@ package com.example.chat.ui.calls
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,12 +71,7 @@ private class IncomingCallData(
     val onDecline: () -> Unit,
 ) {
     val initials: String
-        get() = session.remoteAvatarInitials
-            ?: (if (session.remoteDisplayName.isNotEmpty()) {
-                session.remoteDisplayName.substring(0, 1).uppercase()
-            } else {
-                "U"
-            })
+        get() = session.remoteAvatarInitials ?: callInitials(session.remoteDisplayName)
 }
 
 @Composable
@@ -115,7 +115,9 @@ private fun CallerName(session: ChatyCallSession, align: TextAlign = TextAlign.C
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Chaty Secure Direct Call",
+            // CALL-R1-13: no unconditional "Secure" claim - neutral until the session
+            // carries a verified-encryption flag (none exists in the model yet).
+            "Chaty call",
             textAlign = align,
             color = Color(theme.secondaryTextColor),
             fontSize = 14.sp,
@@ -136,7 +138,14 @@ private fun RoundAction(
     val theme = LocalThemeConfig.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(4.dp),
+        modifier = Modifier
+            .padding(4.dp)
+            // CALL-R1-37: one merged, labeled, roled node per action.
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = label
+                onClick(label = label) { onTap(); true }
+            },
     ) {
         Box(
             contentAlignment = Alignment.Center,
@@ -241,15 +250,9 @@ private fun SheetIncomingCall(data: IncomingCallData) {
                     )
                     .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 32.dp),
             ) {
-                Box(
-                    Modifier
-                        .width(36.dp)
-                        .height(4.dp)
-                        .background(
-                            Color(argbWithAlpha(theme.secondaryTextColor, 0.3)),
-                            CircleShape,
-                        ),
-                )
+                // CALL-R1-50: drag handle removed - the sheet doesn't drag, so the
+                // handle was a broken affordance. Restore together with drag-to-dismiss:
+                // Box(Modifier.width(36.dp).height(4.dp).background(Color(argbWithAlpha(theme.secondaryTextColor, 0.3)), CircleShape))
                 Spacer(Modifier.height(16.dp))
                 CallerName(session)
                 Spacer(Modifier.height(24.dp))

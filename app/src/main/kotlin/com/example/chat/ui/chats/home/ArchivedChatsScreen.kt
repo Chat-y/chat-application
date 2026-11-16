@@ -32,10 +32,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chat.R
 import com.example.chat.core.theme.ThemeConfig
 import com.example.chat.core.theme.argbWithAlpha
 import com.example.chat.domain.models.Conversation
@@ -57,6 +60,7 @@ fun ArchivedChatsScreen(
     onDeleteConversations: (List<String>) -> Unit,
     isConversationHidden: (String) -> Boolean = { false },
 ) {
+    val noMessages = stringResource(R.string.home_archived_chats_screen_no_messages)
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val archived = ArchiveVisibilityPolicy.visible(conversations, isConversationHidden)
@@ -73,9 +77,9 @@ fun ArchivedChatsScreen(
     if (showDeleteConfirm && isSelectionMode) {
         val count = actionableIds.size
         HomeConfirmDialog(
-            title = "Delete $count chat${if (count == 1) "" else "s"}?",
-            message = "This removes the selected conversations for this account.",
-            confirmLabel = "Delete",
+            title = pluralStringResource(R.plurals.home_archive_delete_chats_title, count, count),
+            message = stringResource(R.string.home_archived_chats_screen_this_removes_the_selected_conversations_for_this_account),
+            confirmLabel = stringResource(R.string.home_archived_chats_screen_delete),
             onConfirm = {
                 val ids = ArchiveVisibilityPolicy.actionableIds(selectedIds, conversations, isConversationHidden)
                 if (ids.isNotEmpty()) onDeleteConversations(ids)
@@ -98,7 +102,7 @@ fun ArchivedChatsScreen(
                 ) {
                     IconButton(onClick = { selectedIds = emptySet() }) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
-                            semanticLabel = "Clear selection",
+                            semanticLabel = stringResource(R.string.home_archived_chats_screen_clear_selection),
                             color = Color(theme.primaryTextColor),
                         )
                     }
@@ -114,10 +118,10 @@ fun ArchivedChatsScreen(
                             .forEach(onToggleArchive)
                         selectedIds = emptySet()
                     }) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.unarchive, semanticLabel = "Unarchive", color = Color(theme.primaryTextColor))
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.unarchive, semanticLabel = stringResource(R.string.home_archived_chats_screen_unarchive), color = Color(theme.primaryTextColor))
                     }
                     IconButton(onClick = { showDeleteConfirm = true }) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.delete, semanticLabel = "Delete", color = Color(theme.primaryTextColor))
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.delete, semanticLabel = stringResource(R.string.home_archived_chats_screen_delete), color = Color(theme.primaryTextColor))
                     }
                 }
             } else {
@@ -130,11 +134,11 @@ fun ArchivedChatsScreen(
                 ) {
                     IconButton(onClick = onBack) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
-                            semanticLabel = "Back",
+                            semanticLabel = stringResource(R.string.home_archived_chats_screen_back),
                             color = Color(theme.primaryTextColor),
                         )
                     }
-                    Text("Archived", color = Color(theme.primaryTextColor), fontSize = 19.sp)
+                    Text(stringResource(R.string.home_archived_chats_screen_archived), color = Color(theme.primaryTextColor), fontSize = 19.sp)
                 }
             }
             if (archived.isEmpty()) {
@@ -150,14 +154,14 @@ fun ArchivedChatsScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        "No archived chats",
+                        stringResource(R.string.home_archived_chats_screen_no_archived_chats),
                         color = Color(theme.primaryTextColor),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.W700,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Chats you archive will appear here",
+                        stringResource(R.string.home_archived_chats_screen_chats_you_archive_will_appear_here),
                         color = Color(theme.secondaryTextColor),
                         fontSize = 13.5.sp,
                     )
@@ -219,7 +223,7 @@ fun ArchivedChatsScreen(
                                 Spacer(Modifier.height(4.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        conversation.lastMessageText.ifEmpty { "No messages" },
+                                        conversation.lastMessageText.ifEmpty { noMessages },
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         color = if (conversation.unreadCount > 0) {

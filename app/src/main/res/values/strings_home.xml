@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Archived Chats copy only. User titles, messages, IDs and timestamp formatting stay unchanged. -->
+    <!-- %1$d is the number of selected, currently actionable archived chats. -->
+    <plurals name="home_archive_delete_chats_title">
+        <item quantity="one">Delete %1$d chat?</item>
+        <item quantity="other">Delete %1$d chats?</item>
+    </plurals>
+    <string name="home_archived_chats_screen_this_removes_the_selected_conversations_for_this_account">This removes the selected conversations for this account.</string>
+    <string name="home_archived_chats_screen_delete">Delete</string>
+    <string name="home_archived_chats_screen_clear_selection">Clear selection</string>
+    <string name="home_archived_chats_screen_unarchive">Unarchive</string>
+    <string name="home_archived_chats_screen_back">Back</string>
+    <string name="home_archived_chats_screen_archived">Archived</string>
+    <string name="home_archived_chats_screen_no_archived_chats">No archived chats</string>
+    <string name="home_archived_chats_screen_chats_you_archive_will_appear_here">Chats you archive will appear here</string>
+    <string name="home_archived_chats_screen_no_messages">No messages</string>
+    <!-- Copy reference only: not wired to the pure HomeRetentionPolicy API in this copy-only patch. -->
+    <string name="home_retention_policy_search_currently_filters_loaded_chat_titles_only_no_message">Search matches chat titles and, for unlocked chats, the last loaded message. Locked chats match titles only. No message or note index is built or kept.</string>
+</resources>

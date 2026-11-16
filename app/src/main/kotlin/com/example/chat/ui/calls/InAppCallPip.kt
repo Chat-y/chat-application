@@ -60,7 +60,8 @@ fun InAppCallPip(
     onEndCall: () -> Unit,
     bundleId: com.example.chat.ui.calls.bundles.CallBundleId? = null,
 ) {
-    val bundleTokens = bundleId?.let { themedCallBundle(it) }
+    val pipAppColors = com.example.chat.ui.theme.LocalAppColors.current
+    val bundleTokens = remember(bundleId, pipAppColors) { bundleId?.let { themedCallBundleTokens(it, pipAppColors) } }
     val compactBackground = bundleTokens?.cardBackground ?: callSurface()
     val compactAccent = bundleTokens?.primaryAccent ?: callAccent()
     val compactCorner = bundleTokens?.cardCornerRadiusDp ?: 20
@@ -120,7 +121,7 @@ fun InAppCallPip(
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
-                onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) },
+                onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) }, // detachRenderer() releases the EGL surface internally
             )
         } else {
             Box(
@@ -130,7 +131,7 @@ fun InAppCallPip(
                 CallAvatar(
                     initials = session.remoteAvatarInitials
                         ?: (if (session.remoteDisplayName.isNotEmpty()) {
-                            session.remoteDisplayName.substring(0, 1).uppercase()
+                            callInitials(session.remoteDisplayName)
                         } else {
                             "U"
                         }),

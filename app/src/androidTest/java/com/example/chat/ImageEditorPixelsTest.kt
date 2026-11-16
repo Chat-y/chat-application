@@ -31,4 +31,20 @@ class ImageEditorPixelsTest {
         assertTrue(Color.red(edited.getPixel(50, 50)) > Color.red(original.getPixel(50, 50)))
         assertEquals(Color.rgb(60, 80, 100), original.getPixel(250, 250))
     }
+    @Test fun singlePointStrokeAppearsInExport() {
+        val original = Bitmap.createBitmap(500, 500, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
+        val dot = EditorStroke(Color.RED.toLong(), listOf(Offset(0.5f, 0.5f)))
+        val edited = renderEditedImage(original, 0f, 1f, listOf(dot))
+        assertTrue(Color.red(edited.getPixel(250, 250)) > 240)
+        assertTrue(Color.green(edited.getPixel(250, 250)) < 20)
+    }
+    @Test fun alphaIsKeptUnlessFlatteningWasRequested() {
+        val original = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.TRANSPARENT) }
+        val transparent = renderEditedImage(original, 0f, 1f, emptyList())
+        val flattened = renderEditedImage(original, 0f, 1f, emptyList(), flattenAlpha = true)
+        assertEquals(0, Color.alpha(transparent.getPixel(50, 50)))
+        assertEquals(Color.WHITE, flattened.getPixel(50, 50))
+        assertEquals(0, Color.alpha(original.getPixel(50, 50)))
+    }
+
 }

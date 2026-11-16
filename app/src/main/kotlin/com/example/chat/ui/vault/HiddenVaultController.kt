@@ -21,6 +21,13 @@ class HiddenVaultController(
     fun addListener(listener: () -> Unit) { listeners.add(listener) }
     fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
 
+    val sessionOwner: Long get() = service.sessionOwner
+    val registryError: String? get() = service.registryError
+    val registryLoading: Boolean get() = service.registryLoading
+    suspend fun getPinLength(): Int = service.getPinLength()
+    suspend fun removeConversationLock(conversationId: String) = service.removeConversationLock(conversationId)
+    suspend fun retryLoad() = service.loadVaultRegistry()
+    fun recordActivity() = service.recordActivity()
     val isUnlocked: Boolean get() = service.isUnlocked
     val isDecoyMode: Boolean get() = service.isDecoyMode
     val lockedConversationIds: Set<String> get() = service.lockedConversationIds
@@ -33,7 +40,8 @@ class HiddenVaultController(
 
     suspend fun verifyPin(pin: String): Boolean = service.verifyPin(pin)
 
-    fun forceUnlockForSession() = service.forceUnlockForSession()
+    // No unauthenticated force-unlock API.
+    // fun forceUnlockForSession() = service.forceUnlockForSession()
 
     fun lockVault() = service.lockVault()
 

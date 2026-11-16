@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -224,7 +225,24 @@ fun BackupAndRestoreScreen(
         if (uri != null) {
             scope.launch {
                 val text = withContext(Dispatchers.IO) {
-                    try { context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }
+                    // BKP-R2-076: bounded read; stop before allocating an oversized provider file.
+                    try {
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            val cap = BackupArchiveLogic.MAX_ARCHIVE_BYTES * 2
+                            val out = java.io.ByteArrayOutputStream()
+                            val buf = ByteArray(16 * 1024)
+                            var total = 0L
+                            var tooBig = false
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                total += n
+                                if (total > cap) { tooBig = true; break }
+                                out.write(buf, 0, n)
+                            }
+                            if (tooBig) null else out.toByteArray().toString(Charsets.UTF_8)
+                        }
+                    }
                     catch (_: Exception) { null }
                 }
                 if (text == null) onMessage("Could not read that file.") else pendingRestoreText = text
@@ -280,14 +298,14 @@ fun BackupAndRestoreScreen(
             BackupRow(
                 icon = Icons.Rounded.CloudUpload,
                 title = "Backup Chaty settings",
-                subtitle = "Encrypted local backup of appearance and settings only. Chats, media and account data are not included. Nothing is uploaded.",
+                subtitle = "Encrypted local backup of appearance and settings, plus a snapshot of your chat list. Media and account data are not included. Nothing is uploaded.",
                 busy = isBackingUp,
                 onClick = { if (!isBackingUp) runBackup("Chaty database") },
             )
             BackupRow(
                 icon = Icons.Rounded.SettingsBackupRestore,
                 title = "Restore Chaty settings",
-                subtitle = "Restores appearance and settings from your newest encrypted backup. Readable only on this device while Chaty stays installed. Chats and media are not changed.",
+                subtitle = "Restores appearance and settings from your newest encrypted backup. Readable only on this device while Chaty stays installed. Only appearance and settings are restored; chats and media are not changed.",
                 busy = isRestoring,
                 onClick = { if (!isRestoring) runRestore("Chaty database") },
             )
@@ -317,16 +335,22 @@ fun BackupAndRestoreScreen(
             BackupRow(
                 icon = Icons.Rounded.PermMedia,
                 title = "Backup Media",
-                subtitle = "Not available yet. Media is not included in any backup.",
+                subtitle = "Not available here yet. Use Portable backup above to include downloaded media.",
                 busy = false,
-                onClick = { runBackup("Media archives") },
+                enabled = false,
+                showChevron = false,
+                // BKP-R1-006: was onClick = { runBackup("Media archives") }, which ran the settings backup under a Media label.
+                onClick = {},
             )
             BackupRow(
                 icon = Icons.Rounded.RestorePage,
                 title = "Restore Media",
-                subtitle = "Not available yet.",
+                subtitle = "Not available here yet. Use Portable backup above to restore downloaded media.",
                 busy = false,
-                onClick = { runRestore("Media archives") },
+                enabled = false,
+                showChevron = false,
+                // BKP-R1-006: was onClick = { runRestore("Media archives") }.
+                onClick = {},
             )
         }
 
@@ -491,10 +515,11 @@ private fun BackupRow(
     busy: Boolean,
     onClick: () -> Unit,
     showChevron: Boolean = true,
+    enabled: Boolean = true,
 ) {
     val colors = LocalAppColors.current
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

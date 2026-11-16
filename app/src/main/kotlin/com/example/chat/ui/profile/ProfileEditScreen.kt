@@ -1,6 +1,9 @@
 package com.example.chat.ui.profile
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +56,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -105,6 +118,22 @@ fun ProfileEditScreen(
     val theme = LocalThemeConfig.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    // Persistent inline save error (P2-02): survives a missed snackbar, cleared on next submit.
+    var saveError by remember { mutableStateOf<String?>(null) }
+    var justSaved by remember { mutableStateOf(false) }
+    val reducedMotion = rememberReducedMotion()
+    val haptic = LocalHapticFeedback.current
+    // Scroll the first invalid field into view on a failed save (P5-22).
+    val nameFocus = remember { BringIntoViewRequester() }
+    val usernameFocus = remember { BringIntoViewRequester() }
+    val aboutFocus = remember { BringIntoViewRequester() }
+    // One snackbar at a time (P2-24): dismiss the current one before showing the next.
+    fun show(message: String) {
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            snackbar.showSnackbar(message)
+        }
+    }
 
     var displayName by remember { mutableStateOf(user.displayName) }
     var username by remember { mutableStateOf(user.username) }
@@ -174,9 +203,10 @@ fun ProfileEditScreen(
                 throw cancelled
             } catch (error: Exception) {
                 if (error.message?.contains("cancelled") != true) {
-                    snackbar.showSnackbar(
-                        if (target == "avatar") "Could not prepare profile photo: ${error.message}"
-                        else "Could not prepare banner photo: ${error.message}",
+                    val reason = ProfileErrorMessages.friendly(error, "Please try again.")
+                    show(
+                        if (target == "avatar") "Could not prepare profile photo. $reason"
+                        else "Could not prepare cover photo. $reason",
                     )
                 }
             } finally {
@@ -187,24 +217,34 @@ fun ProfileEditScreen(
 
     fun save() {
         if (isSaving) return
+        saveError = null
         // Inline validators from profile_edit_screen.dart.
-        val name = displayName.trim()
+        // NFC-normalised, bidi controls stripped (P2-11, P3-20).
+        val name = sanitizeDisplayName(displayName)
         if (name.isEmpty()) {
-            scope.launch { snackbar.showSnackbar("Display name cannot be empty") }
+            show("Display name cannot be empty")
+            scope.launch { nameFocus.bringIntoView() }
             return
         }
         if (name.length < 2) {
-            scope.launch { snackbar.showSnackbar("Must be at least 2 characters") }
+            show("Must be at least 2 characters")
+            scope.launch { nameFocus.bringIntoView() }
             return
         }
         ChatyValidators.validateUsername(username)?.let {
-            scope.launch { snackbar.showSnackbar(it) }
+            show(it)
+            scope.launch { usernameFocus.bringIntoView() }
+            return
+        }
+        ChatyValidators.validateBio(about)?.let {
+            show(it)
+            scope.launch { aboutFocus.bringIntoView() }
             return
         }
         val normalized = ChatyValidators.normalizeUsername(username)
         val unchanged = normalized == ChatyValidators.normalizeUsername(user.username)
         if (!unchanged && usernameTaken) {
-            scope.launch { snackbar.showSnackbar("Please select an available username before saving.") }
+            show("Please select an available username before saving.")
             return
         }
         isSaving = true
@@ -221,13 +261,18 @@ fun ProfileEditScreen(
                 }
                 onSave(name, normalized, about.trim(), newAvatarUrl, newBannerUrl)
                 isSaving = false
-                snackbar.showSnackbar("Profile updated successfully.")
+                justSaved = true
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                snackbar.showSnackbar("Profile updated.")
                 onBack()
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 isSaving = false
-                snackbar.showSnackbar("Could not save profile: ${error.message}")
+                val message = "Could not save profile. " +
+                    ProfileErrorMessages.friendly(error, "Please try again.", isSave = true)
+                saveError = message
+                show(message)
             }
         }
     }
@@ -245,12 +290,25 @@ fun ProfileEditScreen(
                         )
                     }
                 },
-                title = { Text("Edit Profile", color = Color(theme.primaryTextColor)) },
+                title = { Text("Edit Profile", color = Color(theme.primaryTextColor), modifier = Modifier.semantics { heading() }) },
                 actions = {
                     if (isSaving) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp).padding(end = 12.dp),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .padding(end = 12.dp)
+                                .semantics {
+                                    contentDescription = "Saving profile"
+                                    liveRegion = LiveRegionMode.Polite
+                                },
                             strokeWidth = 2.2.dp,
+                        )
+                    } else if (justSaved) {
+                        // Brief success mark in place of Save (peak-end, P2-44/P5-10).
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check,
+                            semanticLabel = "Saved",
+                            color = Color(theme.accentColor),
+                            modifier = Modifier.padding(end = 12.dp).size(24.dp),
                         )
                     } else {
                         FilledTonalButton(
@@ -313,7 +371,7 @@ fun ProfileEditScreen(
                                 .background(Color(theme.surfaceColor).copy(alpha = 0.85f), CircleShape),
                         ) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                                semanticLabel = "Change banner photo",
+                                semanticLabel = "Edit cover photo",
                                 color = Color(theme.primaryTextColor),
                                 modifier = Modifier.size(20.dp),
                             )
@@ -358,28 +416,51 @@ fun ProfileEditScreen(
                             )
                         }
                     }
+                    // 48dp touch target (P1-34); the 34dp visual circle is drawn inside it.
                     IconButton(
                         onClick = { if (!isSaving) sourceSheetFor = "avatar" },
                         enabled = !isSaving,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .semantics { contentDescription = "Change avatar" }
-                            .size(34.dp)
-                            .border(2.5.dp, Color(theme.surfaceColor), CircleShape)
-                            .background(Color(theme.accentColor), CircleShape),
+                            .semantics { contentDescription = "Edit profile photo" }
+                            .size(48.dp),
                     ) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera,
-                            semanticLabel = null,
-                            color = Color(theme.onAccentColor),
-                            modifier = Modifier.size(17.dp),
-                        )
+                        Box(
+                            Modifier
+                                .size(34.dp)
+                                .border(2.5.dp, Color(theme.surfaceColor), CircleShape)
+                                .background(Color(theme.accentColor), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera,
+                                semanticLabel = null,
+                                color = Color(theme.onAccentColor),
+                                modifier = Modifier.size(17.dp),
+                            )
+                        }
                     }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            Column(Modifier.padding(horizontal = 20.dp)) {
+            Column(
+                Modifier
+                    .padding(horizontal = 20.dp)
+                    // Inline error expands smoothly; snaps when system animations are off.
+                    .animateContentSize(animationSpec = if (reducedMotion) snap() else tween(180)),
+            ) {
+                saveError?.let { message ->
+                    Text(
+                        message,
+                        color = Color(theme.dangerColor),
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
                 OutlinedTextField(
                     value = displayName,
                     onValueChange = { if (it.length <= 50) displayName = it },
@@ -389,7 +470,11 @@ fun ProfileEditScreen(
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null) },
                     supportingText = { Text("${displayName.length}/50") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Words,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth().bringIntoViewRequester(nameFocus),
                 )
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
@@ -414,7 +499,8 @@ fun ProfileEditScreen(
                         )
                     },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth().bringIntoViewRequester(usernameFocus),
                 )
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
@@ -424,9 +510,19 @@ fun ProfileEditScreen(
                     label = { Text("About / Status") },
                     placeholder = { Text("Say something about yourself or current mood") },
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.info, semanticLabel = null) },
-                    supportingText = { Text("${about.length}/140") },
+                    // Announce only at 120 and 140 characters, not per keystroke (P2-45).
+                    supportingText = {
+                        Text(
+                            "${about.length}/140",
+                            modifier = Modifier.semantics {
+                                if (about.length == 120 || about.length == 140) {
+                                    liveRegion = LiveRegionMode.Polite
+                                }
+                            },
+                        )
+                    },
                     minLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().bringIntoViewRequester(aboutFocus),
                 )
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
@@ -451,19 +547,21 @@ fun ProfileEditScreen(
                 if (target == "avatar") "Change Profile Photo" else "Change Banner Photo",
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .semantics { heading() }
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
             )
             ListItem(
                 headlineContent = { Text("Capture Image") },
                 supportingContent = { Text("Use camera to take a new photo") },
                 leadingContent = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera, semanticLabel = null) },
-                modifier = Modifier.clickable { pick(ProfileMediaSource.camera) },
+                modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { pick(ProfileMediaSource.camera) },
             )
             ListItem(
                 headlineContent = { Text("Pick / Choose from Gallery") },
                 supportingContent = { Text("Select an image from device gallery") },
                 leadingContent = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.gallery, semanticLabel = null) },
-                modifier = Modifier.clickable { pick(ProfileMediaSource.gallery) },
+                modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { pick(ProfileMediaSource.gallery) },
             )
             Spacer(Modifier.height(24.dp))
         }
@@ -523,8 +621,14 @@ private fun LocalAvatarDraftPreview(draft: ProfileAvatarDraft, isCurrent: () -> 
             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
-        state.failed -> Text("Photo preview unavailable", fontSize = 10.sp,
+        state.failed -> Text("Photo preview unavailable", fontSize = 12.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         else -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
     }
 }
+
+private val BIDI_CONTROLS = Regex("[\u200E\u200F\u202A-\u202E\u2066-\u2069]")
+
+/** NFC-normalise and strip bidi override/isolate controls so names cannot be spoofed. */
+private fun sanitizeDisplayName(raw: String): String =
+    java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFC).replace(BIDI_CONTROLS, "").trim()

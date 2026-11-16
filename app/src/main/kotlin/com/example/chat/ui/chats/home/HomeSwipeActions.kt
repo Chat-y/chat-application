@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -70,13 +71,14 @@ fun HomeSwipeActions(
     val offset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     val animation = remember { androidx.compose.runtime.mutableStateOf<Job?>(null) }
     val snap = remember { Animatable(0f) }
+    val reducedMotion=com.example.chat.ui.kit.rememberChatyReduceMotion()
     val easeOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
 
     fun settle(target: Float) {
         animation.value?.cancel()
         animation.value = scope.launch {
             snap.snapTo(offset.floatValue)
-            snap.animateTo(target, tween(durationMillis = 220, easing = easeOutCubic)) {
+            snap.animateTo(target, tween(durationMillis = if(reducedMotion) 0 else 220, easing = easeOutCubic)) {
                 offset.floatValue = value
             }
         }
@@ -150,7 +152,7 @@ fun HomeSwipeActions(
                 // Keep the content at the same composition position throughout
                 // a drag (avatars, remembered state, selection, custom styles).
                 content()
-                if (abs(current) > 4f) Box(Modifier.matchParentSize().clickable { settle(0f) })
+                if (abs(current) > 4f) Box(Modifier.matchParentSize().clickable(onClickLabel = "Close swipe actions", role = Role.Button) { settle(0f) })
             }
         }
     }
@@ -178,7 +180,7 @@ private fun SwipeActionCell(
             .width(extentDp.dp)
             .fillMaxHeight()
             .background(action.color)
-            .clickable(enabled = revealed) { onTrigger() }
+            .clickable(enabled = revealed, onClickLabel = action.label, role = Role.Button) { onTrigger() }
             .padding(horizontal = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,

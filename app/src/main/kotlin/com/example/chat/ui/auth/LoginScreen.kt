@@ -152,7 +152,7 @@ fun LoginScreen(
         return ChatyValidators.validateUsername(value, forRegistration = false)
     }
 
-    androidx.compose.runtime.LaunchedEffect(listOf(errorMessage, identifierError, passwordError, workspaceError)) {
+    androidx.compose.runtime.LaunchedEffect(errorMessage, identifierError, passwordError, workspaceError) {
         if (listOf(errorMessage, identifierError, passwordError, workspaceError).any { !it.isNullOrBlank() }) com.example.chat.ui.kit.ChatyHapticsPort.error(feedbackView)
     }
 
@@ -526,21 +526,21 @@ private fun EmailCodeLoginForm(
         }
     }
     val guardedEmailBack=com.example.chat.ui.core.components.auth.rememberAuthBackAction(active && (email.isNotBlank() || workspace.isNotBlank()),onBack)
-    val active = attempt
-    if (active != null) {
-        androidx.compose.runtime.key(active.challenge.id) {
+    val activeAttempt = attempt
+    if (activeAttempt != null) {
+        androidx.compose.runtime.key(activeAttempt.challenge.id) {
             OtpVerificationScreen(
-                email = active.challenge.email, purpose = OtpPurpose.SignIn,
+                email = activeAttempt.challenge.email, purpose = OtpPurpose.SignIn,
                 onBack = { onResumeState(false);resume=null;attempt = null; error = null },
-                verify = { code -> signedInUser = verifyCode(active, code) },
+                verify = { code -> signedInUser = verifyCode(activeAttempt, code) },
                 resend = {
-                    attempt = requestCode(active.challenge.email,
-                        active.targetTenant.takeUnless { active.isDefaultTenant }, active.isDefaultTenant)
+                    attempt = requestCode(activeAttempt.challenge.email,
+                        activeAttempt.targetTenant.takeUnless { activeAttempt.isDefaultTenant }, activeAttempt.isDefaultTenant)
                     authCopy("If an account exists, a new sign-in code has been sent.")
                 },
                 onVerified = { onResumeState(false);resume=null;signedInUser?.let(onLoggedIn) ?: throw IllegalStateException(authCopy("Server session was not established.")) },
                 deliveryMessage = authCopy("If an account exists for this email, a sign-in code has been sent."),
-                initialResendSeconds = active.challenge.resendAfterSeconds,
+                initialResendSeconds = activeAttempt.challenge.resendAfterSeconds,
             )
         }
         return

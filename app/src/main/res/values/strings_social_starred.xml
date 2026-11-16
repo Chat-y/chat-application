@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_starred_title">Starred messages</string>
+    <string name="social_starred_back">Back</string>
+    <string name="social_starred_refresh">Refresh starred messages</string>
+    <string name="social_starred_search_label">Search starred messages</string>
+    <string name="social_starred_search_hint">Word or conversation name</string>
+    <string name="social_starred_clear">Clear search</string>
+    <string name="social_starred_refreshing">Refreshing starred messages</string>
+    <string name="social_starred_refresh_error">Some conversations could not be refreshed. Pull to retry.</string>
+    <string name="social_starred_retry">Retry</string>
+    <string name="social_starred_loading_title">Loading starred messages</string>
+    <string name="social_starred_failed_title">Starred messages unavailable</string>
+    <string name="social_starred_empty_title">No starred messages yet</string>
+    <string name="social_starred_no_matches">No matching messages</string>
+    <string name="social_starred_loading_body">Your saved messages are loading.</string>
+    <string name="social_starred_failed_body">Refresh failed. Use Retry above to try again.</string>
+    <string name="social_starred_empty_body">Open a message menu and choose Star. Your saved messages will appear here.</string>
+    <string name="social_starred_search_empty_body">Try another word or conversation name.</string>
+    <string name="social_starred_open">Open conversation</string>
+    <string name="social_starred_remove">Remove star</string>
+    <string name="social_starred_options">Options</string>
+    <string name="social_starred_options_description">Message options</string>
+    <string name="social_starred_row_description">Starred message in %1$s</string>
+    <string name="social_starred_sort">Sort: %1$s</string>
+    <string name="social_starred_newest">Newest first</string>
+    <string name="social_starred_oldest">Oldest first</string>
+    <string name="social_starred_by_conversation">By conversation</string>
+    <string name="social_starred_deleted">This message was deleted</string>
+    <string name="social_starred_photo">Photo</string>
+    <string name="social_starred_video">Video</string>
+    <string name="social_starred_voice">Voice message</string>
+    <string name="social_starred_document">Document</string>
+    <string name="social_starred_location">Location</string>
+    <string name="social_starred_contact">Contact</string>
+    <string name="social_starred_task">Task</string>
+    <string name="social_starred_system">System message</string>
+    <string name="social_starred_blank">Empty message</string>
+    <plurals name="social_starred_count">
+        <item quantity="one">%d starred message</item>
+        <item quantity="other">%d starred messages</item>
+    </plurals>
+    <plurals name="social_starred_match_count">
+        <item quantity="one">%d matching message</item>
+        <item quantity="other">%d matching messages</item>
+    </plurals>
+    <string name="social_starred_time_unavailable">Date unavailable</string>
+</resources>

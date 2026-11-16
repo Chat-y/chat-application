@@ -7,4 +7,18 @@ class DocumentQuadTest {
  @Test fun flatSceneDoesNotInventBoundary(){assertNull(detectPaperQuad(IntArray(10000){220},100,100))}
  @Test fun syntheticPaperOnDarkSurfaceDetected(){val p=IntArray(10000){20};for(y in 20..80)for(x in 25..75)p[y*100+x]=240;val q=detectPaperQuad(p,100,100);assertNotNull(q);assertTrue(q!!.isValid());assertEquals(25f/99,q.topLeft.x,.02f);assertEquals(80f/99,q.bottomRight.y,.02f)}
  @Test fun outOfBoundsClampedButValidityExplicit(){val q=PaperQuad.inset.moved(0,PaperPoint(-2f,-1f));assertEquals(0f,q.topLeft.x);assertTrue(q.isValid())}
+ // Added source-only overnight fixtures. NOT RUN.
+ @Test fun paperMustFillAtLeastFivePercentOfFrame(){
+  fun rectangle(height:Float)=PaperQuad(PaperPoint(0f,0f),PaperPoint(1f,0f),PaperPoint(1f,height),PaperPoint(0f,height))
+  assertFalse(rectangle(.049f).isValid());assertTrue(rectangle(.05f).isValid())
+  assertEquals(.05,rectangle(.05f).areaFraction,.000001)
+ }
+ @Test fun nonFiniteQuadCannotSupplyAreaEvidence(){
+  val q=PaperQuad.inset.copy(topLeft=PaperPoint(Float.NaN,0f))
+  assertFalse(q.isValid());assertEquals(0.0,q.areaFraction,0.0)
+ }
+ @Test fun detectorRejectsTinyBrightPaper(){
+  val p=IntArray(10000){20};for(y in 42..57)for(x in 42..57)p[y*100+x]=240
+  assertNull(detectPaperQuad(p,100,100))
+ }
 }

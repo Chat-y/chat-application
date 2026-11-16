@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+  <string name="conv_helper_contrast_warning">%1$s contrast is below %2$s:1. Choose a different colour or follow the theme.</string>
+  <string name="conv_helper_custom_colour">Custom, #%1$08X</string>
+  <string name="conv_helper_theme_default">Theme default</string>
+  <string name="conv_helper_reset">Reset</string>
+  <string name="conv_helper_appearance_copied">Appearance settings copied</string>
+  <string name="conv_helper_copy_appearance_support">Copy appearance settings for support</string>
+  <string name="conv_helper_expanded">Expanded</string>
+  <string name="conv_helper_collapsed">Collapsed</string>
+  <string name="conv_helper_apply_colour_many">Apply one colour to several rows</string>
+  <string name="conv_helper_choose_colour_targets">Choose colour targets</string>
+  <string name="conv_helper_choose_colour">Choose colour</string>
+  <string name="conv_helper_apply_colour_selected">Apply colour to selected rows</string>
+  <string name="conv_helper_emoji_light">Light emoji panel</string>
+  <string name="conv_helper_emoji_dark">Dark emoji panel</string>
+  <string name="conv_helper_emoji_accent">Accent emoji panel</string>
+  <string name="conv_helper_all">All</string>
+  <string name="conv_helper_search_styles">Search styles</string>
+  <string name="conv_helper_no_styles">No matching styles</string>
+  <string name="conv_helper_session_recent">Recent in this session</string>
+</resources>

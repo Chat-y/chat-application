@@ -239,18 +239,31 @@ fun SettingsSubHost(
         // Storage quality controls are backed by the shared media-upload preferences.
         SettingsDestination.StorageMedia -> {
             var cacheLimitMb by remember { mutableStateOf(com.example.chat.data.local.MediaCacheSettings.limitMb(context)) }
+            var cacheUsedBytes by remember { mutableStateOf(0L) }
+            val storageScope = androidx.compose.runtime.rememberCoroutineScope()
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                cacheUsedBytes = withContext(Dispatchers.IO) { runCatching { ServiceLocator.mediaCache.totalBytes() }.getOrDefault(0L) }
+            }
             StorageMediaScreen(
                 preferences = prefs,
                 onBack = onBack,
                 onClearCache = {
-                    ServiceLocator.mediaCache.clearCurrentAccount()
-                    toast("Local media cache cleared. Server copies are untouched.")
+                    // ST1-22: delete off the main thread.
+                    storageScope.launch {
+                        withContext(Dispatchers.IO) { ServiceLocator.mediaCache.clearCurrentAccount() }
+                        cacheUsedBytes = withContext(Dispatchers.IO) { runCatching { ServiceLocator.mediaCache.totalBytes() }.getOrDefault(0L) }
+                        toast("Local media cache cleared. Server copies are untouched.")
+                    }
                 },
                 cacheLimitMb = cacheLimitMb,
+                cacheUsedBytes = cacheUsedBytes,
                 onCacheLimitChange = { mb ->
                     com.example.chat.data.local.MediaCacheSettings.setLimitMb(context, mb)
                     cacheLimitMb = com.example.chat.data.local.MediaCacheSettings.limitMb(context)
-                    ServiceLocator.mediaCache.trimToLimit()
+                    storageScope.launch {
+                        withContext(Dispatchers.IO) { ServiceLocator.mediaCache.trimToLimit() }
+                        cacheUsedBytes = withContext(Dispatchers.IO) { runCatching { ServiceLocator.mediaCache.totalBytes() }.getOrDefault(0L) }
+                    }
                 },
             )
         }

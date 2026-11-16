@@ -1,0 +1,173 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="conv_ui_0_42_bcf112" formatted="false">0:42</string>
+    <string name="conv_ui__43df72" formatted="false">😀   🌱   ☕</string>
+    <string name="conv_ui_a_longer_preview_message_sho_ead0e2" formatted="false">A longer preview message shows how expanded text changes the space used by a conversation. </string>
+    <string name="conv_ui_action_bar_color_77c122" formatted="false">Action Bar Color</string>
+    <string name="conv_ui_alex_64542d" formatted="false">Alex</string>
+    <string name="conv_ui_applies_only_without_wallpap_60db0c" formatted="false">Applies only without wallpaper</string>
+    <string name="conv_ui_background_behind_the_contac_758a6d" formatted="false">Background behind the contact</string>
+    <string name="conv_ui_background_of_date_and_misse_0116fd" formatted="false">Background of date and missed-call labels</string>
+    <string name="conv_ui_background_of_quote_containe_3b5b90" formatted="false">Background of quote container</string>
+    <string name="conv_ui_bar_background_854515" formatted="false">Bar background</string>
+    <string name="conv_ui_bar_icons_29dbfc" formatted="false">Bar icons</string>
+    <string name="conv_ui_before_system_font_scaling_1389fe" formatted="false">Before system font scaling</string>
+    <string name="conv_ui_behaviour_171ca0" formatted="false">Behaviour</string>
+    <string name="conv_ui_bubble_extras_5ef1a3" formatted="false">Bubble extras</string>
+    <string name="conv_ui_bubbles_and_ticks_f7fcbf" formatted="false">Bubbles and ticks</string>
+    <string name="conv_ui_bubbles_style_8eac85" formatted="false">Bubbles style</string>
+    <string name="conv_ui_change_color_of_voice_messag_4cd41b" formatted="false">Change color of voice message Play button</string>
+    <string name="conv_ui_change_emoji_popup_backgroun_23fe59" formatted="false">Change Emoji popup background color</string>
+    <string name="conv_ui_change_emoji_popup_header_ba_3f92a1" formatted="false">Change Emoji popup header background color</string>
+    <string name="conv_ui_change_emoji_popup_icons_col_5606e8" formatted="false">Change Emoji popup icons color</string>
+    <string name="conv_ui_change_left_chat_bubble_colo_d3417c" formatted="false">Change left chat bubble color</string>
+    <string name="conv_ui_change_right_chat_bubble_col_c4975d" formatted="false">Change right chat bubble color</string>
+    <string name="conv_ui_change_text_color_in_the_con_bc662f" formatted="false">Change text color in the conversation box</string>
+    <string name="conv_ui_change_the_color_of_the_circ_79cb96" formatted="false">Change the color of the circle behind Send/Mic</string>
+    <string name="conv_ui_change_the_color_of_the_entr_193a28" formatted="false">Change the Color of the Entry icons</string>
+    <string name="conv_ui_change_the_color_of_the_entr_32703b" formatted="false">Change the Color of the Entry background</string>
+    <string name="conv_ui_change_the_color_of_the_revo_5bcd15" formatted="false">Change the color of the revoked icon on deleted messages</string>
+    <string name="conv_ui_change_the_color_of_the_time_5ff7a1" formatted="false">Change the color of the time inside the left bubble</string>
+    <string name="conv_ui_change_the_color_of_the_time_e42c50" formatted="false">Change the color of the time inside the right bubble</string>
+    <string name="conv_ui_chat_header_beac6d" formatted="false">Chat header</string>
+    <string name="conv_ui_classic_header_preset_bec9e1" formatted="false">Classic header preset</string>
+    <string name="conv_ui_color_of_the_vertical_bar_be_d3e5e1" formatted="false">Color of the vertical bar beside quote</string>
+    <string name="conv_ui_colour_behind_the_send_glyph_11e831" formatted="false">Colour behind the send glyph</string>
+    <string name="conv_ui_colour_behind_the_status_lin_e7f000" formatted="false">Colour behind the status line</string>
+    <string name="conv_ui_colour_behind_the_typing_are_e5c837" formatted="false">Colour behind the typing area</string>
+    <string name="conv_ui_colours_eb4e91" formatted="false">Colours</string>
+    <string name="conv_ui_conversation_background_2f906b" formatted="false">Conversation background</string>
+    <string name="conv_ui_conversation_background_colo_ebd884" formatted="false">Conversation Background Color</string>
+    <string name="conv_ui_deleted_message_5426bd" formatted="false">Deleted message</string>
+    <string name="conv_ui_deleted_message_icon_color_067f99" formatted="false">Deleted Message Icon Color</string>
+    <string name="conv_ui_do_you_like_my_theme_757cae" formatted="false">Do you like my theme?</string>
+    <string name="conv_ui_emoji_2de039" formatted="false">  Emoji</string>
+    <string name="conv_ui_emoji_button_in_conversation_40bf37" formatted="false">Emoji button in conversation screen color</string>
+    <string name="conv_ui_emoji_categories_c50484" formatted="false">Emoji categories</string>
+    <string name="conv_ui_emoji_header_color_1c7dd8" formatted="false">Emoji header color</string>
+    <string name="conv_ui_emoji_header_color_a95642" formatted="false">Emoji Header Color</string>
+    <string name="conv_ui_emoji_header_icons_1ac4f6" formatted="false">Emoji header icons</string>
+    <string name="conv_ui_emoji_header_icons_color_35ab49" formatted="false">Emoji Header Icons Color</string>
+    <string name="conv_ui_emoji_header_icons_color_85cd20" formatted="false">Emoji header icons color</string>
+    <string name="conv_ui_emoji_icon_464a44" formatted="false">Emoji icon</string>
+    <string name="conv_ui_emoji_picker_background_colo_2b26e0" formatted="false">Emoji Picker Background Color</string>
+    <string name="conv_ui_emoji_picker_background_colo_56e57d" formatted="false">Emoji picker background color</string>
+    <string name="conv_ui_emoji_popup_94bd09" formatted="false">Emoji popup</string>
+    <string name="conv_ui_emoji_popup_sample_696c4e" formatted="false">Emoji popup sample</string>
+    <string name="conv_ui_enable_chat_bubble_text_sele_055cc8" formatted="false">Enable chat bubble text selection</string>
+    <string name="conv_ui_entry_background_color_edfc4d" formatted="false">Entry Background Color</string>
+    <string name="conv_ui_expand_long_messages_3e1481" formatted="false">Expand long messages</string>
+    <string name="conv_ui_field_background_062e6c" formatted="false">Field background</string>
+    <string name="conv_ui_field_background_color_ec1969" formatted="false">Field background Color</string>
+    <string name="conv_ui_field_text_a2f608" formatted="false">Field text</string>
+    <string name="conv_ui_group_participant_name_color_aad4e0" formatted="false">Group participant name color</string>
+    <string name="conv_ui_header_appearance_is_include_e9b259" formatted="false">Header appearance is included in settings exports.</string>
+    <string name="conv_ui_header_background_394ff0" formatted="false">Header background</string>
+    <string name="conv_ui_header_only_notifications_an_9cabcf" formatted="false">Header only. Notifications and the chat list still show the name.</string>
+    <string name="conv_ui_header_only_your_contacts_ar_233f2c" formatted="false">Header only; your contacts are unchanged</string>
+    <string name="conv_ui_header_text_7f7131" formatted="false">Header text</string>
+    <string name="conv_ui_hello_69342c" formatted="false">Hello!</string>
+    <string name="conv_ui_hey_there_i_am_using_chaty_5ad60b" formatted="false">Hey there! I am using Chaty.</string>
+    <string name="conv_ui_hi_94dd9e" formatted="false">Hi</string>
+    <string name="conv_ui_hide_audio_and_video_call_sh_32d3f8" formatted="false">Hide audio and video call shortcuts</string>
+    <string name="conv_ui_hide_call_buttons_e56c01" formatted="false">Hide call buttons</string>
+    <string name="conv_ui_hide_contact_name_c646d4" formatted="false">Hide contact name</string>
+    <string name="conv_ui_hide_contact_profile_picture_7aaf75" formatted="false">Hide contact profile picture</string>
+    <string name="conv_ui_hide_preview_78cb0e" formatted="false">Hide preview</string>
+    <string name="conv_ui_hide_status_line_b148da" formatted="false">Hide status line</string>
+    <string name="conv_ui_hide_the_line_below_the_chat_c2bc9e" formatted="false">Hide the line below the chat header</string>
+    <string name="conv_ui_https_example_org_434178" formatted="false">https://example.org</string>
+    <string name="conv_ui_hyperlinks_color_f4aec1" formatted="false">Hyperlinks Color</string>
+    <string name="conv_ui_icon_colour_38def4" formatted="false">Icon colour</string>
+    <string name="conv_ui_incoming_links_650176" formatted="false">Incoming links</string>
+    <string name="conv_ui_info_balloons_background_col_fcd672" formatted="false">Info Balloons Background Color</string>
+    <string name="conv_ui_info_balloons_text_color_4ec567" formatted="false">Info Balloons Text Color</string>
+    <string name="conv_ui_left_bubble_color_de8179" formatted="false">Left Bubble Color</string>
+    <string name="conv_ui_left_bubble_text_color_b0e74d" formatted="false">Left Bubble Text Color</string>
+    <string name="conv_ui_left_bubble_time_color_c564db" formatted="false">Left Bubble Time Color</string>
+    <string name="conv_ui_links_014bcd" formatted="false">Links</string>
+    <string name="conv_ui_links_and_group_names_8a0441" formatted="false">Links and group names</string>
+    <string name="conv_ui_links_in_incoming_and_outgoi_7b17b4" formatted="false">Links in incoming and outgoing messages</string>
+    <string name="conv_ui_long_messages_take_more_spac_9d3a52" formatted="false">Long messages take more space</string>
+    <string name="conv_ui_make_text_selectable_acbcb4" formatted="false">Make Text Selectable</string>
+    <string name="conv_ui_message_bar_880ea4" formatted="false">Message bar</string>
+    <string name="conv_ui_message_bar_style_91e972" formatted="false">Message bar style</string>
+    <string name="conv_ui_message_text_size_67448e" formatted="false">Message text size</string>
+    <string name="conv_ui_mic_send_circle_color_d894d6" formatted="false">Mic/Send Circle Color</string>
+    <string name="conv_ui_missed_voice_call_da7aba" formatted="false">Missed voice call</string>
+    <string name="conv_ui_online_c3e839" formatted="false">Online</string>
+    <string name="conv_ui_outgoing_links_f4ba79" formatted="false">Outgoing links</string>
+    <string name="conv_ui_participant_name_color_bb577d" formatted="false">Participant Name Color</string>
+    <string name="conv_ui_participant_name_e8a7e9" formatted="false">Participant name</string>
+    <string name="conv_ui_playback_progress_and_wavefo_e90549" formatted="false">Playback progress and waveform</string>
+    <string name="conv_ui_preview_choices_apply_saves__bc203c" formatted="false">Preview choices; Apply saves your selection.</string>
+    <string name="conv_ui_preview_f1fbb2" formatted="false">Preview</string>
+    <string name="conv_ui_preview_message_fa769f" formatted="false">Preview message</string>
+    <string name="conv_ui_preview_microphone_state_e707e8" formatted="false">Preview microphone state</string>
+    <string name="conv_ui_preview_of_emoji_popup_group_bd1be8" formatted="false">Preview of emoji popup, group name, link, voice note and date labels</string>
+    <string name="conv_ui_preview_only_nothing_is_sent_5c68fa" formatted="false">Preview only. Nothing is sent.</string>
+    <string name="conv_ui_preview_send_state_598ff4" formatted="false">Preview send state</string>
+    <string name="conv_ui_preview_shapes_apply_saves_y_32b25b" formatted="false">Preview shapes; Apply saves your selection.</string>
+    <string name="conv_ui_preview_the_choices_apply_sa_4217ca" formatted="false">Preview the choices. Apply saves the selected style.</string>
+    <string name="conv_ui_quoted_background_color_9dab35" formatted="false">Quoted Background Color</string>
+    <string name="conv_ui_quoted_body_text_color_f0bcf5" formatted="false">Quoted body text color</string>
+    <string name="conv_ui_quoted_divider_color_945344" formatted="false">Quoted Divider Color</string>
+    <string name="conv_ui_quoted_message_color_e7d8cf" formatted="false">Quoted Message Color</string>
+    <string name="conv_ui_quoted_name_color_3768f5" formatted="false">Quoted Name Color</string>
+    <string name="conv_ui_quoted_text_b5a1ed" formatted="false">Quoted text</string>
+    <string name="conv_ui_quotes_and_extras_f99edc" formatted="false">Quotes and extras</string>
+    <string name="conv_ui_read_and_delivered_ticks_021cc2" formatted="false">Read and delivered ticks</string>
+    <string name="conv_ui_read_more_ad086c" formatted="false">Read more</string>
+    <string name="conv_ui_reset_all_bubble_colours_d8233c" formatted="false">Reset all bubble colours</string>
+    <string name="conv_ui_reset_all_entry_colours_b2d814" formatted="false">Reset all entry colours</string>
+    <string name="conv_ui_reset_all_extras_colours_fd382e" formatted="false">Reset all extras colours</string>
+    <string name="conv_ui_reset_text_size_343a72" formatted="false">Reset text size</string>
+    <string name="conv_ui_right_bubble_color_ba37f3" formatted="false">Right Bubble Color</string>
+    <string name="conv_ui_right_bubble_text_color_e3d3d4" formatted="false">Right Bubble Text Color</string>
+    <string name="conv_ui_right_bubble_time_color_7f2d8c" formatted="false">Right Bubble Time Color</string>
+    <string name="conv_ui_sample_conversation_with_inc_d78404" formatted="false">Sample conversation with incoming and outgoing messages</string>
+    <string name="conv_ui_send_button_7c13d0" formatted="false">Send button</string>
+    <string name="conv_ui_send_fill_f4a388" formatted="false">Send fill</string>
+    <string name="conv_ui_send_icon_ff1d9a" formatted="false">Send icon</string>
+    <string name="conv_ui_sender_name_96d72a" formatted="false">Sender name</string>
+    <string name="conv_ui_sender_name_color_inside_quo_47fc7e" formatted="false">Sender name color inside quoted reply</string>
+    <string name="conv_ui_sender_names_above_group_mes_8110fa" formatted="false">Sender names above group messages</string>
+    <string name="conv_ui_sets_left_chat_bubble_text_c_16a599" formatted="false">Sets Left chat bubble text color</string>
+    <string name="conv_ui_sets_right_chat_bubble_text__e9bdcc" formatted="false">Sets Right chat bubble text color</string>
+    <string name="conv_ui_show_in_header_43f0df" formatted="false">Show in header</string>
+    <string name="conv_ui_show_preview_0e7698" formatted="false">Show preview</string>
+    <string name="conv_ui_status_background_3da647" formatted="false">Status background</string>
+    <string name="conv_ui_status_background_color_27cecc" formatted="false">Status Background Color</string>
+    <string name="conv_ui_status_text_b68390" formatted="false">Status text</string>
+    <string name="conv_ui_status_text_color_78882a" formatted="false">Status Text Color</string>
+    <string name="conv_ui_style_99a0ef" formatted="false">Style</string>
+    <string name="conv_ui_styles_look_and_feel_9ebc23" formatted="false">Styles (Look and feel)</string>
+    <string name="conv_ui_system_bubble_background_f79af7" formatted="false">System bubble background</string>
+    <string name="conv_ui_system_bubble_text_943ad0" formatted="false">System bubble text</string>
+    <string name="conv_ui_system_bubbles_9c5124" formatted="false">System bubbles</string>
+    <string name="conv_ui_text_in_date_and_missed_call_6edb90" formatted="false">Text in date and missed-call labels</string>
+    <string name="conv_ui_text_in_the_status_line_b420ec" formatted="false">Text in the status line</string>
+    <string name="conv_ui_their_message_background_c34216" formatted="false">Their message background</string>
+    <string name="conv_ui_their_message_boundary_c2dbc0" formatted="false">Their message boundary</string>
+    <string name="conv_ui_their_message_text_5eb8ee" formatted="false">Their message text</string>
+    <string name="conv_ui_their_message_time_62e14e" formatted="false">Their message time</string>
+    <string name="conv_ui_their_messages_286928" formatted="false">Their messages</string>
+    <string name="conv_ui_these_appearance_settings_ar_9572c0" formatted="false">These appearance settings are included in settings exports.</string>
+    <string name="conv_ui_ticks_style_ea6c4e" formatted="false">Ticks style</string>
+    <string name="conv_ui_today_24345a" formatted="false">Today</string>
+    <string name="conv_ui_turn_on_the_status_line_to_u_587f77" formatted="false">Turn on the status line to use this</string>
+    <string name="conv_ui_ui_buttons_color_9dd723" formatted="false">UI Buttons Color</string>
+    <string name="conv_ui_undo_39fc72" formatted="false">Undo</string>
+    <string name="conv_ui_voice_note_play_button_color_bd596f" formatted="false">Voice Note Play Button Color</string>
+    <string name="conv_ui_voice_note_play_button_d19469" formatted="false">Voice note play button</string>
+    <string name="conv_ui_voice_note_playing_bar_color_b81f5b" formatted="false">Voice Note Playing Bar Color</string>
+    <string name="conv_ui_voice_note_progress_b44151" formatted="false">Voice note progress</string>
+    <string name="conv_ui_voice_notes_b5d3e8" formatted="false">Voice notes</string>
+    <string name="conv_ui_yes_your_theme_looks_awesome_c283ee" formatted="false">Yes, your theme looks awesome!</string>
+    <string name="conv_ui_you_will_not_see_who_you_are_3ef955" formatted="false">You will not see who you are chatting with.</string>
+    <string name="conv_ui_your_message_background_b0a1fc" formatted="false">Your message background</string>
+    <string name="conv_ui_your_message_boundary_34220a" formatted="false">Your message boundary</string>
+    <string name="conv_ui_your_message_text_98dcca" formatted="false">Your message text</string>
+    <string name="conv_ui_your_message_time_2be207" formatted="false">Your message time</string>
+    <string name="conv_ui_your_messages_2634b8" formatted="false">Your messages</string>
+</resources>

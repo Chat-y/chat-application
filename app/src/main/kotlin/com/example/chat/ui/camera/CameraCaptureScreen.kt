@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +78,12 @@ import kotlinx.coroutines.withContext
  *  it is baked into the published image because statuses have no metadata
  *  channel. Document mode bakes the document-scan matrix into the file.
  *
+ *  Privacy contract: preview analysis, lenses and effect baking run locally in this path;
+ *  this composable does not upload frames. Explicit Send/Post hands confirmed output to
+ *  the host, which owns delivery status. Unsent files tracked by the active camera entry
+ *  are discarded on retake/close. Crash/process-death orphan cleanup is not verified:
+ *  there is no guaranteed 24-hour deletion promise. See docs/media-camera-privacy.md.
+ *
  *  CameraX mapping (camera package -> CameraX):
  *  - CameraController(ResolutionPreset.high, enableAudio false) ->
  *    Preview + ImageCapture(CAPTURE_MODE_MAXIMIZE_QUALITY) +
@@ -83,7 +91,7 @@ import kotlinx.coroutines.withContext
  *  - availableCameras/firstWhere(back) -> CameraSelector.DEFAULT_BACK_CAMERA.
  *  - setFlashMode(torch/off) -> cameraControl.enableTorch; front camera
  *    resets the toggle like the Dart.
- *  - startImageStream throttle 45ms -> ImageAnalysis backpressure + 45ms gate
+ *  - startImageStream throttle 66ms -> ImageAnalysis backpressure + 66ms gate
  *    in the analyzer, frames converted by [CameraFrameSampler]-compatible
  *    readers through [ImageProxy.toFrameData].
  *  - Permission -> canonical ChatyPermissions.camera +
@@ -100,7 +108,21 @@ enum class CameraEntryPreset { photoBack, composerFrontVideo }
 
 enum class CaptureViewMode { photo, document, portrait, night, lenses, video }
 
-/** Result handed back to the host when the user confirms. */
+/** Local-file result handed back only after explicit confirmation.
+ *
+ * Ownership table:
+ * - Captured/picker copies: CameraOwnedFiles owns only files created by this entry.
+ * - Effect-baked copies: registered through onCreated; superseded siblings stay entry-owned.
+ * - Confirmed final copy: transfer(path) removes it from entry cleanup and returns ownedResult.
+ * - Synchronous host rejection: throw from onResult; this screen closes the transferred result.
+ * - Accepted host result: the host owns retry/durable storage and closes ownedResult when safe.
+ * - Story bytes handoff: handoffCameraPhotoBytes closes its owned result in finally.
+ * - Process-death orphans: in-session cleanup cannot prove deletion; startup sweep is outstanding.
+ *
+ * The callback is an ownership boundary, not an upload receipt. A host that accepts work for later
+ * must retain the owned result until its send/retry policy no longer needs those bytes. The camera
+ * supplies local paths, never a signed download URL, and does not enqueue an upload itself.
+ */
 data class ChatyCaptureResult(
     val path: String,
     val effectId: String,
@@ -109,6 +131,21 @@ data class ChatyCaptureResult(
     val ownedResult: CameraOwnedResult? = null,
 )
 
+/** Binding phase only. Staging, sheets and native video state are separate guards.
+ *
+ * | Current | Signal | Next | Required side effect |
+ * | Any | Camera permission denied/revoked | permissionDenied | Unbind photo; close video |
+ * | permissionDenied/noCamera/ready | Permitted explicit photo bind | initializing | Cancel old bind; clear face generation/poses |
+ * | initializing | Photo onReady or video Ready | ready | Refresh supported options and zoom |
+ * | initializing | Native bind failure or 15s watchdog | noCamera | Show recovery; watchdog unbinds photo |
+ * | ready | Native photo capture failure/video Error | noCamera | Keep Send uncalled; expose Retry/gallery |
+ * | noCamera | Retry (no recording/paused draft) | initializing | Keep mode/options; recreate failed session |
+ *
+ * Staged document/photo paths suppress binds until retake/discard. A photo capture
+ * requires ready + resumed lifecycle + no scanner work + no active capture.
+ * Video Recording/Paused keep ready as a binding phase but use VideoSessionState
+ * for stop/pause/review guards. This table is a source description, not a transition test.
+ */
 enum class CameraPhase { initializing, ready, permissionDenied, noCamera }
 
 /** CameraX ImageProxy -> the sampler's frame contract (YUV_420_888 planes
@@ -138,6 +175,8 @@ private class CameraSession(
     var lensFacing: Int = CameraSelector.LENS_FACING_BACK
     var imageCapture: ImageCapture? = null
     var analysis: ImageAnalysis? = null
+    var analysisAvailable: Boolean = true
+        private set
     var preview: Preview? = null
     val analysisExecutor = Executors.newSingleThreadExecutor()
     val captureExecutor = Executors.newSingleThreadExecutor()
@@ -210,6 +249,7 @@ private class CameraSession(
         onReady: () -> Unit,
     ) {
         val provider = provider ?: return
+        analysisAvailable = true
         camera?.cameraInfo?.cameraState?.removeObservers(lifecycleOwner)
         unbind()
         val baseSelector = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
@@ -269,19 +309,21 @@ private class CameraSession(
                 // photo capture working without optional face analysis.
                 provider.unbind(preview, capture, analyzer)
                 analyzer.clearAnalyzer()
+                analysisAvailable = false
                 provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
             }
             camera = bound
             bound.cameraControl.enableTorch(torchOn && lensFacing == CameraSelector.LENS_FACING_BACK)
             bound.cameraInfo.cameraState.observe(lifecycleOwner) { state ->
                 if (state.error != null) {
-                    onError("The camera could not open (code ${state.error?.code}). Close another app using the camera and try again.")
+                    onError("The camera could not open (code ${state.error?.code}). Close another app using the camera, then tap Retry.")
                 } else if (state.type == CameraState.Type.OPEN) {
                     onReady()
                 }
             }
         } catch (error: Exception) {
-            if (nightActive || portraitActive) {
+            // HDR failures need the same one-time plain-photo retry as night/portrait.
+            if (nightActive || portraitActive || hdrActive) {
                 night = false; nightActive = false; portrait=false; portraitActive=false; hdr = false; hdrActive = false
                 bind(previewView,onFrame,onError,onReady)
             } else onError(error.message ?: "The camera could not start.")
@@ -330,8 +372,24 @@ fun ChatyCameraCaptureScreen(
     entryPreset: CameraEntryPreset = CameraEntryPreset.photoBack,
     videoHoldRequest: VideoHoldRequest? = null,
 ) {
-    require(videoHoldRequest == null || entryPreset == CameraEntryPreset.composerFrontVideo) { "Hold recording is composer front-video only" }
-    require(entryPreset != CameraEntryPreset.composerFrontVideo || videoAuthPort != null) { "Front-video entry requires its captured auth port" }
+    // Original host contracts crashed in release on a malformed entry:
+    // require(videoHoldRequest == null || entryPreset == CameraEntryPreset.composerFrontVideo)
+    // require(entryPreset != CameraEntryPreset.composerFrontVideo || videoAuthPort != null)
+    val invalidEntry = (videoHoldRequest != null && entryPreset != CameraEntryPreset.composerFrontVideo) ||
+        (entryPreset == CameraEntryPreset.composerFrontVideo && videoAuthPort == null)
+    if (invalidEntry) {
+        LaunchedEffect(videoHoldRequest) { videoHoldRequest?.close() }
+        androidx.compose.foundation.layout.Column(
+            Modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.surface)
+                .windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        ) {
+            androidx.compose.material3.Text("Camera unavailable for this request", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
+            androidx.compose.material3.Text("Go back and try opening the camera again.", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+            androidx.compose.material3.TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { androidx.compose.material3.Text("Go back") }
+        }
+        return
+    }
     val context = LocalContext.current
     val view = LocalView.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -375,8 +433,10 @@ fun ChatyCameraCaptureScreen(
     // ShutterOverlay parity: one white flash pulse per photo capture.
     var captureFlashSeq by remember { mutableStateOf(0) }
     val captureFlashAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
-    LaunchedEffect(captureFlashSeq) {
-        if (captureFlashSeq > 0) {
+    val reduceCaptureMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    LaunchedEffect(captureFlashSeq, reduceCaptureMotion) {
+        if (reduceCaptureMotion) captureFlashAlpha.snapTo(0f)
+        else if (captureFlashSeq > 0) {
             captureFlashAlpha.snapTo(0.55f)
             captureFlashAlpha.animateTo(0f, androidx.compose.animation.core.tween(280))
         }
@@ -408,14 +468,31 @@ fun ChatyCameraCaptureScreen(
     }
     var effectsOpen by remember { mutableStateOf(false) }
     var lensBrowserOpen by remember { mutableStateOf(false) }
+    var lensesDisabled by remember { mutableStateOf(false) }
     var capturing by remember { mutableStateOf(false) }
+    var sendingPhoto by remember { mutableStateOf(false) }
+    var sentPhotoPath by remember { mutableStateOf<String?>(null) }
     var options by remember { mutableStateOf(CameraCaptureOptions()) }
     var optionsOpen by remember { mutableStateOf(false) }
     var flashSupported by remember { mutableStateOf(false) }
     var stabilizationSupported by remember { mutableStateOf(false) }
     var countdown by remember { mutableStateOf(0) }
     var scannerBusy by remember { mutableStateOf(false) }
-    var scannerError by remember { mutableStateOf<String?>(null) }
+    // Original name retained for review: var scannerError by remember { mutableStateOf<String?>(null) }
+    // This notice covers the whole camera, not only document scanning.
+    var transientNotice by remember { mutableStateOf<String?>(null) }
+    val noticeAccessibilityManager = androidx.compose.ui.platform.LocalAccessibilityManager.current
+    LaunchedEffect(transientNotice, noticeAccessibilityManager) {
+        val shownNotice = transientNotice ?: return@LaunchedEffect
+        val timeout = noticeAccessibilityManager?.calculateRecommendedTimeoutMillis(
+            originalTimeoutMillis = 4_000L,
+            containsIcons = false,
+            containsText = true,
+            containsControls = true,
+        ) ?: 4_000L
+        kotlinx.coroutines.delay(timeout.coerceAtLeast(4_000L))
+        if (transientNotice == shownNotice) transientNotice = null
+    }
     // Highest zoom ratio the camera has actually accepted (user device screenshot
     // 2026-10-30: a rejected preset must not stay offered). Float.MAX_VALUE until
     // a failure proves a lower ceiling.
@@ -470,9 +547,11 @@ fun ChatyCameraCaptureScreen(
         else -> null
     }
 
-    // Face frame pipeline: throttle 45ms, mirror for front camera, solver maps
+    // Face frame pipeline: throttle 66ms, mirror for front camera, solver maps
     // into the cover-cropped preview space.
     var lastFaceFrameMs by remember { mutableStateOf(0L) }
+    var lastFaceSeenElapsedMs by remember { mutableStateOf<Long?>(null) }
+    var faceFrameGeneration by remember { mutableStateOf(0L) }
     var processingFaceFrame by remember { mutableStateOf(false) }
     var viewportSize by remember { mutableStateOf(LensSize(0f, 0f)) }
 
@@ -514,16 +593,22 @@ fun ChatyCameraCaptureScreen(
     fun processSegmentFrame(frame: FrameData, rotationDegrees: Int) {
         val key = segmentEffectKey ?: return
         if (processingSegmentFrame) return
-        val nowMs = System.currentTimeMillis()
-        if (nowMs - lastSegmentFrameMs < 150) return
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        if (nowMs - lastSegmentFrameMs < CAMERA_SEGMENT_INTERVAL_MS) return
         lastSegmentFrameMs = nowMs
         processingSegmentFrame = true
         val intensity = engine.intensity
         val mirrored = session.lensFacing == CameraSelector.LENS_FACING_FRONT
-        scope.launch(Dispatchers.Default) {
+        val renderGeneration = faceFrameGeneration
+        // Keep mutable Compose state and cleanup on main; only native render runs on Default.
+        // Original: scope.launch(Dispatchers.Default) { produced = liveSegmentPreview.render(...) }
+        scope.launch {
             var produced: android.graphics.Bitmap? = null
             try {
-                produced = liveSegmentPreview.render(frame, rotationDegrees, mirrored, key, intensity)
+                withContext(Dispatchers.Default) {
+                    // Assign before the dispatcher return so cancellation still has an owner to clean.
+                    produced = liveSegmentPreview.render(frame, rotationDegrees, mirrored, key, intensity)
+                }
                 val bmp = produced
                 if (bmp != null) {
                     // Single-owner transfer: the frame is handed to the slot
@@ -535,7 +620,10 @@ fun ChatyCameraCaptureScreen(
                     // publish (stale effect key, disposed slot) - recycles it.
                     // Never both, never the caller, never a published frame.
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
-                        val shown = segmentFrames.publish(bmp, accept = segmentEffectKey == key)
+                        val shown = segmentFrames.publish(bmp, accept = segmentEffectKey == key &&
+                            renderGeneration == faceFrameGeneration &&
+                            mirrored == (session.lensFacing == CameraSelector.LENS_FACING_FRONT) &&
+                            intensity == engine.intensity)
                         if (shown) {
                             segmentPreviewFrame = segmentFrames.visible
                             segmentPublishedKey = key
@@ -557,14 +645,21 @@ fun ChatyCameraCaptureScreen(
 
     fun processFaceFrame(frame: FrameData, rotationDegrees: Int) {
         if (!wantsFaceTracking || capturing || processingFaceFrame) return
-        val nowMs = System.currentTimeMillis()
-        if (nowMs - lastFaceFrameMs < 45) return
+        // Use elapsed time so a wall-clock correction cannot keep a stale solve fresh.
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        val frameFacing = session.lensFacing
+        val frameGeneration = faceFrameGeneration
+        // Former redundant 45ms gate differed from the analyzer's actual 66ms budget.
+        if (nowMs - lastFaceFrameMs < CAMERA_FACE_INTERVAL_MS) return
         lastFaceFrameMs = nowMs
         processingFaceFrame = true
         scope.launch {
             try {
-                val detection = faceDetection.detect(frame, rotationDegrees)
-                if (!wantsFaceTracking || capturing) return@launch
+                // Bitmap conversion already used Default internally, but model creation and
+                // native pipeline.detect previously resumed on this screen's main scope.
+                val detection = withContext(Dispatchers.Default) { faceDetection.detect(frame, rotationDegrees) }
+                if (!wantsFaceTracking || capturing || frameFacing != session.lensFacing || frameGeneration != faceFrameGeneration) return@launch
+                if (detection.faces.isNotEmpty()) lastFaceSeenElapsedMs = nowMs
                 val preview = if (viewportSize.width <= 0f || viewportSize.height <= 0f) {
                     LensSize(frame.width.toFloat(), frame.height.toFloat())
                 } else viewportSize
@@ -589,6 +684,8 @@ fun ChatyCameraCaptureScreen(
                 )
                 facePoses = poses
                 faceHealth = faceSolver.health
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 // Detection is best-effort. Never interrupt capture.
             } finally {
@@ -613,6 +710,10 @@ fun ChatyCameraCaptureScreen(
         if (!cameraPermissionGranted || capturedPath != null || documentReviewPath != null || scannerBusy || videoOpen) return
         bindJob?.cancel()
         bindJob = scope.launch {
+            faceFrameGeneration++
+            faceSolver.reset()
+            lastFaceSeenElapsedMs = null
+            facePoses = emptyList()
             phase = CameraPhase.initializing
             errorMessage = null
             try {
@@ -627,16 +728,27 @@ fun ChatyCameraCaptureScreen(
                     },
                     onReady = {
                         phase = CameraPhase.ready
+                        lensesDisabled = !session.analysisAvailable
+                        if (lensesDisabled) { faceFrameGeneration++; faceSolver.reset(); lastFaceSeenElapsedMs = null; facePoses = emptyList() }
                         portraitSupported = session.portraitSupported
                         portraitActive = session.portraitActive
-                        if(captureViewMode==CaptureViewMode.night && !session.nightActive) { captureViewMode=CaptureViewMode.photo; scannerError="Night unavailable. Photo restored." }
-                        if(captureViewMode==CaptureViewMode.portrait && !portraitActive) { captureViewMode=CaptureViewMode.photo; scannerError="Portrait unavailable. Photo restored." }
+                        if(captureViewMode==CaptureViewMode.night && !session.nightActive) { captureViewMode=CaptureViewMode.photo; transientNotice="Night unavailable. Photo restored." }
+                        if(captureViewMode==CaptureViewMode.portrait && !portraitActive) { captureViewMode=CaptureViewMode.photo; transientNotice="Portrait unavailable. Photo restored." }
                         nightSupported = session.nightSupported
                         nightActive = session.nightActive
                         hdrSupported = session.hdrSupported
-                        if (hdrOn && !session.hdrActive) { hdrOn = false; scannerError = "HDR is unavailable on this camera." }
-                        if (nightActive) { faceSolver.reset(); facePoses = emptyList() }
-                        if (options.night && !nightActive) { options = options.copy(night=false); scannerError = "Night mode unavailable. Photo restored." }
+                        if (hdrOn && !session.hdrActive) {
+                            hdrOn = false
+                            // Original notice incorrectly called every mutual-exclusion case unsupported hardware.
+                            // transientNotice = "HDR is unavailable on this camera."
+                            transientNotice = when {
+                                session.nightActive || session.portraitActive -> "HDR is off while Night or Portrait is active."
+                                captureViewMode !in listOf(CaptureViewMode.photo, CaptureViewMode.lenses) -> "HDR is off in this capture mode."
+                                else -> "HDR is unavailable on this camera."
+                            }
+                        }
+                        if (nightActive) { faceFrameGeneration++; faceSolver.reset(); lastFaceSeenElapsedMs = null; facePoses = emptyList() }
+                        if (options.night && !nightActive) { options = options.copy(night=false); transientNotice = "Night mode unavailable. Photo restored." }
                         flashSupported = session.flashSupported
                         stabilizationSupported = session.stabilizationSupported
                         val zoom = session.camera?.cameraInfo?.zoomState?.value
@@ -741,7 +853,9 @@ fun ChatyCameraCaptureScreen(
             session.stabilization = options.stabilization
             session.night = options.night || captureViewMode == CaptureViewMode.night
             session.portrait = captureViewMode == CaptureViewMode.portrait
-            session.hdr = hdrOn
+            // Original unscoped flag: session.hdr = hdrOn
+            session.hdr = hdrOn && captureViewMode in listOf(CaptureViewMode.photo, CaptureViewMode.lenses) &&
+                !session.night && !session.portrait
             bindCamera()
         }
         else session.unbind()
@@ -779,22 +893,39 @@ fun ChatyCameraCaptureScreen(
         if (phase == CameraPhase.initializing && previewView != null && cameraPermissionGranted) {
             kotlinx.coroutines.delay(15_000)
             if (phase == CameraPhase.initializing) {
-                errorMessage = "The camera did not open. Close another app using it, then reopen the camera. You can also pick from your gallery."
+                errorMessage = "The camera did not open. Close another app using it, then tap Retry. You can also pick from your gallery."
                 phase = CameraPhase.noCamera
                 session.unbind()
             }
         }
     }
 
+    var flashRequestSequence by remember { mutableStateOf(0L) }
     fun toggleFlash() {
-        if (!flashSupported) return
+        // Original guard checked flash support alone, even after its camera was unbound.
+        // if (!flashSupported) return
+        if (!flashSupported || phase != CameraPhase.ready || videoOpen || capturing || !ownedFiles.isOpen()) return
         val camera = session.camera ?: return
+        val requestedGeneration = faceFrameGeneration
+        val requestedFacing = session.lensFacing
+        val request = ++flashRequestSequence
         // GB three-state cycle: off -> on -> auto -> off. "on" also lights the
         // torch while composing; "auto" leaves the LED to the capture itself.
         val next = if (flashOn) "auto" else if (flashAuto) "off" else "on"
         val torchNext = next == "on"
-        val future = camera.cameraControl.enableTorch(torchNext)
-        future.addListener({
+        // Original enableTorch call was outside the error guard.
+        // val future = camera.cameraControl.enableTorch(torchNext)
+        val future = try { camera.cameraControl.enableTorch(torchNext) }
+        catch (_: Exception) {
+            transientNotice = "Flash could not change on this camera."
+            return
+        }
+        future.addListener(flashResult@{
+            // Old completions must never rewrite the new camera's flash mode or notice.
+            if (request != flashRequestSequence || !ownedFiles.isOpen() ||
+                requestedGeneration != faceFrameGeneration || requestedFacing != session.lensFacing ||
+                session.camera !== camera || phase != CameraPhase.ready || videoOpen || !cameraPermissionGranted
+            ) return@flashResult
             try {
                 future.get()
                 flashOn = torchNext
@@ -812,7 +943,7 @@ fun ChatyCameraCaptureScreen(
                 flashAuto = false
                 session.torchOn = false
                 session.applyCaptureFlashMode(ImageCapture.FLASH_MODE_OFF)
-                scannerError = "Flash could not change on this camera."
+                transientNotice = "Flash could not change on this camera."
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -831,7 +962,10 @@ fun ChatyCameraCaptureScreen(
             session.torchOn = false
             session.applyCaptureFlashMode(ImageCapture.FLASH_MODE_OFF)
         }
+        workingMaxZoom = Float.MAX_VALUE
+        faceFrameGeneration++
         faceSolver.reset()
+        lastFaceSeenElapsedMs = null
         facePoses = emptyList()
         bindCamera()
     }
@@ -847,19 +981,27 @@ fun ChatyCameraCaptureScreen(
     fun stageRecentPhoto(uri: android.net.Uri) {
         scope.launch {
             try {
+                val mime = context.contentResolver.getType(uri)
+                require(mime == null || mime.startsWith("image/")) { "Choose an image, not another file type." }
                 val dest = File.createTempFile("chaty_picked_", ".jpg", context.cacheDir)
                 if(!ownedFiles.own(dest)) return@launch
                 try { withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { input ->
-                        dest.outputStream().use { input.copyTo(it) }
+                        dest.outputStream().use { output ->
+                            com.example.chat.ui.media.copyMediaBounded(input, output, com.example.chat.ui.media.FileSanitizationService.MAX_SAFE_FILE_SIZE.toLong())
+                        }
                     } ?: error("Image source is unavailable")
-                } } finally { if(!ownedFiles.isOpen() || !kotlinx.coroutines.currentCoroutineContext().isActive) dest.delete() }
+                } } catch (failure: Throwable) { dest.delete(); throw failure }
+                finally { if(!ownedFiles.isOpen() || !kotlinx.coroutines.currentCoroutineContext().isActive) dest.delete() }
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                withContext(Dispatchers.IO) { android.graphics.BitmapFactory.decodeFile(dest.path, bounds) }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) { dest.delete(); error("Selected file is not a readable image") }
                 val selectedPath = dest.absolutePath
                 if (captureViewMode == CaptureViewMode.document) documentReviewPath = selectedPath
                 else stagePickedOrCaptured(selectedPath)
             } catch(cancelled:CancellationException) { throw cancelled
             } catch (_: Exception) {
-                // Picker/copy failure leaves state untouched (Dart returns early).
+                transientNotice = "Could not import this photo. Try another photo or try again."
             }
         }
     }
@@ -879,7 +1021,7 @@ fun ChatyCameraCaptureScreen(
         if (!callsAllowed) {
             // Contact not mutually accepted: block attachment and show auth dialog.
             // Messaging still works, but media/calls require both users to accept.
-            scannerError = "Contact acceptance required — both users must accept before media can be shared."
+            transientNotice = "Contact acceptance required — both users must accept before media can be shared."
             return
         }
         ChatyHapticsPort.light(view)
@@ -897,10 +1039,23 @@ fun ChatyCameraCaptureScreen(
         capturing = true
         captureFlashSeq += 1
         val documentCapture = captureViewMode == CaptureViewMode.document
+        val frontCapture = session.lensFacing == CameraSelector.LENS_FACING_FRONT
+        val captureLens = lensManager.selected
+        val capturePoses = if (isCameraFaceSolveFresh(android.os.SystemClock.elapsedRealtime(), lastFaceSeenElapsedMs) &&
+            faceSolver.health != TrackingHealth.lost
+        ) facePoses.toList() else emptyList()
+        val captureViewport = viewportSize
         ChatyHapticsPort.light(view)
         val stamp = System.currentTimeMillis()
-        val out = File.createTempFile("chaty_capture_", ".jpg", context.cacheDir)
+        // Original unguarded createTempFile could leave capturing stuck after storage failure.
+        val out = try { File.createTempFile("chaty_capture_", ".jpg", context.cacheDir) }
+        catch (_: Exception) {
+            capturing = false
+            transientNotice = "Could not create a photo copy. Check device storage and try again."
+            return
+        }
         if(!ownedFiles.own(out)) { capturing=false; return }
+        try {
         val opts = ImageCapture.OutputFileOptions.Builder(out).build()
         capture.takePicture(opts, session.captureExecutor, object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(results: ImageCapture.OutputFileResults) {
@@ -908,39 +1063,50 @@ fun ChatyCameraCaptureScreen(
                 val work = scope.launch {
                     var path = out.absolutePath
                     if (!documentCapture && !session.nightActive && !session.portraitActive) {
-                        val lens = lensManager.selected
-                        val poses = facePoses
-                        if (!lens.isNoLens && poses.isNotEmpty() && faceSolver.health != TrackingHealth.lost) {
+                        // Original callback read the later mutable lens/poses with only a health gate.
+                        val lens = captureLens
+                        val poses = capturePoses
+                        if (!lens.isNoLens && poses.isNotEmpty()) {
                             try {
-                                val bytes = composeLensIntoImage(
-                                    sourceBytes = File(path).readBytes(),
-                                    previewSize = if (viewportSize.width > 0) viewportSize
-                                        else LensSize(1080f, 1920f),
-                                    lens = lens,
-                                    poses = poses,
-                                )
-                                val lensStamp = System.currentTimeMillis()
-                                val staged = File.createTempFile("chaty_lens_", ".png", context.cacheDir)
-                                if(!ownedFiles.own(staged)) return@launch
-                                staged.writeBytes(bytes)
-                                if(!ownedFiles.own(staged)) return@launch
-                                val jpg = File.createTempFile("chaty_lens_", ".jpg", context.cacheDir)
-                                if(!ownedFiles.own(jpg)) return@launch
-                                val ok = try {
-                                    jpg.outputStream().use { os ->
-                                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                            ?.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, os) == true
-                                    }
-                                } catch (_: Exception) { false }
-                                if(!ownedFiles.own(jpg)) return@launch
-                                if (ok) {
-                                    path = jpg.absolutePath
-                                    try { staged.delete() } catch (_: Exception) {}
-                                } else {
-                                    path = staged.absolutePath
-                                }
+                                // Original whole-byte-array + PNG stage + second decode/JPEG path retained:
+                                // val bytes = composeLensIntoImage(
+                                // sourceBytes = File(path).readBytes(),
+                                // previewSize = if (captureViewport.width > 0 && captureViewport.height > 0) captureViewport
+                                // else LensSize(1080f, 1920f),
+                                // lens = lens,
+                                // poses = poses,
+                                // )
+                                // val lensStamp = System.currentTimeMillis()
+                                // val staged = File.createTempFile("chaty_lens_", ".png", context.cacheDir)
+                                // if(!ownedFiles.own(staged)) return@launch
+                                // staged.writeBytes(bytes)
+                                // if(!ownedFiles.own(staged)) return@launch
+                                // val jpg = File.createTempFile("chaty_lens_", ".jpg", context.cacheDir)
+                                // if(!ownedFiles.own(jpg)) return@launch
+                                // val ok = try {
+                                // jpg.outputStream().use { os ->
+                                // android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                // ?.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, os) == true
+                                // }
+                                // } catch (_: Exception) { false }
+                                // if(!ownedFiles.own(jpg)) return@launch
+                                // if (ok) {
+                                // path = jpg.absolutePath
+                                // try { staged.delete() } catch (_: Exception) {}
+                                // } else {
+                                // path = staged.absolutePath
+                                // }
+                                val baked = bakeCameraLensFile(File(path), context.cacheDir,
+                                    if (captureViewport.width > 0 && captureViewport.height > 0) captureViewport else LensSize(1080f, 1920f),
+                                    lens, poses, mirroredPreview = frontCapture, onCreated = { check(ownedFiles.own(it)) { "Camera session ended." } })
+                                if (!ownedFiles.own(baked)) return@launch
+                                path = baked.path
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: OutOfMemoryError) {
+                                transientNotice = "Not enough memory for the lens copy. Original photo kept."
                             } catch (_: Exception) {
-                                // The face lens could not be baked; keep the photo.
+                                transientNotice = "The lens could not be saved. Original photo kept."
                             }
                         }
                     }
@@ -953,11 +1119,12 @@ fun ChatyCameraCaptureScreen(
                     try {
                         path = withContext(Dispatchers.IO) {
                             CameraPhotoOutput.process(context, path, captureOptions,
-                                if (viewportSize.height > 0) viewportSize.width / viewportSize.height else 9f / 16f).also { derived=it; if(it != path) ownedFiles.own(File(it)) }
+                                if (viewportSize.height > 0) viewportSize.width / viewportSize.height else 9f / 16f,
+                                frontCapture = frontCapture).also { derived=it; if(it != path) ownedFiles.own(File(it)) }
                         }
                     } catch(cancelled:CancellationException) { derived?.takeIf { it != out.absolutePath }?.let { File(it).delete() }; throw cancelled
                     } catch (_: Exception) {
-                        scannerError = "Could not apply capture options. Original photo kept; nothing was sent."
+                        transientNotice = "Could not apply capture options. Original photo kept; nothing was sent."
                     }
                     capturing = false
                     stagePickedOrCaptured(path)
@@ -969,15 +1136,28 @@ fun ChatyCameraCaptureScreen(
                 out.delete()
                 scope.launch {
                     capturing = false
-                    errorMessage = exception.message ?: "The photo could not be captured."
+                    // Native exception text can include local paths; keep the user notice generic.
+                    // errorMessage = exception.message ?: "The photo could not be captured."
+                    errorMessage = "The photo could not be captured. Tap Retry or pick from your gallery."
                     phase = CameraPhase.noCamera
                 }
             }
         })
+        } catch (_: Exception) {
+            out.delete()
+            capturing = false
+            transientNotice = "The photo could not start. Try again or reopen the camera."
+        }
     }
 
     fun shutter() {
-        if (scannerBusy || capturing || countdown > 0) return
+        if (countdown > 0) {
+            timerJob?.cancel()
+            timerJob = null
+            countdown = 0
+            return
+        }
+        if (scannerBusy || capturing) return
         if (videoOpen) {
             // Inline video: the shutter toggles recording; review follows on stop.
             val vs = videoSession ?: return
@@ -991,31 +1171,33 @@ fun ChatyCameraCaptureScreen(
 
         val captureOptions = options
         timerJob = scope.launch {
-            try {
-                for (seconds in captureOptions.timerSeconds downTo 1) {
-                    countdown = seconds
-                    kotlinx.coroutines.delay(1_000)
-                }
-                countdown = 0
+            // Original inline loop: for (seconds in captureOptions.timerSeconds downTo 1)
+            // { countdown = seconds; delay(1000) }; countdown = 0; captureNow(captureOptions)
+            // Extracted without changing the wait/capture order so zero/one/cancellation are testable.
+            runCameraCountdown(captureOptions.timerSeconds, onTick = { countdown = it }) {
                 captureNow(captureOptions)
-            } finally { countdown = 0 }
+            }
         }
     }
 
     fun discard() {
+        if (sendingPhoto) return
         ChatyHapticsPort.light(view)
         capturedPath = null
         ownedFiles.discard()
     }
 
     fun confirmAndSend() {
-        ChatyHapticsPort.success(view)
         val raw = capturedPath ?: return
+        if (sendingPhoto || sentPhotoPath == raw) return
+        sendingPhoto = true
+        val sendCaption = caption.trim()
         val engineEffect = engine.activeEffect
         var path = raw
         var effectId = if (captureViewMode in listOf(CaptureViewMode.document,CaptureViewMode.night,CaptureViewMode.portrait)) "none" else engineEffect.id
         var intensity = if (captureViewMode in listOf(CaptureViewMode.document,CaptureViewMode.night,CaptureViewMode.portrait)) 1.0 else engine.intensity
         scope.launch {
+            try {
             // Stories carry no metadata channel, so the look must live in the pixels.
             // Shader effects (pixelate, segmented backgrounds) have no receiver-side
             // renderer, so they bake into the pixels in EVERY photo mode and the
@@ -1038,10 +1220,10 @@ fun ChatyCameraCaptureScreen(
                     intensity = tagIntensity
                 } catch(cancelled:CancellationException) { throw cancelled
                 } catch (_: Exception) {
-                    scannerError = "Could not apply this effect at full resolution. Original kept; nothing sent."
+                    transientNotice = "Could not apply this effect at full resolution. Original kept; nothing sent."
                     return@launch
                 } catch (_: OutOfMemoryError) {
-                    scannerError = "Not enough memory for the full-resolution effect. Original kept; nothing sent."
+                    transientNotice = "Not enough memory for the full-resolution effect. Original kept; nothing sent."
                     return@launch
                 }
             }
@@ -1052,13 +1234,21 @@ fun ChatyCameraCaptureScreen(
                     path = path,
                     effectId = effectId,
                     effectIntensity = intensity,
-                    caption = caption.trim(),
+                    caption = sendCaption,
                     ownedResult = transferred,
                 ),
-            ) } catch(error:Throwable) { transferred.close(); throw error }
+            )
+                sentPhotoPath = raw
+                ChatyHapticsPort.success(view)
+            } catch(error:Throwable) { transferred.close(); throw error }
+            } finally { sendingPhoto = false }
         }
     }
 
+    // Back dispatch contract: modal sheets handle their own Back while mounted. These host
+    // handlers discard a staged photo/document, or ask before leaving an unsaved video.
+    // A new overlay must dismiss itself before either host handler runs. Never bypass the
+    // unsaved-video prompt or discard a photo while its synchronous send handoff is busy.
     // PopScope: back with a staged capture discards instead of leaving.
     BackHandler(enabled = !videoOpen && (capturedPath != null || documentReviewPath != null)) {
         if (documentReviewPath != null) { documentReviewPath = null; ownedFiles.discard() } else discard()
@@ -1069,6 +1259,15 @@ fun ChatyCameraCaptureScreen(
     BackHandler(enabled = videoOpen) {
         if (videoSession?.hasDraft() == true) videoExitPrompt = true
         else { videoOpen = false; captureViewMode = CaptureViewMode.photo }
+    }
+
+    // The last enabled BackHandler wins: overlays dismiss before staged media or video.
+    BackHandler(enabled = lensBrowserOpen || optionsOpen || effectsOpen) {
+        when {
+            lensBrowserOpen -> lensBrowserOpen = false
+            optionsOpen -> optionsOpen = false
+            effectsOpen -> effectsOpen = false
+        }
     }
 
     DisposableEffect(session) {
@@ -1096,6 +1295,19 @@ fun ChatyCameraCaptureScreen(
             CameraCaptureViewfinder(
                 videoLensRecorded = videoLensEffectActive,
                 phase = phase,
+                onRetryCamera = {
+                    // This action only appears in noCamera, never during a live recording.
+                    // Preserve camera, mode and options while recreating the failed session.
+                    if (phase == CameraPhase.noCamera &&
+                        videoState !is VideoSessionState.Recording && videoState !is VideoSessionState.Paused
+                    ) {
+                        if (videoOpen) {
+                            videoSession?.close()
+                            videoSession = null
+                            bindVideo()
+                        } else bindCamera()
+                    }
+                },
                 errorMessage = errorMessage,
                 captureViewMode = captureViewMode,
                 effect = if (captureViewMode in listOf(CaptureViewMode.document,CaptureViewMode.night,CaptureViewMode.portrait)) EffectRegistry.allEffects.first { it.id == "none" } else engine.activeEffect,
@@ -1121,7 +1333,7 @@ fun ChatyCameraCaptureScreen(
                                 val control = if (videoOpen) videoSession?.boundCamera()?.cameraControl
                                     else session.camera?.cameraControl
                                 if (control == null || startSpan <= 0f) return false
-                                val target = clampCameraZoom(startRatio * detector.currentSpan / startSpan, minZoom, maxZoom)
+                                val target = clampCameraZoom(startRatio * detector.currentSpan / startSpan, minZoom, effectiveZoomMax(maxZoom, workingMaxZoom))
                                 control.setZoomRatio(target)
                                 zoomRatio = target
                                 pinchZoomed = true
@@ -1158,7 +1370,12 @@ fun ChatyCameraCaptureScreen(
                                     val point = pv.meteringPointFactory.createPoint(event.x, event.y)
                                     val action = androidx.camera.core.FocusMeteringAction.Builder(point)
                                         .setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS).build()
-                                    session.camera?.cameraControl?.startFocusAndMetering(action)
+                                    val focus = session.camera?.cameraControl?.startFocusAndMetering(action)
+                                    focus?.addListener({
+                                        runCatching { focus.get() }.getOrNull()?.takeIf { it.isFocusSuccessful }?.let {
+                                            view.announceForAccessibility("Focus locked")
+                                        }
+                                    }, ContextCompat.getMainExecutor(context))
                                     focusTapPoint = Offset(event.x, event.y)
                                     focusTapSeq += 1
                                 }
@@ -1203,13 +1420,32 @@ fun ChatyCameraCaptureScreen(
                         .padding(top = 64.dp, start = 12.dp, end = 12.dp)
                         .heightIn(max = (maxHeight - 288.dp).coerceIn(48.dp, 350.dp)),
                 ) {
-                    if (optionsOpen) CameraOptionsPanel(options, stabilizationSupported, nightSupported, { next -> options = next; if(next.night)captureViewMode=CaptureViewMode.night else if(captureViewMode==CaptureViewMode.night)captureViewMode=CaptureViewMode.photo }, { optionsOpen = false })
-                    scannerError?.let { message -> androidx.compose.material3.TextButton(onClick = { scannerError = null }) {
-                        androidx.compose.material3.Text(message + "  Dismiss", color = androidx.compose.ui.graphics.Color.White)
-                    } }
+                    if (optionsOpen) CameraOptionsPanel(options, stabilizationSupported, nightSupported, { next -> options = next; if(next.night)captureViewMode=CaptureViewMode.night else if(captureViewMode==CaptureViewMode.night)captureViewMode=CaptureViewMode.photo }, { optionsOpen = false }, showPhotoTimer = captureViewMode != CaptureViewMode.video,
+                        frontCamera = session.lensFacing == CameraSelector.LENS_FACING_FRONT)
+                    // Original white-on-preview notice retained for review:
+                    // transientNotice?.let { message -> TextButton(onClick = { transientNotice = null }) { Text(message + "  Dismiss", color = Color.White) } }
+                    if (!lensManager.selected.isNoLens && captureViewMode in listOf(CaptureViewMode.photo, CaptureViewMode.lenses)) {
+                        androidx.compose.material3.Text("Saved lens overlays use a copy up to 2048 pixels on the longest side.",
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.fillMaxWidth().background(androidx.compose.material3.MaterialTheme.colorScheme.surface).padding(8.dp))
+                    }
+                    transientNotice?.let { message ->
+                        androidx.compose.material3.TextButton(
+                            onClick = { transientNotice = null },
+                            modifier = Modifier.fillMaxWidth().semantics {
+                                liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+                            },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+                                contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
+                            ),
+                        ) { androidx.compose.material3.Text(message + "  Dismiss") }
+                    }
                 }
-                if (countdown > 0) androidx.compose.material3.Text("$countdown", modifier = Modifier.align(Alignment.Center),
-                    color = androidx.compose.ui.graphics.Color.White, fontSize = 42.sp)
+                if (countdown > 0) androidx.compose.material3.Text("$countdown\nTap shutter to cancel", modifier = Modifier.align(Alignment.Center)
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.surface, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .padding(16.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 24.sp)
                 // Reference-grounded (Snap/IG recording frames): elapsed time sits
                 // top-center while a video records.
                 if (videoTimerActive) CameraCaptureTimerTop(videoSeconds,
@@ -1220,6 +1456,10 @@ fun ChatyCameraCaptureScreen(
                         .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .35f)),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                if (lensesDisabled && captureViewMode == CaptureViewMode.lenses) androidx.compose.material3.Text(
+                    "Lenses unavailable this session", color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
+                        .padding(horizontal = 12.dp, vertical = 8.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
                 if (portraitActive) androidx.compose.material3.Text("Portrait · device background blur",color=androidx.compose.ui.graphics.Color.White)
                 if (nightActive) androidx.compose.material3.Text("Night · hold still while capturing",color=androidx.compose.ui.graphics.Color.White)
                 val videoZoomReady = videoState is VideoSessionState.Ready || videoTimerActive
@@ -1241,11 +1481,13 @@ fun ChatyCameraCaptureScreen(
                                     // Clamp the offered range to what the camera accepted,
                                     // so the failed preset disappears instead of failing again.
                                     workingMaxZoom = maxOf(minZoom, zoomRatio)
-                                    scannerError = "Zoom is unavailable on this camera."
+                                    transientNotice = "Zoom is unavailable on this camera."
                                 }
                                 // A rejection here is a failed REQUEST, not proof of
                                 // missing camera capability - log the exact error.
-                                if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "rejected requested=" + requested + " error=" + e.javaClass.simpleName + ":" + e.message + " cancelled=" + cancelled + (if (cancelled) "" else " workingMax->" + workingMaxZoom))
+                                // Original diagnostic appended e.message, which can contain provider details/paths.
+                                // Log.i("ZOOM-DIAG", "... error=" + e.javaClass.simpleName + ":" + e.message + "...")
+                                if (com.example.chat.BuildConfig.DEBUG) Log.i("ZOOM-DIAG", "rejected requested=" + requested + " error=" + e.javaClass.simpleName + " cancelled=" + cancelled + (if (cancelled) "" else " workingMax->" + workingMaxZoom))
                             }
                         }, ContextCompat.getMainExecutor(context))
                     }
@@ -1269,7 +1511,7 @@ fun ChatyCameraCaptureScreen(
                 videoSeconds = videoSeconds,
                 videoPaused = videoState is VideoSessionState.Paused,
                 videoSnapshotAvailable = videoSnapshotAvailable,
-                onSnapshot = { videoSession?.takeSnapshot { ok -> if (!ok) scannerError = "Snapshot is unavailable while recording on this camera." } },
+                onSnapshot = { videoSession?.takeSnapshot { ok -> if (!ok) transientNotice = "Snapshot is unavailable while recording on this camera." } },
                 nightSupported = nightSupported,
                 portraitSupported = portraitSupported,
                 videoSupported = videoAuthPort != null,
@@ -1305,7 +1547,7 @@ fun ChatyCameraCaptureScreen(
                                 // Color filters open only from the filters button - the
                                 // lenses tab shows the lens carousel, never the tray.
                                 effectsOpen=false
-                                faceSolver.reset();facePoses=emptyList()
+                                faceFrameGeneration++; faceSolver.reset();lastFaceSeenElapsedMs=null;facePoses=emptyList()
                             }
                         }
                     }
@@ -1348,6 +1590,7 @@ fun ChatyCameraCaptureScreen(
                 onCaptionChange = { caption = it },
                 onDiscard = ::discard,
                 onConfirm = ::confirmAndSend,
+                sending = sendingPhoto || sentPhotoPath == capturedPath,
             )
         }
 

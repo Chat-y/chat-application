@@ -115,8 +115,13 @@ fun AccountSettingsScreen(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var isDeleting by remember { mutableStateOf(false) }
 
+    // AC1-01: the background colour was ignored; keep it so success and failure look different.
+    var snackColor by remember { mutableStateOf<Color?>(null) }
+    fun friendlyError(e: Exception): String =
+        (e.message ?: "Something went wrong").removePrefix("Exception: ")
     fun snack(message: String, background: Color? = null) {
         scope.launch {
+            snackColor = background
             snackbarHostState.showSnackbar(message)
         }
     }
@@ -141,11 +146,17 @@ fun AccountSettingsScreen(
                         scope.launch {
                             try {
                                 deleteAccountData(user.id)
+                                // AC1-10 / AC2-13: end in one signed-out state; do not chain a second "log out" dialog.
+                                // (previously: isDeleting = false; showLogoutDialog = true)
+                                try {
+                                    logout()
+                                } catch (le: Exception) {
+                                    snack("Account deleted, but sign-out failed: ${friendlyError(le)}", colors.error)
+                                }
                                 isDeleting = false
-                                showLogoutDialog = true
                             } catch (e: Exception) {
                                 isDeleting = false
-                                snack("Failed to delete account: $e", colors.error)
+                                snack("Failed to delete account: ${friendlyError(e)}", colors.error)
                             }
                         }
                     },
@@ -174,7 +185,7 @@ fun AccountSettingsScreen(
                             try {
                                 logout()
                             } catch (e: Exception) {
-                                snack("Could not log out: $e")
+                                snack("Could not log out: ${friendlyError(e)}", colors.error)
                             }
                         }
                     },
@@ -201,7 +212,16 @@ fun AccountSettingsScreen(
         containerColor = colors.background,
         snackbarHost = {
             SnackbarHost(snackbarHostState) { data ->
-                Snackbar(snackbarData = data)
+                val bg = snackColor
+                if (bg != null) {
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = bg,
+                        contentColor = com.example.chat.ui.kit.chatyReadableOn(bg, Color.White, Color.Black),
+                    )
+                } else {
+                    Snackbar(snackbarData = data)
+                }
             }
         },
     ) { padding ->
@@ -250,13 +270,14 @@ fun AccountSettingsScreen(
 
                 // 3. ACCOUNT ACTIONS
                 ChatySettingsSection(title = "Account Actions") {
-                    ChatySettingsTile(
-                        icon = Icons.Rounded.QrCode,
-                        iconColor = colors.primary,
-                        title = "My QR Code Identity",
-                        subtitle = "Share your public contact card",
-                        onTap = { /* no-op in the Dart source (onTap: {}) */ },
-                    )
+                    // AC1-04: commented out until the QR screen exists; the tile did nothing.
+                    // ChatySettingsTile(
+                    //     icon = Icons.Rounded.QrCode,
+                    //     iconColor = colors.primary,
+                    //     title = "My QR Code Identity",
+                    //     subtitle = "Share your public contact card",
+                    //     onTap = { /* no-op in the Dart source (onTap: {}) */ },
+                    // )
                     ChatySettingsTile(
                         icon = Icons.Rounded.Logout,
                         iconColor = colors.error,
@@ -273,6 +294,19 @@ fun AccountSettingsScreen(
                         onTap = { showDeleteDialog = true },
                     )
                 }
+            }
+            // AC1-40: block taps and show progress while the irreversible delete runs.
+            if (isDeleting) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) { androidx.compose.material3.CircularProgressIndicator() }
             }
         }
     }

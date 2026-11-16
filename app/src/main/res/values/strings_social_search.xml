@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_search_failure">Search unavailable. Any local chat matches are still shown. Try again.</string>
+    <string name="social_search_retry">Retry search</string>
+    <string name="social_search_truncated">Only the first 100 directory results are checked for display. Refine your query to find someone else.</string>
+
+    <string name="social_search_timeout">Search timed out. Try again.</string>
+    <string name="social_search_unavailable">Search unavailable. Please try again.</string>
+    <string name="social_search_private_failure">Unable to check private search. Try again.</string>
+    <string name="social_search_open_failure">Unable to open this chat. Please try again.</string>
+    <string name="social_search_back">Back</string>
+    <string name="social_search_hint">Search @username, people, groups...</string>
+    <string name="social_search_clear">Clear</string>
+    <string name="social_search_local_only">Search only my chats</string>
+    <string name="social_search_privacy_title">Search privacy</string>
+    <string name="social_search_local_explanation">People-directory search is off for this screen.</string>
+    <string name="social_search_privacy_body">Local chat matching happens on this device. With people search enabled, a settled search of at least two characters is sent through your account to the people directory. The directory can learn the query and when you searched. Use Search only my chats to skip those directory requests.</string>
+    <string name="social_search_close">Close</string>
+    <string name="social_search_discovery">Username Discovery</string>
+    <string name="social_search_discovery_body">Type an @username to find and message another Chaty user without exposing phone numbers. Settled queries of two or more characters are checked against the people directory.</string>
+    <string name="social_search_people_header">People &amp; Usernames</string>
+    <string name="social_search_chats_header">Chats &amp; Groups</string>
+    <string name="social_search_keep_typing">Keep typing to search people</string>
+    <string name="social_search_no_matches">No matching results</string>
+    <string name="social_search_no_matches_body">No usernames, contacts, or conversations match your search.</string>
+    <string name="social_search_clear_search">Clear search</string>
+    <string name="social_search_verified">Verified account</string>
+    <string name="social_search_message">Message</string>
+    <string name="social_search_title">Global search</string>
+    <string name="social_search_input_label">Search usernames, people and conversations</string>
+    <string name="social_search_busy">Searching</string>
+    <string name="social_search_opening">Opening conversation</string>
+    <string name="social_search_filter_all">All</string>
+    <string name="social_search_filter_people">People</string>
+    <string name="social_search_filter_chats">Chats</string>
+    <string name="social_search_filter_groups">Groups</string>
+    <string name="social_search_message_person">Message %1$s (@%2$s)</string>
+    <string name="social_search_open_conversation">Open conversation</string>
+    <string name="social_search_result_summary">%1$s, %2$s</string>
+    <plurals name="social_search_people_count">
+        <item quantity="one">%d person</item>
+        <item quantity="other">%d people</item>
+    </plurals>
+    <plurals name="social_search_conversation_count">
+        <item quantity="one">%d conversation</item>
+        <item quantity="other">%d conversations</item>
+    </plurals>
+</resources>

@@ -44,7 +44,15 @@ fun SplashScreen(routeToHome: suspend () -> Boolean, onRoute: (Boolean) -> Unit)
 
     LaunchedEffect(Unit) {
         started = true
-        onRoute(routeToHome())
+        // A1-03: never hang on the splash; a failure or a 20 s timeout falls back to the signed-out route (false).
+        val route = try {
+            kotlinx.coroutines.withTimeoutOrNull(20_000L) { routeToHome() } ?: false
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        onRoute(route)
     }
 
     Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->

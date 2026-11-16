@@ -5,11 +5,11 @@ import java.time.Instant
 
 /** Exact port of lib/features/updates/status_view_session.dart.
  *  Prevents repeated widget opens and rebuilds from publishing duplicate
- *  views. */
+ *  views. UI-thread confined, process-memory only; keys are identifiers, never logged or persisted. */
 class StatusViewSession {
-    private val recorded = HashSet<String>()
+    private val recorded = HashSet<Pair<String, String>>()
 
-    private fun key(status: StatusRecord, viewerId: String) = "${status.id}:$viewerId"
+    private fun key(status: StatusRecord, viewerId: String) = status.id to viewerId
 
     fun tryBegin(status: StatusRecord, viewerId: String, now: Instant = Instant.now()): Boolean {
         if (status.id.isEmpty() ||

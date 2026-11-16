@@ -43,6 +43,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -156,7 +159,8 @@ fun TaskCreateEditModal(
         scope.launch {
             try {
                 if (existingTask != null) {
-                    controller.updateTask(
+                    // TAS-006: keep the editor open when the server did not confirm.
+                    val saved = controller.updateTask(
                         taskId = existingTask.id,
                         title = trimmedTitle,
                         description = description.trim(),
@@ -164,6 +168,7 @@ fun TaskCreateEditModal(
                         priority = priority.name,
                         dueAtIso = dueDate.toString(),
                     )
+                    if (!saved) throw Exception("Could not save changes. Please try again.")
                 } else {
                     controller.createTask(
                         title = trimmedTitle,
@@ -328,7 +333,16 @@ fun TaskCreateEditModal(
             )
             errorMessage?.let {
                 Spacer(Modifier.height(8.dp))
-                Text(it, color = colors.error, fontSize = 13.sp)
+                Text(
+                    it,
+                    color = colors.error,
+                    fontSize = 13.sp,
+                    // TAS-038: announce validation errors politely.
+                    modifier = Modifier.semantics {
+                        liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+                        error(it)
+                    },
+                )
             }
             Spacer(Modifier.height(20.dp))
             com.example.chat.ui.kit.ChatyChoiceTile(

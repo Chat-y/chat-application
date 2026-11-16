@@ -28,9 +28,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.focused
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
@@ -68,6 +72,7 @@ internal fun conversationRowA11ySummary(
     isMuted: Boolean,
     locked: Boolean,
     selected: Boolean,
+    focused: Boolean = false,
 ): String {
     val parts = mutableListOf(displayTitle)
     if (subtitle.isNotEmpty()) parts.add(subtitle)
@@ -77,6 +82,9 @@ internal fun conversationRowA11ySummary(
     if (isMuted) parts.add("muted")
     if (locked) parts.add("locked")
     if (selected) parts.add("selected")
+    // R2-22: spoken when the list owner moved keyboard focus to this row
+    // (next-unread / arrow navigation); focus alone never opens the chat.
+    if (focused) parts.add("focused")
     return parts.joinToString(", ")
 }
 
@@ -101,6 +109,11 @@ fun ConversationRow(
     currentUserId: String,
     lastOwnMessageState: DeliveryState?,
     selected: Boolean,
+    // R2-22: set by the list owner while keyboard focus sits on this row
+    // (next-unread and arrow navigation). Focus only marks the node for
+    // assistive tech; it never opens the chat, selects it or marks it read.
+    // The visible focus ring stays on the caller's modifier.
+    focused: Boolean = false,
     locked: Boolean,
     elapsedTime: Boolean,
     gbOnlineChat: Boolean,
@@ -112,8 +125,24 @@ fun ConversationRow(
     gbHomeCounterText: Long?,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
+    onPinAction:()->Unit = {},
+    onMuteAction:()->Unit = {},
+    onArchiveAction:()->Unit = {},
+    // R2-26: accessibility-first entry point for a conversation metadata
+    // preview (participant count, mute status), separate from selection -
+    // long-press keeps selecting. Null (default) keeps today's action set;
+    // the caller owns the sheet itself, its contents and any pointer
+    // gesture, and passes null for locked rows.
+    onPreviewAction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    clockMinute: Long = System.currentTimeMillis()/60000,
 ) {
+    val displayNow = java.time.Instant.ofEpochMilli(clockMinute*60000)
+    // R1-44: honour the system 12/24-hour clock preference for every clock
+    // this row renders (timestamp, spoken summary, last-seen line). The
+    // wave-1 formatter parameter defaults to null, which keeps the legacy
+    // 12-hour output for any caller that has not been wired yet.
+    val is24Hour = android.text.format.DateFormat.is24HourFormat(androidx.compose.ui.platform.LocalContext.current)
     val rowRadius = theme.cornerRadius.coerceIn(0.0, 24.0)
     val tileRadius = if (cardRows) (rowRadius + 2).coerceIn(0.0, 26.0) else rowRadius
     val referenceRows = chatList.referenceDefault && com.example.chat.core.preferences.HomePresentationPolicy.isDefault(homePrefs.homeStyle)
@@ -134,7 +163,7 @@ fun ConversationRow(
                 presence?.isRecording == true -> "recording…"
                 presence?.isTyping == true -> "typing…"
                 presence?.isOnline == true -> "online"
-                else -> HomeFormatters.formatLastSeen(presence?.lastSeenAt)
+                else -> HomeFormatters.formatLastSeen(presence?.lastSeenAt, is24Hour = is24Hour)
             }
         } else {
             ""
@@ -174,6 +203,7 @@ fun ConversationRow(
     // A-03: one TalkBack node per row. The summary derives from the SAME subtitle
     // the row displays (draft / typing / recording / presence / last message).
     val rowSubtitle = when {
+        locked -> "Locked conversation"
         conversation.draftText.isNotEmpty() -> "Draft: ${conversation.draftText}"
         subtitleActive -> presenceText
         conversation.lastMessageText.isEmpty() -> presenceText
@@ -181,12 +211,14 @@ fun ConversationRow(
     }
     val rowDescription = conversationRowA11ySummary(
         displayTitle = displayTitle,
-        subtitle = rowSubtitle,
+        subtitle = rowSubtitle + if(locked) "" else ", " + HomeFormatters.formatConversationTimestamp(conversation.lastMessageTime,displayNow, is24Hour = is24Hour) +
+            (lastOwnMessageState?.let {", " + it.name} ?: ""),
         unreadCount = conversation.unreadCount,
         isPinned = conversation.isPinned,
         isMuted = conversation.isMuted,
         locked = locked,
         selected = selected,
+        focused = focused,
     )
 
     Column(modifier) {
@@ -197,6 +229,20 @@ fun ConversationRow(
                 .clearAndSetSemantics {
                     contentDescription = rowDescription
                     role = Role.Button
+                    this.selected=selected
+                    this.focused=focused
+                    customActions=listOfNotNull(
+                        CustomAccessibilityAction(if(conversation.isPinned) "Unpin" else "Pin") {onPinAction();true},
+                        CustomAccessibilityAction(if(conversation.isMuted) "Unmute" else "Mute") {onMuteAction();true},
+                        CustomAccessibilityAction("Archive") {onArchiveAction();true},
+                        // R2-26: TalkBack/keyboard access to the metadata
+                        // preview without touching the long-press selection
+                        // gesture. With the default null callback (and on
+                        // locked rows) the action set is exactly as before.
+                        if (locked) null
+                        else onPreviewAction?.let { action ->
+                            CustomAccessibilityAction("Conversation details") {action();true}
+                        })
                     onClick(label = "Open conversation") { onTap(); true }
                     onLongClick(label = "Select conversation") { onLongPress(); true }
                 }
@@ -272,7 +318,7 @@ fun ConversationRow(
                                 fontWeight = if (conversation.unreadCount > 0) FontWeight.W800 else FontWeight.W600,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
-                            if (conversation.lastMessageText.contains('@')) {
+                            if (false /* Removed raw '@' mention heuristic. Requires structured current-user mention metadata. */) {
                                 Spacer(Modifier.width(4.dp))
                                 Box(
                                     modifier = Modifier
@@ -297,9 +343,9 @@ fun ConversationRow(
                         Spacer(Modifier.width(8.dp))
                         HomeTimeLabel(
                             text = if (elapsedTime) {
-                                HomeFormatters.formatElapsedTime(conversation.lastMessageTime)
+                                HomeFormatters.formatElapsedTime(conversation.lastMessageTime,displayNow)
                             } else {
-                                HomeFormatters.formatConversationTimestamp(conversation.lastMessageTime)
+                                HomeFormatters.formatConversationTimestamp(conversation.lastMessageTime,displayNow, is24Hour = is24Hour)
                             },
                             highlight = conversation.unreadCount > 0,
                             color = Color(theme.secondaryTextColor),
@@ -308,7 +354,7 @@ fun ConversationRow(
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (lastOwnMessageState != null) {
+                        if (!locked && lastOwnMessageState != null) {
                             // The shared tick painter (ui/chats/detail), exact
                             // Dart call: style from the theme, 13dp, secondary
                             // unread / accent read.
@@ -322,7 +368,7 @@ fun ConversationRow(
                             Spacer(Modifier.width(4.dp))
                         }
                         val subtitleSize = (13.5 * effectiveDensity * textSizeScale * theme.fontScale).sp
-                        if (conversation.draftText.isNotEmpty()) {
+                        if (!locked && conversation.draftText.isNotEmpty()) {
                             Text(
                                 buildAnnotatedString {
                                     withStyle(SpanStyle(color = Color(theme.dangerColor), fontWeight = FontWeight.W700)) {
@@ -352,7 +398,7 @@ fun ConversationRow(
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        if (presenceText.isNotEmpty() && conversation.lastMessageText.isNotEmpty() && !subtitleActive) {
+                        if (!locked && presenceText.isNotEmpty() && conversation.lastMessageText.isNotEmpty() && !subtitleActive) {
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 presenceText,

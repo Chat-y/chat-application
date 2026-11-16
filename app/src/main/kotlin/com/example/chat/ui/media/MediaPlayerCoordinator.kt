@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** just_audio ProcessingState port for the player seam. */
 enum class MediaProcessingState {
@@ -61,6 +63,11 @@ class MediaPlayerCoordinator(
     private val islandController: DynamicIslandController? = null,
     private val islandControllerProvider: () -> DynamicIslandController? = { null },
 ) {
+    private val playbackMutex = Mutex()
+    private var disposed = false
+    // Keep queue pins while stopped because Resume/Skip still reference the queue.
+    // Conservatively retain failed-start pins until a successful stop/new-start or dispose.
+    private val playbackLeases = mutableListOf<AutoCloseable>()
     private val listeners = mutableListOf<() -> Unit>()
 
     fun addListener(listener: () -> Unit) { listeners.add(listener) }
@@ -201,7 +208,8 @@ class MediaPlayerCoordinator(
         }
     }
 
-    suspend fun playTrack(item: MediaFileDescriptor, queue: List<MediaFileDescriptor>? = null) {
+    suspend fun playTrack(item: MediaFileDescriptor, queue: List<MediaFileDescriptor>? = null) = playbackMutex.withLock {
+        if (disposed) return@withLock
         try {
             // 1. Check with policy coordinator before playing
             val coordinator = policyCoordinator
@@ -213,11 +221,14 @@ class MediaPlayerCoordinator(
                         errorMessage = "Cannot play audio while an active call owns the session.",
                     )
                     notifyListeners()
-                    return
+                    return@withLock
                 }
             }
 
-            val newQueue = queue ?: listOf(item)
+            val newQueue = (queue ?: listOf(item)).toList()
+            val newLease = MediaPlaybackFileLeases.acquire(newQueue.map { it.path } + item.path)
+            val previousLeases = playbackLeases.toList()
+            playbackLeases += newLease
             val idx = newQueue.indexOfFirst { it.path == item.path }
 
             _state = _state.copy(
@@ -230,13 +241,22 @@ class MediaPlayerCoordinator(
             notifyListeners()
 
             audioPlayer.stop()
+            check(!disposed) { "Player was disposed." }
+            // Previous native use ended successfully; the new queue is already pinned.
+            previousLeases.forEach { it.close(); playbackLeases.remove(it) }
             audioPlayer.setFilePath(item.path)
+            check(!disposed) { "Player was disposed." }
             audioPlayer.setSpeed(_state.speed)
+            check(!disposed) { "Player was disposed." }
             audioPlayer.play()
-        } catch (e: Exception) {
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            // Native stop/start cancellation may be ambiguous. Retain protection until dispose/rebind.
+            throw cancelled
+        } catch (_: Exception) {
             _state = _state.copy(
                 status = PlaybackStatus.error,
-                errorMessage = "Playback error: $e",
+                // Original raw exception could expose local paths/URIs: "Playback error: $e"
+                errorMessage = "This audio could not play. Choose it again or try another file.",
             )
             notifyListeners()
         }
@@ -250,13 +270,15 @@ class MediaPlayerCoordinator(
         }
     }
 
-    suspend fun pause() {
+    suspend fun pause() = playbackMutex.withLock {
+        if (disposed) return@withLock
         audioPlayer.pause()
         _state = _state.copy(status = PlaybackStatus.paused)
         notifyListeners()
     }
 
-    suspend fun resume() {
+    suspend fun resume() = playbackMutex.withLock {
+        if (disposed) return@withLock
         if (_state.activeItem != null) {
             audioPlayer.play()
             _state = _state.copy(status = PlaybackStatus.playing)
@@ -325,7 +347,8 @@ class MediaPlayerCoordinator(
         }
     }
 
-    suspend fun stop() {
+    suspend fun stop() = playbackMutex.withLock {
+        if (disposed) return@withLock
         audioPlayer.stop()
         _state = _state.copy(
             status = PlaybackStatus.stopped,
@@ -337,13 +360,18 @@ class MediaPlayerCoordinator(
     }
 
     fun dispose() {
+        if (disposed) return
+        disposed = true
         policyCoordinator?.removeListener(onPolicyCoordinatorChanged)
         resolveIslandController()?.removePayload("media_active")
         posJob?.cancel()
         durJob?.cancel()
         stateJob?.cancel()
         bufJob?.cancel()
+        // If native disposal fails, keep pins rather than permit cleanup under uncertain playback.
         audioPlayer.dispose()
+        playbackLeases.toList().forEach { it.close() }
+        playbackLeases.clear()
     }
 }
 

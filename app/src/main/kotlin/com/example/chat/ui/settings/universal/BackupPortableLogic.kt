@@ -80,13 +80,14 @@ object BackupPortableLogic {
         // Commit with whole-restore rollback on any failure.
         val committed = mutableListOf<SectionStore>()
         try {
-            for ((store, _) in targets) {
+            // BKP-R3-111: numbered media sections share one store; commit each distinct store once.
+            for (store in targets.map { it.first }.distinct()) {
                 store.commit()
                 committed += store
             }
         } catch (e: Exception) {
             val rollbackErrors = mutableListOf<String>()
-            for (store in targets.map { it.first }) {
+            for (store in targets.map { it.first }.distinct()) {
                 try {
                     store.rollback(snapshots[store.name])
                 } catch (r: Exception) {

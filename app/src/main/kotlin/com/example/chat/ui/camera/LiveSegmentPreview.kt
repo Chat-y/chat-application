@@ -54,6 +54,8 @@ class LiveSegmentPreview(private val bridge: SegmentationBridge) {
             pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
         }
         var image = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+        var mask: Bitmap? = null
+        try {
         if (mirrored) {
             val flipped = Bitmap.createBitmap(
                 image, 0, 0, w, h, Matrix().apply { postScale(-1f, 1f) }, false,
@@ -63,14 +65,14 @@ class LiveSegmentPreview(private val bridge: SegmentationBridge) {
                 image = flipped
             }
         }
-        val mask = bridge.personMask(image) ?: run {
-            image.recycle()
-            return null
+            val producedMask = bridge.personMask(image) ?: return null
+            mask = producedMask
+            return composite(image, producedMask, shaderKey, intensity)
+        } finally {
+            // Original success-only recycle leaked image/mask on failure or cancellation.
+            mask?.takeUnless { it.isRecycled }?.recycle()
+            if (!image.isRecycled) image.recycle()
         }
-        val out = composite(image, mask, shaderKey, intensity)
-        mask.recycle()
-        image.recycle()
-        return out
     }
 
     /** Person-sharp / background-treated composite driven by the mask alpha.
@@ -78,27 +80,34 @@ class LiveSegmentPreview(private val bridge: SegmentationBridge) {
     private fun composite(image: Bitmap, mask: Bitmap, shaderKey: String?, intensity: Double): Bitmap {
         val w = image.width
         val h = image.height
-        val scaledMask = Bitmap.createScaledBitmap(mask, w, h, true)
-        val background = when (shaderKey) {
-            "segment_bg_gradient" -> studioGradientScene(w, h)
-            "segment_bg_office" -> officeScene(w, h)
-            else -> approxBlur(image, intensity)
+        val transient = mutableListOf<Bitmap>()
+        fun own(bitmap: Bitmap): Bitmap {
+            if (bitmap !== image && bitmap !== mask && transient.none { it === bitmap }) transient += bitmap
+            return bitmap
         }
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out)
-        canvas.drawBitmap(background, 0f, 0f, Paint())
-        val cutout = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val cutCanvas = Canvas(cutout)
-        cutCanvas.drawBitmap(image, 0f, 0f, Paint())
-        cutCanvas.drawBitmap(
-            scaledMask, 0f, 0f,
-            Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) },
-        )
-        canvas.drawBitmap(cutout, 0f, 0f, Paint())
-        scaledMask.recycle()
-        cutout.recycle()
-        background.recycle()
-        return out
+        var completed: Bitmap? = null
+        try {
+            val scaledMask = own(Bitmap.createScaledBitmap(mask, w, h, true))
+            val background = own(when (shaderKey) {
+                "segment_bg_gradient" -> studioGradientScene(w, h)
+                "segment_bg_office" -> officeScene(w, h)
+                else -> approxBlur(image, intensity)
+            })
+            val out = own(Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888))
+            val canvas = Canvas(out)
+            canvas.drawBitmap(background, 0f, 0f, Paint())
+            val cutout = own(Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888))
+            val cutCanvas = Canvas(cutout)
+            cutCanvas.drawBitmap(image, 0f, 0f, Paint())
+            cutCanvas.drawBitmap(scaledMask, 0f, 0f,
+                Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) })
+            canvas.drawBitmap(cutout, 0f, 0f, Paint())
+            completed = out
+            return out
+        } finally {
+            // Original path recycled intermediates only after successful compositing.
+            transient.forEach { if (it !== completed && !it.isRecycled) it.recycle() }
+        }
     }
 
     /** Keep in sync with ImageFxBaker.approxBlur. */
@@ -107,8 +116,16 @@ class LiveSegmentPreview(private val bridge: SegmentationBridge) {
         val small = Bitmap.createScaledBitmap(
             src, maxOf(1, src.width / divisor), maxOf(1, src.height / divisor), true,
         )
-        return Bitmap.createScaledBitmap(small, src.width, src.height, true).also {
-            if (it !== small) small.recycle()
+        // Original success-only cleanup:
+        // return Bitmap.createScaledBitmap(small, src.width, src.height, true).also {
+        //     if (it !== small) small.recycle()
+        // }
+        var enlarged: Bitmap? = null
+        try {
+            return Bitmap.createScaledBitmap(small, src.width, src.height, true).also { enlarged = it }
+        } finally {
+            // Scaling may return the input. Never recycle borrowed src or the returned bitmap.
+            if (small !== src && small !== enlarged && !small.isRecycled) small.recycle()
         }
     }
 

@@ -1,5 +1,7 @@
 package com.example.chat.ui
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -92,6 +94,34 @@ fun ChatsHomeHost(
         if (api.isAuthenticated) api.ensureInitialSyncIfNeeded()
     }
     @Suppress("UNUSED_EXPRESSION") rev
+    val owner = api.authSnapshot()
+    var pendingRecipient by remember(owner) {
+        androidx.compose.runtime.mutableStateOf<com.example.chat.domain.models.UserProfile?>(null)
+    }
+    var recipientDecision by remember(owner) {
+        androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null)
+    }
+    var homeDiagnosticsOpen by remember(owner) { androidx.compose.runtime.mutableStateOf(false) }
+    DisposableEffect(owner, recipientDecision) {
+        val decision = recipientDecision
+        onDispose { decision?.complete(false) }
+    }
+    var verificationBusy by remember(owner) { androidx.compose.runtime.mutableStateOf(false) }
+    var verificationRetryAt by remember(owner) { androidx.compose.runtime.mutableStateOf(0L) }
+    var verificationWait by remember(owner) { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(owner,verificationRetryAt) {
+        while(true) {
+            verificationWait=((verificationRetryAt-android.os.SystemClock.elapsedRealtime()+999)/1000).toInt().coerceAtLeast(0)
+            if(verificationWait==0) break
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    fun ownsRequest() = api.authSnapshot() === owner
+    // Host-owned in-flight guard: one running request per (action, chat) so a double tap
+    // cannot start the same mutation twice. Cleared when the request ends or the account changes.
+    val inFlightOps = remember(owner) { java.util.concurrent.ConcurrentHashMap.newKeySet<String>() }
+    fun beginOp(action: String, chatId: String = ""): Boolean = inFlightOps.add("$action|$chatId")
+    fun endOp(action: String, chatId: String = "") { inFlightOps.remove("$action|$chatId") }
     val me = api.currentUser
     val conversations = api.conversations
     fun find(id: String) = conversations.firstOrNull { it.id == id }
@@ -99,6 +129,81 @@ fun ChatsHomeHost(
     fun setState(id: String, field: String, value: Boolean) {
         // Stored on this device: the custom backend has no per-user chat state API yet.
         api.setConversationLocalState(id, field, value)
+    }
+    // Account-owned transient operation state (not persisted, no retry queue). Keyed by owner so an
+    // account switch drops it; every write below also re-checks ownsRequest().
+    var opState by remember(owner) {
+        androidx.compose.runtime.mutableStateOf<Map<com.example.chat.ui.chats.home.HomeOpKey, com.example.chat.ui.chats.home.HomeOpState>>(emptyMap())
+    }
+    var nextOpRequestId by remember(owner) { androidx.compose.runtime.mutableStateOf(0L) }
+    fun dispatchOp(event: com.example.chat.ui.chats.home.HomeOpEvent) { if (ownsRequest()) opState = com.example.chat.ui.chats.home.reduce(opState, event) }
+    // One tracked adapter call per (action, chat). Existing beginOp/endOp guard and toasts are kept;
+    // this only adds Pending/Succeeded/Failed/Cancelled bookkeeping and typed failure wording.
+    fun runTracked(
+        action: String,
+        chatId: String,
+        retryable: Boolean,
+        fallback: String,
+        onSuccess: () -> Unit = {},
+        block: suspend () -> Unit,
+    ) {
+        if (!beginOp(action, chatId)) return
+        val key = com.example.chat.ui.chats.home.HomeOpKey(action, chatId)
+        val requestId = nextOpRequestId + 1
+        nextOpRequestId = requestId
+        dispatchOp(com.example.chat.ui.chats.home.HomeOpEvent.Start(key, requestId))
+        if ((opState[key] as? com.example.chat.ui.chats.home.HomeOpState.Pending)?.requestId != requestId) { endOp(action, chatId); return }
+        scope.launch {
+            try {
+                block()
+                dispatchOp(com.example.chat.ui.chats.home.HomeOpEvent.Succeed(key, requestId))
+                if (ownsRequest()) onSuccess()
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                dispatchOp(com.example.chat.ui.chats.home.HomeOpEvent.Cancel(key, requestId))
+                throw cancel
+            } catch (e: Exception) {
+                val kind = try { com.example.chat.ui.chats.home.classifyFailure(e) } catch (c: kotlinx.coroutines.CancellationException) {
+                    dispatchOp(com.example.chat.ui.chats.home.HomeOpEvent.Cancel(key, requestId))
+                    throw c
+                }
+                val intent = if (retryable && kind != com.example.chat.ui.chats.home.HomeFailureKind.Cancelled) com.example.chat.ui.chats.home.HomeRetryIntent(key, owner) else null
+                dispatchOp(com.example.chat.ui.chats.home.HomeOpEvent.Fail(key, requestId, kind, intent))
+                if (ownsRequest() && kind != com.example.chat.ui.chats.home.HomeFailureKind.Cancelled) toast(homeTypedFailureMessage(e, kind, fallback))
+            } finally { endOp(action, chatId) }
+        }
+    }
+    fun trackedMarkRead(id: String) = runTracked("read", id, true, "Could not mark chat as read. Try again.") { repo.markAsRead(id) }
+    fun trackedMarkUnread(id: String) = runTracked("unread", id, true, "Could not mark chat as unread. Try again.") { repo.markAsUnread(id) }
+    fun trackedMarkAllRead() = runTracked("read_all", "", true, "Could not mark all chats as read. Try again.",
+        onSuccess = { toast("Mark-all-read request completed") }) { repo.markAllAsRead() }
+    // Manual refresh through the existing scope-guarded API only. That call swallows a failed fetch,
+    // so no success or failure is claimed here: the list simply updates if the fetch applied.
+    var homeRefreshing by remember(owner) { androidx.compose.runtime.mutableStateOf(false) }
+    fun refreshHome() {
+        if (homeRefreshing || !ownsRequest()) return
+        homeRefreshing = true
+        scope.launch {
+            try {
+                kotlinx.coroutines.withTimeout(20_000L) { api.loadConversationsIfNeeded(force = true) }
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                if (ownsRequest()) toast("Refresh took too long. Try again.")
+            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel
+            } catch (e: Exception) {
+                if (ownsRequest()) toast(homeTypedFailureMessage(e, com.example.chat.ui.chats.home.classifyFailure(e), "Could not refresh. Try again."))
+            } finally { if (ownsRequest()) homeRefreshing = false }
+        }
+    }
+    // Message-a-number lookup lifecycle: one at a time, token-checked, cancelled on dismiss/account change.
+    var lookupState by remember(owner) {
+        androidx.compose.runtime.mutableStateOf<com.example.chat.ui.chats.home.HomeLookupState>(com.example.chat.ui.chats.home.HomeLookupState.Idle)
+    }
+    var lookupJob by remember(owner) { androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var lookupSeq by remember(owner) { androidx.compose.runtime.mutableStateOf(0L) }
+    fun lookupCurrent(token: Long) = (lookupState as? com.example.chat.ui.chats.home.HomeLookupState.Loading)?.requestId == token
+    fun cancelLookup() { lookupJob?.cancel(); lookupJob = null; lookupState = com.example.chat.ui.chats.home.HomeLookupState.Idle }
+    DisposableEffect(owner) { onDispose { lookupJob?.cancel() } }
+    androidx.compose.runtime.LaunchedEffect(owner, api.conversations.map { it.id }) {
+        dispatchOp(com.example.chat.ui.chats.home.HomeOpEvent.Prune(api.conversations.map { it.id }.toSet()))
     }
     val security = prefs.security
     val hiddenConversationIds = security.hiddenConversationIds.toSet()
@@ -115,7 +220,24 @@ fun ChatsHomeHost(
             )
         }
     } else null
+    val onRetryOp: (com.example.chat.ui.chats.home.HomeOpKey) -> Unit = { key ->
+        val intent = (opState[key] as? com.example.chat.ui.chats.home.HomeOpState.Failed)?.retryIntent
+        if (intent != null && ownsRequest() &&
+            intent.isValidFor(owner, conversations.map { it.id }.toSet()) &&
+            (key.chatId.isEmpty() || (!prefs.isConversationLocked(key.chatId) && key.chatId !in hiddenConversationIds))
+        ) {
+            when (key.action) {
+                "read" -> trackedMarkRead(key.chatId)
+                "unread" -> trackedMarkUnread(key.chatId)
+                "read_all" -> trackedMarkAllRead()
+            }
+        }
+    }
     ChatsHomeScreen(
+        opState = opState,
+        onRetry = onRetryOp,
+        onRefreshHome = { refreshHome() },
+        homeRefreshing = homeRefreshing,
         accountSessionIdentity = api.authSnapshot(),
         folderAccountKey = api.currentAccountHash().orEmpty(),
         headerBottom = headerBottom,
@@ -126,15 +248,25 @@ fun ChatsHomeHost(
             {
                 EmailVerificationBanner(
                     email = me?.email ?: "",
+                    busy = verificationBusy,
+                    retrySeconds = verificationWait,
                     onResend = {
+                        if(!verificationBusy && verificationWait==0) {
+                        verificationBusy=true
                         scope.launch {
                             val address = me?.email ?: ""
                             try {
                                 val message = api.sendEmailVerification(address)
-                                onVerifyEmail(address, message)
+                                if(ownsRequest()) onVerifyEmail(address, message)
+                            } catch(cancel:kotlinx.coroutines.CancellationException) { throw cancel
                             } catch (e: Exception) {
-                                toast(com.example.chat.ui.auth.OtpVerificationLogic.displayError(e))
-                            }
+                                if(ownsRequest()) {
+                                    if(e is com.example.chat.data.api.AuthRateLimitException)
+                                        verificationRetryAt=android.os.SystemClock.elapsedRealtime()+e.retryAfterSeconds*1000L
+                                    toast(com.example.chat.ui.auth.OtpVerificationLogic.displayError(e))
+                                }
+                            } finally { if(ownsRequest()) verificationBusy=false }
+                        }
                         }
                     },
                 )
@@ -209,25 +341,56 @@ fun ChatsHomeHost(
             // synthesize user_<digits>, then open the direct conversation.
             onMessageNumber = { raw ->
                 val number = raw.trim()
-                if (number.isNotEmpty()) {
-                    scope.launch {
+                if (number.isNotEmpty() && lookupState !is com.example.chat.ui.chats.home.HomeLookupState.Loading) {
+                    val token = lookupSeq + 1
+                    lookupSeq = token
+                    lookupState = com.example.chat.ui.chats.home.HomeLookupState.Loading(token)
+                    lookupJob = scope.launch {
                         try {
-                            val existing = api.users.firstOrNull { it.phone.trim() == number || it.username.trim() == number }
-                            val digits = number.filter { it.isDigit() }
-                            val target = existing ?: com.example.chat.domain.models.UserProfile(
-                                id = if (digits.isNotEmpty()) "user_$digits" else number,
-                                displayName = number,
-                                username = number,
-                                avatarInitials = number.substring(0, 1).uppercase(),
-                                avatarColorHex = "#25D366",
-                                about = "Chaty User",
-                                lastSeenAt = java.time.Instant.now(),
-                                phone = number,
-                            )
+                            val candidates=api.searchUsers(number)
+                            if(!ownsRequest() || !lookupCurrent(token)) return@launch
+                            val normalized=com.example.chat.data.api.RegistrationPhonePolicy.normalize(number)
+                            val exact=candidates.filter { user ->
+                                user.username.equals(number.removePrefix("@"),true) ||
+                                    (normalized!=null && com.example.chat.data.api.RegistrationPhonePolicy.normalize(user.phone)==normalized)
+                            }
+                            val target=exact.singleOrNull()
+                            if(target==null) { toast("No unique matching account found. Use Find people to choose a recipient."); return@launch }
+                            if (target.username.isBlank()) {
+                                toast("The server did not return a username. Use Find people to choose a recipient.")
+                                return@launch
+                            }
+                            if (target.id == me?.id) {
+                                toast("That is your own account. Use Find people to choose another recipient.")
+                                return@launch
+                            }
+                            if (recipientDecision != null) return@launch
+                            val decision = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                            pendingRecipient = target
+                            recipientDecision = decision
+                            try {
+                                if (!decision.await() || !ownsRequest()) return@launch
+                            } finally {
+                                decision.complete(false)
+                                if (recipientDecision === decision) {
+                                    recipientDecision = null
+                                    pendingRecipient = null
+                                }
+                            }
+                            // Removed synthetic user_<digits> fallback: identity must come from the server.
                             val conv = repo.getOrCreateDirectConversationAsync(target)
-                            onOpenConversation(conv)
+                            if(ownsRequest() && lookupCurrent(token)) onOpenConversation(conv)
+                        } catch (cancel: kotlinx.coroutines.CancellationException) {
+                            throw cancel
                         } catch (e: Exception) {
-                            toast("Could not start chat: $e")
+                            val kind = com.example.chat.ui.chats.home.classifyFailure(e)
+                            if (ownsRequest() && lookupCurrent(token)) {
+                                lookupState = com.example.chat.ui.chats.home.HomeLookupState.Failed(token, kind)
+                                if (kind != com.example.chat.ui.chats.home.HomeFailureKind.Cancelled)
+                                    toast(homeTypedFailureMessage(e, kind, "Could not start chat. Check the recipient and try again."))
+                            }
+                        } finally {
+                            if (lookupCurrent(token)) lookupState = com.example.chat.ui.chats.home.HomeLookupState.Idle
                         }
                     }
                 }
@@ -245,23 +408,31 @@ fun ChatsHomeHost(
                     context.startActivity(launch)
                     Runtime.getRuntime().exit(0)
                 } catch (e: Exception) {
-                    toast("Chaty could not restart: ${e}")
+                    // Removed raw exception output: toast("Chaty could not restart: ${e}")
+                    toast("Chaty could not restart. Close and reopen the app.")
                 }
             },
         ),
         onTogglePin = { id -> find(id)?.let { setState(id, "pinned", !it.isPinned) } },
         onToggleMute = { id -> find(id)?.let { setState(id, "muted", !it.isMuted) } },
         onToggleArchive = { id -> find(id)?.let { setState(id, "archived", !it.isArchived) } },
-        onMarkRead = { id -> scope.launch { try { repo.markAsRead(id) } catch (_: Exception) {} } },
-        onMarkUnread = { id -> scope.launch { try { repo.markAsUnread(id) } catch (_: Exception) {} } },
-        onMarkAllRead = { scope.launch { try { repo.markAllAsRead() } catch (_: Exception) {} } },
+        onMarkRead = { id -> trackedMarkRead(id) },
+        onMarkUnread = { id -> trackedMarkUnread(id) },
+        onMarkAllRead = { trackedMarkAllRead() },
         onDeleteConversations = { ids ->
             // Dart ChatyDataStore.deleteConversation: custom-backend delete, then the Supabase one.
-            scope.launch {
+            if (beginOp("delete", ids.sorted().joinToString(","))) scope.launch {
+              try {
+                var failed=0
                 for (id in ids) {
-                    try { if (api.isAuthenticated) api.deleteConversation(id) } catch (_: Exception) {}
-                    try { repo.deleteConversation(id) } catch (_: Exception) {}
+                    if(!ownsRequest()) break
+                    try {if(api.isAuthenticated) api.deleteConversation(id) else failed++}
+                    catch(cancel:kotlinx.coroutines.CancellationException) {throw cancel}
+                    catch(_:Exception) {failed++}
                 }
+                // Removed second repository delete: Home is backed by api.conversations.
+                if(ownsRequest()) toast(if(failed==0) "Selected chat deletion completed" else "$failed chat deletions could not be confirmed. Refresh before retrying.")
+              } finally { endOp("delete", ids.sorted().joinToString(",")) }
             }
         },
         onStartCall = { conversation, isVideo ->
@@ -272,11 +443,17 @@ fun ChatsHomeHost(
                 ServiceLocator.callPresentationController.showFullScreen()
                 scope.launch {
                     try {
+                        val allowed=ProtectedResourceGate.authorizeConversation(
+                            conversationId=conversation.id,isProtected=prefs.isConversationLocked(conversation.id),
+                            autoLockTimeout=security.autoLockTimeout,lockMethod=security.lockMethod,
+                            lockService=ServiceLocator.localLockService,setupPrompt=gate.setupPrompt,lockPrompt=gate.lockPrompt)
+                        if(!allowed || !ownsRequest()) return@launch
                         ServiceLocator.callSignaling.initiateCall(
                             otherId, other?.displayName ?: conversation.title,
                             other?.avatarInitials, other?.avatarColorHex, isVideo,
                         )
-                    } catch (e: Exception) { toast(e.message ?: "Unable to start the call.") }
+                    } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel
+                    } catch (e: Exception) { if (ownsRequest()) toast(e.message ?: homeFailureMessage(e, "Unable to start the call.")) }
                 }
             }
         },
@@ -292,7 +469,7 @@ fun ChatsHomeHost(
                     setupPrompt = gate.setupPrompt,
                     lockPrompt = gate.lockPrompt,
                 )
-                if (ok) proceed()
+                if (ok && ownsRequest() && api.conversations.any {it.id==conversation.id}) proceed()
             }
         },
         preferencesController = prefs,
@@ -309,13 +486,18 @@ fun ChatsHomeHost(
                     title = "Locked Chats",
                     reason = "Authenticate to open Locked Chats",
                 )
-                if (ok) authorized()
+                if (ok && ownsRequest()) authorized()
             }
         },
     )
     // Dart ConnectionDetailSheet.show: diagnostics dialog with a Run test action.
     if (connectionSheetOpen) {
         androidx.compose.ui.window.Dialog(onDismissRequest = { connectionSheetOpen = false }) {
+            androidx.compose.foundation.layout.Column {
+                TextButton(onClick = { homeDiagnosticsOpen = true }) {
+                    Text("Read-only Home summary")
+                }
+                androidx.compose.foundation.layout.Box(Modifier.weight(1f, fill = false)) {
             com.example.chat.ui.chats.detail.ConnectionDetailSheetContent(
                 state = ServiceLocator.connectionHealth.state,
                 theme = com.example.chat.ui.theme.LocalThemeConfig.current,
@@ -330,14 +512,61 @@ fun ChatsHomeHost(
                 },
                 onDismiss = { connectionSheetOpen = false },
             )
+                }
+            }
         }
+    }
+    if (homeDiagnosticsOpen) {
+        val health = ServiceLocator.connectionHealth.state
+        val loadedCount = conversations.count {
+            it.id !in hiddenConversationIds && !prefs.isConversationLocked(it.id)
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { homeDiagnosticsOpen = false },
+            title = { Text("Read-only Home summary") },
+            text = {
+                androidx.compose.foundation.layout.Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                ) {
+                    Text("Loaded visible, unlocked conversations: $loadedCount")
+                    Text("Realtime connection: ${health.realtimeStatus.name}")
+                    Text("Connection snapshot timestamp: ${health.lastCheckedAt}")
+                    Text("Last completed Home sync: unavailable. Connection status does not confirm sync completion.")
+                    Text("This summary is shown only on this device. It contains no message text, recipient identifiers or tokens. Opening it does not run a test, save a report or upload it.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { homeDiagnosticsOpen = false }) { Text("Close") }
+            },
+        )
+    }
+    val recipient = pendingRecipient
+    val decision = recipientDecision
+    if (recipient != null && decision != null && ownsRequest()) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { decision.complete(false); cancelLookup() },
+            title = { Text("Confirm recipient") },
+            text = {
+                androidx.compose.foundation.layout.Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Server-resolved username: @${recipient.username}")
+                    Text("Starting from: @${me?.username.orEmpty()}")
+                    Text("Organization context is unavailable. A matching username is not proof that you know or trust this person.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { decision.complete(ownsRequest()) }) { Text("Start chat") }
+            },
+            dismissButton = {
+                TextButton(onClick = { decision.complete(false); cancelLookup() }) { Text("Cancel") }
+            },
+        )
     }
 
 }
 
 /** "Confirm your email" banner for unverified accounts (research 4a.4). */
 @Composable
-private fun EmailVerificationBanner(email: String, onResend: () -> Unit) {
+private fun EmailVerificationBanner(email: String, busy:Boolean, retrySeconds:Int, onResend: () -> Unit) {
     val theme = com.example.chat.ui.theme.LocalThemeConfig.current
     Surface(
         color = Color(com.example.chat.core.theme.argbWithAlpha(theme.accentColor, 0.12)),
@@ -354,9 +583,9 @@ private fun EmailVerificationBanner(email: String, onResend: () -> Unit) {
                 fontSize = 13.sp,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onResend) {
+            TextButton(onClick = onResend,enabled=!busy && retrySeconds==0) {
                 Text(
-                    "Send code",
+                    if(busy) "Sending..." else if(retrySeconds>0) "Retry in ${retrySeconds}s" else "Send code",
                     color = Color(theme.accentColor),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp,
@@ -364,4 +593,20 @@ private fun EmailVerificationBanner(email: String, onResend: () -> Unit) {
             }
         }
     }
+}
+
+/** Host-local failure wording: offline and timeout failures say so, everything else keeps [fallback].
+ *  Never includes exception text, so no recipient or message content leaks into a toast. */
+private fun homeFailureMessage(t: Throwable, fallback: String): String = when (t) {
+    is java.net.UnknownHostException, is java.net.ConnectException ->
+        "You appear to be offline. Check your connection and try again."
+    is java.net.SocketTimeoutException -> "The server took too long to respond. Try again."
+    else -> fallback
+}
+
+/** Typed wording for Home operations. Offline and server-rejected use the content-free copy from
+ *  [classifyFailure]; anything else keeps the existing host wording. Never includes exception text. */
+private fun homeTypedFailureMessage(t: Throwable, kind: com.example.chat.ui.chats.home.HomeFailureKind, fallback: String): String = when (kind) {
+    com.example.chat.ui.chats.home.HomeFailureKind.Offline, com.example.chat.ui.chats.home.HomeFailureKind.ServerRejected -> kind.feedback()
+    else -> homeFailureMessage(t, fallback)
 }

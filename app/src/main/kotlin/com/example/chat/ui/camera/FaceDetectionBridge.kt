@@ -8,13 +8,15 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
-import java.util.concurrent.atomic.AtomicBoolean
+// Original busy flag used AtomicBoolean; full-operation lifecycle now uses workLock.
+// import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.min
-import kotlinx.coroutines.Dispatchers
+// Original bitmap-only dispatch imports retained. The screen dispatches the full operation.
+// import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+// import kotlinx.coroutines.withContext
 
 /** Exact port of lib/features/camera/lens/camera_face_detection_bridge.dart.
  *
@@ -49,41 +51,62 @@ class CameraFaceDetectionBridge(private val context: Context) {
 
     private var landmarker: FaceLandmarker? = null
     private val creationMutex = Mutex()
-    private val busy = AtomicBoolean(false)
+    private val workLock = Any()
+    private var workActive = false
+    private var disposed = false
 
-    /** Port of detect(): primary mesh path with busy-skip, fallback to the
-     *  platform detector on any primary failure. */
+    private fun beginWork(): Boolean = synchronized(workLock) {
+        if (disposed || workActive) false else { workActive = true; true }
+    }
+    private fun finishWork() {
+        val shouldClose = synchronized(workLock) { workActive = false; disposed }
+        if (shouldClose) closeLandmarker()
+    }
+
+    /** One native operation at a time, including initialization and fallback.
+     * Disposal stops new operations and defers model close until active work returns. */
     suspend fun detect(image: FrameData, sensorOrientation: Int): CameraFaceDetectionResult {
+        val rotated = sensorOrientation % 180 != 0
+        val empty = CameraFaceDetectionResult(if (rotated) image.height else image.width, if (rotated) image.width else image.height, emptyMap())
+        if (!beginWork()) return empty
+        return try {
+            detectActive(image, sensorOrientation)
+        } finally {
+            // Native work has returned before a deferred close. Disposal never closes a model
+            // concurrently with this synchronous detect call or its model initialization.
+            finishWork()
+        }
+    }
+
+    private suspend fun detectActive(image: FrameData, sensorOrientation: Int): CameraFaceDetectionResult {
         val rotated = sensorOrientation % 180 != 0
         val resultWidth = if (rotated) image.height else image.width
         val resultHeight = if (rotated) image.width else image.height
         return try {
-            if (busy.get()) {
-                // Skip this frame instead of running the slower fallback
-                // concurrently; the solver holds the last stable pose.
-                return CameraFaceDetectionResult(resultWidth, resultHeight, emptyMap())
-            }
+            // The public entry owns one busy token across setup, native detect and fallback.
             val pipeline = ensureLandmarker()
             if (pipeline == null) {
                 detectWithBuiltin(image, sensorOrientation)
             } else {
-                busy.set(true)
-                try {
-                    val bitmap = withContext(Dispatchers.Default) {
-                        // tasks-vision 1.1.1 BitmapImageBuilder carries no
-                        // rotation setter; rotate the pixels instead so the
-                        // detector sees an upright frame (result dims use the
-                        // rotated extent, matching the Dart contract).
-                        val raw = frameToBitmap(image)
+                    // Entire detect is dispatched by the screen. Original bitmap-only withContext
+                    // could lose an allocated bitmap when cancellation won its return dispatch.
+                    val raw = frameToBitmap(image)
+                    val bitmap = try {
                         val degrees = ((sensorOrientation % 360) + 360) % 360
                         if (degrees == 0) raw else {
-                            val m = android.graphics.Matrix().apply { postRotate(degrees.toFloat()) }
-                            Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
+                            val matrix = android.graphics.Matrix().apply { postRotate(degrees.toFloat()) }
+                            Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
                                 .also { if (it !== raw) raw.recycle() }
                         }
+                    } catch (failure: Throwable) {
+                        if (!raw.isRecycled) raw.recycle()
+                        throw failure
                     }
-                    val mpImage = BitmapImageBuilder(bitmap).build()
-                    val result = pipeline.detect(mpImage)
+                    var mpImage: com.google.mediapipe.framework.image.MPImage? = null
+                    try {
+                    val nativeImage = BitmapImageBuilder(bitmap).build()
+                    mpImage = nativeImage
+                    val result = pipeline.detect(nativeImage)
                     val faces = mutableMapOf<Int, RawFace>()
                     // tasks-vision: each face is a List<NormalizedLandmark>
                     // (container class), not a proto wrapper.
@@ -100,10 +123,14 @@ class CameraFaceDetectionBridge(private val context: Context) {
                         )?.let { faces[it.trackingId] = it }
                     }
                     CameraFaceDetectionResult(resultWidth, resultHeight, faces)
-                } finally {
-                    busy.set(false)
-                }
+                    } finally {
+                        // Synchronous IMAGE-mode detect has returned; release the wrapper reference
+                        // before the pixels. Never recycle while the native task is reading them.
+                        try { mpImage?.close() } finally { if (!bitmap.isRecycled) bitmap.recycle() }
+                    }
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             // Gracefully fall back to the platform detector if the model can't
             // initialize or this device can't run the native runtime.
@@ -133,8 +160,16 @@ class CameraFaceDetectionBridge(private val context: Context) {
     }
 
     fun dispose() {
-        try { landmarker?.close() } catch (_: Exception) {}
+        // Original eager close could race a worker's detect or initialization:
+        // try { landmarker?.close() } catch (_: Exception) {}; landmarker = null
+        val shouldClose = synchronized(workLock) { disposed = true; !workActive }
+        if (shouldClose) closeLandmarker()
+    }
+
+    @Synchronized private fun closeLandmarker() {
+        val owned = landmarker
         landmarker = null
+        try { owned?.close() } catch (_: Exception) {}
     }
 
     /** Full-resolution frame -> ARGB bitmap via the ported readers. */

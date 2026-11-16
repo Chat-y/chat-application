@@ -63,4 +63,40 @@ class MessageInteractionAnchorPolicyTest {
         assertTrue(placement.menuLeftDp >= 8.dp)
         assertTrue(placement.menuMaxHeightDp >= 100.dp)
     }
+
+    // Authored overnight fixtures only. Not compiled/run under the source-only restriction.
+    @Test fun tinyViewportNeverGetsAnUnboundedMinimumOrWidth() {
+        for ((width, height) in listOf(220f to 160f, 100f to 60f, 8f to 8f, 0f to 0f)) {
+            for (outgoing in listOf(false, true)) {
+                val p = MessageInteractionAnchorPolicy.computePlacement(
+                    Rect(-500f, -500f, 1000f, 1000f), width.dp, height.dp, 1f, outgoing)
+                assertTrue(p.menuTopDp.value >= 0f)
+                assertTrue(p.menuLeftDp.value >= 0f)
+                assertTrue(p.menuMaxHeightDp.value >= 0f)
+                assertTrue(p.menuMaxWidthDp.value >= 0f)
+                assertTrue(p.menuTopDp.value + p.menuMaxHeightDp.value <= height)
+                assertTrue(p.menuLeftDp.value + p.menuMaxWidthDp.value <= width)
+                assertTrue(p.reactionRailTopDp.value + p.reactionRailMaxHeightDp.value <= height)
+                assertTrue(p.reactionRailLeftDp.value + p.reactionRailMaxWidthDp.value <= width)
+            }
+        }
+    }
+
+    @Test fun invalidDensityOrAnchorUsesBoundedFallback() {
+        for (density in listOf(0f, -1f, Float.NaN, Float.POSITIVE_INFINITY)) {
+            val p = MessageInteractionAnchorPolicy.computePlacement(
+                Rect(Float.NaN, 0f, 10f, 20f), 220.dp, 160.dp, density, false)
+            assertTrue(p.menuTopDp.value.isFinite())
+            assertTrue(p.menuMaxHeightDp.value.isFinite())
+            assertTrue(p.menuTopDp.value + p.menuMaxHeightDp.value <= 160f)
+            assertTrue(p.menuLeftDp.value + p.menuMaxWidthDp.value <= 220f)
+        }
+    }
+
+    @Test fun invalidViewportCannotInventScreenSpace() {
+        val p = MessageInteractionAnchorPolicy.computePlacement(null,
+            Float.NaN.dp, (-10).dp, Float.NaN, false)
+        assertEquals(0.dp, p.menuMaxWidthDp)
+        assertEquals(0.dp, p.menuMaxHeightDp)
+    }
 }

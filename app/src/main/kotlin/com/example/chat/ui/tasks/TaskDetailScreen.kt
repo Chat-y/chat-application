@@ -54,6 +54,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.chat.domain.models.ChatTask
@@ -74,7 +76,7 @@ import kotlinx.coroutines.launch
  *  its empty state. This port renders the same section with the same empty
  *  state ('No changes recorded yet.') instead of fabricating activity or
  *  expanding Supabase usage. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun TaskDetailScreen(
     task: ChatTask,
@@ -87,6 +89,7 @@ fun TaskDetailScreen(
 ) {
     var currentTask by remember(task) { mutableStateOf(task) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var actionError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     fun userOf(id: String): UserProfile? =
@@ -94,10 +97,29 @@ fun TaskDetailScreen(
 
     fun updateStatus(newStatus: TaskStatus) {
         if (currentTask.status == newStatus) return
-        // Dart applies the local copy first, then persists.
+        // Dart applies the local copy first, then persists. TAS-003: restore
+        // the confirmed task when the server does not confirm.
+        val previous = currentTask
+        actionError = null
         currentTask = currentTask.copy(status = newStatus, updatedAt = Instant.now())
         scope.launch {
-            runCatching { controller.updateTaskStatus(currentTask.id, newStatus) }
+            // TAS-002: same transition use case (validation + history) as Kanban.
+            val result = runCatching { controller.moveTask(previous, newStatus) }.getOrNull()
+            when (result) {
+                is TasksController.MoveResult.Moved, is TasksController.MoveResult.NoOp -> Unit
+                is TasksController.MoveResult.Invalid -> {
+                    currentTask = previous
+                    actionError = result.reason
+                }
+                is TasksController.MoveResult.Failed -> {
+                    currentTask = previous
+                    actionError = result.message
+                }
+                null -> {
+                    currentTask = previous
+                    actionError = "Could not change the status. Please try again."
+                }
+            }
         }
     }
 
@@ -126,7 +148,7 @@ fun TaskDetailScreen(
                 },
                 actions = {
                     IconButton(onClick = { onEditTask(currentTask) }) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.history, semanticLabel = "Edit Task")
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit Task")
                     }
                     var menuOpen by remember { mutableStateOf(false) }
                     Box {
@@ -152,6 +174,14 @@ fun TaskDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
+            actionError?.let { msg ->
+                Text(
+                    msg,
+                    color = colors.error,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+            }
             // Header card
             Column(
                 modifier = Modifier
@@ -278,8 +308,9 @@ fun TaskDetailScreen(
                         title = "Assignees (${currentTask.assigneeIds.size})",
                         colors = colors,
                     ) {
-                        Row(
+                        androidx.compose.foundation.layout.FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.padding(top = 4.dp),
                         ) {
                             currentTask.assigneeIds.take(6).forEach { id ->
@@ -296,6 +327,15 @@ fun TaskDetailScreen(
                                     Text(user?.displayName ?: id, fontSize = 11.5.sp, color = colors.foreground)
                                 }
                             }
+                            // TAS-049: show how many assignees are not listed.
+                            if (currentTask.assigneeIds.size > 6) {
+                                Text(
+                                    "+${currentTask.assigneeIds.size - 6} more",
+                                    fontSize = 11.5.sp,
+                                    color = colors.foregroundSecondary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -305,8 +345,9 @@ fun TaskDetailScreen(
                         title = "Labels",
                         colors = colors,
                     ) {
-                        Row(
+                        androidx.compose.foundation.layout.FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.padding(top = 4.dp),
                         ) {
                             currentTask.labels.forEach { label ->
@@ -337,7 +378,7 @@ fun TaskDetailScreen(
                     .padding(16.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("No changes recorded yet.", color = colors.foreground.copy(alpha = 0.5f), fontSize = 12.sp)
+                Text("Activity history is not available on this server.", color = colors.foreground.copy(alpha = 0.5f), fontSize = 12.sp)
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -349,8 +390,10 @@ fun TaskDetailScreen(
             onDelete = {
                 confirmDelete = false
                 scope.launch {
-                    controller.deleteTask(currentTask.id)
-                    onBack()
+                    // TAS-005: leave only after a confirmed delete.
+                    val deleted = runCatching { controller.deleteTask(currentTask.id) }
+                        .getOrDefault(false)
+                    if (deleted) onBack() else actionError = "Could not delete the task. Please try again."
                 }
             },
         )
@@ -364,7 +407,9 @@ private fun TaskSectionTitle(title: String, colors: TaskColors) {
         color = colors.foregroundSecondary,
         fontSize = 13.sp,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            // TAS-093: section titles are headings for screen-reader navigation.
+            .semantics { heading() },
     )
 }
 

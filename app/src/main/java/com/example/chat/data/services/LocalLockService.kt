@@ -7,12 +7,15 @@ import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.example.chat.ui.settings.security.CredentialStrength
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Biometric / device-credential seam (Dart: local_auth LocalAuthentication).
  *  The Android adapter (BiometricPrompt) is wired by the integration owner;
- *  every method must swallow platform errors and return false/empty, like the
+ *  platform errors return false/empty, while coroutine cancellation propagates like the
  *  Dart try/catch around PlatformException. */
 interface LockBiometrics {
     suspend fun canCheckBiometrics(): Boolean
@@ -43,8 +46,10 @@ class LocalLockService(
     private val attemptMutex = Mutex()
     @Volatile
     private var accountNamespace: String = ""
+    @Volatile private var ownerGeneration = 0L
 
     fun setAccountNamespace(namespaceHash: String) {
+        ownerGeneration++
         accountNamespace = namespaceHash.trim()
     }
 
@@ -56,6 +61,8 @@ class LocalLockService(
     private fun secretPhraseSaltKey() = "${scopedPrefix()}.secret_phrase.salt"
     private fun failedAttemptsKey() = "${scopedPrefix()}.failed_attempts"
     private fun lockoutUntilKey() = "${scopedPrefix()}.lockout_until"
+    private fun phraseAttemptsKey() = "${scopedPrefix()}.secret_phrase.failed_attempts"
+    private fun phraseLockoutKey() = "${scopedPrefix()}.secret_phrase.lockout_until"
     private fun scopedHashKey(method: String) = "${scopedPrefix()}.${normalizeMethod(method)}.hash"
     private fun scopedSaltKey(method: String) = "${scopedPrefix()}.${normalizeMethod(method)}.salt"
 
@@ -91,10 +98,10 @@ class LocalLockService(
             return parsed.toSet().size == parsed.size
         }
 
-        private fun pbkdf2(secret: String, salt: ByteArray): ByteArray {
+        private suspend fun pbkdf2(secret: String, salt: ByteArray): ByteArray = withContext(Dispatchers.Default) {
             val chars = secret.toCharArray()
             val spec = PBEKeySpec(chars, salt, ITERATIONS, BITS)
-            return try {
+            try {
                 SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
             } finally {
                 spec.clearPassword()
@@ -106,9 +113,33 @@ class LocalLockService(
         private val b64dec = java.util.Base64.getDecoder()
     }
 
+    /** Enrollment must distinguish absent data from storage failure or a partial verifier.
+     * Never translate a corrupt/inaccessible existing credential into permission to replace it.
+     */
+    suspend fun hasCredentialForSetup(method: String): Boolean {
+        val generation = ownerGeneration
+        val prefix = scopedPrefix()
+        val normalized = normalizeMethod(method)
+        val hash = secureStorage.read("$prefix.$normalized.hash")
+        val salt = secureStorage.read("$prefix.$normalized.salt")
+        check(generation == ownerGeneration) { "Account changed. Reopen setup." }
+        if (hash == null && salt == null) return false
+        check(!hash.isNullOrBlank() && !salt.isNullOrBlank()) { "Credential storage is incomplete." }
+        val decodedHash = b64dec.decode(hash)
+        try {
+            val decodedSalt = b64dec.decode(salt)
+            try {
+                check(decodedHash.size == BITS / 8 && decodedSalt.size == SALT_LENGTH) { "Credential storage is invalid." }
+            } finally { decodedSalt.fill(0) }
+        } finally { decodedHash.fill(0) }
+        return true
+    }
+
     override suspend fun hasCredential(method: String): Boolean = try {
         !secureStorage.read(scopedHashKey(method)).isNullOrEmpty() &&
             !secureStorage.read(scopedSaltKey(method)).isNullOrEmpty()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
         false
     }
@@ -126,6 +157,8 @@ class LocalLockService(
      *  including validation failures throwing so invalid legacy secrets are
      *  dropped by the migrator's catch. */
     override suspend fun setCredential(method: String, secret: String, pinLength: Int?) {
+        val generation = ownerGeneration
+        val prefix = scopedPrefix()
         val normalized = normalizeMethod(method)
         require(secret.isNotEmpty()) { "Credential must not be empty." }
         if (normalized == "pin") {
@@ -137,18 +170,18 @@ class LocalLockService(
         if (normalized == "pattern" && !isValidPattern(secret)) {
             throw IllegalArgumentException("Pattern must connect at least 4 unique points.")
         }
-        if (normalized == "password" && secret.length < 6) {
-            throw IllegalArgumentException("Password must contain at least 6 characters.")
-        }
+        // Keep legacy credential migrations valid. New enrollment strength is enforced by setup UI.
+        if (normalized == "password" && secret.length < 6) throw IllegalArgumentException("Password must contain at least 6 characters.")
 
         val salt = ByteArray(SALT_LENGTH).also { SecureRandom().nextBytes(it) }
         val derived = pbkdf2(secret, salt)
         val values = linkedMapOf(
-            scopedSaltKey(normalized) to b64.encodeToString(salt),
-            scopedHashKey(normalized) to b64.encodeToString(derived),
+            "$prefix.$normalized.salt" to b64.encodeToString(salt),
+            "$prefix.$normalized.hash" to b64.encodeToString(derived),
         )
-        if (normalized == "pin") values[pinLengthKey()] = (if (pinLength == 6) 6 else 4).toString()
+        if (normalized == "pin") values["$prefix.pin_length"] = (if (pinLength == 6) 6 else 4).toString()
         try {
+            check(generation == ownerGeneration) { "Account changed. Retry from the current account." }
             secureStorage.writeAll(values)
         } finally {
             salt.fill(0)
@@ -157,24 +190,34 @@ class LocalLockService(
     }
 
     /** Constant-time verification with failed-attempt cooldown. */
-    suspend fun verifyCredential(method: String, secret: String): Boolean = attemptMutex.withLock {
-        if (getRemainingCooldownSeconds() > 0) return@withLock false
+    suspend fun verifyCredential(method: String, secret: String): Boolean = verifyCredentialInternal(method, secret, recordAttempt = true)
+
+    /** For authenticated enrollment collision checks only. Never an unlock or public authentication path. */
+    internal suspend fun matchesCredentialForEnrollment(method: String, secret: String): Boolean =
+        verifyCredentialInternal(method, secret, recordAttempt = false)
+
+    private suspend fun verifyCredentialInternal(method: String, secret: String, recordAttempt: Boolean): Boolean = attemptMutex.withLock {
+        if (recordAttempt && getRemainingCooldownSeconds() > 0) return@withLock false
+        val generation = ownerGeneration
+        val prefix = scopedPrefix()
         val normalized = normalizeMethod(method)
         try {
-            val encodedHash = secureStorage.read(scopedHashKey(normalized))
-            val encodedSalt = secureStorage.read(scopedSaltKey(normalized))
+            val encodedHash = secureStorage.read("$prefix.$normalized.hash")
+            val encodedSalt = secureStorage.read("$prefix.$normalized.salt")
             if (encodedHash.isNullOrBlank() || encodedSalt.isNullOrBlank()) return@withLock false
             val salt = b64dec.decode(encodedSalt)
-            val expected = b64dec.decode(encodedHash)
-            val candidate = pbkdf2(secret, salt)
             val isMatch = try {
-                MessageDigest.isEqual(expected, candidate)
-            } finally {
-                salt.fill(0)
-                expected.fill(0)
-                candidate.fill(0)
+                val expected = b64dec.decode(encodedHash)
+                try {
+                    val candidate = pbkdf2(secret, salt)
+                    try { MessageDigest.isEqual(expected, candidate) }
+                    finally { candidate.fill(0) }
+                } finally { expected.fill(0) }
+            } finally { salt.fill(0) }
+            if (generation != ownerGeneration) return@withLock false
+            if (recordAttempt) {
+                if (isMatch) resetFailedAttemptsLocked() else recordFailedAttemptLocked()
             }
-            if (isMatch) resetFailedAttemptsLocked() else recordFailedAttemptLocked()
             isMatch
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -186,20 +229,25 @@ class LocalLockService(
     suspend fun hasSecretPhrase(): Boolean = try {
         !secureStorage.read(secretPhraseHashKey()).isNullOrEmpty() &&
             !secureStorage.read(secretPhraseSaltKey()).isNullOrEmpty()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
         false
     }
 
     suspend fun setSecretPhrase(rawPhrase: String) {
+        val generation = ownerGeneration
+        val prefix = scopedPrefix()
         val normalized = normalizeSecretPhrase(rawPhrase)
-        require(normalized.isNotEmpty()) { "Secret phrase cannot be empty." }
+        CredentialStrength.phraseError(normalized)?.let { throw IllegalArgumentException(it) }
         val salt = ByteArray(SALT_LENGTH).also { SecureRandom().nextBytes(it) }
         val bytes = pbkdf2(normalized, salt)
         try {
+            check(generation == ownerGeneration) { "Account changed. Retry from the current account." }
             secureStorage.writeAll(
                 mapOf(
-                    secretPhraseSaltKey() to b64.encodeToString(salt),
-                    secretPhraseHashKey() to b64.encodeToString(bytes),
+                    "$prefix.secret_phrase.salt" to b64.encodeToString(salt),
+                    "$prefix.secret_phrase.hash" to b64.encodeToString(bytes),
                 ),
             )
         } finally {
@@ -209,23 +257,27 @@ class LocalLockService(
     }
 
     suspend fun verifySecretPhrase(rawQuery: String): Boolean = attemptMutex.withLock {
+        val generation = ownerGeneration
+        val prefix = scopedPrefix()
         val normalized = normalizeSecretPhrase(rawQuery)
-        if (normalized.isEmpty() || getRemainingCooldownSeconds() > 0) return@withLock false
+        if (normalized.isEmpty() || getSecretPhraseRemainingCooldownSeconds() > 0) return@withLock false
         try {
-            val encodedHash = secureStorage.read(secretPhraseHashKey())
-            val encodedSalt = secureStorage.read(secretPhraseSaltKey())
+            val encodedHash = secureStorage.read("$prefix.secret_phrase.hash")
+            val encodedSalt = secureStorage.read("$prefix.secret_phrase.salt")
             if (encodedHash.isNullOrBlank() || encodedSalt.isNullOrBlank()) return@withLock false
             val salt = b64dec.decode(encodedSalt)
-            val expected = b64dec.decode(encodedHash)
-            val candidate = pbkdf2(normalized, salt)
             val matches = try {
-                MessageDigest.isEqual(expected, candidate)
-            } finally {
-                salt.fill(0)
-                expected.fill(0)
-                candidate.fill(0)
-            }
-            if (matches) resetFailedAttemptsLocked() else recordFailedAttemptLocked()
+                val expected = b64dec.decode(encodedHash)
+                try {
+                    val candidate = pbkdf2(normalized, salt)
+                    try { MessageDigest.isEqual(expected, candidate) }
+                    finally { candidate.fill(0) }
+                } finally { expected.fill(0) }
+            } finally { salt.fill(0) }
+            if (generation != ownerGeneration) return@withLock false
+            // Discovery has its own throttle. Ordinary searches must never lock App Lock.
+            if (matches) secureStorage.deleteAll(setOf(phraseAttemptsKey(), phraseLockoutKey()))
+            else recordFailedAttemptLocked(phrase = true)
             matches
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -235,35 +287,44 @@ class LocalLockService(
     }
 
     suspend fun clearSecretPhrase() {
-        secureStorage.deleteAll(setOf(secretPhraseHashKey(), secretPhraseSaltKey()))
+        secureStorage.deleteAll(setOf(secretPhraseHashKey(), secretPhraseSaltKey(), phraseAttemptsKey(), phraseLockoutKey()))
     }
 
     suspend fun getFailedAttempts(): Int = try {
         secureStorage.read(failedAttemptsKey())?.toIntOrNull() ?: 0
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
         0
     }
 
-    suspend fun getRemainingCooldownSeconds(): Int = try {
-        val lockoutTime = secureStorage.read(lockoutUntilKey())?.toLongOrNull() ?: 0L
+    suspend fun getRemainingCooldownSeconds(): Int = cooldownSeconds(lockoutUntilKey())
+    suspend fun getSecretPhraseRemainingCooldownSeconds(): Int = cooldownSeconds(phraseLockoutKey())
+
+    private suspend fun cooldownSeconds(key: String): Int = try {
+        val lockoutTime = secureStorage.read(key)?.toLongOrNull() ?: 0L
         val current = now()
         if (lockoutTime > current) Math.ceil((lockoutTime - current) / 1000.0).toInt() else 0
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
         0
     }
 
     suspend fun recordFailedAttempt() = attemptMutex.withLock { recordFailedAttemptLocked() }
 
-    private suspend fun recordFailedAttemptLocked() {
-        val attempts = getFailedAttempts() + 1
-        val values = linkedMapOf(failedAttemptsKey() to attempts.toString())
+    private suspend fun recordFailedAttemptLocked(phrase: Boolean = false) {
+        val attemptsKey = if (phrase) phraseAttemptsKey() else failedAttemptsKey()
+        val deadlineKey = if (phrase) phraseLockoutKey() else lockoutUntilKey()
+        val attempts = (secureStorage.read(attemptsKey)?.toIntOrNull() ?: 0) + 1
+        val values = linkedMapOf(attemptsKey to attempts.toString())
         val lockoutMs = when {
             attempts >= 15 -> 5 * 60_000L
             attempts >= 10 -> 60_000L
             attempts >= 5 -> 30_000L
             else -> null
         }
-        if (lockoutMs != null) values[lockoutUntilKey()] = (now() + lockoutMs).toString()
+        if (lockoutMs != null) values[deadlineKey] = (now() + lockoutMs).toString()
         secureStorage.writeAll(values)
     }
 
@@ -276,24 +337,31 @@ class LocalLockService(
     suspend fun canUseBiometrics(): Boolean = try {
         val b = biometrics
         b != null && b.canCheckBiometrics() && b.availableBiometrics().isNotEmpty()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
         false
     }
 
     suspend fun availableBiometrics(): List<String> = try {
         biometrics?.availableBiometrics() ?: emptyList()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
         emptyList()
     }
 
     suspend fun authenticateBiometric(reason: String = "Authenticate to unlock Chaty"): Boolean = try {
         if (!canUseBiometrics()) false else biometrics!!.authenticateBiometricOnly(reason)
-    } catch (_: Exception) {
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) {
         false
     }
 
     suspend fun canUseDeviceCredential(): Boolean = try {
         biometrics?.isDeviceCredentialSupported() == true
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
         false
     }
@@ -301,7 +369,8 @@ class LocalLockService(
     suspend fun authenticateDeviceCredential(reason: String = "Use your device lock to unlock Chaty"): Boolean = try {
         val b = biometrics
         if (!canUseDeviceCredential() || b == null) false else b.authenticateWithDeviceCredential(reason)
-    } catch (_: Exception) {
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) {
         false
     }
 

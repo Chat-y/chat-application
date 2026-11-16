@@ -63,6 +63,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -483,9 +484,11 @@ private fun SwitcherTabPill(
     val colors = LocalAppColors.current
     Box(
         modifier = modifier
-            .heightIn(min = 40.dp)
+            // AC1-08/31: 48 dp minimum target and an explicit selected state for TalkBack.
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(if (selected) Color(theme.accentColor) else Color.Transparent)
+            .semantics { this.selected = selected }
             .clickable(role = Role.Tab, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,

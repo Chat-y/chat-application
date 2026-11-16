@@ -115,10 +115,10 @@ fun CameraRecentStrip(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
             ) {
-                items(photos.size) { i ->
+                items(photos.size, key = { photos[it].toString() }) { i ->
                     val uri = photos[i]
                     coil.compose.AsyncImage(
-                        model = uri,
+                        model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current).data(uri).size(192).build(),
                         contentDescription = "Recent photo ${i + 1}",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier

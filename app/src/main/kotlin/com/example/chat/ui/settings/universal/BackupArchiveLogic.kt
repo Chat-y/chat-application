@@ -101,6 +101,7 @@ object BackupArchiveLogic {
         requireWithinArchiveCap(bytes.size.toLong())
         var manifestJson: String? = null
         val found = linkedMapOf<String, ByteArray>()
+        var retainedBytes = 0L
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
@@ -115,8 +116,19 @@ object BackupArchiveLogic {
                     throw InvalidArchive("A file inside the backup is too large.")
                 }
                 val data = zip.readBytesCapped(MAX_ENTRY_BYTES)
-                if (isManifest) manifestJson = String(data, Charsets.UTF_8)
-                else found[name.removePrefix(SECTION_PREFIX)] = data
+                // BKP-R2-096: running total across entries, not only per entry.
+                retainedBytes += data.size
+                if (retainedBytes > MAX_ARCHIVE_BYTES) throw InvalidArchive("The backup expands to more data than is allowed.")
+                if (isManifest) {
+                    // BKP-R2-092: exactly one manifest.
+                    if (manifestJson != null) throw InvalidArchive("Backup contains more than one manifest.")
+                    manifestJson = String(data, Charsets.UTF_8)
+                } else {
+                    // BKP-R2-091: reject duplicate section names instead of overwriting.
+                    val sectionKey = name.removePrefix(SECTION_PREFIX)
+                    if (found.containsKey(sectionKey)) throw InvalidArchive("Backup contains a duplicate file: $name")
+                    found[sectionKey] = data
+                }
                 zip.closeEntry()
                 entry = zip.nextEntry
             }
@@ -204,26 +216,26 @@ object BackupArchiveLogic {
         var skippedQuota = 0
         var chunkOut = ByteArrayOutputStream()
         var chunkZip = ZipOutputStream(chunkOut)
-        var chunkBytes = 0L
+        var runningChunkBytes = 0L
         var chunkIndex = 0
         var totalBytes = 0L
         fun flush() {
-            if (chunkBytes == 0L) return
+            if (runningChunkBytes == 0L) return
             chunkZip.close()
             sections += Section("media.%03d.zip".format(chunkIndex), chunkOut.toByteArray())
             chunkIndex++
             chunkOut = ByteArrayOutputStream()
             chunkZip = ZipOutputStream(chunkOut)
-            chunkBytes = 0L
+            runningChunkBytes = 0L
         }
         for ((name, bytes) in entries) {
             if (bytes.size > maxFileBytes) { skippedOversize++; continue }
             if (totalBytes + bytes.size > maxTotalBytes) { skippedQuota++; continue }
-            if (chunkBytes > 0 && chunkBytes + bytes.size > chunkBytes) flush()
+            if (runningChunkBytes > 0 && runningChunkBytes + bytes.size > chunkBytes) flush()
             chunkZip.putNextEntry(ZipEntry(name))
             chunkZip.write(bytes)
             chunkZip.closeEntry()
-            chunkBytes += bytes.size
+            runningChunkBytes += bytes.size
             totalBytes += bytes.size
             included++
         }

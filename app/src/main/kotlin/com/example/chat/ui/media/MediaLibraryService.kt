@@ -15,6 +15,16 @@ import kotlinx.coroutines.withContext
  *  ChatyPreferencesController. The demo-asset fallback list is preserved
  *  verbatim from the Dart source.
  */
+/** Map-compatible result so existing category readers remain source-compatible.
+ * incomplete/unknown totals must not be presented as a measured empty library. */
+data class MediaStorageBreakdown(
+    val sizes: Map<MediaCategory, Long>,
+    val unavailableDirectories: Int,
+    val scanCompleted: Boolean,
+) : Map<MediaCategory, Long> by sizes {
+    val isComplete: Boolean get() = scanCompleted && unavailableDirectories == 0
+}
+
 class MediaLibraryService(
     private val libraryDirectories: () -> List<File>,
     private val now: () -> Instant = { Instant.now() },
@@ -28,6 +38,8 @@ class MediaLibraryService(
     private val _files = mutableListOf<MediaFileDescriptor>()
     private var _isLoading = false
     private var refreshGeneration = 0L
+    private var storageUnavailableDirectories = 0
+    private var storageScanCompleted = false
     private var _searchQuery = ""
     private var _activeCategoryFilter: MediaCategory? = null
 
@@ -61,23 +73,37 @@ class MediaLibraryService(
 
     suspend fun refreshLibrary() {
         val generation = ++refreshGeneration
+        // Keep prior sizes as a stale snapshot, never as a completed latest scan after cancellation.
+        storageScanCompleted = false
         _isLoading = true
         notifyListeners()
 
         try {
             // Directory enumeration and file-header inspection can touch thousands
             // of files. Keep all disk I/O off the UI dispatcher.
+            var unavailableDirectories = 0
             val scannedFiles = withContext(Dispatchers.IO) {
             val result = mutableListOf<MediaFileDescriptor>()
             try {
                 for (dir in libraryDirectories()) {
-                    if (!dir.exists() || !dir.isDirectory) continue
-                    dir.listFiles()?.forEach entityLoop@{ entity ->
+                    if (!dir.exists() || !dir.isDirectory) { unavailableDirectories++; continue }
+                    val entries = dir.listFiles()
+                    if (entries == null) { unavailableDirectories++; continue }
+                    entries.forEach entityLoop@{ entity ->
                         if (!entity.isFile) return@entityLoop
                         val name = entity.name
                         // Ignore hidden entries and Chaty transient transfer/cache
                         // files; they are implementation data, not user media.
+                        // Legacy exclusion kept for reference, disabled: it missed unsent staging.
+                        // if (name.startsWith(".") || name.startsWith("chaty-outgoing-") ||
+                        //     name.endsWith(".part", ignoreCase = true) ||
+                        //     name.endsWith(".tmp", ignoreCase = true)
+                        // ) return@entityLoop
+                        // Media-worker parity (relayed by parent): also exclude unsent
+                        // chaty_capture_ / chaty_picked_ staging from the broad cache listing;
+                        // those are implementation data, not user media.
                         if (name.startsWith(".") || name.startsWith("chaty-outgoing-") ||
+                            name.startsWith("chaty_capture_") || name.startsWith("chaty_picked_") ||
                             name.endsWith(".part", ignoreCase = true) ||
                             name.endsWith(".tmp", ignoreCase = true)
                         ) return@entityLoop
@@ -86,8 +112,18 @@ class MediaLibraryService(
                                 try {
                                     entity.inputStream().use { stream ->
                                         val buffer = ByteArray(FileTypeDetector.HEADER_BYTES_TO_READ)
-                                        val read = stream.read(buffer)
-                                        if (read <= 0) ByteArray(0) else buffer.copyOf(read)
+                                        // Media-worker parity (relayed by parent): a single read() is
+                                        // not guaranteed to fill the buffer; loop until full or EOF so
+                                        // short reads cannot misclassify a file. Legacy single read:
+                                        // val read = stream.read(buffer)
+                                        // if (read <= 0) ByteArray(0) else buffer.copyOf(read)
+                                        var off = 0
+                                        while (off < buffer.size) {
+                                            val read = stream.read(buffer, off, buffer.size - off)
+                                            if (read <= 0) break
+                                            off += read
+                                        }
+                                        if (off <= 0) ByteArray(0) else buffer.copyOf(off)
                                     }
                                 } catch (_: Exception) {
                                     ByteArray(0)
@@ -112,6 +148,7 @@ class MediaLibraryService(
                 throw cancelled
             } catch (_: Exception) {
                 // A directory can disappear or become inaccessible during a scan.
+                unavailableDirectories++
             }
 
             if (result.isEmpty() && BuildConfig.DEBUG) {
@@ -170,6 +207,8 @@ class MediaLibraryService(
             if (generation != refreshGeneration) return
             _files.clear()
             _files.addAll(scannedFiles)
+            storageUnavailableDirectories = unavailableDirectories
+            storageScanCompleted = true
         } finally {
             if (generation == refreshGeneration) {
                 _isLoading = false
@@ -178,11 +217,17 @@ class MediaLibraryService(
         }
     }
 
-    fun getStorageBreakdown(): Map<MediaCategory, Long> {
+    // Previous Map-only result hid unreadable/missing roots as zero bytes.
+    fun getStorageBreakdown(): MediaStorageBreakdown {
         val map = mutableMapOf<MediaCategory, Long>()
         for (f in _files) {
-            map[f.category] = (map[f.category] ?: 0L) + f.sizeBytes
+            // Debug presentation fixtures are not measured disk usage.
+            if (f.path.startsWith("demo/")) continue
+            val current = map[f.category] ?: 0L
+            val size = f.sizeBytes.coerceAtLeast(0L)
+            map[f.category] = if (size > Long.MAX_VALUE - current) Long.MAX_VALUE else current + size
         }
-        return map
+        return MediaStorageBreakdown(map.toMap(), storageUnavailableDirectories,
+            storageScanCompleted && !_isLoading)
     }
 }

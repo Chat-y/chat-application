@@ -45,6 +45,7 @@ object InlineDocumentProcessor {
         }finally{if(small!==bitmap)small.recycle()}
     }
     fun crop(source: String,quad: PaperQuad,folder: File): String {
+        require(quad.areaFraction >= MIN_PAPER_AREA_FRACTION) { "Move closer. Paper must fill at least 5% of the image." }
         require(quad.isValid()) { "Move the four corners around the paper without crossing them." }
         val bitmap=loadUpright(source,false)
         var output:Bitmap?=null;var file:File?=null

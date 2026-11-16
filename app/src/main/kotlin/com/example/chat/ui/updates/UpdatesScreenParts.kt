@@ -8,6 +8,21 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import com.example.chat.R
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.collectionInfo
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +62,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,10 +93,10 @@ import com.example.chat.data.services.StatusViewer
 import com.example.chat.domain.models.UserProfile
 import com.example.chat.ui.core.theme.ChatyColors
 import com.example.chat.ui.tasks.TaskAvatar
-import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 /** Port of the Dart ChatyConfirmDialog usage in the updates slice:
  *  title/message/confirmLabel (+ destructive). */
@@ -122,68 +140,76 @@ internal fun UpdatesComposerSheet(
     onError: (Throwable) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var text by remember { mutableStateOf("") }
-    var busyType by remember { mutableStateOf<String?>(null) }
-    var pendingConfirm by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var pendingConfirmKind by remember { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf("") }
+    var work by remember { mutableStateOf<StatusPublicationWork?>(null) }
+    val busyType = work?.type
+    var pendingConfirm by remember { mutableStateOf<StatusPendingPublication?>(null) }
+
+    fun submit(action: StatusPendingPublication) {
+        if (work != null || !action.consumeOnce()) return
+        work = StatusPublicationWork.Publishing(action)
+        scope.launch {
+            try {
+                when (action) {
+                    is StatusPendingPublication.Text -> statusService.publishText(action.value)
+                    is StatusPendingPublication.Media -> statusService.publishMediaBytes(
+                        bytes = action.picked.bytes, displayName = action.picked.displayName,
+                        mediaType = action.type, text = action.caption, mimeType = action.picked.mimeType,
+                        durationSeconds = action.picked.durationSeconds,
+                    )
+                }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                onDismiss()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                onError(error)
+            }
+            finally { work = null }
+        }
+    }
 
     fun publishMedia(type: String) {
-        val run = {
-            busyType = type
-            scope.launch {
-                try {
-                    val picked = pickStatusMedia(type)
-                    if (picked != null) {
-                        statusService.publishMediaBytes(
-                            bytes = picked.bytes,
-                            displayName = picked.displayName,
-                            mediaType = type,
-                            text = text,
-                            mimeType = picked.mimeType,
-                            durationSeconds = picked.durationSeconds,
-                        )
-                        onDismiss()
-                    }
-                } catch (error: Throwable) {
-                    onError(error)
-                } finally {
-                    busyType = null
-                }
+        if (work != null || pendingConfirm != null) return
+        val caption = text
+        val selection = StatusPublicationWork.Picking(type)
+        work = selection
+        scope.launch {
+            try {
+                val picked = pickStatusMedia(type) ?: return@launch
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val action = StatusPendingPublication.Media(type, picked, caption)
+                if (work !== selection) return@launch
+                work = null
+                if (confirmBeforeSendingStatus()) pendingConfirm = action else submit(action)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                onError(error)
             }
-        }
-        if (confirmBeforeSendingStatus()) {
-            pendingConfirmKind = "media"
-            pendingConfirm = { run() }
-        } else {
-            run()
+            finally { if (work === selection) work = null }
         }
     }
 
     fun publishText() {
-        val run = {
-            busyType = "text"
-            scope.launch {
-                try {
-                    statusService.publishText(text)
-                    onDismiss()
-                } catch (error: Throwable) {
-                    onError(error)
-                } finally {
-                    busyType = null
-                }
-            }
-        }
-        if (confirmBeforeSendingStatus()) {
-            pendingConfirmKind = "text"
-            pendingConfirm = { run() }
-        } else {
-            run()
-        }
+        if (work != null || pendingConfirm != null || text.isBlank()) return
+        val action = StatusPendingPublication.Text(text.trim())
+        if (confirmBeforeSendingStatus()) pendingConfirm = action else submit(action)
+    }
+
+    val publishingLabel = stringResource(R.string.social_status_publishing)
+    val publicationState = when (work) {
+        is StatusPublicationWork.Picking -> stringResource(R.string.social_status_picking_media)
+        is StatusPublicationWork.Publishing -> if (busyType == "text") stringResource(R.string.social_status_posting_text)
+            else stringResource(R.string.social_status_uploading_media)
+        null -> null
     }
 
     ModalBottomSheet(tonalElevation = 0.dp, containerColor = com.example.chat.ui.theme.LocalAppColors.current.surfaceElevated, dragHandle = null, shape = com.example.chat.ui.kit.ChatyModalShape, onDismissRequest = onDismiss) {
         Column(
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp),
+            modifier = Modifier.imePadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp),
         ) {
             Box(
                 modifier = Modifier
@@ -192,71 +218,82 @@ internal fun UpdatesComposerSheet(
                     .background(colors.foreground.copy(alpha = 0.2f), CircleShape),
             )
             Spacer(Modifier.height(16.dp))
-            Text("New Update", color = colors.foreground, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Text(stringResource(R.string.social_status_composer_title), color = colors.foreground, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(4.dp))
             Text(
-                "Updates expire automatically after 24 hours.",
+                stringResource(R.string.social_status_composer_expiry),
                 color = colors.foreground.copy(alpha = 0.6f),
                 fontSize = 12.sp,
             )
             Spacer(Modifier.height(16.dp))
+            publicationState?.let { label ->
+                Text(label, color = colors.foregroundSecondary,
+                    modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+            }
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
-                placeholder = { Text("Write an update or add a caption…") },
+                label = { Text(stringResource(R.string.social_status_composer_input)) },
+                placeholder = { Text(stringResource(R.string.social_status_composer_hint)) },
+                enabled = busyType == null && pendingConfirm == null,
                 minLines = 3,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(16.dp))
             Row {
-                ComposerAction(Icons.Rounded.Image, "Photo", busyType == "image", colors, Modifier.weight(1f)) {
+                ComposerAction(Icons.Rounded.Image, stringResource(R.string.social_status_photo), busyType == "image", colors, Modifier.weight(1f), enabled = busyType == null && pendingConfirm == null) {
                     if (busyType == null) publishMedia("image")
                 }
                 Spacer(Modifier.width(8.dp))
-                ComposerAction(Icons.Rounded.Videocam, "Video", busyType == "video", colors, Modifier.weight(1f)) {
+                ComposerAction(Icons.Rounded.Videocam, stringResource(R.string.social_status_video), busyType == "video", colors, Modifier.weight(1f), enabled = busyType == null && pendingConfirm == null) {
                     if (busyType == null) publishMedia("video")
                 }
                 Spacer(Modifier.width(8.dp))
-                ComposerAction(Icons.Rounded.GraphicEq, "Audio", busyType == "audio", colors, Modifier.weight(1f)) {
+                ComposerAction(Icons.Rounded.GraphicEq, stringResource(R.string.social_status_audio), busyType == "audio", colors, Modifier.weight(1f), enabled = busyType == null && pendingConfirm == null) {
                     if (busyType == null) publishMedia("audio")
                 }
                 Spacer(Modifier.width(8.dp))
-                ComposerAction(Icons.Rounded.Description, "File", busyType == "document", colors, Modifier.weight(1f)) {
+                ComposerAction(Icons.Rounded.Description, stringResource(R.string.social_status_file), busyType == "document", colors, Modifier.weight(1f), enabled = busyType == null && pendingConfirm == null) {
                     if (busyType == null) publishMedia("document")
                 }
             }
             Spacer(Modifier.height(20.dp))
             ChatyActionButton(
                 onClick = { if (busyType == null) publishText() },
-                enabled = busyType == null,
+                enabled = busyType == null && pendingConfirm == null && text.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (busyType == "text") {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp).semantics { contentDescription = publishingLabel }, strokeWidth = 2.dp)
                 } else {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Publish Update")
+                    Text(stringResource(R.string.social_status_publish))
                 }
             }
         }
     }
 
-    pendingConfirm?.let { confirm ->
+    pendingConfirm?.let { action ->
+        val message = when (action) {
+            is StatusPendingPublication.Text -> stringResource(R.string.social_status_confirm_text, action.value)
+            is StatusPendingPublication.Media -> stringResource(R.string.social_status_confirm_media,
+                StatusMediaReadRules.displayName(action.picked.displayName)) +
+                if (action.caption.isBlank()) "" else stringResource(R.string.social_status_confirm_caption, action.caption)
+        }
         UpdatesConfirmDialog(
-            title = if (pendingConfirmKind == "text") "Post text status?" else "Post this status update?",
-            message = if (pendingConfirmKind == "text") {
-                "This status will be visible to your contacts."
-            } else {
-                "This status will be shared with your contacts."
-            },
-            confirmLabel = "Send",
+            title = stringResource(if (action is StatusPendingPublication.Text) R.string.social_status_confirm_text_title else R.string.social_status_confirm_media_title),
+            message = message,
+            confirmLabel = stringResource(R.string.social_status_send),
             colors = colors,
             onConfirm = {
-                pendingConfirm = null
-                confirm()
+                // Check identity as well as the one-shot ticket: an old dismissed dialog is not approval.
+                if (pendingConfirm === action && work == null) {
+                    pendingConfirm = null
+                    submit(action)
+                }
             },
-            onDismiss = { pendingConfirm = null },
+            onDismiss = { if (pendingConfirm === action) pendingConfirm = null },
         )
     }
 }
@@ -268,6 +305,7 @@ private fun ComposerAction(
     busy: Boolean,
     colors: ChatyColors,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onTap: () -> Unit,
 ) {
     Column(
@@ -275,7 +313,7 @@ private fun ComposerAction(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(colors.surfaceSecondary)
-            .clickable(onClick = onTap)
+            .clickable(enabled = enabled, onClick = onTap)
             .padding(vertical = 10.dp, horizontal = 8.dp),
     ) {
         if (busy) {
@@ -306,21 +344,44 @@ internal fun StatusViewerDialog(
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var signedUrl by remember(status.id) { mutableStateOf<String?>(null) }
+    val viewerPane = stringResource(R.string.social_status_viewer_pane)
+    val mediaLoadingLabel = stringResource(R.string.social_status_media_loading)
+    val mediaFailureLabel = stringResource(R.string.social_status_media_failure)
+    var signedUrl by remember(status.id, currentUser.id) { mutableStateOf<String?>(null) }
+    var urlLoading by remember(status.id, currentUser.id) { mutableStateOf(status.hasMedia) }
+    var urlAttempt by remember(status.id, currentUser.id) { mutableStateOf(0) }
+    var deleteError by remember(status.id) { mutableStateOf<String?>(null) }
+    var deleting by remember(status.id) { mutableStateOf(false) }
+    var viewersRevision by remember(status.id) { mutableStateOf(0) }
     var confirmDelete by remember { mutableStateOf(false) }
     var viewersOpen by remember { mutableStateOf(false) }
 
-    LaunchedEffect(status.id) {
+    LaunchedEffect(statusService, status.id, status.mediaPath, status.expiresAt, currentUser.id, urlAttempt) {
         if (status.hasMedia) {
-            signedUrl = runCatching { statusService.createSignedUrl(status.mediaPath!!) }.getOrNull()
+            urlLoading = true
+            signedUrl = null
+            try {
+                val resolved = status.mediaPath?.let { statusService.createSignedUrl(it) }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                // A returned URL is data, not permission to load a local file or arbitrary scheme.
+                signedUrl = resolved?.takeIf { StatusExternalOpenPolicy.canOpen(it, status.expiresAt) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                signedUrl = null
+            } finally { urlLoading = false }
         }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         val viewerId = currentUser.id
         if (viewSession.tryBegin(status, viewerId)) {
             launch {
                 try {
                     val published = statusService.markViewed(status)
                     if (!published) viewSession.rollback(status, viewerId)
-                } catch (error: Throwable) {
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    viewSession.rollback(status, viewerId)
+                    throw cancelled
+                } catch (error: Exception) {
                     viewSession.rollback(status, viewerId)
                 }
             }
@@ -331,27 +392,29 @@ internal fun StatusViewerDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Column(Modifier.fillMaxSize().background(colors.background)) {
+        Column(Modifier.fillMaxSize().background(colors.background).navigationBarsPadding().semantics { paneTitle = viewerPane }) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
                 IconButton(onClick = onDismiss) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = colors.foreground)
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = stringResource(R.string.social_status_viewer_back), color = colors.foreground)
                 }
                 Spacer(Modifier.width(8.dp))
                 val owner = getUser(status.userId)
-                TaskAvatar(owner?.avatarInitials ?: "U", owner?.avatarColorHex ?: "0xFF6366F1", 38, colors)
+                TaskAvatar(StatusIdentityLabelRules.display(owner?.avatarInitials ?: "U"), owner?.avatarColorHex ?: "0xFF6366F1", 38, colors)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (status.userId == currentUser.id) "My Status" else owner?.displayName ?: "Contact",
+                    if (status.userId == currentUser.id) stringResource(R.string.social_status_viewer_own) else owner?.displayName?.let(StatusIdentityLabelRules::display) ?: stringResource(R.string.social_status_viewer_contact),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     color = colors.foreground,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     modifier = Modifier.weight(1f),
                 )
                 if (status.userId == currentUser.id) {
-                    IconButton(onClick = { confirmDelete = true }) {
+                    IconButton(onClick = { confirmDelete = true }, enabled = !deleting) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.deleteOutline, semanticLabel = "Delete status", color = colors.error)
                     }
                 }
@@ -360,9 +423,20 @@ internal fun StatusViewerDialog(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(20.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                StatusContent(status, signedUrl, colors, template, remoteImage, openUrl)
+                when {
+                    urlLoading -> CircularProgressIndicator(
+                        modifier = Modifier.semantics { contentDescription = mediaLoadingLabel })
+                    status.hasMedia && signedUrl == null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(mediaFailureLabel, color = colors.foregroundSecondary,
+                            modifier = Modifier.semantics { error(mediaFailureLabel) })
+                        ChatyTextButton(onClick = { urlAttempt++ }, label = stringResource(R.string.social_status_viewers_retry))
+                    }
+                    else -> StatusContent(status, signedUrl, colors, template, remoteImage, openUrl)
+                }
             }
-            if (status.text.isNotEmpty()) {
+            deleteError?.let { Text(it, color = colors.error, modifier = Modifier.padding(16.dp)) }
+            if (deleting) CircularProgressIndicator(modifier = Modifier.semantics { contentDescription = "Deleting status" })
+            if (status.mediaType != "text" && status.text.isNotEmpty()) {
                 Text(
                     status.text,
                     textAlign = TextAlign.Center,
@@ -372,11 +446,12 @@ internal fun StatusViewerDialog(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 160.dp).verticalScroll(rememberScrollState())
                         .padding(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 8.dp),
                 )
             }
             if (status.userId == currentUser.id) {
-                ViewsControl(statusService, status, colors) { viewersOpen = true }
+                ViewsControl(statusService, status, colors, viewersRevision) { viewersOpen = true }
             }
         }
     }
@@ -390,9 +465,19 @@ internal fun StatusViewerDialog(
             colors = colors,
             onConfirm = {
                 confirmDelete = false
-                scope.launch {
-                    statusService.deleteStatus(status)
-                    onDismiss()
+                if (!deleting) {
+                    deleting = true
+                    deleteError = null
+                    scope.launch {
+                        try {
+                            statusService.deleteStatus(status)
+                            onDismiss()
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            deleteError = "Unable to delete this update. Try again."
+                        } finally { deleting = false }
+                    }
                 }
             },
             onDismiss = { confirmDelete = false },
@@ -400,7 +485,7 @@ internal fun StatusViewerDialog(
     }
 
     if (viewersOpen) {
-        StatusViewersSheet(status.id, statusService, colors) { viewersOpen = false }
+        StatusViewersSheet(status.id, statusService, colors) { viewersOpen = false; viewersRevision++ }
     }
 }
 
@@ -413,6 +498,8 @@ internal fun StatusContent(
     remoteImage: @Composable (url: String, modifier: Modifier) -> Unit,
     openUrl: (String) -> Unit,
 ) {
+    val mediaFailureLabel = stringResource(R.string.social_status_media_failure)
+    val photoDescription = stringResource(R.string.social_status_photo_description)
     if (status.mediaType == "text") {
         Text(
             status.text,
@@ -422,50 +509,58 @@ internal fun StatusContent(
             lineHeight = 35.1.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = (-0.5).sp,
+            modifier = Modifier.verticalScroll(rememberScrollState()),
         )
         return
     }
     if (signedUrl == null) {
         Text(
-            "Unable to load this update.",
+            mediaFailureLabel,
+            modifier = Modifier.semantics { error(mediaFailureLabel) },
             color = colors.foreground.copy(alpha = 0.6f),
             fontSize = 12.sp,
         )
         return
     }
     if (status.mediaType == "audio" && template.enableStatusAudio) {
-        StatusAudioPlayer(url = signedUrl, name = status.mediaName ?: "Audio update", colors = colors)
+        StatusAudioPlayer(url = signedUrl, name = status.mediaName?.let { StatusMediaReadRules.displayName(it) } ?: stringResource(R.string.social_status_audio_name), colors = colors)
         return
     }
     if (status.mediaType == "image") {
-        // Dart InteractiveViewer + ClipRRect(ChatyRadius.card): pinch/pan
-        // zoom over the clipped remote image.
-        var scale by remember { mutableStateOf(1f) }
-        var offsetX by remember { mutableStateOf(0f) }
-        var offsetY by remember { mutableStateOf(0f) }
-        remoteImage(
-            signedUrl,
-            Modifier
-                .clip(RoundedCornerShape(18.dp))
-                .pointerInput(signedUrl) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1f, 5f)
-                        if (scale > 1f) {
-                            offsetX += pan.x
-                            offsetY += pan.y
-                        } else {
-                            offsetX = 0f
-                            offsetY = 0f
+        var scale by remember(status.id, signedUrl) { mutableStateOf(1f) }
+        var offsetX by remember(status.id, signedUrl) { mutableStateOf(0f) }
+        var offsetY by remember(status.id, signedUrl) { mutableStateOf(0f) }
+        Column(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(18.dp))) {
+                val maxPanX = constraints.maxWidth * (scale - 1f) / 2f
+                val maxPanY = constraints.maxHeight * (scale - 1f) / 2f
+                remoteImage(
+                    signedUrl,
+                    Modifier.fillMaxSize()
+                        .pointerInput(signedUrl) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                scale = (scale * zoom).coerceIn(1f, 5f)
+                                val boundX = size.width * (scale - 1f) / 2f
+                                val boundY = size.height * (scale - 1f) / 2f
+                                offsetX = (offsetX + pan.x).coerceIn(-boundX, boundX)
+                                offsetY = (offsetY + pan.y).coerceIn(-boundY, boundY)
+                            }
                         }
-                    }
-                }
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    translationX = offsetX
-                    translationY = offsetY
-                },
-        )
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offsetX.coerceIn(-maxPanX, maxPanX)
+                            translationY = offsetY.coerceIn(-maxPanY, maxPanY)
+                        }
+                        .semantics { contentDescription = photoDescription },
+                )
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                ChatyTextButton(onClick = { scale = (scale - 0.5f).coerceAtLeast(1f); offsetX = 0f; offsetY = 0f }, label = stringResource(R.string.social_status_zoom_out))
+                ChatyTextButton(onClick = { scale = (scale + 0.5f).coerceAtMost(5f) }, label = stringResource(R.string.social_status_zoom_in))
+                ChatyTextButton(onClick = { scale = 1f; offsetX = 0f; offsetY = 0f }, label = stringResource(R.string.social_status_zoom_reset))
+            }
+        }
         return
     }
     val icon = when (status.mediaType) {
@@ -473,33 +568,65 @@ internal fun StatusContent(
         "audio" -> Icons.Rounded.GraphicEq
         else -> Icons.Rounded.Description
     }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, contentDescription = null, tint = colors.primary, modifier = Modifier.size(84.dp))
+        if (status.mediaType !in setOf("video", "audio", "document")) {
+            Text(stringResource(R.string.social_status_unsupported_media), color = colors.foregroundSecondary)
+        }
         Spacer(Modifier.height(16.dp))
         Text(
-            status.mediaName ?: status.mediaType,
+            StatusMediaReadRules.displayName(status.mediaName ?: status.mediaType),
             textAlign = TextAlign.Center,
             color = colors.foreground,
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
         )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            stringResource(R.string.social_status_external_disclosure),
+            color = colors.foregroundSecondary,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+        )
         Spacer(Modifier.height(16.dp))
-        ChatyActionButton(onClick = { openUrl(signedUrl) }, icon = Icons.Rounded.OpenInNew, label = "Open Securely")
+        ChatyActionButton(
+            onClick = {
+                if (StatusExternalOpenPolicy.canOpen(signedUrl, status.expiresAt)) {
+                    openUrl(signedUrl)
+                }
+            },
+            icon = Icons.Rounded.OpenInNew, label = stringResource(R.string.social_status_external_open),
+        )
     }
 }
 
-/** Port of _buildViewsControl: swipe-up or tap pill showing live viewer
+/** Port of _buildViewsControl: swipe-up or tap pill showing last-loaded viewer
  *  count, opening the viewers sheet. */
 @Composable
 private fun ViewsControl(
     statusService: StatusService,
     status: StatusRecord,
     colors: ChatyColors,
+    revision: Int,
     onOpen: () -> Unit,
 ) {
-    var count by remember(status.id) { mutableStateOf(0) }
-    LaunchedEffect(status.id) {
-        count = runCatching { statusService.viewersFor(status.id).size }.getOrDefault(0)
+    val dragThreshold = with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }
+    var count by remember(status.id) { mutableStateOf<Int?>(null) }
+    var countLoading by remember(status.id) { mutableStateOf(true) }
+    LaunchedEffect(statusService, status.id, revision) {
+        countLoading = true
+        val loaded = try {
+            val result = statusService.viewersFor(status.id).distinctBy { it.userId }.size
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            result
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            null
+        }
+        count = loaded
+        countLoading = false
     }
     Box(
         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp, top = 4.dp),
@@ -511,14 +638,14 @@ private fun ViewsControl(
                 .clip(RoundedCornerShape(24.dp))
                 .background(colors.surfaceElevated.copy(alpha = 0.85f))
                 .border(0.8.dp, colors.borderSubtle, RoundedCornerShape(24.dp))
-                .pointerInput(status.id) {
+                .pointerInput(status.id, dragThreshold) {
                     // Dart onVerticalDragEnd: primaryVelocity < -150 opens
                     // the sheet. Compose reports no fling velocity here, so
                     // accumulate the drag and open on a clear upward swipe.
                     var total = 0f
                     detectVerticalDragGestures(
                         onDragStart = { total = 0f },
-                        onDragEnd = { if (total < -120f) onOpen() },
+                        onDragEnd = { if (total < -dragThreshold) onOpen() },
                     ) { _, dragAmount -> total += dragAmount }
                 }
                 .clickable(onClick = onOpen)
@@ -530,7 +657,7 @@ private fun ViewsControl(
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye, semanticLabel = null, color = colors.primary, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    "$count ${if (count == 1) "view" else "views"}",
+                    if (countLoading) stringResource(R.string.social_status_views_loading) else count?.let { pluralStringResource(R.plurals.social_status_view_count, it, it) } ?: stringResource(R.string.social_status_views_unavailable),
                     color = colors.foreground,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
@@ -551,6 +678,8 @@ internal fun StatusViewersSheet(
     colors: ChatyColors,
     onDismiss: () -> Unit,
 ) {
+    val viewersLoadingLabel = stringResource(R.string.social_status_viewers_loading)
+    val viewersPaneLabel = stringResource(R.string.social_status_viewers_title)
     var viewers by remember(statusId) { mutableStateOf<List<StatusViewer>?>(null) }
     var failed by remember(statusId) { mutableStateOf(false) }
 
@@ -558,32 +687,30 @@ internal fun StatusViewersSheet(
         failed = false
         viewers = null
     }
-    LaunchedEffect(statusId, viewers, failed) {
+    LaunchedEffect(statusService, statusId, viewers, failed) {
         if (viewers == null && !failed) {
-            viewers = runCatching { statusService.viewersFor(statusId) }
-                .getOrElse {
-                    failed = true
-                    null
-                }
+            viewers = try {
+                val loaded = statusService.viewersFor(statusId)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                loaded.distinctBy { it.userId }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                failed = true
+                null
+            }
         }
     }
 
-    fun sheetRelativeTime(value: Instant): String {
-        val diff = Duration.between(value, Instant.now())
-        if (diff.toMinutes() < 1) return "just now"
-        if (diff.toMinutes() < 60) return "${diff.toMinutes()}m ago"
-        if (diff.toHours() < 24) return "${diff.toHours()}h ago"
-        return "${diff.toDays()}d ago"
-    }
-
     ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp, containerColor = com.example.chat.ui.theme.LocalAppColors.current.surfaceElevated, shape = com.example.chat.ui.kit.ChatyModalShape, onDismissRequest = onDismiss) {
-        Column(Modifier.heightIn(max = 480.dp)) {
+        Column(Modifier.heightIn(max = 480.dp).semantics { paneTitle = viewersPaneLabel }) {
             Text(
-                "Viewed by",
+                stringResource(R.string.social_status_viewers_title),
                 color = colors.foreground,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp).semantics { heading() },
             )
             val list = viewers
             when {
@@ -593,17 +720,17 @@ internal fun StatusViewersSheet(
                 ) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye, semanticLabel = null, color = colors.foregroundTertiary, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.height(8.dp))
-                    Text("Unable to load views", color = colors.foreground, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.social_status_viewers_failure_title), color = colors.foreground, fontWeight = FontWeight.Bold)
                     Text(
-                        "Something went wrong while fetching viewers. Please try again.",
+                        stringResource(R.string.social_status_viewers_failure_body),
                         color = colors.foregroundSecondary,
                         fontSize = 12.5.sp,
                         textAlign = TextAlign.Center,
                     )
-                    ChatyTextButton(onClick = ::load, label = "Retry")
+                    ChatyTextButton(onClick = ::load, label = stringResource(R.string.social_status_viewers_retry))
                 }
                 list == null -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(strokeWidth = 2.dp)
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.semantics { contentDescription = viewersLoadingLabel })
                 }
                 list.isEmpty() -> Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -611,45 +738,43 @@ internal fun StatusViewersSheet(
                 ) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye, semanticLabel = null, color = colors.foregroundTertiary, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.height(8.dp))
-                    Text("No views yet", color = colors.foreground, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.social_status_viewers_empty_title), color = colors.foreground, fontWeight = FontWeight.Bold)
                     Text(
-                        "Views will appear here after someone sees your update.",
+                        stringResource(R.string.social_status_viewers_empty_body),
                         color = colors.foregroundSecondary,
                         fontSize = 12.5.sp,
                         textAlign = TextAlign.Center,
                     )
                 }
-                else -> LazyColumn(Modifier.padding(bottom = 16.dp)) {
-                    items(list.size) { index ->
+                else -> LazyColumn(Modifier.padding(bottom = 16.dp).semantics { collectionInfo = androidx.compose.ui.semantics.CollectionInfo(list.size, 1) }) {
+                    items(list.size, key = { index -> list[index].userId }, contentType = { "viewer" }) { index ->
                         val viewer = list[index]
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         ) {
-                            TaskAvatar(viewer.avatarInitials, viewer.avatarColorHex, 40, colors)
+                            TaskAvatar(StatusIdentityLabelRules.display(viewer.avatarInitials), viewer.avatarColorHex, 40, colors)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    viewer.displayName,
-                                    maxLines = 1,
+                                    StatusIdentityLabelRules.display(viewer.displayName),
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     color = colors.foreground,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.5.sp,
+                                    fontSize = 16.sp,
                                 )
                                 Text(
-                                    "@${viewer.username}",
-                                    maxLines = 1,
+                                    "@${StatusIdentityLabelRules.display(viewer.username)}",
+                                    style = androidx.compose.ui.text.TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     color = colors.foregroundSecondary,
-                                    fontSize = 12.5.sp,
+                                    fontSize = 14.sp,
                                 )
+                                Spacer(Modifier.height(4.dp))
+                                StatusTimeLabel(viewer.viewedAt, colors.foregroundTertiary)
                             }
-                            Text(
-                                sheetRelativeTime(viewer.viewedAt),
-                                color = colors.foregroundTertiary,
-                                fontSize = 12.sp,
-                            )
                         }
                         if (index < list.size - 1) {
                             Box(
@@ -672,70 +797,170 @@ internal fun StatusViewersSheet(
  *  stadium button, seek-to-start replay at the end. */
 @Composable
 internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
-    val player = remember(url) { MediaPlayer() }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    var loading by remember(url) { mutableStateOf(true) }
-    var failed by remember(url) { mutableStateOf(false) }
-    var playing by remember(url) { mutableStateOf(false) }
-    var positionMs by remember(url) { mutableLongStateOf(0L) }
-    var durationMs by remember(url) { mutableLongStateOf(0L) }
+    val player = remember(url, lifecycleOwner) { MediaPlayer() }
+    var loading by remember(player) { mutableStateOf(true) }
+    var failed by remember(player) { mutableStateOf(false) }
+    var playing by remember(player) { mutableStateOf(false) }
+    var positionMs by remember(player) { mutableLongStateOf(0L) }
+    var durationMs by remember(player) { mutableLongStateOf(0L) }
+    var seekPreview by remember(player) { mutableStateOf<Float?>(null) }
+    var sourceGeneration by remember(player) { androidx.compose.runtime.mutableIntStateOf(0) }
+    var released by remember(player) { mutableStateOf(false) }
+    var focusUnavailable by remember(player) { mutableStateOf(false) }
+    var outputDisconnected by remember(player) { mutableStateOf(false) }
+    val audioManager = remember(context) {
+        context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+    }
+    val audioAttributes = remember {
+        android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build()
+    }
+    val focusListener = remember(player) {
+        android.media.AudioManager.OnAudioFocusChangeListener { change ->
+            if (!released && (change == android.media.AudioManager.AUDIOFOCUS_LOSS ||
+                    change == android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
+                    change == android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)) {
+                runCatching { if (player.isPlaying) player.pause() }
+                playing = false
+                focusUnavailable = true
+            }
+        }
+    }
+    val focusRequest = remember(player, audioAttributes, focusListener) {
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(audioAttributes)
+                // Pause spoken clips rather than ducking or resuming without an explicit Play.
+                .setWillPauseWhenDucked(true)
+                .setOnAudioFocusChangeListener(focusListener, android.os.Handler(android.os.Looper.getMainLooper()))
+                .build()
+        } else null
+    }
+    @Suppress("DEPRECATION")
+    fun requestFocus(): Boolean = if (android.os.Build.VERSION.SDK_INT >= 26 && focusRequest != null) {
+        audioManager?.requestAudioFocus(focusRequest) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    } else {
+        audioManager?.requestAudioFocus(focusListener, android.media.AudioManager.STREAM_MUSIC,
+            android.media.AudioManager.AUDIOFOCUS_GAIN) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+    @Suppress("DEPRECATION")
+    fun abandonFocus() {
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 26 && focusRequest != null) audioManager?.abandonAudioFocusRequest(focusRequest)
+            else audioManager?.abandonAudioFocus(focusListener)
+        }
+    }
 
     fun loadSource() {
+        if (released) return
+        val expectedGeneration = ++sourceGeneration
+        playing = false
+        abandonFocus()
+        focusUnavailable = false
+        outputDisconnected = false
         loading = true
         failed = false
         positionMs = 0L
         durationMs = 0L
+        seekPreview = null
         try {
             player.reset()
+            player.setAudioAttributes(audioAttributes)
             player.setDataSource(url)
             player.setOnPreparedListener {
-                durationMs = it.duration.toLong()
-                loading = false
+                if (!released && expectedGeneration == sourceGeneration) {
+                    durationMs = it.duration.toLong().coerceAtLeast(0L)
+                    loading = false
+                }
             }
             player.setOnCompletionListener {
-                playing = false
-                positionMs = durationMs
+                if (!released && expectedGeneration == sourceGeneration) {
+                    playing = false
+                    abandonFocus()
+                    positionMs = durationMs
+                }
             }
             player.setOnErrorListener { _, _, _ ->
-                loading = false
-                failed = true
+                if (!released && expectedGeneration == sourceGeneration) {
+                    playing = false
+                    abandonFocus()
+                    loading = false
+                    seekPreview = null
+                    failed = true
+                }
                 true
             }
             player.prepareAsync()
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
+            playing = false
+            abandonFocus()
             loading = false
             failed = true
         }
     }
 
-    LaunchedEffect(url) { loadSource() }
-    LaunchedEffect(playing) {
-        while (playing) {
-            positionMs = runCatching { player.currentPosition.toLong() }.getOrDefault(0L)
+    LaunchedEffect(player) { loadSource() }
+    LaunchedEffect(player, playing) {
+        if (!playing) abandonFocus()
+        while (playing && !released) {
+            try { positionMs = player.currentPosition.toLong().coerceAtLeast(0L) }
+            catch (_: IllegalStateException) { playing = false; failed = true; break }
             delay(200)
         }
+    }
+    // Keep this listener for the player's lifetime so an output change cannot race
+    // registration after Play. It never starts/resumes playback or inspects devices.
+    DisposableEffect(context, player) {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                if (intent.action != android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY || released || !playing) return
+                try { player.pause() } catch (_: IllegalStateException) { failed = true }
+                playing = false
+                seekPreview = null
+                outputDisconnected = true
+                abandonFocus()
+            }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver,
+            android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(receiver) }
     }
     DisposableEffect(player, lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, _ ->
             if (!lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
                 runCatching { if (player.isPlaying) player.pause() }
                 playing = false
+                abandonFocus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            released = true
+            sourceGeneration++
+            abandonFocus()
+            player.setOnPreparedListener(null)
+            player.setOnCompletionListener(null)
+            player.setOnErrorListener(null)
             runCatching { player.release() }
         }
     }
 
     fun togglePlayback() {
-        if (loading || failed || !lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) return
+        if (released || loading || failed || !lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) return
         try {
             if (playing) {
                 player.pause()
                 playing = false
+                abandonFocus()
             } else {
+                val granted = requestFocus()
+                if (!granted) { focusUnavailable = true; return }
+                focusUnavailable = false
+                outputDisconnected = false
                 if (durationMs > 0 && positionMs >= durationMs - 250) {
                     player.seekTo(0)
                     positionMs = 0L
@@ -743,7 +968,9 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
                 player.start()
                 playing = true
             }
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
+            playing = false
+            abandonFocus()
             failed = true
         }
     }
@@ -753,6 +980,11 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
         return "%02d:%02d".format(totalSeconds / 60, totalSeconds % 60)
     }
 
+    val currentSpokenTime = audioSpokenDuration((seekPreview?.toLong() ?: positionMs).coerceAtLeast(0L))
+    val totalSpokenTime = if (durationMs > 0) audioSpokenDuration(durationMs) else stringResource(R.string.social_status_audio_duration_unavailable)
+    val sliderDescription = stringResource(R.string.social_status_audio_seek_description, currentSpokenTime, totalSpokenTime)
+    val sliderLabel = stringResource(R.string.social_status_audio_position)
+    val loadingLabel = stringResource(R.string.social_status_audio_loading)
     Box(
         modifier = Modifier
             .widthIn(max = 360.dp)
@@ -761,7 +993,7 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
             .border(1.dp, colors.borderSubtle, RoundedCornerShape(22.dp))
             .padding(18.dp),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 modifier = Modifier
                     .size(62.dp)
@@ -782,34 +1014,56 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
                 fontSize = 15.sp,
             )
             Spacer(Modifier.height(10.dp))
+            if ((focusUnavailable || outputDisconnected) && !failed) Text(
+                stringResource(if (outputDisconnected) R.string.social_status_audio_output_disconnected else R.string.social_status_audio_interrupted),
+                color = colors.foregroundSecondary, textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+            )
             if (failed) {
                 Text(
-                    "Audio could not be played in Chaty.",
+                    stringResource(R.string.social_status_audio_failure),
                     textAlign = TextAlign.Center,
                     color = colors.error,
                     fontSize = 12.sp,
                 )
-                ChatyTextButton(onClick = ::loadSource, icon = Icons.Rounded.Refresh, label = "Retry")
+                ChatyTextButton(onClick = ::loadSource, icon = Icons.Rounded.Refresh, label = stringResource(R.string.social_status_audio_retry))
             } else {
                 Slider(
-                    value = positionMs.toFloat().coerceIn(0f, (if (durationMs > 0) durationMs else 1).toFloat()),
+                    value = (seekPreview ?: positionMs.toFloat()).coerceIn(0f, (if (durationMs > 0) durationMs else 1).toFloat()),
                     onValueChange = { value ->
-                        if (!loading && durationMs > 0) {
-                            player.seekTo(value.toInt())
-                            positionMs = value.toLong()
+                        if (!released && !loading && !failed && durationMs > 0 &&
+                            lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                            seekPreview = value.coerceIn(0f, durationMs.toFloat())
+                        }
+                    },
+                    onValueChangeFinished = {
+                        val target = seekPreview
+                        seekPreview = null
+                        if (target != null && !released && !loading && !failed && durationMs > 0 &&
+                            lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                            try {
+                                val boundedTarget = target.toLong().coerceIn(0L, durationMs)
+                                player.seekTo(boundedTarget.toInt())
+                                positionMs = boundedTarget
+                            } catch (_: IllegalStateException) {
+                                playing = false
+                                failed = true
+                            }
                         }
                     },
                     valueRange = 0f..(if (durationMs > 0) durationMs.toFloat() else 1f),
+                    enabled = !loading && !failed && durationMs > 0,
+                    modifier = Modifier.semantics { contentDescription = sliderLabel; stateDescription = sliderDescription },
                 )
                 Row(Modifier.fillMaxWidth()) {
                     Text(timeLabel(positionMs), color = colors.foregroundSecondary, fontSize = 12.sp)
                     Spacer(Modifier.weight(1f))
-                    Text(timeLabel(durationMs), color = colors.foregroundSecondary, fontSize = 12.sp)
+                    Text(if (durationMs > 0) timeLabel(durationMs) else stringResource(R.string.social_status_audio_duration_unavailable), color = colors.foregroundSecondary, fontSize = 12.sp)
                 }
                 Spacer(Modifier.height(8.dp))
                 ChatyActionButton(onClick = ::togglePlayback, enabled = !loading) {
                     if (loading) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp).semantics { contentDescription = loadingLabel }, strokeWidth = 2.dp)
                     } else {
                         Icon(
                             if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -817,10 +1071,20 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(if (playing) "Pause audio" else "Play audio")
+                        Text(if (playing) stringResource(R.string.social_status_audio_pause) else stringResource(R.string.social_status_audio_play))
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun audioSpokenDuration(milliseconds: Long): String {
+    val seconds = (milliseconds.coerceAtLeast(0L) / 1000).coerceAtMost(Int.MAX_VALUE.toLong())
+    val minutes = (seconds / 60).toInt()
+    val remainder = (seconds % 60).toInt()
+    val secondLabel = pluralStringResource(R.plurals.social_status_audio_seconds, remainder, remainder)
+    return if (minutes == 0) secondLabel else stringResource(R.string.social_status_audio_minutes_seconds,
+        pluralStringResource(R.plurals.social_status_audio_minutes, minutes, minutes), secondLabel)
 }

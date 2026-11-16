@@ -82,7 +82,14 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                     .height(44.dp)
                     .clip(RoundedCornerShape(22.dp))
                     .background(Color(0x99141414))
-                    .semantics{contentDescription="Zoom slider, drag to zoom";role=Role.Button}
+                    .semantics {
+                        contentDescription = "Camera zoom"
+                        stateDescription = String.format(java.util.Locale.ROOT, "Zoom %.1fx", proposed)
+                        progressBarRangeInfo = ProgressBarRangeInfo(proposed, min..max)
+                        setProgress { requested ->
+                            if (enabled) { proposed = clampCameraZoom(requested, min, max); onZoom(proposed); true } else false
+                        }
+                    }
                     .pointerInput(min,max,enabled) {
                         if(!enabled) return@pointerInput
                         var value = current

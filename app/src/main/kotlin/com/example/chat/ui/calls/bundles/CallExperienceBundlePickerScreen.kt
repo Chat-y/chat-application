@@ -133,8 +133,9 @@ fun CallExperienceBundlePickerScreen(
                             if (isSelected) Modifier.border(2.dp, tokens.primaryAccent, RoundedCornerShape(20.dp))
                             else Modifier
                         )
+                        // CALL-R1-57: tapping the card previews; only the Apply button opens the dialog.
                         .clickable {
-                            pendingBundle = bundle
+                            previewBundleId = bundle
                         },
                 ) {
                     Column(
@@ -204,7 +205,9 @@ fun CallExperienceBundlePickerScreen(
                                 Text("Interactive Preview", fontSize = 13.sp)
                             }
                             Spacer(Modifier.width(10.dp))
+                            // CALL-R1-58: "Applied" is state, not an action - no re-open of the same dialog.
                             Button(
+                                enabled = !isSelected,
                                 onClick = {
                                     pendingBundle = bundle
                                 },
@@ -314,22 +317,41 @@ fun CallBundleLivePreviewScreen(
                         }
                     }
 
-                    // Mode Switcher Tabs
-                    ScrollableTabRow(
-                        selectedTabIndex = previewTab,
-                        edgePadding = 12.dp,
+                    // CALL-R1-56: nine peer tabs -> three phase groups with sub-chips (Hick).
+                    val previewGroups = listOf(
+                        "Call states" to listOf(0 to "Incoming", 5 to "Outgoing", 6 to "Connecting", 7 to "Reconnecting"),
+                        "Active" to listOf(1 to "Active 1:1", 8 to "Active video", 4 to "Production PiP"),
+                        "Concepts" to listOf(2 to "Group concept", 3 to "Invite concept"),
+                    )
+                    var previewGroup by remember { mutableIntStateOf(0) }
+                    androidx.compose.material3.TabRow(
+                        selectedTabIndex = previewGroup,
                         containerColor = Color.Transparent,
                         contentColor = Color.White,
                     ) {
-                        Tab(selected = previewTab == 0, onClick = { previewTab = 0 }, text = { Text("Incoming") })
-                        Tab(selected = previewTab == 1, onClick = { previewTab = 1 }, text = { Text("Active 1:1") })
-                        Tab(selected = previewTab == 2, onClick = { previewTab = 2 }, text = { Text("Group concept") })
-                        Tab(selected = previewTab == 3, onClick = { previewTab = 3 }, text = { Text("Invite concept") })
-                        Tab(selected = previewTab == 4, onClick = { previewTab = 4 }, text = { Text("Production PiP") })
-                        Tab(selected = previewTab == 5, onClick = { previewTab = 5 }, text = { Text("Outgoing") })
-                        Tab(selected = previewTab == 6, onClick = { previewTab = 6 }, text = { Text("Connecting") })
-                        Tab(selected = previewTab == 7, onClick = { previewTab = 7 }, text = { Text("Reconnecting") })
-                        Tab(selected = previewTab == 8, onClick = { previewTab = 8 }, text = { Text("Active video") })
+                        previewGroups.forEachIndexed { gi, group ->
+                            Tab(
+                                selected = previewGroup == gi,
+                                onClick = { previewGroup = gi; previewTab = group.second.first().first },
+                                text = { Text(group.first) },
+                            )
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        previewGroups[previewGroup].second.forEach { entry ->
+                            val chipSelected = previewTab == entry.first
+                            TextButton(onClick = { previewTab = entry.first }) {
+                                Text(
+                                    entry.second,
+                                    color = if (chipSelected) Color.White else Color.White.copy(alpha = 0.6f),
+                                    fontWeight = if (chipSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 13.sp,
+                                )
+                            }
+                        }
                     }
                 }
             }

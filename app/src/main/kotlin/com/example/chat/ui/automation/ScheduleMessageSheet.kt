@@ -194,6 +194,15 @@ internal fun ScheduleMessageSheet(
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = "Pick date & time")
                 }
             }
+            // AUT-042: say why Confirm is disabled.
+            if (body.isBlank() || (!selectedDateTime.isAfter(ZonedDateTime.now()) && attemptedRequest != (body.trim() to selectedDateTime.toInstant()))) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (body.isBlank()) "Enter a message to schedule." else "Choose a time in the future.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Spacer(Modifier.height(20.dp))
             Button(
                 enabled = confirmEnabled && body.isNotBlank() && (selectedDateTime.isAfter(ZonedDateTime.now()) ||
@@ -217,7 +226,7 @@ internal fun ScheduleMessageSheet(
         // Dart: firstDate = now, lastDate = now + 365 days.
         val nowMillis = System.currentTimeMillis()
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = selectedDateTime.toInstant().toEpochMilli(),
+            initialSelectedDateMillis = selectedDateTime.toLocalDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli(),
             selectableDates = object : androidx.compose.material3.SelectableDates {
                 override fun isSelectableDate(utcTimeMillis: Long): Boolean {
                     return utcTimeMillis >= nowMillis - 86_400_000L &&
@@ -231,11 +240,10 @@ internal fun ScheduleMessageSheet(
                 TextButton(onClick = {
                     val millis = datePickerState.selectedDateMillis
                     if (millis != null) {
-                        val picked = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
-                        selectedDateTime = selectedDateTime
-                            .withYear(picked.year)
-                            .withMonth(picked.monthValue)
-                            .withDayOfMonth(picked.dayOfMonth)
+                        // AUT-006/007: the picker value is a UTC-midnight date; build the
+                        // local date once and keep the chosen time and zone.
+                        val picked = Instant.ofEpochMilli(millis).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                        selectedDateTime = ZonedDateTime.of(picked, selectedDateTime.toLocalTime(), selectedDateTime.zone)
                         showDatePicker = false
                         showTimePicker = true
                     }

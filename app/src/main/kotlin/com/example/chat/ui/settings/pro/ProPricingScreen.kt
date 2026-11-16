@@ -28,6 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,7 +78,7 @@ fun ProPricingScreen(
                 letterSpacing = (-0.5).sp,
                 lineHeight = (24 * 1.25).sp,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().semantics { heading() },
             )
             Spacer(Modifier.height(8.dp))
             Text(
@@ -161,6 +164,14 @@ fun ProPricingScreen(
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
                 }
+                // SUB-R1-015: state the amount actually charged.
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (isYearly) "$123.00 charged per year" else "$20.50 charged per month",
+                    color = colors.foreground,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 Spacer(Modifier.height(20.dp))
 
                 // ChatyPrimaryButton: height 48, radius lg=16, primary/white,
@@ -177,6 +188,15 @@ fun ProPricingScreen(
                 ) {
                     Text("Get Started", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
+                // SUB-R1-014: renewal and cancellation terms (text only; no billing is wired).
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (isYearly) "Renews every year until cancelled. Cancel any time in your store subscription settings."
+                    else "Renews every month until cancelled. Cancel any time in your store subscription settings.",
+                    color = colors.foregroundSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = (11 * 1.3).sp,
+                )
                 Spacer(Modifier.height(20.dp))
 
                 Text(
@@ -192,7 +212,8 @@ fun ProPricingScreen(
                 CheckItem(colors, "Smart AI messaging assistance")
                 CheckItem(colors, "Access to Chaty Pro Theme Library")
                 CheckItem(colors, "Early access to new features")
-                CheckItem(colors, "Next-generation privacy & encryption tools")
+                // SUB-R4-015: unsubstantiated security claim, commented out rather than deleted.
+                // CheckItem(colors, "Next-generation privacy & encryption tools")
                 CheckItem(colors, "Unlimited task and backup synchronization")
             }
             Spacer(Modifier.height(32.dp))
@@ -218,6 +239,7 @@ private fun BillingSegment(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .background(background, RoundedCornerShape(999.dp))
+            .heightIn(min = 48.dp)
             .clickable(onClick = onTap)
             .padding(horizontal = horizontalPadding.dp, vertical = 10.dp),
     ) {
@@ -236,7 +258,7 @@ private fun BillingSegment(
 private fun CheckItem(colors: AppColors, text: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(vertical = 6.dp),
+        modifier = Modifier.padding(vertical = 6.dp).semantics(mergeDescendants = true) { },
     ) {
         Box(
             modifier = Modifier

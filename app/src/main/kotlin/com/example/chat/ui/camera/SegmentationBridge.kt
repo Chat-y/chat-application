@@ -29,6 +29,17 @@ class SegmentationBridge(private val context: Context) {
 
     private var segmenter: ImageSegmenter? = null
     private val creationMutex = Mutex()
+    private val workLock = Any()
+    private var workActive = false
+    private var disposed = false
+
+    private fun beginWork(): Boolean = synchronized(workLock) {
+        if (disposed || workActive) false else { workActive = true; true }
+    }
+    private fun finishWork() {
+        val shouldClose = synchronized(workLock) { workActive = false; disposed }
+        if (shouldClose) closeSegmenter()
+    }
 
     private suspend fun ensureSegmenter(): ImageSegmenter? = creationMutex.withLock {
         segmenter?.let { return it }
@@ -55,6 +66,11 @@ class SegmentationBridge(private val context: Context) {
      * two confidence masks: index 0 = background, index 1 = person.
      */
     suspend fun personMask(bitmap: Bitmap): Bitmap? {
+        if (!beginWork()) return null
+        return try { personMaskActive(bitmap) } finally { finishWork() }
+    }
+
+    private suspend fun personMaskActive(bitmap: Bitmap): Bitmap? {
         val seg = ensureSegmenter() ?: return null
         return try {
             val mpImage = BitmapImageBuilder(bitmap).build()
@@ -75,18 +91,23 @@ class SegmentationBridge(private val context: Context) {
                 pixels[i] = (v shl 24) or (v shl 16) or (v shl 8) or v
             }
             Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             null
         }
     }
 
     fun dispose() {
-        try {
-            segmenter?.close()
-        } catch (_: Exception) {
-            // best effort
-        }
+        // Original eager segmenter?.close() could race active worker initialization/segment.
+        val shouldClose = synchronized(workLock) { disposed = true; !workActive }
+        if (shouldClose) closeSegmenter()
+    }
+
+    @Synchronized private fun closeSegmenter() {
+        val owned = segmenter
         segmenter = null
+        try { owned?.close() } catch (_: Exception) { /* best effort */ }
     }
 
     companion object {

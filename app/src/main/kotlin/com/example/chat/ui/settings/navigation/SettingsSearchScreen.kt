@@ -1,5 +1,6 @@
 package com.example.chat.ui.settings.navigation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,14 +72,20 @@ fun <T> SettingsSearchScreen(
     initialQuery: String = "",
 ) {
     val colors = LocalAppColors.current
-    var query by remember { mutableStateOf(initialQuery) }
-    val results = SettingsSearchLogic.filter(query, allSettings, title, category, description, keywords)
+    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialQuery) }
+    // SET-R2-024: only re-filter when the query or the index changes
+    val results = remember(query, allSettings) { SettingsSearchLogic.filter(query, allSettings, title, category, description, keywords) }
 
     Scaffold(
         containerColor = colors.background,
         topBar = {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth()
+                    // SET-R3-024: solid bar so list rows don't slide under a transparent field
+                    .background(colors.surface)
+                    // SET-R1-044
+                    .semantics { paneTitle = "Settings search" }
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) {
@@ -94,10 +104,12 @@ fun <T> SettingsSearchScreen(
                             }
                         }
                     },
+                    // SET-R3-048: visible field boundary
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
+                        focusedContainerColor = colors.surfaceSecondary,
+                        unfocusedContainerColor = colors.surfaceSecondary,
+                        disabledContainerColor = colors.surfaceSecondary,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
                         cursorColor = colors.primary,
@@ -119,10 +131,12 @@ fun <T> SettingsSearchScreen(
                     )
                     Text(
                         "No settings found for \"$query\"",
+                        modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }.padding(top = 12.dp),
                         color = colors.foregroundTertiary,
                         fontSize = 14.sp,
-                        modifier = Modifier.padding(top = 12.dp),
                     )
+                    // SET-R2-047: recovery from an empty result
+                    androidx.compose.material3.TextButton(onClick = { query = "" }) { Text("Clear search", color = colors.primary) }
                 }
             }
         } else {
@@ -176,7 +190,7 @@ fun SettingsSearchScreen(
     title = { it.title },
     category = { it.category },
     description = { it.description },
-    keywords = { emptyList() },
+    keywords = { it.keywords },
     icon = { it.icon },
     onSelect = { onSelect(it.destination) },
     onBack = onBack,

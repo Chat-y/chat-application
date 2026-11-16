@@ -7,6 +7,13 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.TextField
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,12 +102,19 @@ fun ChatyAudioPlayerScreen(
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val isDark = isSystemInDarkTheme()
+    val narrow = LocalConfiguration.current.screenWidthDp < 340
+    val shortWindow = LocalConfiguration.current.screenHeightDp < 600
+    val horizontalGutter = if (narrow) 12.dp else 28.dp
+    LaunchedEffect(state.activeItem?.path, state.queueIndex) {
+        state.activeItem?.let { track -> view.announceForAccessibility("${track.name}, item ${state.queueIndex + 1} of ${state.queue.size.coerceAtLeast(1)}") }
+    }
 
     // Spinning vinyl disc animation (Dart: 14s AnimationController, repeat
     // while playing, stop otherwise - Animatable.stop() preserves the angle).
     val discAngle = remember { Animatable(0f) }
-    LaunchedEffect(state.isPlaying) {
-        if (state.isPlaying) {
+    val reduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    LaunchedEffect(state.isPlaying, reduceMotion) {
+        if (state.isPlaying && !reduceMotion) {
             discAngle.animateTo(
                 targetValue = discAngle.value + 360f,
                 animationSpec = infiniteRepeatable(tween(durationMillis = 14000, easing = LinearEasing)),
@@ -111,9 +125,10 @@ fun ChatyAudioPlayerScreen(
     }
 
     var showQueue by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler { if (showQueue) showQueue = false else onClose() }
 
     Scaffold(
-        containerColor = if (isDark) Color(0xFF0C1017) else Color(0xFFF8FAFC),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -128,7 +143,7 @@ fun ChatyAudioPlayerScreen(
                 },
                 title = { Text("Now Playing", fontSize = 15.sp, fontWeight = FontWeight.W700) },
                 actions = {
-                    IconButton(onClick = { showQueue = true }) {
+                    IconButton(modifier = Modifier.semantics { contentDescription = "Open audio queue" }, onClick = { showQueue = true }) {
                         ChatyMediaIcon(
                             icon = ChatyIconType.queue,
                             size = 20.dp,
@@ -147,7 +162,19 @@ fun ChatyAudioPlayerScreen(
             }
         } else {
             Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 28.dp),
+                modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = horizontalGutter)
+                    .semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction(if (state.isPlaying) "Pause audio" else "Play audio") { scope.launch { coordinator.togglePlayPause() }; true },
+                            CustomAccessibilityAction("Next track") { if (state.hasNext) { scope.launch { coordinator.skipNext() }; true } else false },
+                            CustomAccessibilityAction("Previous track") { if (state.hasPrevious) { scope.launch { coordinator.skipPrevious() }; true } else false },
+                            CustomAccessibilityAction("Change playback speed") {
+                                val speeds = listOf(0.75, 1.0, 1.25, 1.5, 2.0)
+                                val next = speeds.firstOrNull { it > state.speed } ?: speeds.first()
+                                scope.launch { coordinator.setSpeed(next) }; true
+                            },
+                        )
+                    },
                 verticalArrangement = Arrangement.SpaceEvenly,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -155,7 +182,7 @@ fun ChatyAudioPlayerScreen(
                 Box(
                     modifier = Modifier
                         .graphicsLayer { rotationZ = discAngle.value }
-                        .size(240.dp)
+                        .size(if (shortWindow) 144.dp else 240.dp)
                         .shadow(
                             elevation = 36.dp,
                             shape = CircleShape,
@@ -165,10 +192,10 @@ fun ChatyAudioPlayerScreen(
                         .background(
                             Brush.radialGradient(
                                 colorStops = arrayOf(
-                                    0.3f to Color(0xFF1E2530),
-                                    0.6f to Color(0xFF11161F),
+                                    0.3f to MaterialTheme.colorScheme.surfaceVariant,
+                                    0.6f to MaterialTheme.colorScheme.surface,
                                     0.85f to MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                    1.0f to Color(0xFF0D1117),
+                                    1.0f to MaterialTheme.colorScheme.background,
                                 ),
                             ),
                             CircleShape,
@@ -181,7 +208,7 @@ fun ChatyAudioPlayerScreen(
                             .background(MaterialTheme.colorScheme.primary, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ChatyMediaIcon(icon = ChatyIconType.audio, size = 32.dp, color = Color.White)
+                        ChatyMediaIcon(icon = ChatyIconType.audio, size = 32.dp, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
 
@@ -199,9 +226,9 @@ fun ChatyAudioPlayerScreen(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "${track.humanReadableSize} • Audio Recording",
+                        "${track.humanReadableSize} • ${track.mimeType.ifBlank { "Audio file" }}",
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.54f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                     )
                 }
@@ -209,18 +236,24 @@ fun ChatyAudioPlayerScreen(
                 // Seek Bar & Timers
                 Column {
                     val durationMs = state.duration.inWholeMilliseconds
+                    var seekDraft by remember(track.path) { mutableStateOf<Float?>(null) }
                     Slider(
-                        value = if (durationMs > 0)
+                        value = seekDraft?.coerceIn(0f, durationMs.coerceAtLeast(1).toFloat()) ?: if (durationMs > 0)
                             state.position.inWholeMilliseconds.coerceIn(0, durationMs).toFloat()
                         else 0f,
-                        onValueChange = { v -> scope.launch { coordinator.seek(v.toLong().milliseconds) } },
+                        onValueChange = { seekDraft = it },
+                        onValueChangeFinished = {
+                            seekDraft?.let { target -> scope.launch { coordinator.seek(target.toLong().coerceIn(0L, durationMs).milliseconds) } }
+                            seekDraft = null
+                        },
+                        enabled = durationMs > 0,
                         valueRange = 0f..(if (durationMs > 0) durationMs.toFloat() else 1f),
                         colors = SliderDefaults.colors(
                             activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.12f),
+                            inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
                             thumbColor = MaterialTheme.colorScheme.primary,
                         ),
-                        modifier = Modifier.height(24.dp),
+                        modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Audio playback position" },
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
@@ -230,13 +263,13 @@ fun ChatyAudioPlayerScreen(
                             formatDuration(state.position),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.W600,
-                            color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
                             "- ${formatDuration(state.duration - state.position)}",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.W600,
-                            color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -250,23 +283,24 @@ fun ChatyAudioPlayerScreen(
                     IconButton(onClick = { coordinator.toggleShuffle() }) {
                         Icon(
                             Icons.Rounded.Shuffle,
-                            contentDescription = "Shuffle",
+                            contentDescription = if (state.isShuffle) "Shuffle on" else "Shuffle off",
                             tint = if (state.isShuffle) MaterialTheme.colorScheme.primary
-                            else (if (isDark) Color.White.copy(alpha = 0.38f) else Color.Black.copy(alpha = 0.38f)),
+                            else (MaterialTheme.colorScheme.onSurfaceVariant),
                         )
                     }
                     IconButton(
+                        modifier = Modifier.semantics { contentDescription = "Previous track" },
                         onClick = { scope.launch { coordinator.skipPrevious() } },
                         enabled = state.hasPrevious,
                     ) {
                         ChatyMediaIcon(
                             icon = ChatyIconType.seekBackward,
                             size = 24.dp,
-                            color = if (isDark) Color.White else Color(0xDD000000),
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     Box(
-                        Modifier.springInteractiveScale(0.94f).clickable {
+                        Modifier.springInteractiveScale(0.94f).semantics { contentDescription = if (state.isPlaying) "Pause audio" else "Play audio"; role = Role.Button }.clickable {
                             ChatyHapticsPort.threshold(view)
                             scope.launch { coordinator.togglePlayPause() }
                         },
@@ -286,30 +320,33 @@ fun ChatyAudioPlayerScreen(
                             ChatyMediaIcon(
                                 icon = if (state.isPlaying) ChatyIconType.pause else ChatyIconType.play,
                                 size = 28.dp,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onPrimary,
                             )
                         }
                     }
                     IconButton(
+                        modifier = Modifier.semantics { contentDescription = "Next track" },
                         onClick = { scope.launch { coordinator.skipNext() } },
                         enabled = state.hasNext,
                     ) {
                         ChatyMediaIcon(
                             icon = ChatyIconType.seekForward,
                             size = 24.dp,
-                            color = if (isDark) Color.White else Color(0xDD000000),
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     IconButton(onClick = { coordinator.cycleRepeatMode() }) {
                         Icon(
                             if (state.repeatMode == ChatyRepeatMode.one) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                            contentDescription = "Repeat",
+                            contentDescription = "Repeat ${state.repeatMode.name}",
                             tint = if (state.repeatMode != ChatyRepeatMode.off) MaterialTheme.colorScheme.primary
-                            else (if (isDark) Color.White.copy(alpha = 0.38f) else Color.Black.copy(alpha = 0.38f)),
+                            else (MaterialTheme.colorScheme.onSurfaceVariant),
                         )
                     }
                 }
 
+                Text("Shuffle ${if (state.isShuffle) "on" else "off"} · Repeat ${state.repeatMode.name}", style = MaterialTheme.typography.labelMedium)
+                Text("Playback speed ${state.speed}x", style = MaterialTheme.typography.labelMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 // Speed Pill Row
                 SpeedSelector(state, isDark) { s ->
                     ChatyHapticsPort.selection(view)
@@ -320,21 +357,23 @@ fun ChatyAudioPlayerScreen(
     }
 
     if (showQueue) {
-        ModalBottomSheet(tonalElevation = 0.dp, dragHandle = null,
+        ModalBottomSheet(tonalElevation = 0.dp,
             onDismissRequest = { showQueue = false },
-            containerColor = if (isDark) Color(0xFF141923) else Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             shape = com.example.chat.ui.kit.ChatyModalShape,
         ) {
             val sheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.6f
+            var queueQuery by remember { mutableStateOf("") }
+            val queueItems = remember(state.queue, queueQuery) { state.queue.mapIndexed { index, file -> index to file }.filter { (_, file) -> queueQuery.isBlank() || file.name.contains(queueQuery, ignoreCase = true) } }
             Column(modifier = Modifier.height(sheetHeight)) {
-                Spacer(Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .size(width = 36.dp, height = 4.dp)
-                        .background(Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp)),
-                )
-                Spacer(Modifier.height(14.dp))
+//                 Spacer(Modifier.height(12.dp))
+//                 Box(
+//                     modifier = Modifier
+//                         .align(Alignment.CenterHorizontally)
+//                         .size(width = 36.dp, height = 4.dp)
+//                         .background(Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp)),
+//                 )
+//                 Spacer(Modifier.height(14.dp))
                 Text(
                     "Play Queue",
                     fontWeight = FontWeight.W700,
@@ -342,9 +381,13 @@ fun ChatyAudioPlayerScreen(
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 )
                 Spacer(Modifier.height(10.dp))
-                LazyColumn {
-                    items(state.queue.size) { index ->
-                        val item = state.queue[index]
+                if (state.queue.size > 20) TextField(
+                    value = queueQuery, onValueChange = { queueQuery = it }, label = { Text("Search audio queue") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+                if (queueItems.isEmpty()) Text("No matching tracks", modifier = Modifier.padding(16.dp))
+                LazyColumn(Modifier.semantics { collectionInfo = CollectionInfo(queueItems.size, 1) }) {
+                    items(queueItems.size, key = { queueItems[it].first }) { filteredIndex ->
+                        val (index, item) = queueItems[filteredIndex]
                         val isCurrent = index == state.queueIndex
                         ListItem(
                             leadingContent = {
@@ -360,7 +403,11 @@ fun ChatyAudioPlayerScreen(
                                 )
                             },
                             supportingContent = { Text(item.humanReadableSize) },
-                            modifier = androidx.compose.ui.Modifier.clickable {
+                            modifier = androidx.compose.ui.Modifier.semantics {
+                                selected = isCurrent
+                                stateDescription = if (isCurrent) "Now playing, item ${index + 1} of ${state.queue.size}" else "Item ${index + 1} of ${state.queue.size}"
+                                role = Role.Button
+                            }.clickable {
                                 scope.launch { coordinator.playTrack(item, queue = state.queue) }
                                 showQueue = false
                             },
@@ -378,13 +425,16 @@ private fun SpeedSelector(state: MediaPlaybackState, isDark: Boolean, onSelect: 
     val speeds = listOf(0.75, 1.0, 1.25, 1.5, 2.0)
     Row(
         modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .selectableGroup()
+            .semantics { contentDescription = "Playback speed" }
             .clip(RoundedCornerShape(20.dp))
-            .background(if (isDark) Color(0xFF161C26) else Color(0xFFEDF2F7))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         speeds.forEach { s ->
             val isSelected = kotlin.math.abs(state.speed - s) < 0.01
-            Box(Modifier.springInteractiveScale(0.95f).clickable { onSelect(s) }) {
+            Box(Modifier.heightIn(min = 48.dp).semantics { selected = isSelected; stateDescription = if (isSelected) "Selected" else "Not selected"; contentDescription = "Playback speed ${s}x"; role = Role.RadioButton }.springInteractiveScale(0.95f).clickable { onSelect(s) }, contentAlignment = Alignment.Center) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(16.dp))
@@ -395,8 +445,8 @@ private fun SpeedSelector(state: MediaPlaybackState, isDark: Boolean, onSelect: 
                         "${s}x",
                         fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.W800 else FontWeight.W500,
-                        color = if (isSelected) Color.White
-                        else (if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xDD000000)),
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                        else (MaterialTheme.colorScheme.onSurfaceVariant),
                     )
                 }
             }

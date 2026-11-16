@@ -1,62 +1,73 @@
 package com.example.chat.ui.settings
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.media.MediaScannerConnection
+import android.provider.MediaStore
+import android.util.Log
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.GifBox
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chat.BuildConfig
 import com.example.chat.core.preferences.ChatyPreferencesController
 import com.example.chat.core.theme.ThemeController
-import com.example.chat.ui.kit.ChatyBackButton
+import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
 import com.example.chat.ui.kit.GbCardContainer
-import com.example.chat.ui.kit.GbSwitchTile
-import kotlinx.coroutines.launch
-import java.io.File
 
 /**
- * Port of lib/features/settings/universal/hide_media_screen.dart on the GB kit (GbCardContainer/GbSwitchTile,
- * Dart Material icons). The Dart AppBar uses theme.surfaceColor with a 19*fontScale/w700 title in
- * theme.primaryTextColor and a padded ChatyBackButton, and the page background is theme.backgroundColor.
- * The .nomedia marker lives in ChatyMedia under the app files dir (Dart getApplicationDocumentsDirectory is
- * the app's files dir on Android). Uncompiled; no pixel check.
+ * Port of lib/features/settings/universal/hide_media_screen.dart. The scaffold is the shared
+ * ChatySettingsPage (HM1-13), matching the Privacy and Security settings chrome; the switch rows
+ * keep a single accessible toggle target with an explicit state description because the GB kit
+ * tile has no equivalent (HM1-34 partially addressed: shared page chrome, own accessible rows).
+ * The .nomedia marker lives in ChatyMedia under the app files dir (Dart
+ * getApplicationDocumentsDirectory is the app's files dir on Android). Uncompiled; no pixel check.
  */
 @Composable
 fun HideMediaScreen(
@@ -64,107 +75,222 @@ fun HideMediaScreen(
     themeController: ThemeController,
     onBack: () -> Unit,
 ) {
-    rememberPreferencesVersion(preferences)
+    // Recomposition is keyed on the controller's version; reads below are narrowed to the three
+    // hide values so unrelated preference changes do not re-read them (HM1-12, HM1-45).
+    val prefsVersion = rememberPreferencesVersion(preferences)
     val theme = themeController.globalTheme
     val context = LocalContext.current
-    val prefs = preferences.universal
-    val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val accent = Color(theme.accentColor)
+    val haptic = LocalHapticFeedback.current
 
-    fun syncNoMedia(shouldHide: Boolean) {
-        try {
-            val mediaDir = File(context.filesDir, "ChatyMedia")
-            if (!mediaDir.exists()) mediaDir.mkdirs()
-            val marker = File(mediaDir, ".nomedia")
-            if (shouldHide) {
-                if (!marker.exists()) marker.writeText("")
-            } else if (marker.exists()) {
-                marker.delete()
-            }
-        } catch (e: Exception) {
-            android.util.Log.d("HideMedia", "Syncing .nomedia marker failed: $e")
-        }
+    val repository = remember(context) {
+        HideMediaRepository(
+            filesDir = context.filesDir,
+            cacheDir = context.cacheDir,
+            debug = BuildConfig.DEBUG,
+            // One batched scan per type folder; the callback confirms completion (HM1-09, HM3-15, HM3-16).
+            scanMedia = { dir ->
+                MediaScannerConnection.scanFile(context, arrayOf(dir.absolutePath), null, null)
+            },
+            debugLog = { msg -> if (BuildConfig.DEBUG) Log.d("HideMedia", msg) },
+        )
+    }
+    val scope = rememberCoroutineScope()
+    val state = remember(preferences, repository, scope, snackbar) {
+        HideMediaState(preferences, repository, scope, snackbar)
     }
 
-    Box(Modifier.fillMaxSize().background(Color(theme.backgroundColor))) {
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().background(Color(theme.surfaceColor))
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).height(56.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.padding(8.dp)) { ChatyBackButton(onPressed = onBack) }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Hide Media from gallery",
-                    color = Color(theme.primaryTextColor),
-                    fontSize = (19 * theme.fontScale).sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Column(
-                Modifier.weight(1f).windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 12.dp),
-            ) {
-                Text(
-                    "Turn ON toggles to prevent media received in chats from being scanned by and visible in your device gallery.",
-                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    color = Color(theme.secondaryTextColor), fontSize = 13.sp, lineHeight = 18.2.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                GbCardContainer {
-                    GbSwitchTile(
-                        icon = Icons.Rounded.PhotoLibrary, title = "Photos",
-                        subtitle = "Hide photos downloaded from chats in gallery",
-                        value = prefs.hidePhotosFromGallery,
-                        onChanged = { v ->
-                            preferences.updateUniversal(prefs.copy(hidePhotosFromGallery = v))
-                            syncNoMedia(v || prefs.hideVideosFromGallery || prefs.hideGifsFromGallery)
-                        },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Rounded.VideoLibrary, title = "Videos",
-                        subtitle = "Hide received video clips in gallery",
-                        value = prefs.hideVideosFromGallery,
-                        onChanged = { v ->
-                            preferences.updateUniversal(prefs.copy(hideVideosFromGallery = v))
-                            syncNoMedia(prefs.hidePhotosFromGallery || v || prefs.hideGifsFromGallery)
-                        },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Rounded.GifBox, title = "GIFs",
-                        subtitle = "Hide downloaded GIFs and animated stickers in gallery",
-                        value = prefs.hideGifsFromGallery,
-                        onChanged = { v ->
-                            preferences.updateUniversal(prefs.copy(hideGifsFromGallery = v))
-                            syncNoMedia(prefs.hidePhotosFromGallery || prefs.hideVideosFromGallery || v)
-                        },
-                    )
+    val hidePhotos = remember(prefsVersion) { preferences.universal.hidePhotosFromGallery }
+    val hideVideos = remember(prefsVersion) { preferences.universal.hideVideosFromGallery }
+    val hideGifs = remember(prefsVersion) { preferences.universal.hideGifsFromGallery }
+    val onCount = listOf(hidePhotos, hideVideos, hideGifs).count { it }
+
+    LaunchedEffect(state) { state.onScreenOpen() }
+
+    if (state.showHelp) {
+        AlertDialog(
+            onDismissRequest = { state.dismissHelp() },
+            title = { Text("Where to find your media") },
+            text = {
+                Column {
+                    Text("Open the original chat to view received media inside Chaty. This page does not move or delete chat files.")
+                    Text("Local markers are a hint to gallery scanners, not a security boundary. Gallery apps, Files and cloud backups can keep previously exported copies.")
+                    Text("To remove an exported copy, use that gallery or backup service. Resetting these preferences does not remove any copy.")
                 }
-                Spacer(Modifier.height(16.dp))
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TextButton(
-                        onClick = {
-                            preferences.updateUniversal(
-                                prefs.copy(hidePhotosFromGallery = false, hideVideosFromGallery = false, hideGifsFromGallery = false),
-                            )
-                            syncNoMedia(false)
-                            scope.launch {
-                                snackbar.currentSnackbarData?.dismiss()
-                                snackbar.showSnackbar("Media gallery visibility restored to default")
+            },
+            confirmButton = { TextButton(onClick = { state.dismissHelp() }) { Text("Done") } },
+            // HM1-39: a way out when media still appears - open the device gallery to check.
+            dismissButton = {
+                TextButton(onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW).setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+                    try {
+                        context.startActivity(intent)
+                    } catch (_: ActivityNotFoundException) {
+                        state.dismissHelp()
+                    }
+                }) { Text("Open gallery app") }
+            },
+        )
+    }
+
+    if (state.confirmReset) {
+        AlertDialog(
+            onDismissRequest = { state.confirmReset = false },
+            title = { Text("Reset gallery settings?") },
+            text = { Text("Turn off all three hide preferences? This does not move, delete or change media already saved to a gallery or cloud backup.") },
+            dismissButton = { TextButton(onClick = { state.confirmReset = false }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { state.confirmResetNow() }) { Text("Reset") } },
+        )
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        ChatySettingsPage(title = "Hide media", onBack = onBack) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(Modifier.widthIn(max = 600.dp)) {
+                    if (state.bannerVisible) {
+                        // First-visit explainer (HM1-59) with the three "what happens" bullets (HM2-50).
+                        GbCardContainer {
+                            Column(Modifier.padding(16.dp)) {
+                                Text("What hide from gallery does", style = MaterialTheme.typography.titleSmall)
+                                Spacer(Modifier.height(6.dp))
+                                Text("Keeps chat media out of gallery scans for the types you choose.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+                                Text("Files stay inside Chaty; nothing is moved or deleted.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+                                Text("Existing gallery and cloud copies are not changed.", color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp)
+                                TextButton(onClick = { state.dismissBanner() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Got it") }
                             }
-                        },
-                        colors = ButtonDefaults.textButtonColors(contentColor = accent),
-                        contentPadding = ButtonDefaults.TextButtonWithIconContentPadding,
-                    ) {
-                        Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = accent)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Reset Gallery Settings", color = accent, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    // Explanatory text in a card tone directly under the title (HM4-04).
+                    GbCardContainer {
+                        Text(
+                            "These preferences maintain local media markers. Private chat files already stay inside Chaty; existing gallery copies, camera captures and cloud backups are not changed. Hiding is not encryption. Explicit Save to gallery can create a visible copy.",
+                            Modifier.padding(16.dp),
+                            color = Color(theme.secondaryTextColor), fontSize = 14.sp, lineHeight = 20.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // State summary at the top (HM1-56) as a count row (HM4-09), plus an honest
+                    // status line: local markers only, some gallery apps may still show files (HM2-40).
+                    Text(
+                        if (state.saving) "Saving..." else "$onCount of 3 markers on. Photo marker ${if (hidePhotos) "on" else "off"}, video marker ${if (hideVideos) "on" else "off"}, GIF marker ${if (hideGifs) "on" else "off"}. Existing gallery copies are unchanged.",
+                        color = Color(theme.secondaryTextColor), modifier = Modifier.padding(8.dp), fontSize = 14.sp,
+                    )
+                    Text(
+                        "Local markers only; some gallery apps may still show files.",
+                        color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 8.dp), fontSize = 14.sp,
+                    )
+                    if (state.affectedCount >= 0) {
+                        // HM1-30: how many items the markers currently cover.
+                        Text(
+                            "${state.affectedCount} files currently in private chat media folders.",
+                            color = Color(theme.secondaryTextColor), modifier = Modifier.padding(8.dp), fontSize = 14.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    GbCardContainer {
+                        MediaVisibilitySwitch(
+                            icon = Icons.Rounded.PhotoLibrary, title = "Photos",
+                            subtitle = "Keep chat photos out of gallery scans",
+                            value = hidePhotos,
+                            onChanged = { v ->
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress) // HM4-41
+                                state.setHidden(HideMediaRepository.MediaKind.PHOTOS, v)
+                            },
+                        )
+                        MediaVisibilitySwitch(
+                            icon = Icons.Rounded.VideoLibrary, title = "Videos",
+                            subtitle = "Keep chat videos out of gallery scans",
+                            value = hideVideos,
+                            onChanged = { v ->
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                state.setHidden(HideMediaRepository.MediaKind.VIDEOS, v)
+                            },
+                        )
+                        MediaVisibilitySwitch(
+                            icon = Icons.Rounded.GifBox, title = "GIFs",
+                            subtitle = "Keep chat GIFs and animated stickers out of gallery scans",
+                            value = hideGifs,
+                            onChanged = { v ->
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                state.setHidden(HideMediaRepository.MediaKind.GIFS, v)
+                            },
+                        )
+                    }
+                    TextButton(onClick = { state.requestHelp() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("How to find hidden media") }
+                    Spacer(Modifier.height(24.dp))
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        TextButton(
+                            onClick = { state.requestReset() },
+                            enabled = !state.saving && (hidePhotos || hideVideos || hideGifs),
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = accent),
+                            contentPadding = ButtonDefaults.TextButtonWithIconContentPadding,
+                        ) {
+                            Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = accent)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Reset gallery settings", color = accent, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).imePadding().windowInsetsPadding(WindowInsets.navigationBars))
     }
 }
+
+/** Single accessible switch target; no duplicate child toggle action. */
+@Composable
+private fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, value: Boolean, onChanged: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 72.dp)
+            .semantics { stateDescription = if (value) "On" else "Off" }
+            .toggleable(value = value, role = Role.Switch, onValueChange = onChanged)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(
+            checked = value, onCheckedChange = null,
+            // Thumb icon so ON/OFF is not colour-only (HM1-55).
+            thumbContent = if (value) {
+                { Icon(Icons.Rounded.Check, null, Modifier.size(SwitchDefaults.IconSize)) }
+            } else {
+                null
+            },
+            modifier = Modifier.clearAndSetSemantics { },
+        )
+    }
+}
+
+/* Superseded by the ChatySettingsPage migration (HM1-13) and the HideMediaState holder
+ * (HM1-46/HM1-20); kept for reference per the comment-out-don't-delete rule.
+ *
+ * Original layout: custom 56 dp Row title bar (theme.surfaceColor) with a padded
+ * ChatyBackButton and a 20.sp bold "Hide media" title over a verticalScroll Column, and a
+ * composable-local syncNoMedia/update pair with the same generation guards now living in
+ * HideMediaState.update. Behaviour preserved: per-type markers, failure snackbar, reset
+ * confirm + Undo.
+ *
+ * Original header block:
+ * Row(
+ *     Modifier.fillMaxWidth().background(Color(theme.surfaceColor))
+ *         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).height(56.dp),
+ *     verticalAlignment = Alignment.CenterVertically,
+ * ) {
+ *     Box(Modifier.padding(8.dp)) { ChatyBackButton(onPressed = onBack) }
+ *     Spacer(Modifier.width(8.dp))
+ *     Text("Hide media", modifier = Modifier.weight(1f).semantics { heading() },
+ *         color = Color(theme.primaryTextColor), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+ * }
+ *
+ * Original scroll body: Column(Modifier.weight(1f)
+ *     .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+ *     .widthIn(max = 600.dp).align(Alignment.CenterHorizontally)
+ *     .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp)) { ... }
+ */

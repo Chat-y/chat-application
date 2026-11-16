@@ -1,5 +1,7 @@
 package com.example.chat.ui.auth
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import com.example.chat.ui.core.components.auth.ChatyUiTokens
 
 import androidx.compose.foundation.layout.imePadding
@@ -124,6 +126,7 @@ fun CreateNewPasswordScreen(
                     fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text26,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.5).sp,
+modifier = androidx.compose.ui.Modifier.semantics { heading() },
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space8))
                 Text(

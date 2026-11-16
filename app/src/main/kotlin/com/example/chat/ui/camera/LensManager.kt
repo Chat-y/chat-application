@@ -361,6 +361,9 @@ class LensManager(
     private var settleTimer: LensTimerHandle? = null
 
     init {
+        if (com.example.chat.BuildConfig.DEBUG) {
+            requireUniqueCameraLensIds(catalog.map { it.id })
+        }
         _runtimeState = LensRuntimeState.none
     }
 
@@ -426,4 +429,10 @@ class LensManager(
     fun dispose() {
         settleTimer?.cancel()
     }
+}
+
+/** Stable IDs drive selection, favorites and lazy keys; duplicates must fail in debug startup. */
+internal fun requireUniqueCameraLensIds(ids: List<String>) {
+    val seen = HashSet<String>()
+    require(ids.all { seen.add(it) }) { "Camera lens catalog contains duplicate IDs." }
 }

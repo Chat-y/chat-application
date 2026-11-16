@@ -49,4 +49,11 @@ object SettingsIcons {
         "wallpaper_rounded" -> Icons.Rounded.Wallpaper
         else -> null
     }
+
+    /** SET-R2-003: never render a registry entry without an icon. */
+    fun resolveOrDefault(name: String?): ImageVector =
+        resolve(name) ?: run {
+            android.util.Log.w("SettingsIcons", "unmapped icon name: $name")
+            Icons.Outlined.Settings
+        }
 }

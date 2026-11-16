@@ -63,7 +63,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Mood
 import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.ReplyAll
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Schedule
@@ -97,6 +97,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -128,14 +133,36 @@ data class SettingsSearchEntry(
     val description: String,
     val icon: ImageVector,
     val destination: SettingsScreenDestination,
+    val keywords: List<String> = emptyList(),
 )
 
 /** The fields SettingsScreen reads from dataStore.currentUser. */
 data class SettingsProfileUser(val displayName: String, val about: String, val avatarInitials: String, val username: String)
 
-/** Port of _buildSearchIndex (21 entries, same order and copy). */
+/** Port of _buildSearchIndex (18 entries, same order and copy; keywords added for synonym search). */
 fun buildSettingsSearchIndex(): List<SettingsSearchEntry> {
-    fun e(t: String, c: String, d: String, i: ImageVector, dest: SettingsScreenDestination) = SettingsSearchEntry(t, c, d, i, dest)
+    // SET-R2-005: synonym keywords so 'lock', 'theme', 'sound' etc. match
+    val kw = mapOf(
+        "Freeze Last Seen" to listOf("online", "status", "timestamp"),
+        "Hide Last Seen Audience" to listOf("online", "visibility", "who can see"),
+        "Read Receipts (Blue Ticks)" to listOf("seen", "ticks", "read"),
+        "Anti-Delete Messages" to listOf("deleted", "revoke", "retain"),
+        "Chaty App Lock" to listOf("lock", "pin", "biometric", "fingerprint", "pattern", "password"),
+        "Chaty Themes" to listOf("theme", "dark", "light", "color", "colour"),
+        "Global Template Studio" to listOf("template", "layout", "style"),
+        "Starred Messages" to listOf("star", "saved", "favorite", "bookmark"),
+        "Home UI Style" to listOf("home", "layout", "compact", "classic"),
+        "Instagram Stories Bar" to listOf("stories", "status", "avatars"),
+        "Ghost Mode" to listOf("stealth", "hide", "private"),
+        "Bubble Shapes & Corner Radius" to listOf("bubble", "chat", "shape", "font"),
+        "Quick Contact Sidebar" to listOf("sidebar", "contacts", "switcher"),
+        "Auto-Reply Rules" to listOf("auto reply", "bot", "automation"),
+        "Message Scheduler" to listOf("schedule", "later", "timer"),
+        "Interactive Click Particles" to listOf("particles", "effects", "touch", "stars", "hearts"),
+        "Notification Sounds & LED" to listOf("sound", "tone", "ringtone", "vibration", "led"),
+        "System Permissions & Hardware" to listOf("camera", "microphone", "storage", "battery", "permission"),
+    )
+    fun e(t: String, c: String, d: String, i: ImageVector, dest: SettingsScreenDestination) = SettingsSearchEntry(t, c, d, i, dest, kw[t].orEmpty())
     return listOf(
         e("Freeze Last Seen", "Privacy", "Freeze last visible timestamp", Icons.Rounded.AcUnit, SettingsScreenDestination.PrivacyCenter),
         e("Hide Last Seen Audience", "Privacy", "Restrict last seen visibility to Everyone, Contacts, Nobody", Icons.Rounded.VisibilityOff, SettingsScreenDestination.PrivacyCenter),
@@ -158,7 +185,23 @@ fun buildSettingsSearchIndex(): List<SettingsSearchEntry> {
     )
 }
 
-private enum class SettingsSheet { EditProfile, Reset, Export, About }
+/** SET-R2-011: drop bidi-control and zero-width characters that can spoof names. */
+@Composable
+private fun SettingsSectionHeader(color: Color, title: String) {
+    Text(
+        title, Modifier.padding(start = 16.dp, top = 4.dp).semantics { heading() },
+        fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = color.copy(alpha = 0.8f), letterSpacing = 0.9.sp,
+    )
+}
+
+@Composable
+private fun SettingsTile(icon: ImageVector, tint: Color, title: String, subtitle: String, onTap: () -> Unit) =
+    ChatySettingsTile(title = title, icon = icon, iconColor = tint, subtitle = subtitle, onTap = onTap)
+
+private fun stripSpoofChars(s: String): String =
+    s.filterNot { it in '\u200B'..'\u200F' || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\uFEFF' }
+
+private enum class SettingsSheet { EditProfile, Reset, ConfirmResetAll, ConfirmResetPrivacy, Export, About }
 
 /**
  * Port of lib/features/settings/settings_screen.dart. Navigation goes through [onNavigate]; the search
@@ -197,30 +240,19 @@ fun SettingsScreen(
 
     fun toast(msg: String) { scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(msg) } }
 
-    @Composable
-    fun SectionHeader(title: String) {
-        Text(
-            title, Modifier.padding(start = 8.dp, top = 4.dp),
-            fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = secondaryText.copy(alpha = 0.8f), letterSpacing = 0.9.sp,
-        )
-    }
-
-    @Composable
-    fun Tile(icon: ImageVector, tint: Color, title: String, subtitle: String, onTap: () -> Unit) =
-        ChatySettingsTile(title = title, icon = icon, iconColor = tint, subtitle = subtitle, onTap = onTap)
-
     fun nav(d: SettingsScreenDestination): () -> Unit = { onNavigate(d) }
 
     Box(Modifier.fillMaxSize().background(Color(theme.backgroundColor))) {
         Column(
-            Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().semantics { paneTitle = "Settings" }.safeDrawingPadding().verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })
                 .padding(horizontal = 18.dp, vertical = 12.dp),
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onBack?.invoke() }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", modifier = Modifier.size(22.dp), color = primaryText) }
+                // SET-R1-001: only show Back when there is somewhere to go back to.
+                if (onBack != null) IconButton(onClick = { onBack.invoke() }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", modifier = Modifier.size(22.dp), color = primaryText) } else Spacer(Modifier.size(48.dp))
                 Row {
                     IconButton(onClick = { onOpenSearch(buildSettingsSearchIndex()) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = "Search settings", modifier = Modifier.size(22.dp), color = primaryText) }
-                    IconButton(onClick = { sheet = SettingsSheet.Export }) { Icon(Icons.Rounded.QrCodeScanner, "Export chat", Modifier.size(22.dp), tint = primaryText) }
+                    IconButton(onClick = { sheet = SettingsSheet.Export }) { Icon(Icons.Rounded.IosShare, "Export chats", Modifier.size(22.dp), tint = primaryText) }
                     IconButton(onClick = { sheet = SettingsSheet.EditProfile }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit profile", modifier = Modifier.size(22.dp), color = primaryText) }
                 }
             }
@@ -229,14 +261,16 @@ fun SettingsScreen(
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(
                     Modifier
+                        .minimumInteractiveComponentSize()
                         .background(colors.surfaceSecondary, RoundedCornerShape(18.dp))
                         .border(1.dp, colors.borderSubtle, RoundedCornerShape(18.dp))
+                        .clickable(role = androidx.compose.ui.semantics.Role.Button) { sheet = SettingsSheet.EditProfile }
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(Icons.Rounded.Mood, null, Modifier.size(16.dp), tint = accent)
                     Spacer(Modifier.width(6.dp))
-                    Text(if (user.about.isNotEmpty()) user.about else "Current mood", color = primaryText, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (user.about.isNotEmpty()) user.about else "Current mood", color = primaryText, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.height(10.dp))
                 Box(
@@ -247,16 +281,16 @@ fun SettingsScreen(
                 ) {
                     Box(Modifier.size(80.dp).background(colors.surfaceSecondary, CircleShape), contentAlignment = Alignment.Center) {
                         Text(
-                            if (user.avatarInitials.isNotEmpty() && user.avatarInitials != "BM") user.avatarInitials
+                            if (user.avatarInitials.isNotEmpty()) user.avatarInitials
                             else if (user.displayName.isNotEmpty()) user.displayName.substring(0, 1).uppercase() else "U",
                             fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = primaryText,
                         )
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.clickable { sheet = SettingsSheet.EditProfile }, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.minimumInteractiveComponentSize().clickable { sheet = SettingsSheet.EditProfile }, verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (user.displayName.isNotEmpty() && user.displayName != "Bandi Maya") user.displayName
+                        if (user.displayName.isNotEmpty()) user.displayName
                         else if (user.username.isNotEmpty()) user.username else "User",
                         color = primaryText, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.3).sp,
                     )
@@ -270,88 +304,88 @@ fun SettingsScreen(
 
             ChatySettingsCard {
                 Column {
-                    Tile(com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.rupee), colors.primary, "Payments", "Chaty Pro plans, UPI & billing", nav(SettingsScreenDestination.ProPricing))
+                    SettingsTile(com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.rupee), colors.primary, "Payments", "Chaty Pro plans, UPI & billing", nav(SettingsScreenDestination.ProPricing))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Diamond, Color(0xFFFFC107), "Subscriptions", "Explore premium benefits", nav(SettingsScreenDestination.ProPricing))
+                    SettingsTile(Icons.Outlined.Diamond, colors.warning, "Subscriptions", "Explore premium benefits", nav(SettingsScreenDestination.ProPricing))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Rounded.Devices, colors.info, "Linked devices", "Use Chaty on web and desktop devices", nav(SettingsScreenDestination.LinkedDevicesOnly))
+                    SettingsTile(Icons.Rounded.Devices, colors.info, "Linked devices", "Use Chaty on web and desktop devices", nav(SettingsScreenDestination.LinkedDevicesOnly))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Person, colors.success, "Account", "Profile photo, username & details", nav(SettingsScreenDestination.AccountSettings))
+                    SettingsTile(Icons.Outlined.Person, colors.success, "Account", "Profile photo, username & details", nav(SettingsScreenDestination.AccountSettings))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Lock, colors.primary, "Privacy", "Blocked accounts, disappearing messages", nav(SettingsScreenDestination.PrivacyCenter))
+                    SettingsTile(Icons.Outlined.Lock, colors.primary, "Privacy", "Blocked accounts, disappearing messages", nav(SettingsScreenDestination.PrivacyCenter))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.People, colors.accent, "Lists", "Manage people and contact groups", nav(SettingsScreenDestination.NewChatGroupMode))
+                    SettingsTile(Icons.Outlined.People, colors.accent, "Lists", "Manage people and contact groups", nav(SettingsScreenDestination.NewChatGroupMode))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.ChatBubbleOutline, colors.success, "Chats", "Chat history, backup", nav(SettingsScreenDestination.ConversationSettings))
+                    SettingsTile(Icons.Outlined.ChatBubbleOutline, colors.success, "Chats", "Chat history, backup", nav(SettingsScreenDestination.ConversationSettings))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Palette, colors.warning, "Appearance", "Chat theme, app icon, app theme", nav(SettingsScreenDestination.UniversalScreen))
+                    SettingsTile(Icons.Outlined.Palette, colors.warning, "Appearance", "Chat theme, app icon, app theme", nav(SettingsScreenDestination.UniversalScreen))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Rounded.Cast, colors.primary, "Broadcasts", "Create and manage broadcast recipient lists", nav(SettingsScreenDestination.NewChatBroadcastMode))
+                    SettingsTile(Icons.Rounded.Cast, colors.primary, "Broadcasts", "Create and manage broadcast recipient lists", nav(SettingsScreenDestination.NewChatBroadcastMode))
                 }
             }
             Spacer(Modifier.height(18.dp))
 
-            SectionHeader("PRIVACY & SECURITY")
+            SettingsSectionHeader(secondaryText, "PRIVACY & SECURITY")
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {
-                    Tile(Icons.Outlined.Shield, colors.info, "Privacy Center", "Freeze last seen, anti-delete, read receipts & stealth", nav(SettingsScreenDestination.PrivacyCenter))
+                    SettingsTile(Icons.Outlined.Shield, colors.info, "Privacy Center", "Freeze last seen, anti-delete, read receipts & stealth", nav(SettingsScreenDestination.PrivacyCenter))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Lock, colors.primary, "Security Center", "Chaty App Lock (Biometric/PIN/Pattern), devices & audit", nav(SettingsScreenDestination.SecurityCenter))
+                    SettingsTile(Icons.Outlined.Lock, colors.primary, "Security Center", "Chaty App Lock (Biometric/PIN/Pattern), devices & audit", nav(SettingsScreenDestination.SecurityCenter))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.VpnKey, colors.success, "System Permissions & Hardware", "Camera, mic, storage, background refresh & battery", nav(SettingsScreenDestination.SystemPermissions))
+                    SettingsTile(Icons.Outlined.VpnKey, colors.success, "System Permissions & Hardware", "Camera, mic, storage, background refresh & battery", nav(SettingsScreenDestination.SystemPermissions))
                 }
             }
             Spacer(Modifier.height(18.dp))
 
-            SectionHeader("THEMES & APPEARANCE")
+            SettingsSectionHeader(secondaryText, "THEMES & APPEARANCE")
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {
-                    Tile(Icons.Outlined.Palette, colors.accent, "Themes & Color Engine", "13+ dark & light presets, custom tokens, font scaling", nav(SettingsScreenDestination.ThemeEditor))
+                    SettingsTile(Icons.Outlined.Palette, colors.accent, "Themes & Color Engine", "13+ dark & light presets, custom tokens, font scaling", nav(SettingsScreenDestination.ThemeEditor))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Rounded.DashboardCustomize, colors.primary, "Global Template Studio", "Apply a complete app template or mix component styles across navigation, chats, composer, updates, profile and calls", nav(SettingsScreenDestination.TemplatesSettings))
+                    SettingsTile(Icons.Rounded.DashboardCustomize, colors.primary, "Global Template Studio", "Apply a complete app template or mix component styles across navigation, chats, composer, updates, profile and calls", nav(SettingsScreenDestination.TemplatesSettings))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.AutoAwesomeMosaic, colors.primary, "Universal Appearance", "App icon changer, custom emojis, typography styles", nav(SettingsScreenDestination.UniversalAppearance))
+                    SettingsTile(Icons.Outlined.AutoAwesomeMosaic, colors.primary, "Universal Appearance", "App icon changer, custom emojis, typography styles", nav(SettingsScreenDestination.UniversalAppearance))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.TouchApp, colors.warning, "Navigation & Touch Effects", "Interactive click particles (Stars/Hearts/Bubbles), Sound FX", nav(SettingsScreenDestination.NavigationEffects))
+                    SettingsTile(Icons.Outlined.TouchApp, colors.warning, "Navigation & Touch Effects", "Interactive click particles (Stars/Hearts/Bubbles), Sound FX", nav(SettingsScreenDestination.NavigationEffects))
                 }
             }
             Spacer(Modifier.height(18.dp))
 
-            SectionHeader("CHATS & NOTIFICATIONS")
+            SettingsSectionHeader(secondaryText, "CHATS & NOTIFICATIONS")
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {
-                    Tile(Icons.Outlined.SpaceDashboard, colors.info, "Home Screen UI Layout", "Classic, compact, expressive, stories-first styles", nav(SettingsScreenDestination.HomeScreenSettings))
+                    SettingsTile(Icons.Outlined.SpaceDashboard, colors.info, "Home Screen UI Layout", "Classic, compact, expressive, stories-first styles", nav(SettingsScreenDestination.HomeScreenSettings))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.ChatBubbleOutline, colors.success, "Conversation Customization", "Bubble shapes, corner radius, tick styles, contact sidebar", nav(SettingsScreenDestination.ConversationSettings))
+                    SettingsTile(Icons.Outlined.ChatBubbleOutline, colors.success, "Conversation Customization", "Bubble shapes, corner radius, tick styles, contact sidebar", nav(SettingsScreenDestination.ConversationSettings))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Star, colors.primary, "Starred Messages", "Search, open and remove saved messages across conversations", nav(SettingsScreenDestination.StarredMessages))
+                    SettingsTile(Icons.Outlined.Star, colors.primary, "Starred Messages", "Search, open and remove saved messages across conversations", nav(SettingsScreenDestination.StarredMessages))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Notifications, colors.warning, "Notification & Sound Studio", "Conversation tones, LED colors, heads-up popups, vibration", nav(SettingsScreenDestination.NotificationSettings))
+                    SettingsTile(Icons.Outlined.Notifications, colors.warning, "Notification & Sound Studio", "Conversation tones, LED colors, heads-up popups, vibration", nav(SettingsScreenDestination.NotificationSettings))
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.SmartToy, colors.success, "Message Automation & Scheduler", "Auto-reply bot with keyword rules, message scheduler", nav(SettingsScreenDestination.MessageManagement))
+                    SettingsTile(Icons.Outlined.SmartToy, colors.success, "Message Automation & Scheduler", "Auto-reply bot with keyword rules, message scheduler", nav(SettingsScreenDestination.MessageManagement))
                 }
             }
             Spacer(Modifier.height(18.dp))
 
-            SectionHeader("DATA & SYSTEM")
+            SettingsSectionHeader(secondaryText, "DATA & SYSTEM")
             Spacer(Modifier.height(8.dp))
             ChatySettingsCard {
                 Column {
-                    Tile(Icons.Outlined.Backup, colors.info, "Backup & Export Data", "Export encrypted chats JSON, backup verification") { sheet = SettingsSheet.Export }
+                    SettingsTile(Icons.Outlined.Backup, colors.info, "Backup & Export Data", "Export encrypted chats JSON, backup verification") { sheet = SettingsSheet.Export }
                     ChatySettingsRowDivider()
-                    Tile(Icons.Rounded.RestartAlt, colors.error, "Reset & Diagnostics", "Reset privacy settings, themes, or restore factory defaults") { sheet = SettingsSheet.Reset }
+                    SettingsTile(Icons.Rounded.RestartAlt, colors.error, "Reset & Diagnostics", "Reset privacy settings, themes, or restore factory defaults") { sheet = SettingsSheet.Reset }
                     ChatySettingsRowDivider()
-                    Tile(Icons.Outlined.Info, colors.foregroundSecondary, "About Chaty", "Version 1.0.0 \u2022 Pure private messaging architecture") { sheet = SettingsSheet.About }
+                    SettingsTile(Icons.Outlined.Info, colors.foregroundSecondary, "About Chaty", "Version, build information and licenses") { sheet = SettingsSheet.About }
                 }
             }
             Spacer(Modifier.height(24.dp))
 
             OutlinedButton(
                 onClick = onLogout,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp).semantics { contentDescription = "Log out of Chaty. Asks for confirmation." },
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.2.dp, colors.error),
             ) {
@@ -373,15 +407,18 @@ fun SettingsScreen(
                 containerColor = colors.surface,
                 shape = com.example.chat.ui.kit.ChatyModalShape,
             ) {
-                Column(Modifier.fillMaxWidth().imePadding().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp)) {
+                Column(Modifier.fillMaxWidth().semantics { paneTitle = "Edit profile details" }.imePadding().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp)) {
                     Text("Edit Profile Details", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.foreground)
                     Spacer(Modifier.height(16.dp))
-                    OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Display Name") })
+                    OutlinedTextField(name, { if (it.length <= 50) name = it }, Modifier.fillMaxWidth(), label = { Text("Display Name") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
+                        isError = name.isBlank(), supportingText = { Text(if (name.isBlank()) "Name can't be empty" else "${name.length}/50") }, singleLine = true)
                     Spacer(Modifier.height(14.dp))
-                    OutlinedTextField(about, { about = it }, Modifier.fillMaxWidth(), label = { Text("Bio / About Status") })
+                    OutlinedTextField(about, { if (it.length <= 140) about = it }, Modifier.fillMaxWidth(), label = { Text("Bio / About Status") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), supportingText = { Text("${about.length}/140") })
                     Spacer(Modifier.height(20.dp))
                     Button(
-                        onClick = { onSaveProfile(name.trim(), about.trim()); sheet = null },
+                        onClick = { onSaveProfile(stripSpoofChars(name).trim(), stripSpoofChars(about).trim()); sheet = null },
+                        enabled = name.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
@@ -397,10 +434,10 @@ fun SettingsScreen(
                 ContextMenuSection(
                     items = listOf(
                         ContextMenuItem("Reset Theme to Default B&W", icon = Icons.Rounded.Restore, subtitle = "Restore default monochrome theme", onTap = {
-                            themeController.resetToDefaults(); toast("Theme reset to default.")
+                            sheet = null; themeController.resetToDefaults(); toast("Theme reset to default.")
                         }),
                         ContextMenuItem("Reset Privacy Options", icon = Icons.Outlined.Shield, subtitle = "Reset last seen and stealth toggles", onTap = {
-                            preferences.resetPrivacy(); toast("Privacy settings reset.")
+                            sheet = SettingsSheet.ConfirmResetPrivacy
                         }),
                     ),
                 ),
@@ -408,20 +445,39 @@ fun SettingsScreen(
                     title = "Danger Zone",
                     items = listOf(
                         ContextMenuItem("Reset ALL Preferences", icon = Icons.Rounded.CleaningServices, subtitle = "Restore factory defaults", isDestructive = true, onTap = {
-                            preferences.resetAll(); themeController.resetToDefaults()
-                            toast("All preferences reset to factory defaults.")
+                            // SET-R1-004: destructive, so ask first.
+                            sheet = SettingsSheet.ConfirmResetAll
                         }),
                     ),
                 ),
             ),
         )
+        SettingsSheet.ConfirmResetAll -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+            onDismissRequest = { sheet = null },
+            title = { Text("Reset all preferences?") },
+            text = { Text("This restores every setting and the theme to factory defaults. This cannot be undone.") },
+            dismissButton = { TextButton(onClick = { sheet = null }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    preferences.resetAll(); themeController.resetToDefaults(); sheet = null
+                    toast("All preferences reset to factory defaults.")
+                }) { Text("Reset", color = colors.error) }
+            },
+        )
+        SettingsSheet.ConfirmResetPrivacy -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
+            onDismissRequest = { sheet = null },
+            title = { Text("Reset privacy options?") },
+            text = { Text("Last seen, read receipts and stealth options will return to their defaults.") },
+            dismissButton = { TextButton(onClick = { sheet = null }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { preferences.resetPrivacy(); sheet = null; toast("Privacy settings reset.") }) { Text("Reset", color = colors.error) } },
+        )
         SettingsSheet.Export -> AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { sheet = null },
             title = { Text("Backup & Export") },
-            text = { Text("All your encrypted chats, settings, scheduled rules, and media configurations have been verified and backed up locally.") },
+            text = { Text("Chat export is coming soon. Nothing has been exported or backed up by this screen yet.") },
             dismissButton = { TextButton(onClick = { sheet = null }) { Text("Close") } },
-            // Source quirk preserved: Export JSON only dismisses and shows the snackbar; nothing is exported.
-            confirmButton = { Button(onClick = { sheet = null; toast("Exported backup package successfully! \uD83D\uDCE6") }) { Text("Export JSON") } },
+            // SET-R1-003: no false success. Export is disabled until it exists.
+            confirmButton = { Button(onClick = {}, enabled = false) { Text("Export JSON (coming soon)") } },
         )
         SettingsSheet.About -> ChatyAboutDialog(
             applicationName = "Chaty",
@@ -431,7 +487,7 @@ fun SettingsScreen(
             licenses = licenses,
         ) {
             Spacer(Modifier.height(12.dp))
-            Text("End-to-end encrypted, deeply customizable instant messaging application.")
+            Text("Deeply customizable instant messaging application. Standard chats use HTTPS transport encryption and are not end-to-end encrypted in this version.")
         }
         null -> Unit
     }

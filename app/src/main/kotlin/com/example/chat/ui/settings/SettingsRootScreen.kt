@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -82,6 +83,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -112,7 +114,13 @@ enum class SettingsDestination {
 /** Dart ProfileMediaSource. */
 enum class ProfileMediaSource { camera, gallery }
 
-private data class RootRow(val dest: SettingsDestination, val icon: ImageVector, val tint: @Composable () -> Color, val title: String, val subtitle: String)
+/** SET-R1-026: semantic tint key instead of a composable lambda, so RootRow stays a stable data class. */
+private enum class RootDialog { None, About, Policy }
+private enum class RootPick { None, Avatar, Banner }
+
+private enum class RootTint { foregroundSecondary, info, success, accent, warning, primary }
+
+private data class RootRow(val dest: SettingsDestination, val icon: ImageVector, val tint: RootTint, val title: String, val subtitle: String)
 private data class RootGroup(val title: String, val rows: List<RootRow>)
 
 /** Rows whose screens need backend support that is not shipped yet (see ReleaseFeatures). */
@@ -125,45 +133,45 @@ private val deferredDestinations: Set<SettingsDestination> = buildSet {
 
 /** Same 6 groups, order, icons, colors and copy as settings_root_screen.dart (L507-720),
  *  minus the deferred rows; empty groups are dropped. */
-private val rootGroups: List<RootGroup> get() = allRootGroups
+private val rootGroups: List<RootGroup> by lazy(LazyThreadSafetyMode.PUBLICATION) { allRootGroups
     .map { g -> g.copy(rows = g.rows.filterNot { it.dest in deferredDestinations }) }
-    .filter { it.rows.isNotEmpty() }
+    .filter { it.rows.isNotEmpty() } }
 
 private val allRootGroups: List<RootGroup> = listOf(
     RootGroup("Devices", listOf(
-        RootRow(SettingsDestination.LinkedDevices, Icons.Rounded.Devices, { LocalAppColors.current.foregroundSecondary }, "Linked Devices", "Use Chaty on web and desktop, view active sessions"),
+        RootRow(SettingsDestination.LinkedDevices, Icons.Rounded.Devices, RootTint.foregroundSecondary, "Linked Devices", "Use Chaty on web and desktop, view active sessions"),
     )),
     RootGroup("Privacy and security", listOf(
-        RootRow(SettingsDestination.Privacy, Icons.Rounded.Security, { LocalAppColors.current.info }, "Privacy Center", "Last seen, online presence, anti-delete, read receipts & stealth"),
-        RootRow(SettingsDestination.Security, Icons.Outlined.Lock, { LocalAppColors.current.success }, "Security & App Lock", "Biometric, PIN, Pattern protection & session security"),
+        RootRow(SettingsDestination.Privacy, Icons.Rounded.Security, RootTint.info, "Privacy Center", "Last seen, online presence, anti-delete, read receipts & stealth"),
+        RootRow(SettingsDestination.Security, Icons.Outlined.Lock, RootTint.success, "Security & App Lock", "Biometric, PIN, Pattern protection & session security"),
     )),
     RootGroup("Look and feel", listOf(
-        RootRow(SettingsDestination.ThemeEngine, Icons.Outlined.ColorLens, { LocalAppColors.current.accent }, "Theme & Color Engine", "13+ dark & light theme presets, token editor & palette"),
-        RootRow(SettingsDestination.TemplateStudio, Icons.Rounded.DashboardCustomize, { LocalAppColors.current.info }, "Global Template Studio", "App-wide templates and independent component styles"),
-        RootRow(SettingsDestination.HomeScreen, Icons.Outlined.Home, { LocalAppColors.current.accent }, "Home Screen", "Header, chat rows, floating button & status"),
-        RootRow(SettingsDestination.Conversation, Icons.Outlined.ChatBubbleOutline, { LocalAppColors.current.success }, "Conversation Customization", "Bubbles, ticks, contact sidebar & message appearance"),
-        RootRow(SettingsDestination.Effects, Icons.Outlined.TouchApp, { LocalAppColors.current.warning }, "Navigation & Touch Effects", "Interactive click particles (Stars/Hearts/Bubbles), Sound FX"),
-        RootRow(SettingsDestination.Universal, Icons.Outlined.Palette, { LocalAppColors.current.accent }, "Universal", "Colors, icons and fonts, language & other"),
-        RootRow(SettingsDestination.HomeShortcuts, Icons.Outlined.Widgets, { LocalAppColors.current.accent }, "Home shortcuts", "Configure in-app home layout and shortcuts"),
+        RootRow(SettingsDestination.ThemeEngine, Icons.Outlined.ColorLens, RootTint.accent, "Theme & Color Engine", "13+ dark & light theme presets, token editor & palette"),
+        RootRow(SettingsDestination.TemplateStudio, Icons.Rounded.DashboardCustomize, RootTint.info, "Global Template Studio", "App-wide templates and independent component styles"),
+        RootRow(SettingsDestination.HomeScreen, Icons.Outlined.Home, RootTint.accent, "Home Screen", "Header, chat rows, floating button & status"),
+        RootRow(SettingsDestination.Conversation, Icons.Outlined.ChatBubbleOutline, RootTint.success, "Conversation Customization", "Bubbles, ticks, contact sidebar & message appearance"),
+        RootRow(SettingsDestination.Effects, Icons.Outlined.TouchApp, RootTint.warning, "Navigation & Touch Effects", "Interactive click particles (Stars/Hearts/Bubbles), Sound FX"),
+        RootRow(SettingsDestination.Universal, Icons.Outlined.Palette, RootTint.accent, "Universal", "Colors, icons and fonts, language & other"),
+        RootRow(SettingsDestination.HomeShortcuts, Icons.Outlined.Widgets, RootTint.accent, "Home shortcuts", "Configure in-app home layout and shortcuts"),
     )),
     RootGroup("Messages and calls", listOf(
-        RootRow(SettingsDestination.Notifications, Icons.Outlined.NotificationsNone, { LocalAppColors.current.warning }, "Notifications & Alerts", "Heads-up popups, notification sounds, LED & vibration"),
-        RootRow(SettingsDestination.Automation, Icons.Outlined.SmartToy, { LocalAppColors.current.info }, "Message Automation & Scheduler", "Auto-reply rules, auto-responder bot & message scheduler"),
-        RootRow(SettingsDestination.Calls, Icons.Outlined.Call, { LocalAppColors.current.warning }, "Call Settings", "Call privacy, incoming call controls & call appearance"),
-        RootRow(SettingsDestination.DynamicIsland, Icons.Outlined.Widgets, { LocalAppColors.current.info }, "Dynamic Island", "Floating island for notifications, music, calls, timers & more"),
+        RootRow(SettingsDestination.Notifications, Icons.Outlined.NotificationsNone, RootTint.warning, "Notifications & Alerts", "Heads-up popups, notification sounds, LED & vibration"),
+        RootRow(SettingsDestination.Automation, Icons.Outlined.SmartToy, RootTint.info, "Message Automation & Scheduler", "Auto-reply rules, auto-responder bot & message scheduler"),
+        RootRow(SettingsDestination.Calls, Icons.Outlined.Call, RootTint.warning, "Call Settings", "Call privacy, incoming call controls & call appearance"),
+        RootRow(SettingsDestination.DynamicIsland, Icons.Outlined.Widgets, RootTint.info, "Dynamic Island", "Floating island for notifications, music, calls, timers & more"),
     )),
     RootGroup("Storage and system", listOf(
-        RootRow(SettingsDestination.NetworkUsage, Icons.Rounded.Wifi, { LocalAppColors.current.info }, "Network", "Connection status, transport and link speed estimates"),
-        RootRow(SettingsDestination.DataUsage, Icons.Rounded.Storage, { LocalAppColors.current.info }, "Data Usage", "Upload/download totals, per-type usage and transfer history"),
-        RootRow(SettingsDestination.StorageMedia, Icons.Rounded.Storage, { LocalAppColors.current.accent }, "Storage & Media", "Auto-download quality, media limits & cache retention"),
-        RootRow(SettingsDestination.Permissions, Icons.Outlined.AdminPanelSettings, { LocalAppColors.current.primary }, "System Permissions & Hardware", "Camera, microphone, storage, battery & OS access"),
-        RootRow(SettingsDestination.BackupRestore, Icons.Outlined.Backup, { LocalAppColors.current.info }, "Backup and restore", "Export and restore Chaty settings safely"),
-        RootRow(SettingsDestination.WasteCleaning, Icons.Outlined.CleaningServices, { LocalAppColors.current.foregroundSecondary }, "Waste cleaning", "Remove expired generated image cache files"),
+        RootRow(SettingsDestination.NetworkUsage, Icons.Rounded.Wifi, RootTint.info, "Network", "Connection status, transport and link speed estimates"),
+        RootRow(SettingsDestination.DataUsage, Icons.Rounded.Storage, RootTint.info, "Data Usage", "Upload/download totals, per-type usage and transfer history"),
+        RootRow(SettingsDestination.StorageMedia, Icons.Rounded.Storage, RootTint.accent, "Storage & Media", "Auto-download quality, media limits & cache retention"),
+        RootRow(SettingsDestination.Permissions, Icons.Outlined.AdminPanelSettings, RootTint.primary, "System Permissions & Hardware", "Camera, microphone, storage, battery & OS access"),
+        RootRow(SettingsDestination.BackupRestore, Icons.Outlined.Backup, RootTint.info, "Backup and restore", "Export and restore Chaty settings safely"),
+        RootRow(SettingsDestination.WasteCleaning, Icons.Outlined.CleaningServices, RootTint.foregroundSecondary, "Waste cleaning", "Remove expired generated image cache files"),
     )),
     RootGroup("About", listOf(
-        RootRow(SettingsDestination.About, Icons.Outlined.Info, { LocalAppColors.current.foregroundSecondary }, "About Chaty", "App version, build information and licenses"),
-        RootRow(SettingsDestination.PrivacyPolicy, Icons.Outlined.Shield, { LocalAppColors.current.foregroundSecondary }, "Privacy Policy", "Learn how service requests, messages and local data are handled"),
-        RootRow(SettingsDestination.ShareChaty, Icons.Rounded.Share, { LocalAppColors.current.foregroundSecondary }, "Share Chaty", "Invite friends and family to join Chaty"),
+        RootRow(SettingsDestination.About, Icons.Outlined.Info, RootTint.foregroundSecondary, "About Chaty", "App version, build information and licenses"),
+        RootRow(SettingsDestination.PrivacyPolicy, Icons.Outlined.Shield, RootTint.foregroundSecondary, "Privacy Policy", "Learn how service requests, messages and local data are handled"),
+        RootRow(SettingsDestination.ShareChaty, Icons.Rounded.Share, RootTint.foregroundSecondary, "Share Chaty", "Invite friends and family to join Chaty"),
     )),
 )
 
@@ -195,8 +203,8 @@ fun SettingsRootScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    var dialog by remember { mutableStateOf("") }          // "", "about", "policy"
-    var pickTarget by remember { mutableStateOf("") }      // "", "avatar", "banner"
+    var dialog by remember { mutableStateOf(RootDialog.None) }
+    var pickTarget by remember { mutableStateOf(RootPick.None) }
     val override = preferences.home.myNameOverride.trim()
     val effectiveOverride = override
     val rawName = user.displayName.trim()
@@ -210,21 +218,28 @@ fun SettingsRootScreen(
     val accent = Color(theme.accentColor)
 
     fun toast(msg: String) { scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(msg) } }
+    var uploading by remember { mutableStateOf(false) }   // SET-R1-019: in-flight guard
     fun runPick(avatar: Boolean, source: ProfileMediaSource) {
+        if (uploading) return
+        uploading = true
         scope.launch {
             try {
                 if (avatar) onPickAvatar(source) else onPickBanner(source)
                 toast(if (avatar) "Profile photo updated." else "Banner updated.")
             } catch (e: Exception) {
                 if (e.toString().contains("cancelled")) return@launch
-                toast(if (avatar) "Could not update profile photo: $e" else "Could not update banner: $e")
+                // SET-R1-014: canned copy, no raw exception text in the UI
+                android.util.Log.w("SettingsRoot", "profile media update failed", e)
+                toast(if (avatar) "Could not update profile photo. Try again." else "Could not update banner. Try again.")
+            } finally {
+                uploading = false
             }
         }
     }
     fun open(d: SettingsDestination) {
         when (d) {
-            SettingsDestination.About -> dialog = "about"
-            SettingsDestination.PrivacyPolicy -> dialog = "policy"
+            SettingsDestination.About -> dialog = RootDialog.About
+            SettingsDestination.PrivacyPolicy -> dialog = RootDialog.Policy
             SettingsDestination.ShareChaty -> ChatyShareService.shareApp(context) { toast(it) }
             else -> onNavigate(d)
         }
@@ -247,9 +262,11 @@ fun SettingsRootScreen(
             }
             // R2/R3: grouped lists capped at 720dp centered on larger
             // windows (approved responsive plan 8 Nov 2026).
-            Column(Modifier.weight(1f).fillMaxWidth().widthIn(max = 720.dp).align(Alignment.CenterHorizontally).verticalScroll(rememberScrollState())) {
+            Column(Modifier.weight(1f).fillMaxWidth().widthIn(max = 720.dp).align(Alignment.CenterHorizontally).verticalScroll(androidx.compose.runtime.saveable.rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) })) {
                 Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    val bannerHeight = ((LocalConfiguration.current.screenWidthDp - 32) * 9f / 16f).dp
+                    val bannerWidthDp = (minOf(LocalConfiguration.current.screenWidthDp, 720) - 32).coerceAtLeast(0)
+                    // SET-R1-007/R2-045: use the capped container width; cap height on wide windows
+                    val bannerHeight = (if (bannerWidthDp > 480) 180f else bannerWidthDp * 9f / 16f).dp
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                         Box(
                             Modifier.fillMaxWidth().height(bannerHeight)
@@ -264,18 +281,18 @@ fun SettingsRootScreen(
                                     contentAlignment = Alignment.Center,
                                 ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(34.dp), color = accent.copy(alpha = 0.65f)) }
                             } else {
-                                val model = if (banner.startsWith("http://") || banner.startsWith("https://")) banner else "file://" + banner.removePrefix("file://")
+                                val model = if (banner.startsWith("http://") || banner.startsWith("https://") || banner.startsWith("content://")) banner else "file://" + banner.removePrefix("file://")
                                 val fallback: @Composable () -> Unit = {
                                     Box(Modifier.fillMaxSize().background(colors.surfaceElevated), contentAlignment = Alignment.Center) {
                                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(30.dp), color = colors.foregroundSecondary)
                                     }
                                 }
-                                ChatyAsyncImage(model, "Account banner", Modifier.fillMaxSize(), placeholder = fallback, error = fallback)
+                                ChatyAsyncImage(model, "", Modifier.fillMaxSize(), placeholder = fallback, error = fallback)
                             }
                         }
                         Box(
                             Modifier.align(Alignment.TopEnd).padding(10.dp).size(48.dp).clip(CircleShape)
-                                .background(colors.surface.copy(alpha = 0.92f)).clickable { pickTarget = "banner" },
+                                .background(colors.surface.copy(alpha = 0.92f)).clickable { pickTarget = RootPick.Banner },
                             contentAlignment = Alignment.Center,
                         ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = "Change account banner", modifier = Modifier.size(19.dp), color = colors.foreground) }
                         // Dart Positioned(bottom: -40): 4dp padding ring around an 84dp avatar.
@@ -284,7 +301,8 @@ fun SettingsRootScreen(
                                 .background(colors.background, CircleShape)
                                 .border(1.dp, colors.borderSubtle, CircleShape)
                                 .padding(4.dp).clip(CircleShape)
-                                .clickable { pickTarget = "avatar" },
+                                .semantics { contentDescription = "Change profile photo" }
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { pickTarget = RootPick.Avatar },
                             contentAlignment = Alignment.Center,
                         ) {
                             val fallback: @Composable () -> Unit = {
@@ -318,17 +336,24 @@ fun SettingsRootScreen(
                     Modifier.fillMaxWidth()
                         .background(colors.surfaceSecondary, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                         .border(1.dp, colors.borderSubtle, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                        .padding(top = 12.dp, bottom = 40.dp),
+                        .navigationBarsPadding().padding(top = 12.dp, bottom = 16.dp),
                 ) {
                     rootGroups.forEach { group ->
                         Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp)) {
-                            Text(group.title, Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp), color = colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(group.title, Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp).semantics { heading() }, color = colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             Column(
                                 Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(24.dp))
                                     .border(1.dp, colors.borderSubtle, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)),
                             ) {
                                 group.rows.forEachIndexed { i, row ->
-                                    RootItemTile(row.icon, row.tint(), row.title, row.subtitle) { open(row.dest) }
+                                    RootItemTile(row.icon, when (row.tint) {
+                                        RootTint.foregroundSecondary -> colors.foregroundSecondary
+                                        RootTint.info -> colors.info
+                                        RootTint.success -> colors.success
+                                        RootTint.accent -> colors.accent
+                                        RootTint.warning -> colors.warning
+                                        RootTint.primary -> colors.primary
+                                    }, row.title, row.subtitle) { open(row.dest) }
                                     if (i < group.rows.lastIndex) HorizontalDivider(Modifier.padding(start = 68.dp, end = 16.dp), thickness = 1.dp, color = colors.divider)
                                 }
                             }
@@ -337,7 +362,7 @@ fun SettingsRootScreen(
                     Spacer(Modifier.height(16.dp))
                     OutlinedButton(
                         onClick = onLogout,
-                        modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(48.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(48.dp).semantics { contentDescription = "Log out of Chaty. Asks for confirmation." },
                         shape = RoundedCornerShape(14.dp),
                         border = androidx.compose.foundation.BorderStroke(1.2.dp, colors.error.copy(alpha = 0.8f)),
                     ) {
@@ -351,16 +376,16 @@ fun SettingsRootScreen(
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 
-    if (pickTarget.isNotEmpty()) {
-        val avatar = pickTarget == "avatar"
-        ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp, containerColor = com.example.chat.ui.theme.LocalAppColors.current.surfaceElevated, shape = com.example.chat.ui.kit.ChatyModalShape, onDismissRequest = { pickTarget = "" }) {
+    if (pickTarget != RootPick.None) {
+        val avatar = pickTarget == RootPick.Avatar
+        ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp, containerColor = com.example.chat.ui.theme.LocalAppColors.current.surfaceElevated, shape = com.example.chat.ui.kit.ChatyModalShape, onDismissRequest = { pickTarget = RootPick.None }) {
             Column(Modifier.padding(bottom = 16.dp)) {
                 for ((icon, label, src) in listOf(
                     Triple(Icons.Rounded.PhotoCamera, "Take photo", ProfileMediaSource.camera),
                     Triple(Icons.Rounded.PhotoLibrary, "Choose from gallery", ProfileMediaSource.gallery),
                 )) {
                     Row(
-                        Modifier.fillMaxWidth().clickable { pickTarget = ""; runPick(avatar, src) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                        Modifier.fillMaxWidth().clickable { pickTarget = RootPick.None; runPick(avatar, src) }.padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(icon, null, tint = colors.foreground)
@@ -372,9 +397,9 @@ fun SettingsRootScreen(
         }
     }
 
-    if (dialog == "policy") {
+    if (dialog == RootDialog.Policy) {
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
-            onDismissRequest = { dialog = "" },
+            onDismissRequest = { dialog = RootDialog.None },
             containerColor = colors.surfaceElevated,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -398,15 +423,15 @@ fun SettingsRootScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = { dialog = "" }, colors = ButtonDefaults.buttonColors(containerColor = colors.accent)) {
+                Button(onClick = { dialog = RootDialog.None }, colors = ButtonDefaults.buttonColors(containerColor = colors.accent)) {
                     Text("I Understand", color = com.example.chat.ui.kit.chatyReadableOn(colors.accent, colors.onAccent, colors.foreground), fontWeight = FontWeight.Bold)
                 }
             },
         )
     }
-    if (dialog == "about") {
+    if (dialog == RootDialog.About) {
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
-            onDismissRequest = { dialog = "" },
+            onDismissRequest = { dialog = RootDialog.None },
             containerColor = colors.surfaceElevated,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -419,7 +444,16 @@ fun SettingsRootScreen(
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("Chaty", color = colors.foreground, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Version ${context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "Unknown"} · Build ${if (android.os.Build.VERSION.SDK_INT >= 28) context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode else context.packageManager.getPackageInfo(context.packageName, 0).versionCode.toLong()}", color = colors.foregroundSecondary, fontSize = 12.sp)
+                    // SET-R1-016/028: one guarded lookup per dialog open, not per recomposition
+                    val versionText = remember {
+                        try {
+                            val info = if (android.os.Build.VERSION.SDK_INT >= 33) context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+                            else @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
+                            val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+                            "Version ${info.versionName ?: "Unknown"} · Build $code"
+                        } catch (e: Exception) { "Version Unknown" }
+                    }
+                    Text(versionText, color = colors.foregroundSecondary, fontSize = 12.sp)
                     Spacer(Modifier.height(12.dp))
                     Text(
                         "Chaty is a messaging app with optional cross-app island features. Notification access lets the island show other apps' notifications and media controls. Overlay access, or the optional accessibility host, lets it appear above other apps. These are your choices, not requirements for ordinary messaging. Open the island permission settings to see access status and turn it off. Standard chats are not end-to-end encrypted in this version.\n\nPackage: ${context.packageName}",
@@ -428,7 +462,7 @@ fun SettingsRootScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = { dialog = "" }, colors = ButtonDefaults.buttonColors(containerColor = colors.accent)) {
+                Button(onClick = { dialog = RootDialog.None }, colors = ButtonDefaults.buttonColors(containerColor = colors.accent)) {
                     Text("OK", color = com.example.chat.ui.kit.chatyReadableOn(colors.accent, colors.onAccent, colors.foreground), fontWeight = FontWeight.Bold)
                 }
             },
@@ -441,7 +475,7 @@ fun SettingsRootScreen(
 private fun RootItemTile(icon: ImageVector, tint: Color, title: String, subtitle: String, onTap: () -> Unit) {
     val colors = LocalAppColors.current
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onTap).padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onTap).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(24.dp), tint = tint) }

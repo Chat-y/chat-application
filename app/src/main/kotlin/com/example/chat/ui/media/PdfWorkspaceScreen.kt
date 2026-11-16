@@ -67,6 +67,14 @@ import com.example.chat.ui.kit.springInteractiveScale
 import com.example.chat.ui.media.icons.ChatyIconType
 import com.example.chat.ui.media.icons.ChatyMediaIcon
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import androidx.compose.ui.semantics.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material3.TextButton
 import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -105,61 +113,128 @@ fun PdfWorkspaceScreen(
 
     var isProcessing by remember { mutableStateOf(false) }
     var processingStatus by remember { mutableStateOf("") }
-    var successSheet by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var successSheet by remember { mutableStateOf<Triple<String, String, Int?>?>(null) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(library) {
         library.setFilter(MediaCategory.pdf)
         library.refreshLibrary()
     }
 
-    fun runConversion(type: ConversionType, paths: List<String>, status: String, successTitle: String) {
-        if (paths.isEmpty()) return
+//      Old synchronous picker/conversion implementation retained, disabled:
+//     fun runConversion(type: ConversionType, paths: List<String>, status: String, successTitle: String) {
+//         if (paths.isEmpty()) return
+//         isProcessing = true
+//         processingStatus = status
+//         scope.launch {
+//             try {
+//                 val docDir = context.filesDir
+//                 val now = System.currentTimeMillis()
+//                 val request = ConversionRequest(
+//                     id = now.toString(),
+//                     type = type,
+//                     sourceFilePaths = paths,
+//                     outputDirectory = docDir.path,
+//                     outputFileName = if (type == ConversionType.imagesToPdf)
+//                         "Chaty_Images_$now.pdf" else "Chaty_Document_$now.pdf",
+//                 )
+//                 val result = when (type) {
+//                     ConversionType.imagesToPdf -> pdfService.convertImagesToPdf(request)
+//                     else -> pdfService.convertTextToPdf(request)
+//                 }
+//                 isProcessing = false
+//                 if (result.success && result.outputFilePaths.isNotEmpty()) {
+//                     ChatyHapticsPort.threshold(view)
+//                     library.refreshLibrary()
+//                     successSheet = successTitle to result.outputFilePaths.first()
+//                 } else {
+//                     snackbar.showSnackbar(result.errorMessage ?: "Conversion failed.")
+//                 }
+//             } catch (e: Exception) {
+//                 isProcessing = false
+//                 snackbar.showSnackbar("Error: $e")
+//             }
+//         }
+//     }
+//
+//     // file_picker: FileType.image, allowMultiple: true
+//     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(9)) { uris ->
+//         if (uris.isEmpty()) return@rememberLauncherForActivityResult
+//         // Persisted permission + copy into cache so the clean-room PDF builder
+//         // can read plain file paths (Dart received real paths from file_picker).
+//         val paths = uris.mapNotNull { uri -> copyToCache(context, uri, "imgpick") }
+//         runConversion(ConversionType.imagesToPdf, paths, "Converting ${paths.size} images to PDF...", "Image to PDF Complete")
+//     }
+//     // file_picker: FileType.custom ['txt','md','json','csv']
+//     val textPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+//         if (uri == null) return@rememberLauncherForActivityResult
+//         val path = copyToCache(context, uri, "txtpick") ?: return@rememberLauncherForActivityResult
+//         runConversion(ConversionType.textToPdf, listOf(path), "Converting text to PDF...", "Text to PDF Complete")
+//     }
+//
+    var processingJob by remember { mutableStateOf<Job?>(null) }
+    fun startConversion(uris: List<android.net.Uri>, type: ConversionType, successTitle: String) {
+        if (uris.isEmpty() || isProcessing) return
         isProcessing = true
-        processingStatus = status
-        scope.launch {
+        processingStatus = "Preparing selected files"
+        processingJob = scope.launch {
+            val temporary = mutableListOf<File>()
+            var validatedPages: Int? = null
             try {
-                val docDir = context.filesDir
-                val now = System.currentTimeMillis()
-                val request = ConversionRequest(
-                    id = now.toString(),
-                    type = type,
-                    sourceFilePaths = paths,
-                    outputDirectory = docDir.path,
-                    outputFileName = if (type == ConversionType.imagesToPdf)
-                        "Chaty_Images_$now.pdf" else "Chaty_Document_$now.pdf",
-                )
-                val result = when (type) {
-                    ConversionType.imagesToPdf -> pdfService.convertImagesToPdf(request)
-                    else -> pdfService.convertTextToPdf(request)
+                val result = withContext(Dispatchers.IO) {
+                    val paths = uris.mapIndexed { index, uri ->
+                        withContext(Dispatchers.Main) { processingStatus = "Importing ${index + 1} of ${uris.size}" }
+                        val copy = stageMediaSource(context, uri.toString(), "chaty_pdf_import_")
+                        temporary += copy
+                        copy.path
+                    }
+                    coroutineContext.ensureActive()
+                    withContext(Dispatchers.Main) { processingStatus = "Converting a local copy" }
+                    val id = java.util.UUID.randomUUID().toString()
+                    // DOC-R3-120: carry the original display title through the request options so
+                    // the generated PDF is not titled after its cache filename.
+                    val sourceTitle = if (type == ConversionType.textToPdf) runCatching {
+                        context.contentResolver.query(uris.first(), arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else null
+                        }
+                    }.getOrNull() else null
+                    // DOC-R3-153: human-recognizable timestamped names, with a short id suffix
+                    // so two conversions in the same minute still never collide.
+                    val stamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmm")
+                        .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.now())
+                    val request = ConversionRequest(id, type, paths, context.filesDir.path,
+                        if (type == ConversionType.imagesToPdf) "Chaty_Images_${stamp}_${id.take(4)}.pdf" else "Chaty_Document_${stamp}_${id.take(4)}.pdf",
+                        if (sourceTitle.isNullOrBlank()) emptyMap() else mapOf("sourceTitle" to sourceTitle))
+                    val result = if (type == ConversionType.imagesToPdf) pdfService.convertImagesToPdf(request) else pdfService.convertTextToPdf(request)
+                    if (result.success) {
+                        require(result.outputFilePaths.isNotEmpty()) { "Missing PDF output" }
+                        val output = File(result.outputFilePaths.first())
+                        require(output.isFile && output.length() > 0) { "PDF output is unavailable" }
+                        android.os.ParcelFileDescriptor.open(output, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                            android.graphics.pdf.PdfRenderer(descriptor).use { renderer ->
+                                // DOC-R3-156: the page count we show is validated from the written file, not the input list.
+                                validatedPages = renderer.pageCount
+                                require(renderer.pageCount > 0) { "Invalid PDF output" }
+                            }
+                        }
+                    }
+                    result
                 }
-                isProcessing = false
-                if (result.success && result.outputFilePaths.isNotEmpty()) {
+                if (result.success) {
                     ChatyHapticsPort.threshold(view)
                     library.refreshLibrary()
-                    successSheet = successTitle to result.outputFilePaths.first()
-                } else {
-                    snackbar.showSnackbar(result.errorMessage ?: "Conversion failed.")
-                }
-            } catch (e: Exception) {
-                isProcessing = false
-                snackbar.showSnackbar("Error: $e")
-            }
+                    successSheet = Triple(successTitle, result.outputFilePaths.first(), validatedPages)
+                } else snackbar.showSnackbar(result.errorMessage ?: "Conversion failed. Your sources were not changed.")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { snackbar.showSnackbar("Could not convert these files. Check file access, format and the 100 MB limit.") }
+            finally { temporary.forEach { it.delete() }; isProcessing = false; processingStatus = "" }
         }
     }
-
-    // file_picker: FileType.image, allowMultiple: true
+    androidx.activity.compose.BackHandler(enabled = isProcessing) { processingJob?.cancel() }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(9)) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        // Persisted permission + copy into cache so the clean-room PDF builder
-        // can read plain file paths (Dart received real paths from file_picker).
-        val paths = uris.mapNotNull { uri -> copyToCache(context, uri, "imgpick") }
-        runConversion(ConversionType.imagesToPdf, paths, "Converting ${paths.size} images to PDF...", "Image to PDF Complete")
+        startConversion(uris, ConversionType.imagesToPdf, "Image to PDF Complete")
     }
-    // file_picker: FileType.custom ['txt','md','json','csv']
     val textPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val path = copyToCache(context, uri, "txtpick") ?: return@rememberLauncherForActivityResult
-        runConversion(ConversionType.textToPdf, listOf(path), "Converting text to PDF...", "Text to PDF Complete")
+        if (uri != null) startConversion(listOf(uri), ConversionType.textToPdf, "Text to PDF Complete")
     }
 
     Scaffold(
@@ -186,18 +261,35 @@ fun PdfWorkspaceScreen(
                 }
                 item { Spacer(Modifier.height(12.dp)) }
                 item {
-                    Row {
-                        Box(Modifier.weight(1f)) {
+                    // DOC-R4-196 / DOC-R5-256: below 340dp the conversion cards stack so
+                    // growing subtitles wrap instead of clipping in split-screen.
+                    androidx.compose.foundation.layout.BoxWithConstraints {
+                        val imagesCard = @Composable {
                             ToolCard(ChatyIconType.convert, "Images to PDF", "Merge photos into document", Color(0xFF38BDF8), isDark) {
+                                if (isProcessing) return@ToolCard
                                 ChatyHapticsPort.light(view)
                                 imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Box(Modifier.weight(1f)) {
-                            ToolCard(ChatyIconType.document, "Text to PDF", "Format txt/md as PDF", Color(0xFF10B981), isDark) {
+                        val textCard = @Composable {
+                            // DOC-R1-038: plain-text conversion - markdown is rendered as raw text, not styled.
+                            ToolCard(ChatyIconType.document, "Text to PDF", "Plain text (.txt/.md) to PDF", Color(0xFF10B981), isDark) {
+                                if (isProcessing) return@ToolCard
                                 ChatyHapticsPort.light(view)
                                 textPicker.launch(arrayOf("text/plain", "text/markdown", "application/json", "text/csv", "text/*"))
+                            }
+                        }
+                        if (maxWidth < 340.dp) {
+                            Column(Modifier.fillMaxWidth()) {
+                                imagesCard()
+                                Spacer(Modifier.height(12.dp))
+                                textCard()
+                            }
+                        } else {
+                            Row {
+                                Box(Modifier.weight(1f)) { imagesCard() }
+                                Spacer(Modifier.width(12.dp))
+                                Box(Modifier.weight(1f)) { textCard() }
                             }
                         }
                     }
@@ -232,7 +324,7 @@ fun PdfWorkspaceScreen(
                                 .background(if (isDark) Color(0xFF161C26) else Color.White)
                                 .padding(28.dp),
                             contentAlignment = Alignment.Center,
-                        ) { Text("No PDFs stored in Chaty yet. Convert images or import one above!") }
+                        ) { Text("No PDFs stored in Chaty yet. Use Images to PDF or Text to PDF above.") }
                     }
                 } else {
                     items(pdfs.size, key = { pdfs[it].id }) { idx ->
@@ -281,7 +373,9 @@ fun PdfWorkspaceScreen(
             // Processing progress overlay
             if (isProcessing) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.54f)),
+                    modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.54f))
+                        .semantics { paneTitle = "PDF conversion"; liveRegion = LiveRegionMode.Polite }
+                        .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } },
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(
@@ -294,6 +388,7 @@ fun PdfWorkspaceScreen(
                         CircularProgressIndicator()
                         Spacer(Modifier.height(16.dp))
                         Text(processingStatus, fontWeight = FontWeight.W700)
+                        TextButton(onClick = { processingJob?.cancel() }) { Text("Cancel conversion") }
                     }
                 }
             }
@@ -301,7 +396,7 @@ fun PdfWorkspaceScreen(
     }
 
     // Success sheet
-    successSheet?.let { (title, outputPath) ->
+    successSheet?.let { (title, outputPath, pageCount) ->
         ModalBottomSheet(dragHandle = { com.example.chat.ui.kit.ChatySheetGrabber() }, tonalElevation = 0.dp,
             onDismissRequest = { successSheet = null },
             containerColor = if (isDark) Color(0xFF141923) else Color.White,
@@ -309,6 +404,12 @@ fun PdfWorkspaceScreen(
         ) {
             val file = File(outputPath)
             val sizeStr = if (file.exists()) "%.1f KB".format(file.length() / 1024.0) else ""
+            // DOC-R4-183: the green check is decorative; completion gets spoken feedback once.
+            LaunchedEffect(Unit) {
+                view.announceForAccessibility(
+                    title + ". " + file.name + (pageCount?.let { ", $it page" + (if (it == 1) "" else "s") } ?: "") + ". Share and Open actions are available.",
+                )
+            }
             Column(modifier = Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     modifier = Modifier.size(54.dp).background(Color(0xFF22C55E).copy(alpha = 0.15f), CircleShape),
@@ -317,7 +418,7 @@ fun PdfWorkspaceScreen(
                 Spacer(Modifier.height(12.dp))
                 Text(title, fontWeight = FontWeight.W800, fontSize = 17.sp)
                 Spacer(Modifier.height(4.dp))
-                Text("${file.name} • $sizeStr", color = Color.Gray, fontSize = 12.sp)
+                Text("${file.name} • $sizeStr" + (pageCount?.let { " • $it page" + (if (it == 1) "" else "s") } ?: ""), color = Color.Gray, fontSize = 12.sp)
                 Spacer(Modifier.height(20.dp))
                 Row {
                     OutlinedButton(
@@ -341,6 +442,12 @@ fun PdfWorkspaceScreen(
                     Spacer(Modifier.width(12.dp))
                     Button(
                         onClick = {
+                            // DOC-R3-158: the output can disappear between success and Open; recheck first.
+                            if (!file.isFile) {
+                                successSheet = null
+                                scope.launch { snackbar.showSnackbar("The PDF is no longer available. Convert it again or return to the library.") }
+                                return@Button
+                            }
                             successSheet = null
                             val descriptor = MediaFileDescriptor(
                                 id = outputPath,
@@ -374,7 +481,8 @@ private fun ToolCard(
     isDark: Boolean,
     onTap: () -> Unit,
 ) {
-    Box(Modifier.springInteractiveScale(0.96f).clickable(onClick = onTap)) {
+    // DOC-R4-181: one merged button node so the icon, title and subtitle read as a single command.
+    Box(Modifier.springInteractiveScale(0.96f).semantics(mergeDescendants = true) { role = Role.Button }.clickable(onClick = onTap)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -399,22 +507,25 @@ private fun ToolCard(
             Spacer(Modifier.height(12.dp))
             Text(title, fontWeight = FontWeight.W700, fontSize = 14.sp)
             Spacer(Modifier.height(2.dp))
-            Text(subtitle, fontSize = 11.sp, color = Color.Gray)
+            // DOC-R1-046: 12sp readable metadata baseline (was 11sp).
+            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
         }
     }
 }
 
-/** Copies a picked content Uri into the app cache and returns the file path,
- *  matching file_picker's real-path behavior on Android. */
-private fun copyToCache(context: android.content.Context, uri: android.net.Uri, prefix: String): String? {
-    return try {
-        val name = "${prefix}_${System.currentTimeMillis()}"
-        val out = File(context.cacheDir, name)
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            out.outputStream().use { input.copyTo(it) }
-        } ?: return null
-        out.absolutePath
-    } catch (e: Exception) {
-        null
-    }
-}
+//  Legacy synchronous cache-copy helper, replaced by bounded stageMediaSource:
+// * Copies a picked content Uri into the app cache and returns the file path,
+//  *  matching file_picker's real-path behavior on Android.
+// private fun copyToCache(context: android.content.Context, uri: android.net.Uri, prefix: String): String? {
+//     return try {
+//         val name = "${prefix}_${System.currentTimeMillis()}"
+//         val out = File(context.cacheDir, name)
+//         context.contentResolver.openInputStream(uri)?.use { input ->
+//             out.outputStream().use { input.copyTo(it) }
+//         } ?: return null
+//         out.absolutePath
+//     } catch (e: Exception) {
+//         null
+//     }
+// }
+//

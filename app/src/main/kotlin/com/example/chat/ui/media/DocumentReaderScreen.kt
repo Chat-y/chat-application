@@ -3,6 +3,14 @@ package com.example.chat.ui.media
 import com.example.chat.ui.kit.ChatyHapticsPort
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +28,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -73,6 +83,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -98,10 +109,17 @@ import kotlin.math.min
 /** Exact port of lib/features/media/ui/document/document_reader_screen.dart.
  *
  *  In-app reader for pdf/text/image/video + fallback for office/archive.
- *  Page counts are estimated from extracted line counts exactly as Dart does
- *  (35 lines/page pdf, 45 lines/page text) - not real PDF pagination.
+ *  PDFs use PdfRenderer page counts and rendered pages. Text is paged in explicit
+ *  45-line chunks; search offsets resolve to those same chunks.
  *  Platform seams: share_plus/url_launcher -> ACTION_SEND / ACTION_VIEW with
  *  FileProvider (owner: manifest + file_paths, same entry as PdfWorkspace).
+ *
+ *  Search policy (DOC-R2-072 / DOC-R2-074 / DOC-R2-075 / DOC-R2-076): matching is literal,
+ *  case-insensitive and non-overlapping (Regex leftmost semantics); there is no accent folding
+ *  or Unicode normalization, so every match offset always refers to the original decoded text.
+ *  Text is normalized CRLF/CR -> LF at load for display and pagination (DOC-R5-218); blank
+ *  final pages are possible when a file ends with many newlines and are shown, not dropped
+ *  (DOC-R5-220).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,113 +134,224 @@ fun DocumentReaderScreen(
     val snackbar = remember { SnackbarHostState() }
     val isDark = isSystemInDarkTheme()
 
-    var isSearching by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    var currentPage by remember { mutableIntStateOf(1) }
-    var totalPages by remember { mutableIntStateOf(1) }
-    var textContent by remember { mutableStateOf("") }
-    var isLoadingContent by remember { mutableStateOf(true) }
-    var contentError by remember { mutableStateOf<String?>(null) }
-    var searchMatches by remember { mutableStateOf<List<DocumentSearchMatch>>(emptyList()) }
-    var currentMatchIndex by remember { mutableIntStateOf(0) }
-    var showDetails by remember { mutableStateOf(false) }
-    var showJumpDialog by remember { mutableStateOf(false) }
+    var isSearching by remember(file.path) { mutableStateOf(false) }
+    var searchQuery by androidx.compose.runtime.saveable.rememberSaveable(file.path) { mutableStateOf("") }
+    var currentPage by androidx.compose.runtime.saveable.rememberSaveable(file.path) { mutableIntStateOf(1) }
+    var totalPages by remember(file.path) { mutableIntStateOf(1) }
+    var textContent by remember(file.path) { mutableStateOf("") }
+    var isLoadingContent by remember(file.path) { mutableStateOf(true) }
+    var contentError by remember(file.path) { mutableStateOf<String?>(null) }
+    var searchMatches by remember(file.path) { mutableStateOf<List<DocumentSearchMatch>>(emptyList()) }
+    var currentMatchIndex by remember(file.path) { mutableIntStateOf(0) }
+    val textScrollState = rememberScrollState()
+    val density = LocalDensity.current
+    var showDetails by remember(file.path) { mutableStateOf(false) }
+    var showJumpDialog by remember(file.path) { mutableStateOf(false) }
 
-    LaunchedEffect(file.path) {
+    val isTextFile = file.extension in setOf("txt", "md", "json", "csv", "log")
+    // DOC-R2-103: explicit reading-size setting for long text sessions (session-scoped,
+    // 16sp scalable baseline per the proposed guidance; Small 14 / Normal 16 / Large 18).
+    var readingSizeSp by androidx.compose.runtime.saveable.rememberSaveable(file.path) { mutableIntStateOf(16) }
+    var retryAttempt by remember(file.path) { mutableIntStateOf(0) }
+    var pdfBitmap by remember(file.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var pdfEmpty by remember(file.path) { mutableStateOf(false) }
+    var fileMissing by remember(file.path) { mutableStateOf(false) }
+    var textPreviewLimited by remember(file.path) { mutableStateOf(false) }
+    LaunchedEffect(file.path, retryAttempt) {
         isLoadingContent = true
-        val diskFile = File(file.path)
-        if (!diskFile.exists()) {
-            isLoadingContent = false
-            contentError = "File does not exist on disk: ${file.path}"
-            return@LaunchedEffect
-        }
+        contentError = null
+        textContent = ""
+        searchMatches = emptyList()
+        currentMatchIndex = 0
+        currentPage = 1
+        totalPages = 1
+        pdfEmpty = false
+        fileMissing = false
+        textPreviewLimited = false
         try {
+            val diskFile = File(file.path)
+            if (!(diskFile.isFile && diskFile.canRead())) { fileMissing = true; contentError = "This file is no longer available."; return@LaunchedEffect }
             if (file.category == MediaCategory.pdf) {
-                val extracted = withContext(Dispatchers.IO) { pdfService.extractTextFromPdf(file.path) }
-                val lines = extracted.split("\n").size
-                totalPages = max(1, ceil(lines / 35.0).toInt())
-                textContent = extracted
-            } else if (file.category == MediaCategory.document ||
-                file.extension == "txt" || file.extension == "md" ||
-                file.extension == "json" || file.extension == "csv"
-            ) {
-                val content = withContext(Dispatchers.IO) { diskFile.readText() }
-                textContent = content
-                totalPages = max(1, ceil(content.split("\n").size / 45.0).toInt())
+                totalPages = withContext(Dispatchers.IO) {
+                    android.os.ParcelFileDescriptor.open(diskFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        android.graphics.pdf.PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
+                    }
+                }
+                // DOC-R2-067: an empty page tree is an explicit state, never a 1-of-0 navigation.
+                if (totalPages <= 0) { pdfEmpty = true; contentError = "This PDF has no pages to display."; return@LaunchedEffect }
+            } else if (isTextFile) {
+                val decoded = withContext(Dispatchers.IO) {
+                    require(diskFile.length() <= FileSanitizationService.MAX_SAFE_FILE_SIZE) { "Document exceeds safe read limit" }
+                    decodeTextFileBounded(diskFile)
+                }
+                when {
+                    decoded.unsupported -> { contentError = "This does not look like a readable text file."; return@LaunchedEffect }
+                    else -> {
+                        // DOC-R5-218: CRLF/CR normalize to LF at load so pagination and search offsets agree.
+                        textContent = decoded.text.replace("\r\n", "\n").replace('\r', '\n')
+                        textPreviewLimited = decoded.truncated
+                        totalPages = max(1, ceil(textContent.split("\n").size / 45.0).toInt())
+                    }
+                }
             }
-        } catch (e: Exception) {
-            contentError = "Could not read file contents: $e"
+            currentPage = currentPage.coerceIn(1, totalPages)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (e: Exception) {
+            // DOC-R2-062: an encrypted PDF is a distinct state, not a generic read failure.
+            contentError = if (e.message?.let { it.contains("password", true) || it.contains("encrypt", true) } == true)
+                "This PDF is password-protected. This reader cannot unlock it; open it in a viewer that supports passwords."
+            else "Could not read this file. Check access, file format and the 100 MB file limit."
         }
-        isLoadingContent = false
+        finally { isLoadingContent = false }
+    }
+    LaunchedEffect(file.path, currentPage, retryAttempt, isLoadingContent) {
+        if (file.category != MediaCategory.pdf || isLoadingContent || contentError != null) return@LaunchedEffect
+        pdfBitmap = null
+        try {
+            pdfBitmap = withContext(Dispatchers.IO) {
+                android.os.ParcelFileDescriptor.open(File(file.path), android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    android.graphics.pdf.PdfRenderer(descriptor).use { renderer ->
+                        renderer.openPage((currentPage - 1).coerceIn(0, renderer.pageCount - 1)).use { page ->
+                            val factor = minOf(2048f / page.width.coerceAtLeast(1), 2048f / page.height.coerceAtLeast(1))
+                            val bitmap = android.graphics.Bitmap.createBitmap((page.width * factor).toInt().coerceAtLeast(1), (page.height * factor).toInt().coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
+                            bitmap.eraseColor(android.graphics.Color.WHITE)
+                            page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            bitmap
+                        }
+                    }
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { contentError = "Could not display this PDF page. Try opening it in an external app." }
+    }
+
+    val textLines = remember(textContent) { textContent.split("\n") }
+    val textLineStarts = remember(textContent) {
+        buildList { add(0); textContent.forEachIndexed { index, char -> if (char == '\n') add(index + 1) } }.toIntArray()
+    }
+    var announcedInitialPage by androidx.compose.runtime.saveable.rememberSaveable(file.path) { mutableStateOf(false) }
+    // DOC-R4-173: page changes are confirmed once the page state settles; the initial page is not announced.
+    LaunchedEffect(currentPage, isLoadingContent, contentError) {
+        if (isLoadingContent || contentError != null) return@LaunchedEffect
+        if (!announcedInitialPage) { announcedInitialPage = true; return@LaunchedEffect }
+        view.announceForAccessibility("Page $currentPage of $totalPages")
+    }
+    var searchTruncated by remember(file.path) { mutableStateOf(false) }
+    var searchBusy by remember(file.path) { mutableStateOf(false) }
+    /** DOC-R1-004: bring the focused search match into view (approximate line-height scroll). */
+    fun scrollToFocusedMatch(match: DocumentSearchMatch) {
+        if (!isTextFile || textContent.isEmpty()) return
+        val found = textLineStarts.binarySearch(match.startOffset)
+        val line = (if (found >= 0) found else -found - 2).coerceAtLeast(0)
+        val lineInPage = (line - (match.pageNumber - 1) * 45).coerceAtLeast(0)
+        // Line height tracks the reading-size setting (DOC-R2-103), not a fixed 14sp body.
+        val targetPx = (with(density) { (readingSizeSp * 1.6).sp.toPx() } * lineInPage).toInt()
+        scope.launch { textScrollState.animateScrollTo(targetPx) }
     }
 
     fun onSearchChanged(query: String) {
         searchQuery = query
         currentMatchIndex = 0
-        if (query.isNotEmpty() && textContent.isNotEmpty()) {
-            val regex = Regex(Regex.escape(query), RegexOption.IGNORE_CASE)
-            val matches = mutableListOf<DocumentSearchMatch>()
-            var idx = 0
-            for (m in regex.findAll(textContent)) {
-                val start = max(0, m.range.first - 20)
-                val end = min(textContent.length, m.range.last + 1 + 20)
-                val snippet = textContent.substring(start, end).replace("\n", " ")
-                matches.add(
-                    DocumentSearchMatch(
-                        pageNumber = ceil(m.range.first / max(1.0, textContent.length / totalPages.toDouble()))
-                            .toInt().coerceIn(1, totalPages),
-                        matchIndex = idx++,
-                        snippet = snippet,
-                        startOffset = m.range.first,
-                        endOffset = m.range.last + 1,
-                    ),
-                )
+    }
+    LaunchedEffect(file.path, searchQuery, textContent) {
+        searchMatches = emptyList()
+        searchTruncated = false
+        if (searchQuery.isEmpty() || textContent.isEmpty() || !isTextFile) { searchBusy = false; return@LaunchedEffect }
+        searchBusy = true
+        try {
+            delay(200)
+            val result = withContext(Dispatchers.Default) {
+                val matches = ArrayList<DocumentSearchMatch>()
+                var truncated = false
+                for (match in Regex(Regex.escape(searchQuery), RegexOption.IGNORE_CASE).findAll(textContent)) {
+                    coroutineContext.ensureActive()
+                    if (matches.size >= 1000) { truncated = true; break }
+                    val foundLine = textLineStarts.binarySearch(match.range.first)
+                    val line = if (foundLine >= 0) foundLine else -foundLine - 2
+                    matches += DocumentSearchMatch((line.coerceAtLeast(0) / 45 + 1).coerceIn(1, totalPages), matches.size, "", match.range.first, match.range.last + 1)
+                }
+                matches.toList() to truncated
             }
-            searchMatches = matches
-        } else {
-            searchMatches = emptyList()
-        }
+            searchMatches = result.first
+            searchTruncated = result.second
+            searchMatches.firstOrNull()?.let { currentPage = it.pageNumber; scrollToFocusedMatch(it) }
+        } finally { searchBusy = false }
     }
 
     fun nextMatch() {
         if (searchMatches.isEmpty()) return
         currentMatchIndex = (currentMatchIndex + 1) % searchMatches.size
         currentPage = searchMatches[currentMatchIndex].pageNumber
+        scrollToFocusedMatch(searchMatches[currentMatchIndex])
+        announceMatch(searchMatches[currentMatchIndex])
     }
 
     fun prevMatch() {
         if (searchMatches.isEmpty()) return
         currentMatchIndex = (currentMatchIndex - 1 + searchMatches.size) % searchMatches.size
         currentPage = searchMatches[currentMatchIndex].pageNumber
+        scrollToFocusedMatch(searchMatches[currentMatchIndex])
+        announceMatch(searchMatches[currentMatchIndex])
     }
 
-    fun shareFile() {
-        ChatyHapticsPort.light(view)
-        val diskFile = File(file.path)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", diskFile)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = file.mimeType.ifEmpty { "*/*" }
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, file.name)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, null))
+    /** DOC-R4-172: after an explicit next/previous, speak the position and a short snippet. */
+    fun announceMatch(match: DocumentSearchMatch) {
+        if (textContent.isEmpty()) return
+        val from = (match.startOffset - 40).coerceAtLeast(0)
+        val to = (match.endOffset + 40).coerceAtMost(textContent.length)
+        val snippet = textContent.substring(from, to).replace('\n', ' ').trim()
+        view.announceForAccessibility("Match ${currentMatchIndex + 1} of ${searchMatches.size}: $snippet")
     }
 
-    fun openExternal() {
+//      Legacy unguarded FileProvider setup retained:
+//     fun shareFile() {
+//         ChatyHapticsPort.light(view)
+//         val diskFile = File(file.path)
+//         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", diskFile)
+//         val intent = Intent(Intent.ACTION_SEND).apply {
+//             type = file.mimeType.ifEmpty { "*" }
+//             putExtra(Intent.EXTRA_STREAM, uri)
+//             putExtra(Intent.EXTRA_SUBJECT, file.name)
+//             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+//         }
+//         context.startActivity(Intent.createChooser(intent, null))
+//     }
+//
+//     fun openExternal() {
+//         ChatyHapticsPort.light(view)
+//         val diskFile = File(file.path)
+//         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", diskFile)
+//         val intent = Intent(Intent.ACTION_VIEW).apply {
+//             setDataAndType(uri, file.mimeType.ifEmpty { "*" })
+//             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+//         }
+//         try {
+//             context.startActivity(intent)
+//         } catch (e: ActivityNotFoundException) {
+//             scope.launch { snackbar.showSnackbar("No external application found to open this file.") }
+//         }
+//     }
+//
+    fun launchFile(share: Boolean) {
         ChatyHapticsPort.light(view)
-        val diskFile = File(file.path)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", diskFile)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, file.mimeType.ifEmpty { "*/*" })
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
         try {
-            context.startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
-            scope.launch { snackbar.showSnackbar("No external application found to open this file.") }
-        }
+            val diskFile = File(file.path)
+            require(diskFile.isFile && diskFile.canRead())
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", diskFile)
+            val intent = Intent(if (share) Intent.ACTION_SEND else Intent.ACTION_VIEW).apply {
+                // DOC-R2-086: an unknown type falls back to a binary stream, never */* which
+                // would offer irrelevant apps.
+                val safeMime = file.mimeType.ifEmpty { "application/octet-stream" }
+                if (share) { type = safeMime; putExtra(Intent.EXTRA_STREAM, uri) }
+                else setDataAndType(uri, safeMime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = android.content.ClipData.newRawUri("Document", uri)
+            }
+            context.startActivity(Intent.createChooser(intent, if (share) "Share document" else "Open document"))
+        } catch (_: Exception) { scope.launch { snackbar.showSnackbar("Could not open this file action. Check that the file and a compatible app are available.") } }
     }
+    fun shareFile() = launchFile(true)
+    fun openExternal() = launchFile(false)
 
     Scaffold(
         containerColor = if (isDark) Color(0xFF0F131A) else Color(0xFFF8FAFC),
@@ -243,6 +372,13 @@ fun DocumentReaderScreen(
                             value = searchQuery,
                             onValueChange = { onSearchChanged(it) },
                             placeholder = { Text("Search text in document...") },
+                            supportingText = {
+                                when {
+                                    searchBusy -> Text("Searching")
+                                    searchTruncated -> Text("Showing first 1,000 matches. Refine your search.")
+                                    searchQuery.isNotEmpty() && searchMatches.isEmpty() -> Text("No matches")
+                                }
+                            },
                             singleLine = true,
                             trailingIcon = {
                                 if (searchMatches.isNotEmpty()) {
@@ -263,11 +399,12 @@ fun DocumentReaderScreen(
                         )
                     } else {
                         Text(file.name, fontSize = 15.sp, fontWeight = FontWeight.W700,
-                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.semantics { heading() })
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
+                    IconButton(enabled = isTextFile, onClick = {
                         isSearching = !isSearching
                         if (!isSearching) {
                             searchQuery = ""
@@ -280,7 +417,8 @@ fun DocumentReaderScreen(
                         )
                     }
                     IconButton(onClick = { shareFile() }) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share, semanticLabel = "Share")
+                        // DOC-R4-179: identify the document being handed off, not a bare "Share".
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share, semanticLabel = "Share ${file.name}")
                     }
                     Box {
                         var menuOpen by remember { mutableStateOf(false) }
@@ -292,6 +430,12 @@ fun DocumentReaderScreen(
                                 DropdownMenuItem(text = { Text("Jump to page...") }, onClick = {
                                     menuOpen = false; showJumpDialog = true
                                 })
+                            }
+                            if (isTextFile) {
+                                // DOC-R2-103: reading-size choices only affect the text reader.
+                                DropdownMenuItem(text = { Text("Reading size: Small${if (readingSizeSp == 14) " (current)" else ""}") }, onClick = { readingSizeSp = 14 })
+                                DropdownMenuItem(text = { Text("Reading size: Normal${if (readingSizeSp == 16) " (current)" else ""}") }, onClick = { readingSizeSp = 16 })
+                                DropdownMenuItem(text = { Text("Reading size: Large${if (readingSizeSp == 18) " (current)" else ""}") }, onClick = { readingSizeSp = 18 })
                             }
                             DropdownMenuItem(text = { Text("Open in external app") }, onClick = {
                                 menuOpen = false; openExternal()
@@ -329,7 +473,7 @@ fun DocumentReaderScreen(
                             .background(if (isDark) Color(0xFF1A2230) else Color(0xFFEDF2F7))
                             .padding(horizontal = 14.dp, vertical = 6.dp),
                     ) {
-                        Text("Page $currentPage of $totalPages", fontWeight = FontWeight.W700, fontSize = 13.sp)
+                        Text("${if (file.category == MediaCategory.pdf) "Page" else "Section"} $currentPage of $totalPages", fontWeight = FontWeight.W700, fontSize = 13.sp)
                     }
                     IconButton(onClick = { currentPage++ }, enabled = currentPage < totalPages) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = "Next page")
@@ -350,11 +494,18 @@ fun DocumentReaderScreen(
                             color = Color(0xFFFF5252), modifier = Modifier.size(44.dp))
                         Spacer(Modifier.height(12.dp))
                         Text(contentError!!, textAlign = TextAlign.Center)
+                        if (fileMissing) {
+                            // DOC-R2-109: a missing file cannot be retried or opened; offer the way out only.
+                            Spacer(Modifier.height(16.dp))
+                            OutlinedButton(onClick = onClose) { Text("Back to Library") }
+                        } else {
+                        TextButton(onClick = { retryAttempt++ }) { Text("Retry") }
                         Spacer(Modifier.height(16.dp))
                         OutlinedButton(onClick = { openExternal() }) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.openInNew, semanticLabel = null)
                             Spacer(Modifier.width(6.dp))
                             Text("Try External App")
+                        }
                         }
                     }
                 }
@@ -364,48 +515,71 @@ fun DocumentReaderScreen(
                     }
                 }
                 file.category == MediaCategory.image -> {
-                    // InteractiveViewer minScale 0.8 maxScale 5.0
-                    var zoom by remember { mutableStateOf(1f) }
-                    var offsetX by remember { mutableStateOf(0f) }
-                    var offsetY by remember { mutableStateOf(0f) }
-                    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-                        zoom = (zoom * zoomChange).coerceIn(0.8f, 5f)
-                        offsetX += panChange.x
-                        offsetY += panChange.y
-                    }
-                    Box(
-                        modifier = Modifier.fillMaxSize().transformable(transformState),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ChatyAsyncImage(
-                            url = File(file.path).toURI().toString(),
-                            contentDescription = file.name,
-                            modifier = Modifier.graphicsLayer {
-                                scaleX = zoom; scaleY = zoom
-                                translationX = offsetX; translationY = offsetY
-                            },
-                            contentScale = ContentScale.Fit,
-                        )
-                    }
+//                     // InteractiveViewer minScale 0.8 maxScale 5.0
+//                     var zoom by remember(file.path) { mutableStateOf(1f) }
+//                     var offsetX by remember(file.path) { mutableStateOf(0f) }
+//                     var offsetY by remember(file.path) { mutableStateOf(0f) }
+//                     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+//                         zoom = (zoom * zoomChange).coerceIn(0.8f, 5f)
+//                         offsetX += panChange.x
+//                         offsetY += panChange.y
+//                     }
+//                     Box(
+//                         modifier = Modifier.fillMaxSize().transformable(transformState),
+//                         contentAlignment = Alignment.Center,
+//                     ) {
+//                         ChatyAsyncImage(
+//                             url = File(file.path).toURI().toString(),
+//                             contentDescription = file.name,
+//                             modifier = Modifier.graphicsLayer {
+//                                 scaleX = zoom; scaleY = zoom
+//                                 translationX = offsetX; translationY = offsetY
+//                             },
+//                             contentScale = ContentScale.Fit,
+//                         )
+//                     }
+//                 }
+                    com.example.chat.ui.chats.detail.MediaReviewImage(File(file.path).toURI().toString(), file.name, Modifier.fillMaxSize())
                 }
                 file.category == MediaCategory.video -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         ChatyVideoPlayerWidget(
                             videoPath = file.path,
                             title = file.name,
-                            autoPlay = true,
+                            // DOC-R2-106: no autoplay in a reader - playback is an explicit user choice.
+                            autoPlay = false,
                         )
                     }
                 }
-                file.category == MediaCategory.pdf || file.category == MediaCategory.document -> {
+                file.category == MediaCategory.pdf -> {
+                    val page = pdfBitmap
+                    if (page == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    else Image(page.asImageBitmap(), "Page $currentPage of $totalPages in ${file.name}", modifier = Modifier.fillMaxSize().padding(8.dp), contentScale = ContentScale.Fit)
+                }
+                isTextFile -> {
+                    val highlightStyle = SpanStyle(background = MaterialTheme.colorScheme.tertiaryContainer, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                    Column(Modifier.fillMaxSize()) {
+                        if (textPreviewLimited) {
+                            // DOC-R1-015: the preview is capped; say so instead of silently truncating.
+                            Text(
+                                "Showing the first 2 MB of this large document. Open in an external app for the full file.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                            )
+                        }
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(textScrollState)
                             .padding(20.dp),
+                        contentAlignment = Alignment.TopCenter,
                     ) {
                         Box(
                             modifier = Modifier
+                                // DOC-R4-191: constrain reading width on wide screens so lines stay trackable.
+                                .widthIn(max = 600.dp)
                                 .fillMaxWidth()
                                 .shadow(
                                     12.dp, RoundedCornerShape(16.dp),
@@ -423,15 +597,36 @@ fun DocumentReaderScreen(
                         ) {
                             SelectionContainer {
                                 Text(
-                                    textContent.ifEmpty { "Document is empty." },
-                                    fontSize = 14.sp,
-                                    lineHeight = (14 * 1.6).sp,
+                                    buildAnnotatedString {
+                                        val pageText = textLines.drop((currentPage - 1) * 45).take(45).joinToString("\n").ifEmpty { "Document is empty." }
+                                        append(pageText)
+                                        if (searchQuery.isNotEmpty()) Regex(Regex.escape(searchQuery), RegexOption.IGNORE_CASE).findAll(pageText).forEach { match ->
+                                            addStyle(highlightStyle, match.range.first, match.range.last + 1)
+                                        }
+                                    },
+                                    fontSize = readingSizeSp.sp,
+                                    lineHeight = (readingSizeSp * 1.6).sp,
                                     fontFamily = if (file.extension == "json" || file.extension == "csv")
                                         FontFamily.Monospace else null,
                                     color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF1E293B),
                                 )
                             }
                         }
+                    }
+                    }
+                }
+                file.category == MediaCategory.audio -> {
+                    // DOC-R1-060: this reader has no audio branch; route honestly instead of a blank preview.
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(file.name, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text("This reader does not play audio. Open it from the media viewer or an external player.", textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(16.dp))
+                        OutlinedButton(onClick = { openExternal() }) { Text("Open in External App") }
                     }
                 }
                 else -> {
@@ -501,6 +696,8 @@ fun DocumentReaderScreen(
     // Page jump dialog
     if (showJumpDialog) {
         var jumpText by remember { mutableStateOf("$currentPage") }
+        val jumpTarget = jumpText.toIntOrNull()
+        val jumpValid = jumpTarget != null && jumpTarget in 1..totalPages
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showJumpDialog = false },
             title = { Text("Jump to Page") },
@@ -509,17 +706,18 @@ fun DocumentReaderScreen(
                     value = jumpText,
                     onValueChange = { jumpText = it },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    // DOC-R4-174: persistent label plus explicit error semantics, not placeholder-only.
+                    label = { Text("Page number") },
                     placeholder = { Text("Enter page (1 - $totalPages)") },
                     suffix = { Text("of $totalPages") },
                     singleLine = true,
+                    isError = !jumpValid,
+                    supportingText = { if (!jumpValid) Text("Enter a page from 1 to $totalPages") },
                 )
             },
             confirmButton = {
-                Button(onClick = {
-                    jumpText.toIntOrNull()?.let { target ->
-                        if (target in 1..totalPages) currentPage = target
-                    }
-                    showJumpDialog = false
+                Button(enabled = jumpValid, onClick = {
+                    jumpTarget?.takeIf { it in 1..totalPages }?.let { currentPage = it; showJumpDialog = false }
                 }) { Text("Jump") }
             },
             dismissButton = {
@@ -548,28 +746,48 @@ fun DocumentReaderScreen(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W800),
                 )
                 Spacer(Modifier.height(14.dp))
+                // DOC-R2-108: name, type and size come first; the implementation path is last.
                 InfoRow("File Name", file.name)
-                InfoRow("Size", file.humanReadableSize)
-                InfoRow("MIME Type", file.mimeType)
                 InfoRow("Category", file.category.name.uppercase())
-                InfoRow("Path", file.path)
+                InfoRow("MIME Type", file.mimeType)
+                InfoRow("Size", file.humanReadableSize)
                 InfoRow(
                     "Modified",
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                         .withZone(ZoneId.systemDefault()).format(file.modifiedAt),
                 )
+                InfoRow("Path", file.path)
                 Spacer(Modifier.height(14.dp))
-                Row {
-                    OutlinedButton(onClick = { showDetails = false; openExternal() }, modifier = Modifier.weight(1f)) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.openInNew, semanticLabel = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Open External")
+                // DOC-R4-195 / DOC-R5-246: below 340dp the two actions stack so a 200% font
+                // scale never squeezes them into collision.
+                androidx.compose.foundation.layout.BoxWithConstraints {
+                    // DOC-R4-179: the generic action names the document it hands off.
+                    val openBtn = @Composable { m: Modifier ->
+                        OutlinedButton(onClick = { showDetails = false; openExternal() }, modifier = m.semantics { contentDescription = "Open ${file.name} in an external app" }) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.openInNew, semanticLabel = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Open External")
+                        }
                     }
-                    Spacer(Modifier.width(12.dp))
-                    Button(onClick = { showDetails = false; shareFile() }, modifier = Modifier.weight(1f)) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share, semanticLabel = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Share File")
+                    val shareBtn = @Composable { m: Modifier ->
+                        Button(onClick = { showDetails = false; shareFile() }, modifier = m.semantics { contentDescription = "Share ${file.name}" }) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share, semanticLabel = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Share File")
+                        }
+                    }
+                    if (maxWidth < 340.dp) {
+                        Column(Modifier.fillMaxWidth()) {
+                            openBtn(Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(8.dp))
+                            shareBtn(Modifier.fillMaxWidth())
+                        }
+                    } else {
+                        Row {
+                            openBtn(Modifier.weight(1f))
+                            Spacer(Modifier.width(12.dp))
+                            shareBtn(Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -579,14 +797,73 @@ fun DocumentReaderScreen(
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(modifier = Modifier.padding(vertical = 4.dp)) {
+    // DOC-R1-048 / DOC-R2-108: label-above-value stacking wraps safely at large font
+    // scale, and long paths never crowd a fixed-width label column.
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Text(
             label,
             fontWeight = FontWeight.W600,
             fontSize = 12.sp,
             color = Color.Gray,
-            modifier = Modifier.width(90.dp),
         )
-        Text(value, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Text(value, fontSize = 12.sp)
+    }
+}
+
+/** Decoded preview of a text document: bounded content plus honesty flags. */
+private class TextDecodeResult(val text: String, val truncated: Boolean, val unsupported: Boolean)
+
+/** DOC-R1-015: preview cap so multi-hundred-MB logs never load fully into memory. */
+private const val TEXT_PREVIEW_BYTES = 2 * 1024 * 1024
+
+/**
+ * DOC-R1-015 / DOC-R2-069 / DOC-R2-070: bounded, BOM-aware text decode.
+ * Reads at most TEXT_PREVIEW_BYTES of source (flagging truncation), honors UTF-8 /
+ * UTF-16 BOMs, refuses UTF-32 and binary content mislabeled as text, and never
+ * loads the whole file into memory.
+ */
+private fun decodeTextFileBounded(file: File): TextDecodeResult {
+    file.inputStream().buffered().use { stream ->
+        stream.mark(4)
+        val bom = ByteArray(4)
+        val bomLen = stream.read(bom)
+        stream.reset()
+        var charset: java.nio.charset.Charset = Charsets.UTF_8
+        var skip = 0L
+        when {
+            // UTF-32 BOMs first: FF FE 00 00 would otherwise be misread as UTF-16LE.
+            bomLen >= 4 && bom[0] == 0xFF.toByte() && bom[1] == 0xFE.toByte() && bom[2] == 0.toByte() && bom[3] == 0.toByte() ->
+                return TextDecodeResult("", truncated = false, unsupported = true) // UTF-32 LE
+            bomLen >= 4 && bom[0] == 0.toByte() && bom[1] == 0.toByte() && bom[2] == 0xFE.toByte() && bom[3] == 0xFF.toByte() ->
+                return TextDecodeResult("", truncated = false, unsupported = true) // UTF-32 BE
+            bomLen >= 3 && bom[0] == 0xEF.toByte() && bom[1] == 0xBB.toByte() && bom[2] == 0xBF.toByte() -> skip = 3L // UTF-8 BOM
+            bomLen >= 2 && bom[0] == 0xFF.toByte() && bom[1] == 0xFE.toByte() -> { charset = Charsets.UTF_16LE; skip = 2L }
+            bomLen >= 2 && bom[0] == 0xFE.toByte() && bom[1] == 0xFF.toByte() -> { charset = Charsets.UTF_16BE; skip = 2L }
+        }
+        // DOC-R2-069: with no BOM, sniff the first chunk for binary content.
+        stream.mark(8192)
+        val sniff = ByteArray(8192)
+        val sniffLen = stream.read(sniff)
+        stream.reset()
+        if (skip == 0L && sniffLen > 0) {
+            var controls = 0
+            for (i in 0 until sniffLen) {
+                val b = sniff[i].toInt() and 0xFF
+                if (b == 0) return TextDecodeResult("", truncated = false, unsupported = true)
+                if (b < 0x09 || b in 0x0E..0x1F) controls++
+            }
+            if (controls > sniffLen / 4) return TextDecodeResult("", truncated = false, unsupported = true)
+        }
+        stream.skip(skip)
+        val buffer = ByteArray(TEXT_PREVIEW_BYTES + 1)
+        var total = 0
+        while (total < buffer.size) {
+            val read = stream.read(buffer, total, buffer.size - total)
+            if (read < 0) break
+            total += read
+        }
+        val truncated = total > TEXT_PREVIEW_BYTES
+        val text = String(buffer, 0, min(total, TEXT_PREVIEW_BYTES), charset)
+        return TextDecodeResult(text, truncated, unsupported = false)
     }
 }

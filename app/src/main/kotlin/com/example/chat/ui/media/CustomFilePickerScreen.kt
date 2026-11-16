@@ -69,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
@@ -87,6 +88,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 
 /** Exact port of lib/features/media/ui/picker/custom_file_picker_screen.dart.
  *
@@ -115,6 +126,8 @@ fun CustomFilePickerScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val isDark = isSystemInDarkTheme()
+    val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val searchKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     var tick by remember { mutableIntStateOf(0) }
     DisposableEffect(libraryService) {
@@ -124,23 +137,58 @@ fun CustomFilePickerScreen(
     }
     @Suppress("UNUSED_EXPRESSION") tick
 
-    var searchText by remember { mutableStateOf("") }
-    var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var searchText by remember(libraryService) { mutableStateOf(boundedPickerText(libraryService.searchQuery)) }
+    var selectedPaths by remember(libraryService) { mutableStateOf<Set<String>>(emptySet()) }
     var isGridView by remember { mutableStateOf(true) }
-    var isSelectionMode by remember { mutableStateOf(false) }
-    var summaryFiles by remember { mutableStateOf<List<MediaFileDescriptor>?>(null) }
+    val listScrollState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val gridScrollState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    var isSelectionMode by remember(libraryService) { mutableStateOf(false) }
+    var summaryFiles by remember(libraryService) { mutableStateOf<List<MediaFileDescriptor>?>(null) }
 
-    LaunchedEffect(Unit) {
-        if (initialCategory != null) libraryService.setFilter(initialCategory)
-        libraryService.refreshLibrary()
+    var refreshError by remember(libraryService) { mutableStateOf<String?>(null) }
+    var refreshAttempt by remember { mutableIntStateOf(0) }
+    var importing by remember(libraryService) { mutableStateOf(false) }
+    var importProgress by remember(libraryService) { mutableStateOf("") }
+    var importStopping by remember(libraryService) { mutableStateOf(false) }
+    var importNotice by remember(libraryService) { mutableStateOf<String?>(null) }
+    var importHelpSeen by remember(libraryService) { mutableStateOf(false) }
+    var showImportHelp by remember { mutableStateOf(false) }
+    var importJob by remember(libraryService) { mutableStateOf<Job?>(null) }
+    val importActive = remember(libraryService) { java.util.concurrent.atomic.AtomicBoolean(true) }
+    val importFiles = remember(libraryService) { mutableListOf<File>() }
+    val transferredPaths = remember(libraryService) { mutableSetOf<String>() }
+    DisposableEffect(libraryService) {
+        onDispose {
+            importActive.set(false)
+            importJob?.cancel()
+            if (!isWorkspaceMode) importFiles.filter { it.path !in transferredPaths }.forEach { it.delete() }
+        }
+    }
+    val allFiles = remember(libraryService, tick) { libraryService.files }
+    // val visibleFiles = remember(libraryService, tick) { libraryService.filteredFiles }
+    var browseOrder by remember(libraryService) { mutableStateOf(MediaBrowseOrder.Newest) }
+    var sortExpanded by remember { mutableStateOf(false) }
+    var detailsFile by remember(libraryService) { mutableStateOf<MediaFileDescriptor?>(null) }
+    val visibleFiles = remember(libraryService, tick, browseOrder) { orderMediaFiles(libraryService.filteredFiles, browseOrder) }
+    LaunchedEffect(libraryService, initialCategory, refreshAttempt) {
+        refreshError = null
+        try {
+            libraryService.setFilter(initialCategory)
+            libraryService.refreshLibrary()
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { refreshError = "Could not refresh files. Try again." }
     }
 
     fun toggleSelect(item: MediaFileDescriptor) {
+        if (!item.exists || !File(item.path).canRead()) {
+            scope.launch { snackbar.showSnackbar("This file is no longer available. Refresh the library.") }
+            return
+        }
         ChatyHapticsPort.selection(view)
         val paths = selectedPaths.toMutableSet()
         if (paths.contains(item.path)) {
             paths.remove(item.path)
-            if (paths.isEmpty() && !isWorkspaceMode) isSelectionMode = false
+            if (paths.isEmpty()) isSelectionMode = false
         } else {
             if (!allowMultiple) paths.clear()
             paths.add(item.path)
@@ -159,76 +207,177 @@ fun CustomFilePickerScreen(
         if (allowMultiple) ActivityResultContracts.OpenMultipleDocuments()
         else ActivityResultContracts.OpenDocument(),
     ) { result ->
-        val uris = when (result) {
+        val uris = (when (result) {
             is List<*> -> result.filterIsInstance<android.net.Uri>()
             is android.net.Uri -> listOf(result)
             else -> emptyList()
-        }
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        scope.launch {
+        }).distinct()
+        if (uris.isEmpty() || !importActive.get()) return@rememberLauncherForActivityResult
+        if (importing) return@rememberLauncherForActivityResult
+        importing = true
+        importStopping = false
+        importNotice = null
+        importJob = scope.launch {
+            val sessionFiles = mutableListOf<File>()
+            val completedBatch = mutableListOf<Pair<MediaFileDescriptor, File>>()
+            var itemNumber = 0
+            var itemLabel = "attachment"
             try {
                 val context = view.context
                 val descriptors = withContext(Dispatchers.IO) {
-                    uris.mapNotNull { uri ->
-                        // Copy into cache so descriptors carry real paths,
-                        // matching file_picker's Android behavior.
-                        val name = "devpick_${System.currentTimeMillis()}_${uris.indexOf(uri)}"
-                        val out = File(context.cacheDir, name)
-                        context.contentResolver.openInputStream(uri)?.use { input ->
-                            out.outputStream().use { input.copyTo(it) }
-                        } ?: return@mapNotNull null
-                        val classification = FileTypeDetector.classifyFile(
-                            headerBytesOf = {
-                                out.inputStream().use { s -> ByteArray(16).also { s.read(it) } }
-                            },
-                            filePath = out.absolutePath,
-                        )
-                        MediaFileDescriptor(
-                            id = out.absolutePath,
-                            name = out.name,
-                            path = out.absolutePath,
-                            sizeBytes = out.length(),
-                            mimeType = classification.mimeType,
-                            category = classification.category,
-                            modifiedAt = java.time.Instant.ofEpochMilli(out.lastModified()),
-                        )
+                    uris.mapIndexed { index, uri ->
+                        coroutineContext.ensureActive()
+                        itemNumber = index + 1
+                        itemLabel = "attachment" // A failing new provider item must not inherit the prior label.
+                        requirePickerContentScheme(uri.scheme)
+                        withContext(Dispatchers.Main) { importProgress = "Importing ${index + 1} of ${uris.size}" }
+                        val displayName = runCatching {
+                            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                                if (cursor.moveToFirst()) cursor.getString(0) else null
+                            }
+                        }.getOrNull() ?: "attachment"
+                        requirePickerProviderName(displayName)
+                        val safeName = FileSanitizationService { context.cacheDir }.sanitizeFileName(displayName)
+                        itemLabel = pickerFileLabel(safeName)
+//                         val out = File(context.cacheDir, "devpick_${java.util.UUID.randomUUID()}_$safeName")
+//                         sessionFiles += out
+//                         try {
+//                             context.contentResolver.openInputStream(uri)?.use { input ->
+//                                 out.outputStream().use { output ->
+//                                     var lastReported = 0L
+//                                     copyMediaBounded(input, output, FileSanitizationService.MAX_SAFE_FILE_SIZE.toLong()) { bytes ->
+//                                         if (bytes - lastReported >= 256 * 1024) {
+//                                             lastReported = bytes
+//                                             withContext(Dispatchers.Main) { importProgress = "Importing ${index + 1} of ${uris.size}: ${android.text.format.Formatter.formatFileSize(context, bytes)} copied" }
+//                                         }
+//                                     }
+//                                 }
+//                             } ?: error("Unavailable source")
+//                             require(out.length() > 0) { "Empty source" }
+                        // Old direct devpick_<uuid> file writing is replaced with an exclusive hidden
+                        // .part copy. Visible filenames are assigned only after the whole batch closes.
+                        var lastReported = 0L
+                        val copy = copyPickerImport(context.cacheDir, FileSanitizationService.MAX_SAFE_FILE_SIZE.toLong(),
+                            openSource = { context.contentResolver.openInputStream(uri) },
+                            onPendingCreated = { sessionFiles += it }) { bytes ->
+                            if (bytes - lastReported >= 256 * 1024) {
+                                lastReported = bytes
+                                withContext(Dispatchers.Main) { importProgress = "Importing ${index + 1} of ${uris.size}: ${android.text.format.Formatter.formatFileSize(context, bytes)} copied" }
+                            }
+                        }
+                        val out = copy.file
+                        try {
+                            // Copy, byte cap, nonempty check and both stream closes completed in copyPickerImport.
+                            // Original filePath = safeName let suffix fallback claim an unverified type.
+                            // Detect from bytes only. Unknown formats stay generic, not a decoder promise.
+                            val classification = out.inputStream().use { stream ->
+                                FileTypeDetector.classifyBytes(readPickerHeader(stream))
+                            }
+                            val importName = pickerDetectedImportName(safeName, classification)
+                            MediaFileDescriptor(
+                                id = out.absolutePath, name = importName, path = out.absolutePath,
+                                sizeBytes = copy.bytesCopied, mimeType = classification.mimeType,
+                                category = classification.category,
+                                modifiedAt = java.time.Instant.ofEpochMilli(out.lastModified()),
+                                metadata = mapOf("source" to "Device document", "providerName" to safeName,
+                                    "typeEvidence" to if (classification.mimeType == "application/octet-stream") "Unknown bytes; generic file" else "Header signature"),
+                            ).also { completedBatch += it to out }
+                        } catch (error: Throwable) { out.delete(); throw error }
+                    }
+                    coroutineContext.ensureActive()
+                    completedBatch.map { (descriptor, pending) ->
+                        val finalFile = File(context.cacheDir, "devpick_${java.util.UUID.randomUUID()}_${descriptor.name}")
+                        check(!finalFile.exists()) { "Import output collision" }
+                        if (!pending.renameTo(finalFile)) throw PickerImportFailure(PickerImportFailureKind.Storage)
+                        sessionFiles += finalFile
+                        descriptor.copy(id = finalFile.path, path = finalFile.path)
                     }
                 }
-                if (descriptors.isEmpty()) return@launch
-                if (isWorkspaceMode) {
-                    libraryService.refreshLibrary()
-                } else {
-                    confirmAndReturn(descriptors)
+                coroutineContext.ensureActive()
+                check(importActive.get()) { "Import session ended" }
+                importFiles += sessionFiles
+                if (isWorkspaceMode) libraryService.refreshLibrary() else confirmAndReturn(descriptors)
+                importNotice = "Imported ${descriptors.size} of ${uris.size} device documents. These are local copies, not live links."
+            } catch (cancelled: CancellationException) {
+                val remainingCopies = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    sessionFiles.forEach { it.delete() }; sessionFiles.count { it.exists() }
                 }
-            } catch (e: Exception) {
-                snackbar.showSnackbar("Failed to access device files: $e")
-            }
+                if (importActive.get()) importNotice = if (remainingCopies == 0) "Import canceled. This batch was not added."
+                    else "Import canceled. $remainingCopies temporary copies could not be removed. This batch was not added."
+                throw cancelled
+            } catch (failure: Exception) {
+                val remainingCopies = withContext(Dispatchers.IO) { sessionFiles.forEach { it.delete() }; sessionFiles.count { it.exists() } }
+                if (importActive.get()) {
+                    val problem = when ((failure as? PickerImportFailure)?.kind) {
+                        PickerImportFailureKind.Unavailable -> "The document provider could not open this item. Choose it again."
+                        PickerImportFailureKind.Permission -> "Read access was lost. Choose the file again to grant access."
+                        PickerImportFailureKind.Storage -> "The local copy could not be written. Check device storage, free space if needed, and try again."
+                        PickerImportFailureKind.TooLarge -> "This file exceeds the 100 MB per-file limit. Choose a smaller file."
+                        PickerImportFailureKind.Empty -> "This file returned no bytes. Choose a nonempty file."
+                        PickerImportFailureKind.Read -> "The document provider stopped or could not finish reading. Choose the file again."
+                        null -> "This file could not be imported. Choose it again."
+                    }
+                    importNotice = "Item $itemNumber of ${uris.size} ($itemLabel): $problem No files from this batch were added." +
+                        if (remainingCopies > 0) " $remainingCopies temporary copies could not be removed." else ""
+                }
+            } finally { importing = false; importStopping = false; importProgress = "" }
         }
     }
 
     fun pickFromDeviceStorage() {
+        if (importing) return
         ChatyHapticsPort.light(view)
-        devicePicker.launch(arrayOf("*/*"))
+        if (!importHelpSeen) showImportHelp = true else devicePicker.launch(arrayOf("*/*"))
     }
 
     fun openFile(item: MediaFileDescriptor) {
         if (item.path.startsWith("demo/") || !item.exists) {
-            toggleSelect(item)
+            scope.launch { snackbar.showSnackbar("This file is no longer available. Refresh the library.") }
             return
         }
         onOpenDocument(item)
     }
 
+    if (showImportHelp) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { showImportHelp = false },
+        title = { Text("Import device documents") },
+        text = { Text("Chaty makes private local copies, not live links to the original documents. Copies are limited to 100 MB per file. If one item fails, the whole new batch is canceled; your existing selection stays unchanged.") },
+        confirmButton = { TextButton(onClick = { showImportHelp = false; importHelpSeen = true; devicePicker.launch(arrayOf("*/*")) }) { Text("Choose files") } },
+        dismissButton = { TextButton(onClick = { showImportHelp = false }) { Text("Cancel") } },
+    )
+    detailsFile?.let { file ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { detailsFile = null },
+            title = { Text("File details") },
+            text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(pickerFileLabel(file.name), style = MaterialTheme.typography.titleMedium.copy(
+                    textDirection = androidx.compose.ui.text.style.TextDirection.ContentOrLtr))
+                Text("Size: ${file.humanReadableSize} (${file.sizeBytes} bytes)")
+                Text("Type: ${file.mimeType}")
+                Text("Category: ${file.category.name}")
+                (file.metadata["source"] as? String)?.let { Text("Source: $it") }
+                (file.metadata["providerName"] as? String)?.let { Text("Provider label (unverified): ${pickerFileLabel(it)}") }
+                (file.metadata["typeEvidence"] as? String)?.let { Text("Type evidence: $it") }
+                Text("Modified: ${java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM).withZone(java.time.ZoneId.systemDefault()).format(file.modifiedAt)}")
+                Text("Location: ${file.path}")
+            } },
+            confirmButton = { TextButton(onClick = { detailsFile = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close details") } },
+        )
+    }
     Scaffold(
-        containerColor = if (isDark) Color(0xFF0F131A) else Color(0xFFF8FAFC),
+        containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Column {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = if (isDark) Color(0xFF131822).copy(alpha = 0.85f)
-                        else Color.White.copy(alpha = 0.85f),
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
                     ),
+                    navigationIcon = {
+                        IconButton(onClick = onClose) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back")
+                        }
+                    },
                     title = {
                         Text(
                             title,
@@ -244,21 +393,27 @@ fun CustomFilePickerScreen(
                                 contentDescription = if (isGridView) "List view" else "Grid view",
                             )
                         }
-                        IconButton(onClick = { pickFromDeviceStorage() }) {
+                        IconButton(enabled = !importing, onClick = { pickFromDeviceStorage() }) {
                             Icon(Icons.Rounded.AddToPhotos, contentDescription = "Browse device files")
                         }
                         Spacer(Modifier.width(6.dp))
                     },
                 )
+                Text(if (isWorkspaceMode) "Open files, or select files to share" else "Select files to send", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+                if (!allowMultiple) Text("Choose one file", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
                 // Search input
                 Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                     TextField(
                         value = searchText,
                         onValueChange = {
-                            searchText = it
-                            libraryService.setSearchQuery(it)
+                            val bounded = boundedPickerText(it)
+                            searchText = bounded
+                            libraryService.setSearchQuery(bounded)
                         },
-                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).then(Modifier.focusRequester(searchFocus)),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { searchKeyboard?.hide() }),
+                        label = { Text("Search files") },
                         placeholder = { Text("Search files, documents, photos...") },
                         leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = null, modifier = Modifier.size(20.dp)) },
                         trailingIcon = {
@@ -266,6 +421,7 @@ fun CustomFilePickerScreen(
                                 IconButton(onClick = {
                                     searchText = ""
                                     libraryService.setSearchQuery("")
+                                    searchFocus.requestFocus()
                                 }) {
                                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.clear, semanticLabel = "Clear", modifier = Modifier.size(18.dp))
                                 }
@@ -274,8 +430,8 @@ fun CustomFilePickerScreen(
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = TextFieldDefaults.colors(
-                            focusedContainerColor = if (isDark) Color(0xFF1A212E) else Color(0xFFEDF2F7),
-                            unfocusedContainerColor = if (isDark) Color(0xFF1A212E) else Color(0xFFEDF2F7),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
                         ),
@@ -291,25 +447,64 @@ fun CustomFilePickerScreen(
                         libraryService.setFilter(cat)
                     },
                 )
-                Spacer(Modifier.height(8.dp))
+                importNotice?.let { notice ->
+                    Text(notice, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium)
+                    Row {
+                        TextButton(enabled = !importing, onClick = { pickFromDeviceStorage() }) { Text("Browse again") }
+                        TextButton(onClick = { importNotice = null }) { Text("Dismiss notice") }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${visibleFiles.size} ${if (searchText.isNotBlank()) "matches" else "files"} · ${libraryService.activeCategoryFilter?.name ?: "All categories"}",
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
+                    Box {
+                        TextButton(onClick = { sortExpanded = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Sort: ${browseOrder.label}") }
+                        androidx.compose.material3.DropdownMenu(expanded = sortExpanded, onDismissRequest = { sortExpanded = false }) {
+                            MediaBrowseOrder.entries.forEach { order ->
+                                androidx.compose.material3.DropdownMenuItem(text = { Text(order.label) },
+                                    onClick = { browseOrder = order; sortExpanded = false },
+                                    modifier = Modifier.heightIn(min = 48.dp).semantics { selected = browseOrder == order })
+                            }
+                        }
+                    }
+                }
             }
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
+                importing -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Text(if (importStopping) "Stopping import and removing incomplete copies" else importProgress, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    TextButton(enabled = !importStopping, onClick = { importStopping = true; importJob?.cancel() }) { Text(if (importStopping) "Stopping" else "Cancel import") }
+                }
+                refreshError != null -> Column(Modifier.align(Alignment.Center)) {
+                    Text(refreshError!!)
+                    TextButton(onClick = { refreshAttempt++ }) { Text("Retry") }
+                }
                 libraryService.isLoading -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Text("Scanning files", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        }
                     }
                 }
-                libraryService.filteredFiles.isEmpty() -> {
-                    EmptyState(isDark, onBrowse = { pickFromDeviceStorage() })
+                visibleFiles.isEmpty() -> {
+                    if (searchText.isNotEmpty() || libraryService.activeCategoryFilter != null) {
+                        Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("No matching files in ${libraryService.activeCategoryFilter?.name ?: "all categories"}")
+                            Text(if (searchText.isNotBlank()) "Try another search or clear the category filter." else "This category has no files. Other categories may still contain files.")
+                            TextButton(onClick = { searchText = ""; libraryService.setSearchQuery(""); libraryService.setFilter(null) }) { Text("Clear search and filters") }
+                        }
+                    } else EmptyState(isDark, onBrowse = { pickFromDeviceStorage() })
                 }
                 else -> {
-                    val items = libraryService.filteredFiles
+                    val items = visibleFiles
                     if (isGridView) {
                         LazyVerticalGrid(
-                            columns = GridCells.Fixed(3),
+                            state = gridScrollState,
+                            columns = GridCells.Adaptive(minSize = 110.dp),
                             contentPadding = PaddingValues(
                                 start = 16.dp, end = 16.dp, top = 12.dp,
                                 bottom = if (selectedPaths.isNotEmpty()) 90.dp else 20.dp,
@@ -323,18 +518,22 @@ fun CustomFilePickerScreen(
                                     item = item,
                                     isSelected = selectedPaths.contains(item.path),
                                     showCheck = isSelectionMode || selectedPaths.contains(item.path),
+                                    selectsOnTap = isSelectionMode || !isWorkspaceMode,
                                     isDark = isDark,
-                                    modifier = Modifier.aspectRatio(0.85f),
+                                    // Former fixed aspectRatio(0.85f) could not grow with larger text.
+                                    modifier = Modifier.heightIn(min = 208.dp),
                                     onTap = {
                                         if (isSelectionMode || !isWorkspaceMode) toggleSelect(item)
                                         else openFile(item)
                                     },
                                     onLongPress = { toggleSelect(item) },
+                                    onDetails = { detailsFile = item },
                                 )
                             }
                         }
                     } else {
                         LazyColumn(
+                            state = listScrollState,
                             contentPadding = PaddingValues(
                                 start = 16.dp, end = 16.dp, top = 12.dp,
                                 bottom = if (selectedPaths.isNotEmpty()) 90.dp else 20.dp,
@@ -346,43 +545,69 @@ fun CustomFilePickerScreen(
                                     item = item,
                                     isSelected = selectedPaths.contains(item.path),
                                     showCheck = isSelectionMode || selectedPaths.contains(item.path),
+                                    selectsOnTap = isSelectionMode || !isWorkspaceMode,
                                     isDark = isDark,
                                     onTap = {
                                         if (isSelectionMode || !isWorkspaceMode) toggleSelect(item)
                                         else openFile(item)
                                     },
                                     onLongPress = { toggleSelect(item) },
+                                    onDetails = { detailsFile = item },
                                 )
                                 Spacer(Modifier.height(8.dp))
                             }
                         }
                     }
+
+                }
+            }
                     if (selectedPaths.isNotEmpty()) {
                         FloatingActionDock(
                             count = selectedPaths.size,
                             isWorkspaceMode = isWorkspaceMode,
                             isDark = isDark,
-                            onDeselect = { selectedPaths = emptySet() },
-                            onConfirm = {
-                                confirmAndReturn(items.filter { selectedPaths.contains(it.path) })
+                            onDeselect = {
+                                val previous = selectedPaths
+                                selectedPaths = emptySet(); isSelectionMode = false
+                                scope.launch {
+                                    if (snackbar.showSnackbar("${previous.size} files deselected", actionLabel = "Undo") == androidx.compose.material3.SnackbarResult.ActionPerformed && selectedPaths.isEmpty()) {
+                                        selectedPaths = previous.intersect(libraryService.files.map { it.path }.toSet())
+                                        isSelectionMode = selectedPaths.isNotEmpty()
+                                    }
+                                }
                             },
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp),
+                            onConfirm = {
+                                // Original silently omitted vanished selected IDs:
+                                // confirmAndReturn(allFiles.filter { selectedPaths.contains(it.path) })
+                                val snapshot = snapshotPickerSelection(allFiles, selectedPaths.toSet())
+                                when {
+                                    snapshot.missingPaths.isNotEmpty() -> {
+                                        selectedPaths = selectedPaths - snapshot.missingPaths
+                                        isSelectionMode = selectedPaths.isNotEmpty()
+                                        scope.launch { snackbar.showSnackbar("${snapshot.missingPaths.size} selected files are no longer in the library. Review the remaining selection before continuing.") }
+                                    }
+                                    snapshot.duplicatePaths.isNotEmpty() -> {
+                                        scope.launch { snackbar.showSnackbar("The library has duplicate entries for selected files. Refresh before continuing.") }
+                                    }
+                                    else -> confirmAndReturn(snapshot.files)
+                                }
+                            },
+                            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(20.dp),
                         )
                     }
-                }
-            }
         }
     }
 
     // Attachment summary sheet
     summaryFiles?.let { files ->
-        var caption by remember { mutableStateOf("") }
+        var delivering by remember(files) { mutableStateOf(false) }
+        // Caption field retained below as a comment until the attachment contract supports captions.
         ModalBottomSheet(tonalElevation = 0.dp, dragHandle = null,
             onDismissRequest = { summaryFiles = null },
-            containerColor = if (isDark) Color(0xFF141923) else Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             shape = com.example.chat.ui.kit.ChatyModalShape,
         ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 20.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 20.dp)) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
@@ -390,46 +615,58 @@ fun CustomFilePickerScreen(
                         .background(Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp)),
                 )
                 Spacer(Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.semantics(mergeDescendants = true) {
+                    contentDescription = "${files.size} attachments, ${android.text.format.Formatter.formatFileSize(view.context, pickerTotalBytes(files))} total"
+                }, verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Send ${files.size} ${if (files.size == 1) "Attachment" else "Attachments"}",
+                        "${if (isWorkspaceMode) "Share" else "Send"} ${files.size} ${if (files.size == 1) "Attachment" else "Attachments"}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W700),
                     )
                     Spacer(Modifier.weight(1f))
-                    val totalMb = files.fold(0L) { sum, f -> sum + f.sizeBytes } / (1024.0 * 1024.0)
+                    val totalSize = android.text.format.Formatter.formatFileSize(view.context, pickerTotalBytes(files))
                     Text(
-                        "%.2f MB total".format(totalMb),
+                        "$totalSize total",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                     )
                 }
                 Spacer(Modifier.height(14.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(80.dp)) {
-                    items(files.size) { index ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.heightIn(min = 160.dp)) {
+                    items(files.size, key = { files[it].path }) { index ->
                         val f = files[index]
                         Column(
                             modifier = Modifier
-                                .width(76.dp)
+                                .width(120.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (isDark) Color(0xFF1E2433) else Color(0xFFF1F5F9))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .border(
                                     1.dp,
-                                    if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                                    MaterialTheme.colorScheme.outlineVariant,
                                     RoundedCornerShape(12.dp),
                                 )
                                 .padding(8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {
-                            CategoryIcon(f.category, size = 24)
+                            ItemPreview(f, previewDp = 72)
                             Spacer(Modifier.height(4.dp))
-                            Text(f.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                fontSize = 10.sp, fontWeight = FontWeight.W600)
+                            Text(pickerFileLabel(f.name), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyLarge.copy(textDirection = androidx.compose.ui.text.style.TextDirection.ContentOrLtr), fontWeight = FontWeight.W600)
+                            Text(f.mimeType, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                            Text(if (f.extension.isBlank()) "No filename suffix" else "Suffix: .${boundedPickerText(pickerFileLabel(f.extension), 24)}",
+                                maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                            TextButton(enabled = !delivering, modifier = Modifier.heightIn(min = 48.dp), onClick = {
+                                selectedPaths = selectedPaths - f.path
+                                summaryFiles = files.filterIndexed { i, _ -> i != index }.takeIf { it.isNotEmpty() }
+                                if (selectedPaths.isEmpty()) isSelectionMode = false
+                            }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
                 Spacer(Modifier.height(14.dp))
+                /* Captions are not returned by the file-attachment callback. Retained for a future contract migration:
+                var caption by remember { mutableStateOf("") }
                 OutlinedTextField(
                     value = caption,
                     onValueChange = { caption = it },
@@ -437,6 +674,11 @@ fun CustomFilePickerScreen(
                     placeholder = { Text("Add a message or caption...") },
                     shape = RoundedCornerShape(14.dp),
                 )
+                */
+                Text("File attachments are sent without a caption.", style = MaterialTheme.typography.bodySmall)
+                Text("Listed in library order, not selection-tap order.", style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { summaryFiles = null }) { Text("Change selection") }
+
                 Spacer(Modifier.height(16.dp))
                 Row {
                     OutlinedButton(
@@ -446,13 +688,68 @@ fun CustomFilePickerScreen(
                     ) { Text("Cancel") }
                     Spacer(Modifier.width(12.dp))
                     Button(
+                        enabled = !delivering,
                         onClick = {
-                            summaryFiles = null
-                            onSendAttachments(files)
+                            if (delivering) return@Button
+                            delivering = true
+                            // Original synchronous exists/canRead preflight and handoff retained below.
+                            //                             if (files.any { !it.exists || !File(it.path).canRead() }) {
+                            //                                 delivering = false
+                            //                                 scope.launch { snackbar.showSnackbar("An attachment is no longer available. Refresh and pick it again.") }
+                            //                             } else try {
+                            //                                 if (isWorkspaceMode) {
+                            //                                     val uris = ArrayList(files.map { descriptor -> androidx.core.content.FileProvider.getUriForFile(view.context, "${view.context.packageName}.fileprovider", File(descriptor.path)) })
+                            //                                     val intent = android.content.Intent(if (uris.size == 1) android.content.Intent.ACTION_SEND else android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                            //                                         type = files.map { it.mimeType }.distinct().singleOrNull() ?: "*/*"
+                            //                                         if (uris.size == 1) putExtra(android.content.Intent.EXTRA_STREAM, uris.first()) else putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+                            //                                         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            //                                         clipData = android.content.ClipData.newRawUri("Attachments", uris.first()).also { data -> uris.drop(1).forEach { data.addItem(android.content.ClipData.Item(it)) } }
+                            //                                     }
+                            //                                     view.context.startActivity(android.content.Intent.createChooser(intent, "Share files"))
+                            //                                 } else onSendAttachments(files)
+                            //                                 transferredPaths += files.map { it.path }
+                            //                                 summaryFiles = null
+                            //                                 selectedPaths = emptySet()
+                            //                                 isSelectionMode = false
+                            //                             } catch (_: Exception) {
+                            //                                 delivering = false
+                            //                                 scope.launch { snackbar.showSnackbar("Could not open the attachment action. Try again.") }
+                            //                             }
+                            scope.launch {
+                                try {
+                                    val states = withContext(Dispatchers.IO) { files.map(::pickerSummaryFileState) }
+                                    coroutineContext.ensureActive()
+                                    // Cancel/change-selection/dispose during IO revokes this confirmation.
+                                    if (!importActive.get() || summaryFiles !== files) return@launch
+                                    if (states.any { it == PickerSummaryFileState.Unavailable }) {
+                                        snackbar.showSnackbar("An attachment is no longer available. Refresh and pick it again.")
+                                    } else if (states.any { it == PickerSummaryFileState.ChangedSize }) {
+                                        snackbar.showSnackbar("An attachment changed size. Cancel this review and choose it again before sending.")
+                                    } else {
+                                        if (isWorkspaceMode) {
+                                            val uris = ArrayList(files.map { descriptor -> androidx.core.content.FileProvider.getUriForFile(view.context, "${view.context.packageName}.fileprovider", File(descriptor.path)) })
+                                            val intent = android.content.Intent(if (uris.size == 1) android.content.Intent.ACTION_SEND else android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                                                type = files.map { it.mimeType }.distinct().singleOrNull() ?: "*/*"
+                                                if (uris.size == 1) putExtra(android.content.Intent.EXTRA_STREAM, uris.first()) else putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+                                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                clipData = android.content.ClipData.newRawUri("Attachments", uris.first()).also { data -> uris.drop(1).forEach { data.addItem(android.content.ClipData.Item(it)) } }
+                                            }
+                                            view.context.startActivity(android.content.Intent.createChooser(intent, "Share files"))
+                                        } else onSendAttachments(files)
+                                        transferredPaths += files.map { it.path }
+                                        summaryFiles = null
+                                        selectedPaths = emptySet()
+                                        isSelectionMode = false
+                                    }
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) {
+                                    snackbar.showSnackbar("Could not open the attachment action. Your selection was kept. Check the destination before trying again.")
+                                } finally { delivering = false }
+                            }
                         },
                         modifier = Modifier.weight(1f).height(48.dp),
                         shape = RoundedCornerShape(14.dp),
-                    ) { Text("Send Now") }
+                    ) { Text(if (delivering) "Preparing" else if (isWorkspaceMode) "Share ${files.size} files" else "Send ${files.size} files") }
                 }
             }
         }
@@ -473,7 +770,7 @@ private fun FilterPills(isDark: Boolean, active: MediaCategory?, onSelect: (Medi
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.height(36.dp),
+        modifier = Modifier.heightIn(min = 48.dp),
     ) {
         items(categories.size) { idx ->
             val (cat, label) = categories[idx]
@@ -481,16 +778,17 @@ private fun FilterPills(isDark: Boolean, active: MediaCategory?, onSelect: (Medi
             Box(
                 modifier = Modifier
                     .springInteractiveScale(0.96f)
-                    .clickable { onSelect(cat) }
+                    .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(cat) })
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(
                         if (isSelected) MaterialTheme.colorScheme.primary
-                        else (if (isDark) Color(0xFF1A212E) else Color.White),
+                        else (MaterialTheme.colorScheme.surfaceVariant),
                     )
                     .border(
                         1.dp,
                         if (isSelected) Color.Transparent
-                        else (if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f)),
+                        else (MaterialTheme.colorScheme.outlineVariant),
                         RoundedCornerShape(18.dp),
                     )
                     .padding(horizontal = 14.dp, vertical = 6.dp),
@@ -500,8 +798,7 @@ private fun FilterPills(isDark: Boolean, active: MediaCategory?, onSelect: (Medi
                     label,
                     fontSize = 12.sp,
                     fontWeight = if (isSelected) FontWeight.W700 else FontWeight.W500,
-                    color = if (isSelected) Color.White
-                    else (if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155)),
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -514,50 +811,64 @@ private fun GridItem(
     item: MediaFileDescriptor,
     isSelected: Boolean,
     showCheck: Boolean,
+    selectsOnTap: Boolean,
     isDark: Boolean,
     modifier: Modifier = Modifier,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
+    onDetails: () -> Unit,
 ) {
     Box(
         modifier = modifier
             .springInteractiveScale(0.97f)
-            .combinedClickable(onClick = onTap, onLongClick = onLongPress)
+            // Original unconditional checkbox role did not describe workspace Open taps.
+            .combinedClickable(onClick = onTap,
+                onClickLabel = if (selectsOnTap) { if (isSelected) "Deselect file" else "Select file" } else "Open file",
+                onLongClick = onLongPress, onLongClickLabel = if (isSelected) "Deselect file" else "Select file",
+                role = if (selectsOnTap) Role.Checkbox else Role.Button)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${item.humanReadableSize}"
+                selected = isSelected
+                stateDescription = if (isSelected) "Selected" else "Not selected"
+            }
             .shadow(
                 8.dp, RoundedCornerShape(14.dp),
                 ambientColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
                 spotColor = Color.Black.copy(alpha = if (isDark) 0.2f else 0.04f),
             )
             .clip(RoundedCornerShape(14.dp))
-            .background(if (isDark) Color(0xFF161C26) else Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
                 color = if (isSelected) MaterialTheme.colorScheme.primary
-                else (if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)),
+                else (MaterialTheme.colorScheme.outlineVariant),
                 shape = RoundedCornerShape(14.dp),
             ),
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { ItemPreview(item) }
+            Box(Modifier.heightIn(min = 96.dp), contentAlignment = Alignment.Center) { ItemPreview(item, previewDp = 96) }
             Spacer(Modifier.height(4.dp))
             Text(
-                item.name,
-                maxLines = 1,
+                pickerFileLabel(item.name),
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.bodyLarge.copy(textDirection = androidx.compose.ui.text.style.TextDirection.ContentOrLtr),
                 fontWeight = FontWeight.W600,
-                color = if (isDark) Color.White else Color(0xFF1E293B),
+                color = MaterialTheme.colorScheme.onSurface,
             )
+            Text(item.mimeType, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 item.humanReadableSize,
-                fontSize = 9.sp,
-                color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        IconButton(onClick = onDetails, modifier = Modifier.align(Alignment.TopStart).size(48.dp).semantics { contentDescription = "Details for ${pickerFileLabel(item.name)}" }) { Text("i", color = MaterialTheme.colorScheme.primary) }
         if (showCheck) {
             Box(
                 modifier = Modifier
@@ -586,38 +897,51 @@ private fun ListItemRow(
     item: MediaFileDescriptor,
     isSelected: Boolean,
     showCheck: Boolean,
+    selectsOnTap: Boolean,
     isDark: Boolean,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
+    onDetails: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .springInteractiveScale(0.98f)
-            .combinedClickable(onClick = onTap, onLongClick = onLongPress)
+            // Original unconditional checkbox role did not describe workspace Open taps.
+            .combinedClickable(onClick = onTap,
+                onClickLabel = if (selectsOnTap) { if (isSelected) "Deselect file" else "Select file" } else "Open file",
+                onLongClick = onLongPress, onLongClickLabel = if (isSelected) "Deselect file" else "Select file",
+                role = if (selectsOnTap) Role.Checkbox else Role.Button)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "${pickerFileLabel(item.name)}, ${item.mimeType}, ${item.humanReadableSize}"
+                selected = isSelected
+                stateDescription = if (isSelected) "Selected" else "Not selected"
+            }
             .clip(RoundedCornerShape(14.dp))
-            .background(if (isDark) Color(0xFF161C26) else Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
                 color = if (isSelected) MaterialTheme.colorScheme.primary
-                else (if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)),
+                else (MaterialTheme.colorScheme.outlineVariant),
                 shape = RoundedCornerShape(14.dp),
             )
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { ItemPreview(item) }
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { ItemPreview(item, previewDp = 44) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.W600, fontSize = 13.sp)
+            Text(pickerFileLabel(item.name), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.W600, style = MaterialTheme.typography.bodyLarge.copy(
+                    textDirection = androidx.compose.ui.text.style.TextDirection.ContentOrLtr))
             Spacer(Modifier.height(2.dp))
             Text(
                 "${item.humanReadableSize} • ${item.extension.uppercase()}",
-                fontSize = 11.sp,
-                color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        IconButton(onClick = onDetails, modifier = Modifier.size(48.dp).semantics { contentDescription = "Details for ${pickerFileLabel(item.name)}" }) { Text("i", color = MaterialTheme.colorScheme.primary) }
         if (showCheck) {
             Box(
                 modifier = Modifier
@@ -643,13 +967,18 @@ private fun ListItemRow(
 }
 
 @Composable
-private fun ItemPreview(item: MediaFileDescriptor) {
-    if (item.category == MediaCategory.image && item.exists) {
-        ChatyAsyncImage(
-            url = File(item.path).toURI().toString(),
-            contentDescription = item.name,
-            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
+private fun ItemPreview(item: MediaFileDescriptor, previewDp: Int = 48) {
+    // Previously this queried item.exists during every composition and always requested 48dp.
+    // Coil now checks availability asynchronously; failures keep the category fallback.
+    if (item.category == MediaCategory.image) {
+        val pixels = with(androidx.compose.ui.platform.LocalDensity.current) { previewDp.dp.roundToPx() }.coerceIn(32, 512)
+        coil.compose.SubcomposeAsyncImage(
+            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                .data(File(item.path)).size(pixels).build(),
+            contentDescription = null,
+            modifier = Modifier.size(previewDp.dp).clip(RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop,
+            loading = { CategoryIcon(item.category) },
             error = { CategoryIcon(item.category) },
         )
         return
@@ -661,14 +990,14 @@ private fun ItemPreview(item: MediaFileDescriptor) {
 private fun CategoryIcon(category: MediaCategory, size: Int = 32) {
     when (category) {
         MediaCategory.image -> com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.gallery, semanticLabel = null,
-            color = Color(0xFF38BDF8), modifier = Modifier.size(size.dp))
-        MediaCategory.video -> ChatyMediaIcon(icon = ChatyIconType.video, size = size.dp, color = Color(0xFFA855F7))
-        MediaCategory.audio -> ChatyMediaIcon(icon = ChatyIconType.audio, size = size.dp, color = Color(0xFF10B981))
-        MediaCategory.pdf -> ChatyMediaIcon(icon = ChatyIconType.pdf, size = size.dp, color = Color(0xFFEF4444))
-        MediaCategory.document -> ChatyMediaIcon(icon = ChatyIconType.document, size = size.dp, color = Color(0xFF3B82F6))
-        MediaCategory.archive -> ChatyMediaIcon(icon = ChatyIconType.archive, size = size.dp, color = Color(0xFFF59E0B))
+            color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(size.dp))
+        MediaCategory.video -> ChatyMediaIcon(icon = ChatyIconType.video, size = size.dp, color = MaterialTheme.colorScheme.secondary)
+        MediaCategory.audio -> ChatyMediaIcon(icon = ChatyIconType.audio, size = size.dp, color = MaterialTheme.colorScheme.tertiary)
+        MediaCategory.pdf -> ChatyMediaIcon(icon = ChatyIconType.pdf, size = size.dp, color = MaterialTheme.colorScheme.error)
+        MediaCategory.document -> ChatyMediaIcon(icon = ChatyIconType.document, size = size.dp, color = MaterialTheme.colorScheme.primary)
+        MediaCategory.archive -> ChatyMediaIcon(icon = ChatyIconType.archive, size = size.dp, color = MaterialTheme.colorScheme.secondary)
         MediaCategory.other -> Icon(Icons.Rounded.InsertDriveFile, contentDescription = null,
-            tint = Color.Gray, modifier = Modifier.size(size.dp))
+            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(size.dp))
     }
 }
 
@@ -686,23 +1015,23 @@ private fun FloatingActionDock(
             .fillMaxWidth()
             .shadow(16.dp, RoundedCornerShape(22.dp), ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.25f))
             .clip(RoundedCornerShape(22.dp))
-            .background(if (isDark) Color(0xFF1A2230).copy(alpha = 0.9f) else Color.White.copy(alpha = 0.9f))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
             .border(
                 1.dp,
-                if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
+                MaterialTheme.colorScheme.outlineVariant,
                 RoundedCornerShape(22.dp),
             )
             .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("$count selected", fontWeight = FontWeight.W700, fontSize = 14.sp)
+        Text("$count selected", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, fontWeight = FontWeight.W700, fontSize = 14.sp)
         Spacer(Modifier.weight(1f))
         TextButton(onClick = onDeselect) { Text("Deselect") }
         Spacer(Modifier.width(8.dp))
         Button(onClick = onConfirm, shape = RoundedCornerShape(16.dp)) {
             Icon(Icons.Rounded.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(4.dp))
-            Text(if (isWorkspaceMode) "Share / Open" else "Attach")
+            Text(if (isWorkspaceMode) "Share" else "Attach")
         }
     }
 }
@@ -717,9 +1046,9 @@ private fun EmptyState(isDark: Boolean, onBrowse: () -> Unit) {
         Box(
             modifier = Modifier
                 .size(80.dp)
-                .background(if (isDark) Color(0xFF1E2638) else Color(0xFFEDF2F7), CircleShape),
+                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(40.dp)) }
+        ) { Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp)) }
         Spacer(Modifier.height(16.dp))
         Text("No Files Found", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W700))
         Spacer(Modifier.height(6.dp))

@@ -104,6 +104,9 @@ fun AccountRecentsOverlay(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
+                    // AC1-33: a labelled close action for TalkBack on the backdrop.
+                    onClickLabel = "Close account switcher",
+                    role = androidx.compose.ui.semantics.Role.Button,
                     onClick = { if (!isSwitching) onDismiss() },
                 ),
         )

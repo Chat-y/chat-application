@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +59,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -232,6 +237,7 @@ private fun ProfileHeader(
 ) {
     val theme = LocalThemeConfig.current
     val screenWidth = LocalConfiguration.current.screenWidthDp
+    var showPhoto by remember { mutableStateOf(false) }
     // Exact sizing from profile_screen.dart.
     val bannerHeight = when (headerStyle) {
         ProfileHeaderStyle.compactHeader -> 128
@@ -263,23 +269,31 @@ private fun ProfileHeader(
             ) {
                 BannerSurface(bannerUrl = bannerUrl, height = bannerHeight)
                 if (onEditBanner != null) {
+                    // 48dp touch target (P1-32); the 31dp scrimmed circle (3:1 contrast
+                    // over any photo, P1-37) is drawn inside it.
                     IconButton(
                         onClick = onEditBanner,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(top = 12.dp, end = 12.dp)
-                            .size(31.dp)
-                            .background(
-                                Color(theme.surfaceColor).copy(alpha = 0.85f),
-                                CircleShape,
-                            )
-                            .border(1.dp, LocalAppColors.current.borderSubtle, CircleShape),
+                            .padding(top = 4.dp, end = 4.dp)
+                            .size(48.dp),
                     ) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                            semanticLabel = "Change profile banner",
-                            color = Color(theme.primaryTextColor),
-                            modifier = Modifier.size(17.dp),
-                        )
+                        Box(
+                            Modifier
+                                .size(31.dp)
+                                .background(
+                                    Color(theme.surfaceColor).copy(alpha = 0.85f),
+                                    CircleShape,
+                                )
+                                .border(1.dp, LocalAppColors.current.borderSubtle, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
+                                semanticLabel = "Edit cover photo",
+                                color = Color(theme.primaryTextColor),
+                                modifier = Modifier.size(17.dp),
+                            )
+                        }
                     }
                 }
                 Box(
@@ -289,13 +303,24 @@ private fun ProfileHeader(
                         .background(Color(theme.backgroundColor), avatarShapeOf(avatarShape, avatarSize + 8))
                         .padding(4.dp),
                 ) {
-                    ChatyAvatar(
-                        initials = initials,
-                        colorHex = colorHex,
-                        url = avatarUrl,
-                        size = avatarSize,
-                        shape = avatarShape,
-                    )
+                    // Tap to view the photo full size (P5-29); only when a photo exists.
+                    Box(
+                        Modifier
+                            .clip(avatarShapeOf(avatarShape, avatarSize))
+                            .clickable(
+                                enabled = !avatarUrl.isNullOrBlank(),
+                                onClickLabel = "View profile photo",
+                            ) { showPhoto = true },
+                    ) {
+                        ChatyAvatar(
+                            initials = initials,
+                            colorHex = colorHex,
+                            url = avatarUrl,
+                            size = avatarSize,
+                            shape = avatarShape,
+                            a11yLabel = "Profile photo of $displayName",
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(52.dp))
@@ -306,7 +331,12 @@ private fun ProfileHeader(
                 fontSize = 24.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.4).sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .semantics { heading() },
             )
             Spacer(Modifier.height(3.dp))
             Text(
@@ -314,6 +344,9 @@ private fun ProfileHeader(
                 color = Color(theme.secondaryTextColor),
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 24.dp),
             )
             if (about.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
@@ -326,10 +359,49 @@ private fun ProfileHeader(
                     modifier = Modifier.padding(horizontal = 32.dp),
                 )
             }
+            if (about.isEmpty()) AddBioPrompt(onEdit)
             Spacer(Modifier.height(16.dp))
             EditPill(onClick = onEdit)
             Spacer(Modifier.height(20.dp))
         }
+    }
+    if (showPhoto && !avatarUrl.isNullOrBlank()) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showPhoto = false }) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable(onClickLabel = "Close photo") { showPhoto = false },
+            ) {
+                ChatyAsyncImage(
+                    url = avatarUrl,
+                    contentDescription = "Profile photo of $displayName",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                )
+            }
+        }
+    }
+}
+
+/** Empty-bio nudge on the own profile (P1-47): opens the editor. */
+@Composable
+private fun AddBioPrompt(onEdit: () -> Unit) {
+    val theme = LocalThemeConfig.current
+    Box(
+        Modifier
+            .heightIn(min = 48.dp)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onEdit)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "Add a bio",
+            color = Color(theme.secondaryTextColor),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -357,7 +429,7 @@ private fun CompactHeader(
                 .border(1.dp, LocalAppColors.current.borderSubtle, avatarShapeOf(avatarShape, avatarSize))
                 .padding(3.dp),
         ) {
-            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape)
+            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = "Profile photo of $displayName")
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).padding(top = 2.dp)) {
@@ -370,12 +442,12 @@ private fun CompactHeader(
                     lineHeight = 21.6.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).semantics { heading() },
                 )
                 if (onEditBanner != null) {
-                    IconButton(onClick = onEditBanner, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onEditBanner, modifier = Modifier.size(48.dp)) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                            semanticLabel = "Change profile banner",
+                            semanticLabel = "Edit cover photo",
                             color = Color(theme.secondaryTextColor),
                             modifier = Modifier.size(20.dp),
                         )
@@ -402,6 +474,7 @@ private fun CompactHeader(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (about.isEmpty()) AddBioPrompt(onEdit)
             Spacer(Modifier.height(10.dp))
             EditPill(onClick = onEdit)
         }
@@ -439,7 +512,7 @@ private fun CenteredIdentityHeader(
                         .background(Color(theme.surfaceColor).copy(alpha = 0.88f), CircleShape),
                 ) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper,
-                        semanticLabel = "Change profile banner",
+                        semanticLabel = "Edit cover photo",
                         color = Color(theme.primaryTextColor),
                     )
                 }
@@ -452,7 +525,7 @@ private fun CenteredIdentityHeader(
                 .border(1.dp, LocalAppColors.current.borderSubtle, avatarShapeOf(avatarShape, avatarSize + 8))
                 .padding(4.dp),
         ) {
-            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape)
+            ChatyAvatar(initials, colorHex, avatarUrl, avatarSize, avatarShape, a11yLabel = "Profile photo of $displayName")
         }
         Spacer(Modifier.height(12.dp))
         Text(
@@ -464,6 +537,7 @@ private fun CenteredIdentityHeader(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() },
         )
         Spacer(Modifier.height(3.dp))
         Text(
@@ -483,6 +557,7 @@ private fun CenteredIdentityHeader(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
+        if (about.isEmpty()) AddBioPrompt(onEdit)
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.Center) {
             EditPill(onClick = onEdit)
@@ -554,6 +629,8 @@ internal fun ChatyAvatar(
     url: String?,
     size: Int,
     shape: String,
+    /** Optional TalkBack label, e.g. "Profile photo of Sam". Null keeps the avatar decorative. */
+    a11yLabel: String? = null,
 ) {
     val theme = LocalThemeConfig.current
     val clipShape = avatarShapeOf(shape, size)
@@ -572,7 +649,11 @@ internal fun ChatyAvatar(
         Modifier
             .size(size.dp)
             .clip(clipShape)
-            .background(fallbackColor.copy(alpha = 0.20f)),
+            .background(fallbackColor.copy(alpha = 0.20f))
+            .then(
+                if (a11yLabel != null) Modifier.semantics { contentDescription = a11yLabel }
+                else Modifier,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         // Blank/null URL renders the initials fallback via error ?: placeholder
@@ -610,6 +691,7 @@ private fun ProfileStatsGrid(chats: Int, groups: Int, contacts: Int) {
             Column(
                 Modifier
                     .weight(1f)
+                    .semantics(mergeDescendants = true) { contentDescription = "$label: $value" }
                     .padding(horizontal = 4.dp)
                     .background(Color(theme.surfaceColor), RoundedCornerShape(14.dp))
                     .border(1.dp, LocalAppColors.current.borderSubtle, RoundedCornerShape(14.dp))
@@ -627,7 +709,7 @@ private fun ProfileStatsGrid(chats: Int, groups: Int, contacts: Int) {
                 Text(
                     label,
                     color = Color(theme.secondaryTextColor),
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -649,7 +731,12 @@ internal fun EditPill(onClick: () -> Unit) {
             .alpha(if (pressed) 0.82f else 1f)
             .background(Color(theme.cardColor), RoundedCornerShape(999.dp))
             .border(1.dp, LocalAppColors.current.borderSubtle, RoundedCornerShape(999.dp))
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = androidx.compose.ui.semantics.Role.Button,
+                onClick = onClick,
+            )
             .padding(horizontal = 18.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -678,7 +765,9 @@ internal fun SettingsSection(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.6.sp,
-                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+                modifier = Modifier
+                    .padding(start = 4.dp, bottom = 6.dp)
+                    .semantics { heading() },
             )
         }
         Column(
@@ -715,7 +804,10 @@ internal fun SettingsTile(
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                if (onClick != null) Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+                else Modifier,
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

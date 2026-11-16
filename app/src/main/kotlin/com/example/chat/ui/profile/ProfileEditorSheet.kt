@@ -33,6 +33,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -115,7 +119,7 @@ fun ProfileEditorSheet(
                 snackbar.showSnackbar("Profile updated.")
             } catch (error: Throwable) {
                 saving = false
-                snackbar.showSnackbar("Could not update profile: ${error.message}")
+                snackbar.showSnackbar("Could not update profile. " + ProfileErrorMessages.friendly(error, "Please try again.", isSave = true))
             }
         }
     }
@@ -131,7 +135,7 @@ fun ProfileEditorSheet(
                 }
             } catch (error: Throwable) {
                 if (error.message?.contains("cancelled") != true) {
-                    snackbar.showSnackbar("Could not update photo: ${error.message}")
+                    snackbar.showSnackbar("Could not update photo. " + ProfileErrorMessages.friendly(error, "Please try again."))
                 }
             } finally {
                 photoBusy = false
@@ -176,7 +180,15 @@ fun ProfileEditorSheet(
                         Text("Gallery")
                     }
                     if (photoBusy) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            Modifier
+                                .size(16.dp)
+                                .semantics {
+                                    contentDescription = "Uploading photo"
+                                    liveRegion = LiveRegionMode.Polite
+                                },
+                            strokeWidth = 2.dp,
+                        )
                     }
                 }
             }
@@ -225,7 +237,7 @@ fun ProfileEditorSheet(
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = { save() },
-                enabled = !saving,
+                enabled = !saving && !photoBusy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (saving) {
@@ -235,7 +247,7 @@ fun ProfileEditorSheet(
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (saving) "Saving…" else "Save profile")
+                Text(if (saving) "Saving…" else "Save")
             }
         }
     }

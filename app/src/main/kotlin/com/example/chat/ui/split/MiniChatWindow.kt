@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -72,8 +73,8 @@ fun MiniChatWindow(
         val maxMiniHeight = (maxHeight - 24.dp).coerceAtLeast(1.dp)
         val minMiniWidth = 280.dp.coerceAtMost(maxMiniWidth)
         val minMiniHeight = 320.dp.coerceAtMost(maxMiniHeight)
-        val miniWidthDp = requestedWidth.dp.coerceIn(minMiniWidth, maxMiniWidth)
-        val miniHeightDp = requestedHeight.dp.coerceIn(minMiniHeight, maxMiniHeight)
+        val miniWidthDp = (if (requestedWidth.isFinite()) requestedWidth else initialWidthDp).dp.coerceIn(minMiniWidth, maxMiniWidth)
+        val miniHeightDp = (if (requestedHeight.isFinite()) requestedHeight else initialHeightDp).dp.coerceIn(minMiniHeight, maxMiniHeight)
         val miniWidthPx = with(density) { miniWidthDp.toPx() }
         val miniHeightPx = with(density) { miniHeightDp.toPx() }
         val pillWidthDp = 180.dp.coerceAtMost(maxMiniWidth)
@@ -122,7 +123,7 @@ fun MiniChatWindow(
 
         val windowShape = RoundedCornerShape(16.dp)
         if (showSnapGuides) {
-            Canvas(Modifier.fillMaxSize()) {
+            Canvas(Modifier.fillMaxSize().clearAndSetSemantics { }) { // SPL-30: guides are decorative
                 val guideColor = colors.accent.copy(alpha = .55f)
                 drawLine(guideColor, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), 1.dp.toPx())
                 drawLine(guideColor, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), 1.dp.toPx())
@@ -212,13 +213,13 @@ fun MiniChatWindow(
                         }
                     }
                     IconButton(onClick = onToggleMinimize, modifier = Modifier.size(48.dp)) {
-                        ChatyIcon(ChatyIconId.chevronDown, color = colors.foregroundSecondary, semanticLabel = "Minimize")
+                        ChatyIcon(ChatyIconId.chevronDown, color = colors.foregroundSecondary, semanticLabel = "Minimize ${paneItem.title}")
                     }
                     IconButton(onClick = onExpandToFull, modifier = Modifier.size(48.dp)) {
-                        ChatyIcon(ChatyIconId.forward, color = colors.foregroundSecondary, semanticLabel = "Expand")
+                        ChatyIcon(ChatyIconId.forward, color = colors.foregroundSecondary, semanticLabel = "Open full chat ${paneItem.title}")
                     }
                     IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
-                        ChatyIcon(ChatyIconId.close, color = colors.foregroundSecondary, semanticLabel = "Close")
+                        ChatyIcon(ChatyIconId.close, color = colors.foregroundSecondary, semanticLabel = "Close ${paneItem.title}")
                     }
                 }
 

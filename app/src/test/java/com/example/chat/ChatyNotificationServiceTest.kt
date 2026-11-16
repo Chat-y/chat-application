@@ -48,4 +48,39 @@ class ChatyNotificationServiceTest {
         assertEquals(2, ids.distinct().size)
         assertNotEquals(ids[0], ids[1])
     }
+
+    @Test
+    fun clearReviewedEntriesPreservesNewArrivals() {
+        val service = ChatyNotificationService()
+        service.triggerEventNotification("Reviewed", "Before confirmation")
+        val reviewedIds = service.notifications.map { it.id }.toSet()
+        service.triggerEventNotification("New", "After confirmation opened")
+        service.clear(reviewedIds)
+        assertEquals(listOf("New"), service.notifications.map { it.title })
+    }
+
+    @Test
+    fun clearUnknownOrEmptyIdsDoesNotNotify() {
+        val service = ChatyNotificationService()
+        var changes = 0
+        service.addListener { changes++ }
+        service.triggerEventNotification("Keep", "Body")
+        service.clear(emptySet())
+        service.clear(setOf("unknown"))
+        assertEquals(1, changes)
+        assertEquals(1, service.notifications.size)
+    }
+
+    @Test
+    fun clearReviewedIdsIsSafeWithConcurrentArrival() {
+        val service = ChatyNotificationService()
+        repeat(20) { service.triggerEventNotification("Old $it", "Body") }
+        val reviewedIds = service.notifications.map { it.id }.toSet()
+        val writer = Thread { repeat(20) { service.triggerEventNotification("New $it", "Body") } }
+        writer.start()
+        service.clear(reviewedIds)
+        writer.join()
+        assertEquals(20, service.notifications.size)
+        assertTrue(service.notifications.none { it.id in reviewedIds })
+    }
 }

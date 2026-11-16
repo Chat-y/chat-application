@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
 
 import androidx.compose.foundation.selection.selectable
 
@@ -129,7 +130,8 @@ fun ChatySettingsSection(
         if (title != null) {
             Text(
                 title.uppercase(),
-                modifier = Modifier.padding(start = 12.dp, bottom = 6.dp, top = 12.dp),
+                // CS4-30: section titles are headings for TalkBack navigation.
+                modifier = Modifier.semantics { heading() }.padding(start = 12.dp, bottom = 6.dp, top = 12.dp),
                 color = colors.primary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.W700,
@@ -302,11 +304,14 @@ fun ChatySwitchTile(
     subtitle: String? = null,
     enabled: Boolean = true,
 ) {
+    // CS4-31: merge the whole row into the switch node so TalkBack announces
+    // title + subtitle + state as one stop (safe here: the only interactive
+    // child is the switch itself, which is cleared below).
     Box(Modifier.toggleable(
         value = value, enabled = enabled && onChanged != null,
         role = androidx.compose.ui.semantics.Role.Switch,
         onValueChange = { onChanged?.invoke(it) },
-    )) {
+    ).semantics(mergeDescendants = true) {}) {
         ChatySettingsTile(
             icon = icon, iconColor = iconColor, title = title, subtitle = subtitle, enabled = enabled,
             onTap = null,

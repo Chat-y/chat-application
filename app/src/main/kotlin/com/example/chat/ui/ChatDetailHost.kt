@@ -61,6 +61,7 @@ import com.example.chat.ui.chats.home.HomeAvatar
 import com.example.chat.data.api.ApiPresenceClient
 import com.example.chat.ui.chats.home.parseAvatarColorHex
 import com.example.chat.ui.theme.LocalThemeConfig
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1236,11 +1237,32 @@ private fun ChatDetailHostContent(
                             infoConnection = nextStatus
                         } finally { infoBusy = false }
                     },
+                    /* Previous fire-and-forget deletion, retained for reference:
                     onDeleteConversation = {
                         // Dart dataStore.deleteConversation: api first when authenticated, then repository.
                         scope.launch {
                             if (api.isAuthenticated) { try { api.deleteConversation(live.id) } catch (_: Exception) {} }
                             try { repo.deleteConversation(live.id) } catch (_: Exception) {}
+                        }
+                    },
+                    */
+                    // Compatibility callback is required; this host always supplies the awaited path.
+                    onDeleteConversation = {},
+                    onDeleteConversationAwaited = {
+                        try {
+                            check(api.authSnapshot() === messageAccountScope) { "Account changed." }
+                            check(api.isAuthenticated) { "Authentication required." }
+                            api.deleteConversation(live.id)
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            check(api.authSnapshot() === messageAccountScope) { "Account changed." }
+                            repo.deleteConversation(live.id)
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            check(api.authSnapshot() === messageAccountScope) { "Account changed." }
+                            true
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            false
                         }
                     },
                     onDeleteUser = { if (api.isAuthenticated) api.deleteUser(other.id) },

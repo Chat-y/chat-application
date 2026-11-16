@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_activity_today">Today</string>
+    <string name="social_activity_yesterday">Yesterday</string>
+    <string name="social_activity_empty_title">You\'re all caught up</string>
+    <string name="social_activity_empty_body">Activity from this app session appears here. It is not a permanent history and disappears when this session ends.</string>
+    <string name="social_activity_fallback_title">App activity</string>
+    <string name="social_activity_read_full">Read full activity</string>
+    <string name="social_activity_show_less">Show less</string>
+    <string name="social_activity_dismiss">Dismiss activity</string>
+    <plurals name="social_activity_session_count">
+        <item quantity="one">%d event in this app session</item>
+        <item quantity="other">%d events in this app session</item>
+    </plurals>
+    <string name="social_activity_title">Notifications</string>
+    <string name="social_activity_back">Back</string>
+    <string name="social_activity_clear_action">Clear activity</string>
+    <string name="social_activity_settings">Notification settings</string>
+    <string name="social_activity_clear_title">Clear recent activity?</string>
+    <string name="social_activity_clear_body">This clears the activity list stored in this app session. It does not delete messages or call history.</string>
+    <string name="social_activity_clear_confirm">Clear</string>
+    <string name="social_activity_cancel">Cancel</string>
+    <string name="social_activity_time_unavailable">Time unavailable</string>
+</resources>

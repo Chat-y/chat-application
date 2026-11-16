@@ -27,7 +27,7 @@ import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material3.CircularProgressIndicator
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +40,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,16 +80,21 @@ fun NavigationDestinationsSettingsScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
-    var primary by remember {
-        mutableStateOf(NavigationDestinationsLogic.reconcile(initialPrimary, initialOverflow).first)
+    // SET-R1-008/R2-001: reconcile once, and re-seed when the inputs change.
+    val reconciledInitial = remember(initialPrimary, initialOverflow) {
+        NavigationDestinationsLogic.reconcile(initialPrimary, initialOverflow)
     }
-    var overflow by remember {
-        mutableStateOf(NavigationDestinationsLogic.reconcile(initialPrimary, initialOverflow).second)
-    }
+    var primary by remember(reconciledInitial) { mutableStateOf<List<String>>(reconciledInitial.first.toList()) }
+    var overflow by remember(reconciledInitial) { mutableStateOf<List<String>>(reconciledInitial.second.toList()) }
+    // SET-R1-010: unsaved-changes guard
+    val dirty = primary != reconciledInitial.first || overflow != reconciledInitial.second
+    var confirm by remember { mutableStateOf("") }   // "", "discard", "reset"
+
     var saving by remember { mutableStateOf(false) }
 
-    fun errorText(error: Throwable): String =
-        (error.message ?: error.toString()).removePrefix("Bad state: ")
+    // SET-R1-023: canned copy, no raw backend text in the UI
+    fun errorText(error: Throwable): String = "Could not save. Try again."
+
 
     fun save() {
         if (saving) return
@@ -127,10 +137,14 @@ fun NavigationDestinationsSettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(colors.surface)
+                    // SET-R1-037: keep controls out of the status bar (edge-to-edge)
+                    .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.safeDrawing.only(androidx.compose.foundation.layout.WindowInsetsSides.Top))
+                    // SET-R1-044: announce the screen
+                    .semantics { paneTitle = "Navigation destinations" }
                     .padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = { if (dirty) confirm = "discard" else onBack() }) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = colors.foreground)
                 }
                 Text(
@@ -140,7 +154,7 @@ fun NavigationDestinationsSettingsScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { reset() }, enabled = !saving) {
+                TextButton(onClick = { confirm = "reset" }, enabled = !saving, modifier = Modifier.height(48.dp)) {
                     Text("Reset", color = colors.primary)
                 }
                 Spacer(Modifier.width(4.dp))
@@ -165,7 +179,7 @@ fun NavigationDestinationsSettingsScreen(
                     ) {
                         DestinationSection(
                             title = "Primary navigation",
-                            subtitle = "Up to 4 frequently used destinations",
+                            subtitle = "Up to ${NavigationDestinationsLogic.MAX_PRIMARY} frequently used destinations",
                             ids = primary,
                             isPrimary = true,
                             primaryCount = primary.size,
@@ -218,7 +232,7 @@ fun NavigationDestinationsSettingsScreen(
                 ) {
                     DestinationSection(
                         title = "Primary navigation",
-                        subtitle = "Up to 4 frequently used destinations",
+                        subtitle = "Up to ${NavigationDestinationsLogic.MAX_PRIMARY} frequently used destinations",
                         ids = primary,
                         isPrimary = true,
                         primaryCount = primary.size,
@@ -264,6 +278,25 @@ fun NavigationDestinationsSettingsScreen(
             }
         }
     }
+
+    if (confirm == "discard") {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirm = "" },
+            title = { Text("Discard changes?") },
+            text = { Text("Your destination order has not been saved.") },
+            dismissButton = { TextButton(onClick = { confirm = "" }) { Text("Keep editing") } },
+            confirmButton = { TextButton(onClick = { confirm = ""; onBack() }) { Text("Discard") } },
+        )
+    }
+    if (confirm == "reset") {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirm = "" },
+            title = { Text("Reset to template order?") },
+            text = { Text("The destination order returns to the active template.") },
+            dismissButton = { TextButton(onClick = { confirm = "" }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { confirm = ""; reset() }) { Text("Reset") } },
+        )
+    }
 }
 
 @Composable
@@ -292,7 +325,7 @@ private fun DestinationSection(
             }
             if (isPrimary) {
                 Text(
-                    "${ids.size}/4",
+                    "${ids.size}/${NavigationDestinationsLogic.MAX_PRIMARY}",
                     color = colors.primary,
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 14.sp,
@@ -307,21 +340,25 @@ private fun DestinationSection(
                 modifier = Modifier.padding(16.dp),
             )
         }
-        ids.forEachIndexed { index, id ->
-            if (NavigationDestinationsLogic.isRowVisible(id)) {
-                if (index > 0) {
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(colors.borderSubtle))
-                }
-                DestinationRow(
-                    id = id,
-                    index = index,
-                    count = ids.size,
-                    isPrimary = isPrimary,
-                    primaryCount = primaryCount,
-                    onMove = { onMove(id) },
-                    onReorder = onReorder,
-                )
+        // SET-R1-009: index arithmetic over visible rows only; map back to the real list on reorder.
+        val visibleIds = ids.filter { NavigationDestinationsLogic.isRowVisible(it) }
+        visibleIds.forEachIndexed { vIndex, id ->
+            if (vIndex > 0) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(colors.borderSubtle))
             }
+            DestinationRow(
+                id = id,
+                index = vIndex,
+                count = visibleIds.size,
+                isPrimary = isPrimary,
+                primaryCount = primaryCount,
+                onMove = { onMove(id) },
+                onReorder = { i, delta ->
+                    val from = ids.indexOf(visibleIds[i])
+                    val target = visibleIds.getOrNull(i + delta)
+                    if (from >= 0 && target != null) onReorder(from, ids.indexOf(target) - from)
+                },
+            )
         }
     }
 }
@@ -338,7 +375,7 @@ private fun DestinationRow(
 ) {
     val colors = LocalAppColors.current
     val title = NavigationDestinationsLogic.labels[id] ?: return
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 2.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 2.dp).semantics { stateDescription = "${index + 1} of $count" }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
@@ -363,30 +400,30 @@ private fun DestinationRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
         ) {
-            IconButton(onClick = { onReorder(index, -1) }, enabled = index != 0, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = { onReorder(index, -1) }, enabled = index != 0, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up", tint = colors.foreground)
             }
             IconButton(
                 onClick = { onReorder(index, 1) },
                 enabled = index != count - 1,
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(48.dp),
             ) {
                 Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down", tint = colors.foreground)
             }
             TextButton(
                 onClick = onMove,
-                enabled = if (isPrimary) primaryCount > 1 else primaryCount < 4,
+                enabled = if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY,
             ) {
                 Icon(
                     if (isPrimary) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowUp,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = if (if (isPrimary) primaryCount > 1 else primaryCount < 4) colors.primary else colors.foregroundTertiary,
+                    tint = if (if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY) colors.primary else colors.foregroundTertiary,
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
                     if (isPrimary) "Move to More" else "Make primary",
-                    color = if (if (isPrimary) primaryCount > 1 else primaryCount < 4) colors.primary else colors.foregroundTertiary,
+                    color = if (if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY) colors.primary else colors.foregroundTertiary,
                 )
             }
         }
@@ -397,7 +434,7 @@ private fun destinationIcon(id: String): ImageVector = when (id) {
     ChatyNavigationDestinationIds.chats -> Icons.Outlined.ChatBubbleOutline
     ChatyNavigationDestinationIds.groups -> Icons.Outlined.Groups
     ChatyNavigationDestinationIds.updates -> Icons.Outlined.AutoAwesome
-    ChatyNavigationDestinationIds.tasks -> Icons.Rounded.Checklist
+    ChatyNavigationDestinationIds.tasks -> Icons.Outlined.Checklist
     ChatyNavigationDestinationIds.calls -> Icons.Outlined.Call
     ChatyNavigationDestinationIds.settings -> Icons.Outlined.Settings
     else -> Icons.Outlined.Devices

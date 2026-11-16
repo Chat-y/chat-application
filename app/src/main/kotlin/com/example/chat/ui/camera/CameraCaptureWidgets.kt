@@ -67,6 +67,11 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+// Duplicate import retained disabled after source audit: import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.role
@@ -118,6 +123,7 @@ fun CameraCaptureViewfinder(
     onPickFromGallery: () -> Unit,
     focusTap: Offset? = null,
     captureFlashAlpha: Float = 0f,
+    onRetryCamera: (() -> Unit)? = null,
 ) {
     Box(
         Modifier
@@ -165,14 +171,14 @@ fun CameraCaptureViewfinder(
         // coordinate space: same centered box, same aspect constraint.
         val focusRing = focusTap
         if (focusRing != null) {
-            Box(
+            BoxWithConstraints(
                 Modifier
                     .align(Alignment.Center)
                     .then(if (previewAspect != null) Modifier.fillMaxWidth().aspectRatio(previewAspect) else Modifier.fillMaxSize()),
             ) {
                 Box(
                     Modifier
-                        .offset { IntOffset((focusRing.x - 34.dp.toPx()).roundToInt(), (focusRing.y - 34.dp.toPx()).roundToInt()) }
+                        .offset { IntOffset((focusRing.x - 34.dp.toPx()).coerceIn(0f, (maxWidth.toPx() - 68.dp.toPx()).coerceAtLeast(0f)).roundToInt(), (focusRing.y - 34.dp.toPx()).coerceIn(0f, (maxHeight.toPx() - 68.dp.toPx()).coerceAtLeast(0f)).roundToInt()) }
                         .size(68.dp)
                         .border(2.dp, Color.White.copy(alpha = 0.9f), CircleShape)
                         .semantics { contentDescription = "Focusing here" },
@@ -193,8 +199,12 @@ fun CameraCaptureViewfinder(
                 title = "Camera unavailable",
                 message = errorMessage
                     ?: "No usable camera was found on this device. You can still share from your gallery.",
-                actionLabel = "Pick from gallery",
-                onAction = onPickFromGallery,
+                // Original gallery-only action retained:
+                // actionLabel = "Pick from gallery", onAction = onPickFromGallery
+                actionLabel = if (onRetryCamera != null) "Retry" else "Pick from gallery",
+                onAction = onRetryCamera ?: onPickFromGallery,
+                secondaryActionLabel = if (onRetryCamera != null) "Pick from gallery" else null,
+                onSecondaryAction = onPickFromGallery,
             )
             CameraPhase.ready -> Unit
         }
@@ -241,6 +251,9 @@ fun CameraCaptureViewfinder(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(
+                    androidx.compose.material3.MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f),
+                    androidx.compose.ui.graphics.Color.Transparent)))
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(top = 8.dp, start = 8.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -336,8 +349,12 @@ private fun CameraCaptureNoCameraPane(
     message: String,
     actionLabel: String,
     onAction: () -> Unit,
+    secondaryActionLabel: String? = null,
+    onSecondaryAction: () -> Unit = {},
 ) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    val actionFocus = androidx.compose.runtime.remember { FocusRequester() }
+    LaunchedEffect(title) { actionFocus.requestFocus() }
+    Box(Modifier.fillMaxSize().semantics { liveRegion = LiveRegionMode.Polite }, contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -359,10 +376,17 @@ private fun CameraCaptureNoCameraPane(
                 lineHeight = 19.5.sp,
             )
             Spacer(Modifier.height(20.dp))
-            OutlinedButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick = onAction) {
+            OutlinedButton(modifier = Modifier.heightIn(min = 48.dp).focusRequester(actionFocus), shape = com.example.chat.ui.kit.ChatyActionShape, onClick = onAction) {
                 CameraGlyph(kind = "filters", color = Color.White, size = 18.dp)
                 Spacer(Modifier.width(6.dp))
                 Text(actionLabel, color = Color.White)
+            }
+            if (secondaryActionLabel != null) {
+                androidx.compose.material3.FilledTonalButton(
+                    onClick = onSecondaryAction,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    shape = com.example.chat.ui.kit.ChatyActionShape,
+                ) { Text(secondaryActionLabel) }
             }
         }
     }
@@ -411,6 +435,7 @@ fun CameraCaptureBottomControls(
     onPickRecent: (android.net.Uri) -> Unit = {},
 ) {
     val ready = phase == CameraPhase.ready
+    val reduceControlMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
     val configuration = LocalConfiguration.current
     val tight = minOf(configuration.screenWidthDp, configuration.screenHeightDp) < 340 ||
         configuration.screenHeightDp < 680
@@ -471,7 +496,8 @@ fun CameraCaptureBottomControls(
                         }
                         val scale by animateFloatAsState(
                             targetValue = if (isSelected) 1.06f else 0.88f,
-                            animationSpec = tween(180, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)),
+                            // Original fixed animationSpec = tween(180, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)),
+                            animationSpec = tween(if (reduceControlMotion) 0 else 180, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)),
                             label = "effect-scale",
                         )
                         Column(
@@ -542,9 +568,13 @@ fun CameraCaptureBottomControls(
                 .filter { when(it){CaptureViewMode.portrait->portraitSupported;CaptureViewMode.night->nightSupported;CaptureViewMode.video->videoSupported;else->true} }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val slotWidth = (if (tight) 76 else 88).dp
-                LaunchedEffect(captureViewMode, maxWidth) {
+                // Original centering always animated and keyed only captureViewMode/maxWidth.
+                LaunchedEffect(captureViewMode, maxWidth, reduceControlMotion) {
                     val idx = stripModes.indexOf(captureViewMode)
-                    if (idx >= 0) stripState.animateScrollToItem(idx)
+                    if (idx >= 0) {
+                        // Original: stripState.animateScrollToItem(idx)
+                        if (reduceControlMotion) stripState.scrollToItem(idx) else stripState.animateScrollToItem(idx)
+                    }
                 }
                 LazyRow(
                     state = stripState,
@@ -682,7 +712,11 @@ fun CameraCaptureBottomControls(
                 // Reference recording row (user video 2026-10-30): the stop control
                 // stays centered; pause/resume sits at the right edge.
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CameraCaptureShutter(enabled = true, capturing = false, videoActive = true, recording = true, onClick = onShutter)
+                    CameraCaptureShutter(enabled = true, capturing = false, videoActive = true, recording = true, elapsedSeconds = videoSeconds, paused = videoPaused, onClick = onShutter)
+                    if (videoPaused) Text("Paused", color = androidx.compose.material3.MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.align(Alignment.TopCenter).offset(y = (-32).dp)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp).semantics { liveRegion = LiveRegionMode.Polite })
                     if (videoSnapshotAvailable) {
                         // Reference recording row: still snapshot button left of stop.
                         // Drawn only when the session really bound the 3-use-case
@@ -841,7 +875,7 @@ private fun CameraCaptureModeButton(
 /** _buildShutter: 76dp ring (4dp white border, 5dp gap), spinner while
  *  capturing, filled inner circle otherwise. */
 @Composable
-private fun CameraCaptureShutter(enabled: Boolean, capturing: Boolean, videoActive: Boolean = false, recording: Boolean = false, hollow: Boolean = false, onClick: () -> Unit) {
+private fun CameraCaptureShutter(enabled: Boolean, capturing: Boolean, videoActive: Boolean = false, recording: Boolean = false, hollow: Boolean = false, elapsedSeconds: Int = 0, paused: Boolean = false, onClick: () -> Unit) {
     // Reference (user video 2026-10-30): white ring in every state; photo fill is
     // white, video idle is a red filled circle, recording is a red rounded square.
     // Size stays 76dp so the row geometry is stable.
@@ -852,7 +886,7 @@ private fun CameraCaptureShutter(enabled: Boolean, capturing: Boolean, videoActi
             .border(4.dp, Color.White, CircleShape)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(5.dp)
-            .semantics { contentDescription = if (videoActive) { if (recording) "Stop recording" else "Record video" } else "Take photo" },
+            .semantics { contentDescription = if (videoActive) { if (recording) "Stop recording" else "Record video" } else "Take photo"; stateDescription = when { recording && paused -> "Recording paused, $elapsedSeconds seconds"; recording -> "Recording, $elapsedSeconds seconds"; capturing -> "Capturing photo"; else -> "Ready" } },
         contentAlignment = Alignment.Center,
     ) {
         if (capturing) {
@@ -897,7 +931,7 @@ private fun CameraCaptureShutter(enabled: Boolean, capturing: Boolean, videoActi
 @Composable
 fun CameraCaptureTimerTop(seconds: Int, modifier: Modifier = Modifier) {
     Row(
-        modifier = modifier.semantics { contentDescription = "Recording time" },
+        modifier = modifier.semantics { contentDescription = "Recording time"; stateDescription = "Recording, $seconds seconds" },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(8.dp).clip(CircleShape).background(CameraRecordingRed))
@@ -912,7 +946,11 @@ fun CameraCaptureTimerTop(seconds: Int, modifier: Modifier = Modifier) {
 }
 
 /** _buildConfirmPane: zoomable preview with the stored effect applied exactly
- *  like receivers render it, caption field, discard + confirm. */
+ *  like receivers render it, caption field, discard + confirm.
+ *  Hierarchy: Send/Post is the single filled primary action; Discard stays secondary and
+ *  caption is optional. The caption never requests initial focus or opens the keyboard.
+ *  Keep quality-priority still capture honest with the in-flight ring; burst is not implemented.
+ */
 @Composable
 fun CameraCaptureConfirmPane(
     path: String,
@@ -924,6 +962,7 @@ fun CameraCaptureConfirmPane(
     onCaptionChange: (String) -> Unit,
     onDiscard: () -> Unit,
     onConfirm: () -> Unit,
+    sending: Boolean = false,
 ) {
     val isChat = mode == ChatyCaptureMode.chat
     Column(Modifier.fillMaxSize().background(Color.Black)) {
@@ -989,7 +1028,7 @@ fun CameraCaptureConfirmPane(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .clickable(onClick = onDiscard)
+                    .clickable(enabled = !sending, onClick = onDiscard)
                     .semantics { contentDescription = "Discard photo" },
                 contentAlignment = Alignment.Center,
             ) {
@@ -999,6 +1038,7 @@ fun CameraCaptureConfirmPane(
             TextField(
                 value = caption,
                 onValueChange = onCaptionChange,
+                enabled = !sending,
                 modifier = Modifier.weight(1f),
                 minLines = 1,
                 maxLines = 2,
@@ -1024,13 +1064,15 @@ fun CameraCaptureConfirmPane(
                     .size(50.dp)
                     .clip(CircleShape)
                     .background(androidx.compose.material3.MaterialTheme.colorScheme.primary)
-                    .clickable(onClick = onConfirm)
+                    .clickable(enabled = !sending, onClick = onConfirm)
                     .semantics {
                         contentDescription = if (isChat) "Send photo" else "Post to my status"
+                        if (sending) stateDescription = "Preparing photo; please wait"
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                CameraGlyph(
+                if (sending) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = androidx.compose.material3.MaterialTheme.colorScheme.onPrimary)
+                else CameraGlyph(
                     kind = "send",
                     color = androidx.compose.material3.MaterialTheme.colorScheme.onPrimary,
                     size = 24.dp,

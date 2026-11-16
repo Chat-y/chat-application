@@ -2,6 +2,12 @@ package com.example.chat.ui.chats.detail
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import androidx.compose.ui.semantics.*
+import com.example.chat.ui.media.stageMediaSource
+import com.example.chat.ui.media.copyMediaBounded
+import com.example.chat.ui.media.openMediaInput
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import android.net.Uri
 import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
@@ -24,6 +30,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -119,6 +128,7 @@ fun MediaViewerScreen(
     // Owned viewers must cross the same short account/epoch barrier as inline playback.
     deliverPlayback: ((() -> Unit) -> Boolean)? = null,
 ) {
+    com.example.chat.ui.kit.ProtectSensitiveWindow(active = restrictedViewOnce)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -133,26 +143,31 @@ fun MediaViewerScreen(
         if (reduceMotion || sourceBounds == null) opening.snapTo(1f)
         else if (targetBounds != null && openingReady) opening.animateTo(1f, tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
-    var trimming by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf(false) }
+    var trimming by remember(storagePath) { mutableStateOf(false) }
+    var editing by remember(storagePath) { mutableStateOf(false) }
     var editedCopy by remember(storagePath) { mutableStateOf<java.io.File?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var signedUrl by remember { mutableStateOf<String?>(null) }
+    val ownedCopies = remember(storagePath) { mutableListOf<java.io.File>() }
+    DisposableEffect(storagePath) { onDispose { ownedCopies.forEach { it.delete() } } }
+    var externalActionBusy by remember(storagePath) { mutableStateOf(false) }
+    var trimSource by remember(storagePath) { mutableStateOf<String?>(null) }
+    var error by remember(storagePath) { mutableStateOf<String?>(null) }
+    var signedUrl by remember(storagePath) { mutableStateOf<String?>(null) }
 
     // Video state (Dart VideoPlayerController value).
-    var videoReady by remember { mutableStateOf(false) }
-    var videoFailed by remember { mutableStateOf(false) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var durationMs by remember { mutableIntStateOf(0) }
-    var positionMs by remember { mutableIntStateOf(0) }
-    var bufferedPct by remember { mutableIntStateOf(0) }
-    var videoWidth by remember { mutableIntStateOf(0) }
-    var videoHeight by remember { mutableIntStateOf(0) }
-    var videoView by remember { mutableStateOf<VideoView?>(null) }
+    var videoReady by remember(storagePath) { mutableStateOf(false) }
+    var videoFailed by remember(storagePath) { mutableStateOf(false) }
+    var isPlaying by remember(storagePath) { mutableStateOf(false) }
+    var durationMs by remember(storagePath) { mutableIntStateOf(0) }
+    var positionMs by remember(storagePath) { mutableIntStateOf(0) }
+    var bufferedPct by remember(storagePath) { mutableIntStateOf(0) }
+    var videoWidth by remember(storagePath) { mutableIntStateOf(0) }
+    var videoHeight by remember(storagePath) { mutableIntStateOf(0) }
+    var videoView by remember(storagePath) { mutableStateOf<VideoView?>(null) }
 
     androidx.compose.runtime.SideEffect { registerStopReader?.invoke { videoView?.stopPlayback(); videoView = null } }
+    var reloadAttempt by remember(storagePath) { mutableIntStateOf(0) }
     // Dart _load.
-    LaunchedEffect(storagePath, type) {
+    LaunchedEffect(storagePath, type, reloadAttempt) {
         error = null
         signedUrl = null
         videoReady = false
@@ -168,9 +183,8 @@ fun MediaViewerScreen(
             // resolves; the video branch overlays its own spinner until
             // onPrepared fires.
             signedUrl = createSignedUrl(path, 3600)
-        } catch (e: Exception) {
-            error = (e.message ?: e.toString()).removePrefix("Exception: ")
-        }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { error = "Could not load this attachment. Check your connection and reopen it." }
     }
 
     val mediaLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -189,6 +203,11 @@ fun MediaViewerScreen(
         mediaLifecycleOwner.lifecycle.addObserver(observer)
         onDispose { mediaLifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    DisposableEffect(videoView, isPlaying, mediaForeground) {
+        val reader = videoView
+        reader?.keepScreenOn = isPlaying && mediaForeground
+        onDispose { reader?.keepScreenOn = false }
+    }
     // Poll playback position/state (Dart controller value listener).
     LaunchedEffect(videoView, videoReady, mediaForeground) {
         val vv = videoView
@@ -197,7 +216,7 @@ fun MediaViewerScreen(
             positionMs = vv.currentPosition
             bufferedPct = vv.bufferPercentage
             isPlaying = vv.isPlaying
-            delay(250)
+            delay(if (isPlaying) 250 else 1_000)
         }
     }
 
@@ -211,71 +230,139 @@ fun MediaViewerScreen(
         }
     }
 
-    // Dart _openExternally (url_launcher externalApplication).
-    fun openExternally() {
-        if (restrictedViewOnce || error != null) return
-        if (ownedActions) { onOwnedOpen?.invoke(); return }
-        val url = signedUrl ?: return
-        try {
-            val local = editedCopy
-            val intent = if (local != null) {
-                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", local)
-                Intent(Intent.ACTION_VIEW).setDataAndType(uri, when (local.extension) {
-                    "mp4" -> "video/mp4"; "m4a" -> "audio/mp4"; else -> "image/jpeg"
-                }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } else Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            context.startActivity(
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        } catch (e: ActivityNotFoundException) {
-            scope.launch {
-                snackbarHostState.showSnackbar("No application could open this attachment.")
-            }
+    // Old URL forwarding implementation retained below, disabled because signed URLs are bearer tokens.
+//
+//     // Dart _openExternally (url_launcher externalApplication).
+//     fun openExternally() {
+//         if (restrictedViewOnce || error != null) return
+//         if (ownedActions) { onOwnedOpen?.invoke(); return }
+//         val url = signedUrl ?: return
+//         try {
+//             val local = editedCopy
+//             val intent = if (local != null) {
+//                 val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", local)
+//                 Intent(Intent.ACTION_VIEW).setDataAndType(uri, when (local.extension) {
+//                     "mp4" -> "video/mp4"; "m4a" -> "audio/mp4"; else -> "image/jpeg"
+//                 }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+//             } else Intent(Intent.ACTION_VIEW, Uri.parse(url))
+//             context.startActivity(
+//                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+//             )
+//         } catch (e: ActivityNotFoundException) {
+//             scope.launch {
+//                 snackbarHostState.showSnackbar("No application could open this attachment.")
+//             }
+//         }
+//     }
+//
+//     // Dart _share (share_plus text + subject).
+//     fun share() {
+//         if (restrictedViewOnce || error != null) return
+//         if (ownedActions) { onOwnedShare?.invoke(); return }
+//         val local = editedCopy
+//         if (local != null) {
+//             val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", local)
+//             context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+//                 this.type = when { local.extension == "mp4" -> "video/mp4"; local.extension == "m4a" -> "audio/mp4"; else -> "image/jpeg" }; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+//             }, "Share edited copy"))
+//             return
+//         }
+//         val url = signedUrl ?: return
+//         val send = Intent(Intent.ACTION_SEND).apply {
+//             this.type = "text/plain"
+//             putExtra(Intent.EXTRA_TEXT, url)
+//             putExtra(Intent.EXTRA_SUBJECT, title)
+//         }
+//         try {
+//             context.startActivity(
+//                 Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+//             )
+//         } catch (e: ActivityNotFoundException) {
+//             // share_plus silently no-ops without a target; keep parity.
+//         }
+//     }
+//
+//
+    fun launchExternal(share: Boolean) {
+        if (restrictedViewOnce || error != null || externalActionBusy) return
+        if (ownedActions) { if (share) onOwnedShare?.invoke() else onOwnedOpen?.invoke(); return }
+        val source = editedCopy?.toURI()?.toString()
+            ?: (providedModel as? java.io.File)?.toURI()?.toString()
+            ?: signedUrl ?: return
+        externalActionBusy = true
+        scope.launch {
+            var export: java.io.File? = null
+            var handedOff = false
+            try {
+                export = stageMediaSource(context, source, "chaty_shared_")
+                coroutineContext.ensureActive()
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", export!!)
+                val classification = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.chat.ui.media.FileTypeDetector.classifyFile(
+                        headerBytesOf = { export!!.inputStream().use { input ->
+                            val bytes = ByteArray(32); val count = input.read(bytes)
+                            if (count > 0) bytes.copyOf(count) else byteArrayOf()
+                        } }, filePath = export!!.path)
+                }
+                val mime = classification.mimeType.takeUnless { it == "application/octet-stream" }
+                    ?: when (type) { "image" -> "image/*"; "video" -> "video/*"; else -> "application/octet-stream" }
+                val intent = Intent(if (share) Intent.ACTION_SEND else Intent.ACTION_VIEW).apply {
+                    if (share) { this.type = mime; putExtra(Intent.EXTRA_STREAM, uri) } else setDataAndType(uri, mime)
+                    clipData = android.content.ClipData.newRawUri("Attachment", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, if (share) "Share attachment" else "Open attachment"))
+                // External recipients may read later. Keep the exported snapshot for normal cache expiry.
+                handedOff = true
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { snackbarHostState.showSnackbar("Could not prepare this attachment. Check access and the 100 MB file limit, then try again.") }
+            finally { if (!handedOff) export?.delete(); externalActionBusy = false }
         }
     }
-
-    // Dart _share (share_plus text + subject).
-    fun share() {
-        if (restrictedViewOnce || error != null) return
-        if (ownedActions) { onOwnedShare?.invoke(); return }
-        val local = editedCopy
-        if (local != null) {
-            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", local)
-            context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                this.type = when { local.extension == "mp4" -> "video/mp4"; local.extension == "m4a" -> "audio/mp4"; else -> "image/jpeg" }; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }, "Share edited copy"))
-            return
-        }
-        val url = signedUrl ?: return
-        val send = Intent(Intent.ACTION_SEND).apply {
-            this.type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, url)
-            putExtra(Intent.EXTRA_SUBJECT, title)
-        }
-        try {
-            context.startActivity(
-                Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        } catch (e: ActivityNotFoundException) {
-            // share_plus silently no-ops without a target; keep parity.
-        }
-    }
+    fun openExternally() = launchExternal(false)
+    fun share() = launchExternal(true)
 
     // Dart _toggleVideo.
     // GB media-preview option: save the viewed image/video to the device gallery.
-    fun saveToGallery() {
+    var galleryConfirmation by remember(storagePath) { mutableStateOf(false) }
+    var savingToGallery by remember(storagePath) { mutableStateOf(false) }
+    fun performGallerySave() {
+        if (restrictedViewOnce || savingToGallery) return
         val source = editedCopy?.absolutePath
             ?: (providedModel as? java.io.File)?.absolutePath
             ?: signedUrl
             ?: return
+        savingToGallery = true
         scope.launch {
-            val message = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { saveMediaToGallery(context, source, title, type == "video") }
-                    .getOrElse { "Save failed: ${it.message ?: it}" }
-            }
-            snackbarHostState.showSnackbar(message)
+            try {
+                val message = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try { saveMediaToGallery(context, source, title, type == "video") }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { "Could not save attachment. Try again." }
+                }
+                snackbarHostState.showSnackbar(message)
+            } finally { savingToGallery = false }
         }
     }
+    fun saveToGallery() {
+        if (restrictedViewOnce || savingToGallery) return
+        val hidden = runCatching {
+            val prefs = com.example.chat.ServiceLocator.preferencesController.universal
+            when {
+                type == "video" -> prefs.hideVideosFromGallery
+                title.endsWith(".gif", true) -> prefs.hideGifsFromGallery
+                else -> prefs.hidePhotosFromGallery
+            }
+        }.getOrDefault(true)
+        if (hidden) galleryConfirmation = true else performGallerySave()
+    }
+    if (galleryConfirmation && !restrictedViewOnce) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { galleryConfirmation = false },
+        title = { Text("Save a visible gallery copy?") },
+        text = { Text("Hide media is enabled for this media type. Save to gallery creates a shared copy visible in your phone gallery and to other apps with gallery access. The original stays in Chaty.") },
+        confirmButton = { TextButton(onClick = { galleryConfirmation = false; performGallerySave() }) { Text("Save visible copy") } },
+        dismissButton = { TextButton(onClick = { galleryConfirmation = false }) { Text("Cancel") } },
+    )
 
     fun toggleVideo() {
         val vv = videoView ?: return
@@ -293,7 +380,7 @@ fun MediaViewerScreen(
         isPlaying = vv.isPlaying
     }
 
-    var closing by remember { mutableStateOf(false) }
+    var closing by remember(storagePath) { mutableStateOf(false) }
     fun closeViewer() {
         if (closing) return
         closing = true
@@ -309,20 +396,52 @@ fun MediaViewerScreen(
     val primary = Color(theme.accentColor)
     val borderSubtle = Color(theme.dividerColor)
 
-    if (trimming && signedUrl != null && !restrictedViewOnce) {
-        MediaTrimScreen(editedCopy?.toURI()?.toString() ?: signedUrl!!, type == "video",
+    LaunchedEffect(trimming, storagePath) {
+        if (trimming) {
+            val source = editedCopy?.toURI()?.toString() ?: (providedModel as? java.io.File)?.toURI()?.toString() ?: signedUrl
+            if (source != null) try {
+                val copy = stageMediaSource(context, source, "chaty_trim_source_")
+                ownedCopies += copy
+                trimSource = copy.toURI().toString()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { trimming = false; snackbarHostState.showSnackbar("Could not prepare a local trim copy.") }
+        } else trimSource = null
+    }
+    if (trimming && !restrictedViewOnce) {
+        val localTrimSource = trimSource
+        if (localTrimSource == null) {
+            Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding().padding(24.dp)) {
+                CircularProgressIndicator(); Text("Preparing local trim copy")
+                TextButton(onClick = { trimming = false }) { Text("Cancel") }
+            } }
+            return
+        }
+        MediaTrimScreen(localTrimSource, type == "video",
             onCancel = { trimming = false },
-            onApply = { result -> editedCopy = result.file; signedUrl = result.file.toURI().toString(); trimming = false },
+            onApply = { result -> ownedCopies += result.file; editedCopy = result.file; signedUrl = result.file.toURI().toString(); trimming = false },
         )
         return
     }
     if (editing && signedUrl != null && !restrictedViewOnce) {
         ImageEditorScreen(editedCopy?.toURI()?.toString() ?: signedUrl!!,
             onCancel = { editing = false },
-            onApply = { file -> editedCopy = file; editing = false },
+            onApply = { file -> ownedCopies += file; editedCopy = file; editing = false },
         )
         return
     }
+    if (error != null) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { closeViewer() },
+        title = { Text("Attachment unavailable") },
+        text = { Text(error!!) },
+        confirmButton = { TextButton(onClick = { reloadAttempt++ }) { Text("Retry") } },
+        dismissButton = { TextButton(onClick = { closeViewer() }) { Text("Close") } },
+    )
+    if (externalActionBusy || savingToGallery) androidx.compose.material3.AlertDialog(
+        onDismissRequest = {},
+        title = { Text(if (savingToGallery) "Saving gallery copy" else "Preparing attachment") },
+        text = { CircularProgressIndicator() },
+        confirmButton = {},
+    )
     Scaffold(
         modifier = modifier,
         containerColor = elevated,
@@ -354,7 +473,7 @@ fun MediaViewerScreen(
                     Text(
                         size,
                         color = foregroundSecondary,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.sp,
                     )
                 }
                 if (type in setOf("video", "audio") && !restrictedViewOnce && error == null) TextButton(onClick = { if (ownedActions) onOwnedEdit?.invoke() else trimming = true }, enabled = signedUrl != null || providedModel != null) { Text("Trim") }
@@ -619,8 +738,8 @@ private fun ImageViewerContent(
     theme: ThemeConfig,
     onReady: () -> Unit = {},
 ) {
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    var scale by remember(model) { mutableStateOf(1f) }
+    var offset by remember(model) { mutableStateOf(Offset.Zero) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewportW = constraints.maxWidth.toFloat()
         val viewportH = constraints.maxHeight.toFloat()
@@ -628,7 +747,7 @@ private fun ImageViewerContent(
             Modifier
                 .fillMaxSize()
                 .clipToBounds()
-                .pointerInput(viewportW, viewportH) {
+                .pointerInput(model, viewportW, viewportH) {
                     detectTransformGestures { centroid, pan, zoom, _ ->
                         val oldScale = scale
                         // _matrixScale: max(current * gesture, cover) then
@@ -707,32 +826,20 @@ private fun VideoProgressBar(
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(20.dp)
-            .pointerInput(Unit) {
-                detectTapGestures { tap -> onSeek((tap.x / size.width).coerceIn(0f, 1f)) }
-            }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures { change, _ ->
-                    change.consume()
-                    onSeek((change.position.x / size.width).coerceIn(0f, 1f))
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
+    var draft by remember { mutableStateOf<Float?>(null) }
+    Column(modifier.fillMaxWidth()) {
         Canvas(Modifier.fillMaxWidth().height(3.dp)) {
             drawRect(backgroundColor)
-            drawRect(
-                bufferedColor,
-                size = Size(size.width * buffered.coerceIn(0f, 1f), size.height),
-            )
-            drawRect(
-                playedColor,
-                size = Size(size.width * position.coerceIn(0f, 1f), size.height),
-            )
+            drawRect(bufferedColor, size = Size(size.width * buffered.coerceIn(0f, 1f), size.height))
         }
+        androidx.compose.material3.Slider(
+            value = draft ?: position.coerceIn(0f, 1f),
+            onValueChange = { draft = it },
+            onValueChangeFinished = { draft?.let(onSeek); draft = null },
+            valueRange = 0f..1f,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "Video playback position" },
+            colors = androidx.compose.material3.SliderDefaults.colors(activeTrackColor = playedColor, thumbColor = playedColor, inactiveTrackColor = backgroundColor),
+        )
     }
 }
 
@@ -749,7 +856,7 @@ private fun MediaViewerFallbackCard(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(24.dp), // ChatySpacing.xl
+        modifier = Modifier.padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite }, // ChatySpacing.xl
     ) {
         Icon(
             icon,
@@ -787,17 +894,19 @@ private fun MediaViewerFallbackCard(
 
 private fun formatPlaybackTime(milliseconds: Int): String {
     val seconds = milliseconds.coerceAtLeast(0) / 1000
-    return "%d:%02d".format(seconds / 60, seconds % 60)
+    return if (seconds >= 3600) "%d:%02d:%02d".format(seconds / 3600, seconds / 60 % 60, seconds % 60)
+    else "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 /** Writes [source] (http(s) URL, content:// URI, or absolute file path) into the
  *  device gallery via MediaStore and returns the user-facing result text
  *  (GB copy: "Photo saved to gallery" / "Video saved to gallery"). */
-private fun saveMediaToGallery(context: android.content.Context, source: String, displayName: String, isVideo: Boolean): String {
+private suspend fun saveMediaToGallery(context: android.content.Context, source: String, displayName: String, isVideo: Boolean): String {
     if (android.os.Build.VERSION.SDK_INT < 29) {
         return "Saving to gallery needs Android 10 or newer."
     }
-    val extension = displayName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+    val safeName = com.example.chat.ui.media.FileSanitizationService { context.cacheDir }.sanitizeFileName(displayName)
+    val extension = safeName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
     val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
         ?: if (isVideo) "video/mp4" else "image/jpeg"
     val collection = if (isVideo) {
@@ -806,7 +915,7 @@ private fun saveMediaToGallery(context: android.content.Context, source: String,
         android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
     }
     val values = android.content.ContentValues().apply {
-        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, safeName)
         put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
         put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, (if (isVideo) "Movies" else "Pictures") + "/Chaty")
         put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
@@ -815,28 +924,33 @@ private fun saveMediaToGallery(context: android.content.Context, source: String,
     val uri = resolver.insert(collection, values) ?: return "Save failed: the gallery refused the new item."
     try {
         resolver.openOutputStream(uri)?.use { out ->
-            openMediaSource(context, source).use { input -> input.copyTo(out) }
+            openMediaInput(context, source).use { input -> require(copyMediaBounded(input, out, com.example.chat.ui.media.FileSanitizationService.MAX_SAFE_FILE_SIZE.toLong()) > 0) }
         } ?: error("could not open the gallery item for writing")
         values.clear()
         values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
-    } catch (error: Exception) {
+    } catch (cancelled: CancellationException) {
         resolver.delete(uri, null, null)
-        return "Save failed: ${error.message ?: error}"
+        throw cancelled
+    } catch (_: Exception) {
+        resolver.delete(uri, null, null)
+        return "Could not save attachment. Check access and the 100 MB file limit."
     }
     return if (isVideo) "Video saved to gallery" else "Photo saved to gallery"
 }
 
-private fun openMediaSource(context: android.content.Context, source: String): java.io.InputStream = when {
-    source.startsWith("http://") || source.startsWith("https://") -> {
-        val connection = java.net.URL(source).openConnection() as java.net.HttpURLConnection
-        connection.connectTimeout = 15000
-        connection.readTimeout = 30000
-        connection.connect()
-        if (connection.responseCode !in 200..299) error("download failed (HTTP ${connection.responseCode})")
-        connection.inputStream
-    }
-    source.startsWith("content://") ->
-        context.contentResolver.openInputStream(Uri.parse(source)) ?: error("could not open the source")
-    else -> java.io.File(source).inputStream()
-}
+//  Legacy source opener (replaced by openMediaInput to close HTTP connections and handle file URIs):
+// private fun openMediaSource(context: android.content.Context, source: String): java.io.InputStream = when {
+//     source.startsWith("http://") || source.startsWith("https://") -> {
+//         val connection = java.net.URL(source).openConnection() as java.net.HttpURLConnection
+//         connection.connectTimeout = 15000
+//         connection.readTimeout = 30000
+//         connection.connect()
+//         if (connection.responseCode !in 200..299) error("download failed (HTTP ${connection.responseCode})")
+//         connection.inputStream
+//     }
+//     source.startsWith("content://") ->
+//         context.contentResolver.openInputStream(Uri.parse(source)) ?: error("could not open the source")
+//     else -> java.io.File(source).inputStream()
+// }
+//

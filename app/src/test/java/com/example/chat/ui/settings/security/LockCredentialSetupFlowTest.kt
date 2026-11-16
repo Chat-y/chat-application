@@ -34,17 +34,17 @@ fun main() = runBlocking {
     // Password
     val l4 = FakeLock(); val p = LockCredentialSetupFlow("Password", 4, l4); p.init()
     p.handleContinue("   "); check(p.error == "Please enter a password.")
-    p.handleContinue("abc"); check(p.error == "Password must contain at least 6 characters.")
+    p.handleContinue("abc"); check(p.error == "Password must contain at least 8 characters.")
     check(p.handleContinue(" secret1 ") == SetupOutcome.clearText && p.step == SetupStep.confirmNew)
     p.handleContinue("secret2"); check(p.error == "Passwords do not match. Try again.")
-    check(p.handleContinue("secret1") == SetupOutcome.saved && l4.saved == Triple("Password", "secret1", null))
+    check(p.handleContinue(" secret1 ") == SetupOutcome.saved && l4.saved == Triple("Password", " secret1 ", null))
     // save failure message cleanup
     val l5 = FakeLock().apply { failSave = "Invalid argument(s): PIN too short" }; val f5 = LockCredentialSetupFlow("PIN", 4, l5); f5.init()
-    f5.handleContinue("1357"); f5.handleContinue("1357"); check(f5.error == "PIN too short" && !f5.busy)
+    f5.handleContinue("1357"); f5.handleContinue("1357"); check(f5.error == "Could not save the credential. Try again." && !f5.busy)
     // Pattern
     val l6 = FakeLock(); val pt = LockCredentialSetupFlow("Pattern", 4, l6); pt.init()
     check(!pt.canContinuePattern); pt.handlePatternContinue(); check(pt.error == "Draw your pattern first.")
-    pt.onPatternComplete("0-1"); check(pt.error == "Connect at least 4 dots.")
+    pt.onPatternComplete("0-1"); check(pt.error == "Connect at least 4 dots using each dot once.")
     pt.onPatternComplete("0-1-2-5"); check(pt.canContinuePattern && pt.error == "")
     check(pt.handlePatternContinue() == SetupOutcome.resetPad && pt.step == SetupStep.confirmNew && pt.firstPatternDrawn == null)
     pt.handlePatternContinue(); check(pt.error == "Draw the confirmation pattern first.")

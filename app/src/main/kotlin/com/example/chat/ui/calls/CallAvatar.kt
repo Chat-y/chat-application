@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,7 +22,8 @@ fun CallAvatar(
     colorHex: String?,
     size: Dp,
 ) {
-    val background = parseCallAvatarColor(colorHex)
+    // CALLS-R1-28: parse once per color, not on every recomposition of every visible row.
+    val background = remember(colorHex) { parseCallAvatarColor(colorHex) }
     Box(
         modifier = Modifier.size(size).background(background, CircleShape),
         contentAlignment = Alignment.Center,
@@ -48,3 +50,7 @@ fun parseCallAvatarColor(colorHex: String?): Color {
     val argb = if (value <= 0xFFFFFF) (0xFF000000L or value) else value
     return Color(argb)
 }
+
+/** CALL-R1-07: the one caller-initials rule - first letter of the trimmed name, "U" when empty. */
+fun callInitials(name: String?): String =
+    name?.trim()?.takeIf { it.isNotEmpty() }?.substring(0, 1)?.uppercase() ?: "U"

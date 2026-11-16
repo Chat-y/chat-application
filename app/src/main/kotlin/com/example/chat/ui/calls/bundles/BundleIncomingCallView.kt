@@ -84,7 +84,10 @@ fun BundleIncomingCallView(
     val latestPending by rememberUpdatedState(actionPending)
     val requestAccept: () -> Unit = { if (!latestPending) latestAccept() }
     val requestDecline: () -> Unit = { if (!latestPending) latestDecline() }
-    val baseTokens = com.example.chat.ui.calls.themedCallBundle(bundleId)
+    val incomingAppColors = com.example.chat.ui.theme.LocalAppColors.current
+    val baseTokens = androidx.compose.runtime.remember(bundleId, incomingAppColors) {
+        com.example.chat.ui.calls.themedCallBundleTokens(bundleId, incomingAppColors)
+    }
     val tokens = if (session.isVideo && !banner) baseTokens.copy(surfaceBackground = Color.Transparent) else baseTokens
     if (banner) {
         SharedIncomingCallBanner(session, actionPending, requestAccept, requestDecline, onExpand, bundleId)
@@ -104,7 +107,7 @@ fun BundleIncomingCallView(
                 Surface(color = tokens.cardBackground, shape = RoundedCornerShape(24.dp)) {
                     TextButton(modifier = Modifier.heightIn(min = 48.dp), enabled = !actionPending,
                         onClick = { previewOn = !previewOn; if (!previewOn) localPreviewOwner?.close() }) {
-                        Text(if (!previewOn) "Preview off" else if (previewReady) "Preview on" else "Preview unavailable", color = tokens.primaryText,
+                        Text(if (!previewOn) "Show preview" else if (previewReady) "Hide preview" else "Preview unavailable", color = tokens.primaryText,
                             modifier = Modifier.semantics { contentDescription = "Own camera preview. Only you can see this. " + if (previewReady) "On. Turn off" else "Off or unavailable. Try turn on" })
                     }
                 }
@@ -303,7 +306,8 @@ private fun ReferenceHorizontalPuck(twoWay: Boolean, background: Color, accept: 
                 contentDescription = description
                 customActions = buildList {
                     add(CustomAccessibilityAction("Answer call") { acceptNow(); true })
-                    if (twoWay) add(CustomAccessibilityAction("Decline call") { declineNow(); true })
+                    // CALL-R1-43: decline must be reachable without the gesture in one-way mode too.
+                    add(CustomAccessibilityAction("Decline call") { declineNow(); true })
                 }
             }.testTag(if (twoWay) "google_puck" else "ios_answer_puck")
             .pointerInput(range, reduced) {
@@ -584,12 +588,31 @@ private fun GoogleClassicIncomingCall(
                     .padding(bottom = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = "▲ Swipe up to answer",
-                    color = callSecondary(),
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(bottom = 16.dp),
+                // CALL-R1-59: a drawn, animated chevron replaces the static unicode arrow.
+                val hintReduced = com.example.chat.ui.kit.rememberChatyReduceMotion()
+                val hintTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "swipe-hint")
+                val hintDy by hintTransition.animateFloat(
+                    initialValue = 0f, targetValue = -6f,
+                    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                        androidx.compose.animation.core.tween(900), androidx.compose.animation.core.RepeatMode.Reverse),
+                    label = "swipe-hint-dy",
                 )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.KeyboardArrowUp,
+                        contentDescription = null,
+                        tint = callSecondary(),
+                        modifier = Modifier.offset(y = (if (hintReduced) 0f else hintDy).dp),
+                    )
+                    Text(
+                        text = "Swipe up to answer",
+                        color = callSecondary(),
+                        fontSize = 13.sp,
+                    )
+                }
                 VerticalDragPuck(
                     puckDescription = "Google classic swipe up to answer",
                     onDragUp = onAccept, onDragDown = {}, thresholdDp = 96f,
@@ -761,7 +784,18 @@ private fun AzureRingVerticalIncomingCall(
             )
             VerticalDottedTrack(tokens.secondaryText)
             val reducedRingMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
-            val pulseAlpha = if (reducedRingMotion) 0.18f else {
+            // CALL-R1-27: the infinite pulse sleeps while the window isn't resumed
+            // (an unanswered ring shouldn't keep the compositor awake).
+            val ringLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+            var ringResumed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+            androidx.compose.runtime.DisposableEffect(ringLifecycleOwner) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    ringResumed = event != androidx.lifecycle.Lifecycle.Event.ON_PAUSE && event != androidx.lifecycle.Lifecycle.Event.ON_STOP
+                }
+                ringLifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { ringLifecycleOwner.lifecycle.removeObserver(observer) }
+            }
+            val pulseAlpha = if (reducedRingMotion || !ringResumed) 0.18f else {
                 val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "ringing-hint")
                 val alpha by transition.animateFloat(initialValue = 0.10f, targetValue = 0.22f,
                     animationSpec = androidx.compose.animation.core.infiniteRepeatable(
@@ -1009,7 +1043,9 @@ private fun NextcloudTalkIncomingCall(
                 onDragUp = onAccept,
                 onDragDown = {},
                 thresholdDp = 96f,
-                onTap = onAccept,
+                // CALL-R1-12: tap-to-answer removed (pocket-answer is a privacy-grade accident);
+                // drag + the existing "Answer call" a11y action remain. Restore as opt-in if wanted:
+                // onTap = onAccept,
                 upA11yLabel = "Accept call",
                 downA11yLabel = null,
                 modifier = Modifier.testTag("nextcloud_accept"),

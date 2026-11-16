@@ -113,6 +113,13 @@ class ChatyPreferencesController(
 
     private val authListener: (String?) -> Unit = { newUserId -> handleAuthStateChange(newUserId) }
 
+    /** Monotonic account-scope generation, backed by the load generation that is
+     *  bumped on every scope switch (initial load, sign-in, sign-out, re-scope).
+     *  Read-only: capture before async work and compare afterwards; a changed
+     *  value means the captured account scope is stale and must not be applied. */
+    val scopeGeneration: Long
+        get() = loadGeneration.get()
+
     init {
         scope.launch { initLoad() }
         auth.addListener(authListener)

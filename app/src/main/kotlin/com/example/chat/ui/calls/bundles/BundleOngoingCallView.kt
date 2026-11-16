@@ -1,4 +1,9 @@
 package com.example.chat.ui.calls.bundles
+// CALL-R1-08: DEAD CODE - no call sites in the tree (GlobalCallHost renders
+// BundleIncomingCallView for incoming and OngoingCallScreen for ongoing). This file also
+// contains non-functional buttons (keypad/dialpad/message onClick = {}). Do not wire it
+// back in without removing or implementing those controls. Deletion decision: parent.
+
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -133,7 +138,7 @@ private fun ChatyDefaultOngoingCall(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = session.remoteDisplayName.take(1).uppercase().ifEmpty { "C" },
+                        text = com.example.chat.ui.calls.callInitials(session.remoteDisplayName),
                         fontSize = 40.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -869,7 +874,7 @@ private fun NextcloudTalkOngoingCall(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = session.remoteDisplayName.take(1).uppercase().ifEmpty { "N" },
+                    text = com.example.chat.ui.calls.callInitials(session.remoteDisplayName),
                     fontSize = 48.sp,
                     fontWeight = FontWeight.Bold,
                     color = tokens.secondaryText,

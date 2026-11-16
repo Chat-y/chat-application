@@ -10,7 +10,7 @@ class PdfProcessingParityTest {
     private fun svc() = PdfProcessingService(FileSanitizationService { File("/tmp") })
 
     @Test fun `text pdf bytes are valid and round-trip through extraction`() {
-        val tmp = File("/tmp/pdf-parity"); tmp.mkdirs()
+        val tmp = java.nio.file.Files.createTempDirectory("pdf-parity-").toFile()
         val src = File(tmp, "notes.txt").apply { writeText("Hello world\nsecond line\n(parens) and \\ backslash") }
         val result = svc().convertTextToPdf(ConversionRequest(
             id = "t1", type = ConversionType.textToPdf,
@@ -37,6 +37,7 @@ class PdfProcessingParityTest {
         assertTrue(text.contains("- Page 1/1"))
     }
 
+    /* Former parity test asserted invalid PNG/JPEG container embedding; retained, not executed:
     @Test fun `image pdf embeds bytes with png flate vs jpeg dct filter`() {
         val tmp = File("/tmp/pdf-parity-img"); tmp.mkdirs()
         val png = File(tmp, "a.png").apply { writeBytes(byteArrayOf(0x89.toByte(), 0x50, 1, 2, 3, 4)) }
@@ -53,6 +54,15 @@ class PdfProcessingParityTest {
         assertTrue(body.contains("/FlateDecode"))
         assertTrue(body.contains("/DCTDecode"))
         assertTrue(body.contains("/Count 2"))
+    }
+
+    */
+    @Test fun `invalid image containers fail without generating a corrupt PDF`() {
+        val dir = java.nio.file.Files.createTempDirectory("invalid-pdf-image-").toFile()
+        val png = File(dir, "a.png").apply { writeBytes(byteArrayOf(0x89.toByte(), 0x50, 1, 2, 3, 4)) }
+        val result = svc().convertImagesToPdf(ConversionRequest("invalid", ConversionType.imagesToPdf, listOf(png.path), dir.path, "result.pdf"))
+        assertFalse(result.success)
+        assertFalse(File(dir, "result.pdf").exists())
     }
 
     @Test fun `no valid images fails with exact dart message`() {

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -43,6 +44,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -70,6 +74,21 @@ import com.example.chat.domain.models.Conversation
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import com.example.chat.ui.kit.ChatyBackButton
 
 /** Exact port of lib/features/vault/hidden_vault_screen.dart.
  *
@@ -107,63 +126,92 @@ fun HiddenVaultScreen(
     }
     @Suppress("UNUSED_EXPRESSION") listenTick
 
-    var enteredPin by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isAuthenticating by remember { mutableStateOf(false) }
+    val owner = controller.sessionOwner
+    var enteredPin by remember(controller, owner) { mutableStateOf("") }
+    var pinLength by remember(controller, owner) { mutableIntStateOf(4) }
+    var credentialReady by remember(controller, owner) { mutableStateOf(false) }
+    var errorMessage by remember(controller, owner) { mutableStateOf<String?>(null) }
+    var isAuthenticating by remember(controller, owner) { mutableStateOf(false) }
     val shake = remember { Animatable(0f) }
 
     fun triggerBiometricAuth() {
         if (isAuthenticating) return
         isAuthenticating = true
         scope.launch {
-            val authed = controller.unlockVault()
-            isAuthenticating = false
-            if (authed) {
-                ChatyHapticsPort.light(view) // Dart: HapticFeedback.lightImpact()
-            }
+            try {
+                val verified = controller.unlockVault()
+                if (controller.sessionOwner != owner) return@launch
+                if (verified) { errorMessage = null; ChatyHapticsPort.light(view) }
+                else errorMessage = "Biometric authentication was not completed. Use your PIN or try again."
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { errorMessage = "Authentication unavailable. Try again." }
+            finally { isAuthenticating = false; enteredPin = "" }
         }
     }
 
     fun verifyPinAttempt() {
+        if (isAuthenticating || !credentialReady || enteredPin.length != pinLength) return
         val pin = enteredPin
+        isAuthenticating = true
         scope.launch {
-            val verified = controller.verifyPin(pin)
-            if (verified) {
-                ChatyHapticsPort.threshold(view) // Dart: HapticFeedback.mediumImpact()
+            try {
+                val verified = controller.verifyPin(pin)
+                if (controller.sessionOwner != owner) return@launch
                 enteredPin = ""
-                errorMessage = null
-            } else if (pin.length >= 4) {
-                // Shake animation and haptic rejection
-                ChatyHapticsPort.error(view) // Dart: HapticFeedback.heavyImpact()
-                shake.snapTo(0f)
-                if (!reduceMotion) shake.animateTo(1f, animationSpec = tween(durationMillis = 400))
-                errorMessage = "Incorrect PIN. Try again or use biometrics."
-                enteredPin = ""
-            }
+                if (verified) {
+                    ChatyHapticsPort.threshold(view)
+                    errorMessage = null
+                } else {
+                    ChatyHapticsPort.error(view)
+                    errorMessage = "PIN not accepted. Check your PIN or wait before retrying."
+                    shake.snapTo(0f)
+                    if (!reduceMotion) shake.animateTo(1f, animationSpec = tween(durationMillis = 200))
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { errorMessage = "Could not verify the PIN. Try again." }
+            finally { enteredPin = ""; isAuthenticating = false }
         }
     }
 
     fun onDigitPressed(digit: String) {
-        if (enteredPin.length >= 6) return
-        ChatyHapticsPort.selection(view) // Dart: HapticFeedback.selectionClick()
+        if (digit.length != 1 || digit[0] !in '0'..'9' || isAuthenticating || !credentialReady || enteredPin.length >= pinLength) return
         enteredPin += digit
         errorMessage = null
-        if (enteredPin.length == 4 || enteredPin.length == 6) {
-            verifyPinAttempt()
-        }
+        if (enteredPin.length == pinLength) verifyPinAttempt()
     }
 
     fun onBackspacePressed() {
-        if (enteredPin.isEmpty()) return
-        ChatyHapticsPort.selection(view) // Dart: HapticFeedback.selectionClick()
+        if (isAuthenticating || enteredPin.isEmpty()) return
         enteredPin = enteredPin.dropLast(1)
         errorMessage = null
     }
 
-    // Prompt biometric on screen load if vault is locked
-    LaunchedEffect(Unit) {
-        if (!controller.isUnlocked) {
-            triggerBiometricAuth()
+    LaunchedEffect(controller, owner) {
+        try {
+            val length = controller.getPinLength()
+            if (controller.sessionOwner == owner) { pinLength = length; credentialReady = true }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { errorMessage = "Could not load PIN settings. Reopen the vault to retry." }
+        // Biometrics are user initiated; opening the screen never launches an unexpected prompt.
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(controller, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                enteredPin = ""
+                controller.lockVault()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            controller.lockVault()
+        }
+    }
+    LaunchedEffect(controller, owner, controller.isUnlocked) {
+        while (controller.isUnlocked) {
+            delay(1_000)
+            listenTick++ // Re-check the service's inactivity deadline without resetting it.
         }
     }
 
@@ -186,6 +234,8 @@ fun HiddenVaultScreen(
             isDark = isDark,
             onBack = onBack,
             enteredPinLength = enteredPin.length,
+            pinLength = pinLength,
+            authenticating = isAuthenticating || !credentialReady,
             errorMessage = errorMessage,
             shakeOffsetPx = { sin(shake.value * Math.PI * 6) * 12 * 3 }, // 12 logical px shake
             onDigit = ::onDigitPressed,
@@ -201,6 +251,8 @@ private fun LockScreenView(
     isDark: Boolean,
     onBack: (() -> Unit)?,
     enteredPinLength: Int,
+    pinLength: Int,
+    authenticating: Boolean,
     errorMessage: String?,
     shakeOffsetPx: () -> Double,
     onDigit: (String) -> Unit,
@@ -209,10 +261,12 @@ private fun LockScreenView(
 ) {
     val primary = MaterialTheme.colorScheme.primary
     Scaffold(
-        containerColor = if (isDark) Color(0xFF0D1117) else Color(0xFFF0F4F8),
+        modifier = Modifier.semantics { paneTitle = "Hidden Vault"; isTraversalGroup = true },
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Hidden Vault", fontWeight = FontWeight.W700) },
+                title = { Text("Hidden Vault", modifier = Modifier.semantics { heading() }, fontWeight = FontWeight.W700) },
+                navigationIcon = { onBack?.let { ChatyBackButton(onPressed = it) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
@@ -221,6 +275,7 @@ private fun LockScreenView(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .widthIn(max = 480.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -256,25 +311,24 @@ private fun LockScreenView(
             Text(
                 "Enter your secure PIN or use biometrics",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.54f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(24.dp))
 
             // PIN Indicator dots with shake animation
             Row(
                 horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.offset { IntOffset(shakeOffsetPx().roundToInt(), 0) },
+                modifier = Modifier.semantics { stateDescription = "$enteredPinLength of $pinLength digits entered" }
+                    .offset { IntOffset(shakeOffsetPx().roundToInt(), 0) },
             ) {
-                repeat(4) { index ->
+                repeat(pinLength) { index ->
                     val isFilled = index < enteredPinLength
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 10.dp)
                             .size(16.dp)
                             .background(
-                                if (isFilled) primary
-                                else if (isDark) Color.White.copy(alpha = 0.24f)
-                                else Color.Black.copy(alpha = 0.12f),
+                                if (isFilled) primary else MaterialTheme.colorScheme.outline,
                                 CircleShape,
                             ),
                     )
@@ -285,7 +339,8 @@ private fun LockScreenView(
                 Spacer(Modifier.height(14.dp))
                 Text(
                     errorMessage,
-                    color = Color(0xFFFF5252),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    color = MaterialTheme.colorScheme.error,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.W600,
                     textAlign = TextAlign.Center,
@@ -294,12 +349,16 @@ private fun LockScreenView(
 
             Spacer(Modifier.height(16.dp))
 
+            if (authenticating) Text("Checking authentication...", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             NumericPad(
                 isDark = isDark,
+                enabled = !authenticating,
                 onDigit = onDigit,
                 onBackspace = onBackspace,
                 onBiometric = onBiometric,
             )
+            }
             Spacer(Modifier.height(20.dp))
         }
     }
@@ -308,6 +367,7 @@ private fun LockScreenView(
 @Composable
 private fun NumericPad(
     isDark: Boolean,
+    enabled: Boolean,
     onDigit: (String) -> Unit,
     onBackspace: () -> Unit,
     onBiometric: () -> Unit,
@@ -320,7 +380,7 @@ private fun NumericPad(
         listOf("bio", "0", "back"),
     )
 
-    Column {
+    Column(Modifier.widthIn(max = 360.dp)) {
         rows.forEach { row ->
             Row(
                 modifier = Modifier
@@ -338,7 +398,7 @@ private fun NumericPad(
                                 .background(primary.copy(alpha = 0.12f))
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
+                                    enabled = enabled,
                                     role = Role.Button,
                                     onClick = onBiometric,
                                 ),
@@ -357,12 +417,11 @@ private fun NumericPad(
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
                                 .background(
-                                    if (isDark) Color.White.copy(alpha = 0.06f)
-                                    else Color.Black.copy(alpha = 0.04f),
+                                    MaterialTheme.colorScheme.surfaceVariant,
                                 )
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
+                                    enabled = enabled,
                                     role = Role.Button,
                                     onClick = onBackspace,
                                 ),
@@ -372,7 +431,7 @@ private fun NumericPad(
                                 Icons.AutoMirrored.Rounded.Backspace,
                                 contentDescription = "Backspace",
                                 modifier = Modifier.size(22.dp),
-                                tint = if (isDark) Color.White.copy(alpha = 0.7f) else Color.Black.copy(alpha = 0.54f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         else -> Box(
@@ -381,17 +440,16 @@ private fun NumericPad(
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
                                 .background(
-                                    if (isDark) Color(0xFF1C2128) else Color.White,
+                                    MaterialTheme.colorScheme.surface,
                                 )
                                 .border(
                                     1.dp,
-                                    if (isDark) Color.White.copy(alpha = 0.08f)
-                                    else Color.Black.copy(alpha = 0.06f),
+                                    MaterialTheme.colorScheme.outlineVariant,
                                     CircleShape,
                                 )
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
+                                    enabled = enabled,
                                     role = Role.Button,
                                     onClick = { onDigit(cell) },
                                 ),
@@ -401,7 +459,7 @@ private fun NumericPad(
                                 cell,
                                 fontSize = 26.sp,
                                 fontWeight = FontWeight.W600,
-                                color = if (isDark) Color.White else Color.Black.copy(alpha = 0.87f),
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
@@ -422,11 +480,32 @@ private fun UnlockedVaultView(
     onLock: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    var removalCandidate by remember(controller) { mutableStateOf<String?>(null) }
+    var removalBusy by remember(controller) { mutableStateOf(false) }
+    var removalError by remember(controller) { mutableStateOf<String?>(null) }
+    removalCandidate?.let { id ->
+        AlertDialog(
+            onDismissRequest = { if (!removalBusy) removalCandidate = null },
+            title = { Text("Remove chat protection?") },
+            text = { Text(removalError ?: "This chat will return to the inbox without vault protection.") },
+            dismissButton = { TextButton(enabled = !removalBusy, onClick = { removalCandidate = null }) { Text("Cancel") } },
+            confirmButton = { TextButton(enabled = !removalBusy, onClick = {
+                removalBusy = true
+                scope.launch {
+                    try { controller.removeConversationLock(id); removalCandidate = null }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { removalError = "Could not remove protection. Try again." }
+                    finally { removalBusy = false }
+                }
+            }) { Text(if (removalBusy) "Saving..." else "Remove protection") } },
+        )
+    }
     val lockedIds = controller.lockedConversationIds
-    val lockedConversations = conversationsProvider().filter { lockedIds.contains(it.id) }
+    val lockedConversations = conversationsProvider().filter { lockedIds.contains(it.id) }.distinctBy { it.id }
 
     Scaffold(
-        containerColor = if (isDark) Color(0xFF0D1117) else Color(0xFFF0F4F8),
+        modifier = Modifier.semantics { paneTitle = "Hidden Vault"; isTraversalGroup = true },
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -439,6 +518,7 @@ private fun UnlockedVaultView(
                         )
                     }
                 },
+                navigationIcon = { onBack?.let { ChatyBackButton(onPressed = it) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 actions = {
                     IconButton(onClick = onLock) {
@@ -448,7 +528,12 @@ private fun UnlockedVaultView(
             )
         },
     ) { padding ->
-        if (lockedConversations.isEmpty()) {
+        if (controller.registryError != null || controller.registryLoading) {
+            Column(Modifier.fillMaxSize().padding(padding).padding(24.dp)) {
+                Text(if (controller.registryLoading) "Loading protected chats..." else controller.registryError.orEmpty())
+                TextButton(onClick = { scope.launch { controller.retryLoad() } }, enabled = !controller.registryLoading) { Text("Retry") }
+            }
+        } else if (lockedConversations.isEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -461,7 +546,7 @@ private fun UnlockedVaultView(
                     Icons.Rounded.Shield,
                     contentDescription = null,
                     modifier = Modifier.size(64.dp),
-                    tint = if (isDark) Color.White.copy(alpha = 0.3f) else Color.Black.copy(alpha = 0.26f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
@@ -471,9 +556,9 @@ private fun UnlockedVaultView(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "To hide a conversation into this encrypted vault, select it from the inbox and choose \"Lock to Vault\".",
+                    "To protect a conversation, select it from the inbox and choose \"Lock to Vault\". Vault protection is an access lock, not a separate encryption guarantee.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.54f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -485,7 +570,7 @@ private fun UnlockedVaultView(
             ) {
                 items(lockedConversations, key = { it.id }, contentType = { "vault-conversation" }) { conversation ->
                     Card(
-                        onClick = { onOpenConversation(conversation.id) },
+                        onClick = { if (controller.isUnlocked && !controller.isDecoyMode) { controller.recordActivity(); onOpenConversation(conversation.id) } },
                         shape = RoundedCornerShape(16.dp),
                     ) {
                         Row(
@@ -503,7 +588,7 @@ private fun UnlockedVaultView(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    conversation.avatarInitials
+                                    conversation.avatarInitials?.take(4)
                                         ?: conversation.title.firstOrNull()?.uppercase() ?: "?",
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
@@ -512,24 +597,27 @@ private fun UnlockedVaultView(
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    conversation.title,
+                                    conversation.title.take(256).ifBlank { "Unnamed conversation" },
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.W700,
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    conversation.lastMessageText.ifEmpty { "Encrypted conversation" },
+                                    "Protected conversation",
                                     fontSize = 13.sp,
-                                    color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.54f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
                             IconButton(onClick = {
-                                scope.launch { controller.toggleConversationLock(conversation.id) }
+                                removalError = null
+                                removalCandidate = conversation.id
                             }) {
                                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.unlock,
-                                    semanticLabel = "Unlock from Vault",
+                                    semanticLabel = "Remove vault protection from ${conversation.title.take(256).ifBlank { "unnamed conversation" }}",
                                     modifier = Modifier.size(20.dp),
                                 )
                             }

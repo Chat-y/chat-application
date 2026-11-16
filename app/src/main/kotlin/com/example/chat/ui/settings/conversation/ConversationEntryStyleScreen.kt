@@ -1,6 +1,11 @@
 package com.example.chat.ui.settings.conversation
 
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -55,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +77,7 @@ import com.example.chat.ui.theme.LocalAppColors
 import com.example.chat.ui.theme.LocalThemeConfig
 import kotlinx.coroutines.launch
 
+/* Legacy display-string registry and dead preview palette, retained for rollback.
 private val entryStyles = listOf(
     "Stock",
     "Reference 2",
@@ -108,127 +115,161 @@ private class EntryPreviewColors(
     val textEntryBg: Color, val textEntry: Color,
 )
 
+*/
+private fun normalizeStyle(raw: String): String = com.example.chat.core.theme.ConversationEntryStyles.layoutName(raw)
+
 /**
  * Port of ConversationEntryStyleScreen including its own static _buildStylePreview (the Dart
  * screen draws its own preview rather than the chat composer). UNCOMPILED (Compose).
  * Deviation: Dart BoxShadow blur uses elevation-shadow here (shadow(elevation) approximates it).
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ConversationEntryStyleScreen(preferences: ChatyPreferencesController, onBack: () -> Unit) {
+    val strings = androidx.compose.ui.platform.LocalContext.current.resources
     val config = LocalThemeConfig.current
     val colors = LocalAppColors.current
-    var version by remember { mutableIntStateOf(0) }
-    DisposableEffect(preferences) {
-        val l: () -> Unit = { version += 1 }
-        preferences.addListener(l)
-        onDispose { preferences.removeListener(l) }
-    }
-    @Suppress("UNUSED_VARIABLE") val v = version
-    val p = preferences.conversation
+    // Legacy whole-controller version listener replaced by a conversation-only snapshot.
+    val p = rememberConversationPreferences(preferences)
+
     val pickers = rememberGbPickers()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val fs = config.fontScale.toFloat()
+    val previewRequester = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+    var previewText by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val fs = config.fontScale.toFloat().let { if (it.isFinite()) it.coerceIn(0.8f, 2f) else 1f }
     fun pickColor(title: String, current: Long?, apply: (Long) -> Unit) =
         pickers.showColor(title, current ?: config.accentColor) { apply(it) }
 
     fun c(x: Long?, fb: Color) = x?.let { Color(it) } ?: fb
     val uiEntryBg = c(p.uiEntryBackgroundColor, Color(config.surfaceColor))
-    val pc = EntryPreviewColors(
-        buttons = c(p.uiButtonsColor, Color(config.secondaryTextColor)),
-        emoji = c(p.emojiButtonColor, Color(config.secondaryTextColor)),
-        send = c(p.sendButtonColor, Color.White),
-        micCircle = c(p.micSendBgCircleColor, Color(config.accentColor)),
-        textEntryBg = c(p.textEntryBackgroundColor, colors.surfaceSecondary),
-        textEntry = c(p.textEntryColor, Color(config.primaryTextColor)),
-    )
+    val composerColors = com.example.chat.ui.chats.detail.ComposerColors.resolve(config,
+        p.uiButtonsColor, p.emojiButtonColor, p.sendButtonColor, p.micSendBgCircleColor,
+        p.textEntryBackgroundColor, p.textEntryColor)
+
 
     Box(Modifier.fillMaxSize().background(Color(config.backgroundColor))) {
         Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().background(Color(config.surfaceColor))
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).height(56.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.padding(8.dp)) { ChatyBackButton(onPressed = onBack) }
-                Text("Conversation Entry style", color = Color(config.primaryTextColor), fontSize = (19f * fs).sp, fontWeight = FontWeight.W700)
-            }
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 12.dp)) {
+            com.example.chat.ui.kit.ChatyAppBar(title = strings.getString(com.example.chat.R.string.conv_ui_message_bar_880ea4), onBack = onBack)
+            Column(Modifier.weight(1f).align(Alignment.CenterHorizontally).widthIn(max = 600.dp).fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().imePadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp, vertical = 16.dp)) {
                 GbLivePreviewCard(padding = PaddingValues(horizontal = 8.dp, vertical = 16.dp)) {
-                    Box(Modifier.fillMaxWidth().background(uiEntryBg, RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 8.dp)) {
-                        var previewText by remember { mutableStateOf("") }
+                    Box(Modifier.fillMaxWidth().bringIntoViewRequester(previewRequester).background(uiEntryBg, RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 8.dp)) {
                         com.example.chat.ui.chats.detail.ChatEntryBar(
                             entryStyle = normalizeStyle(p.entryStyle),
-                            colors = com.example.chat.ui.chats.detail.ComposerColors.resolve(config,
-                                p.uiButtonsColor, p.emojiButtonColor, p.sendButtonColor, p.micSendBgCircleColor,
-                                p.textEntryBackgroundColor, p.textEntryColor),
+                            colors = composerColors,
                             template = com.example.chat.core.templates.ComposerTemplate(com.example.chat.core.templates.ComposerActionPlacement.integrated),
                             theme = config, text = previewText, onTextChange = { previewText = it },
                             onCamera = {}, onSend = { previewText = "" },
+                            onTextInputFocused = { scope.launch { previewRequester.bringIntoView() } },
                         )
                     }
                 }
-                Spacer(Modifier.height(14.dp))
-                GbCardContainer {
+                androidx.compose.material3.TextButton(onClick = { previewText = if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_message_fa769f) else "" }) {
+                    Text(if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_send_state_598ff4) else strings.getString(com.example.chat.R.string.conv_ui_preview_microphone_state_e707e8))
+                }
+                Text(strings.getString(com.example.chat.R.string.conv_ui_preview_only_nothing_is_sent_5c68fa), color = Color(config.secondaryTextColor), fontSize = 12.sp)
+                ConversationContrastNote(composerColors.inputText, composerColors.inputBg, 4.5f, strings.getString(com.example.chat.R.string.conv_ui_field_text_a2f608))
+                ConversationContrastNote(composerColors.uiButtons, uiEntryBg, 3f, strings.getString(com.example.chat.R.string.conv_ui_bar_icons_29dbfc))
+                ConversationContrastNote(Color(config.onAccentColor), composerColors.sendFill, 3f, strings.getString(com.example.chat.R.string.conv_ui_send_icon_ff1d9a))
+                Spacer(Modifier.height(16.dp))
+                GbCardContainer(headerText = strings.getString(com.example.chat.R.string.conv_ui_style_99a0ef)) {
                     Column {
-                        GbSettingRow(
-                            icon = Icons.Rounded.Style, title = "Conversation Entry style",
-                            subtitle = "Change the style of the Bottom Entry in Conversation screen\nSelected: ${normalizeStyle(p.entryStyle)}",
-                            hasSubScreen = true,
-                            onTap = {
-                                pickers.showRadio("Conversation Entry style", entryStyles, normalizeStyle(preferences.conversation.entryStyle)) { value ->
-                                    preferences.updateConversation(preferences.conversation.copy(entryStyle = value))
-                                    scope.launch {
-                                        snackbar.currentSnackbarData?.dismiss()
-                                        snackbar.showSnackbar("$value applied to the conversation entry bar")
+                        ConversationStyleGallery(
+                            title = strings.getString(com.example.chat.R.string.conv_ui_message_bar_style_91e972),
+                            subtitle = strings.getString(com.example.chat.R.string.conv_ui_preview_the_choices_apply_sa_4217ca),
+                            values = com.example.chat.core.theme.ConversationEntryStyles.options,
+                            keyOf = { it.id },
+                            selected = com.example.chat.core.theme.ConversationEntryStyles.resolve(p.entryStyle),
+                            labelOf = { it.label },
+                            familyOf = { it.family },
+                            onSelected = { option ->
+                                val previous = preferences.conversation.entryStyle
+                                preferences.editConversation { latest -> latest.copy(entryStyle = option.id) }
+                                scope.launch {
+                                    snackbar.currentSnackbarData?.dismiss()
+                                    val result = snackbar.showSnackbar("${option.label} applied", actionLabel = strings.getString(com.example.chat.R.string.conv_ui_undo_39fc72))
+                                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed &&
+                                        preferences.conversation.entryStyle == option.id) {
+                                        preferences.editConversation { latest -> latest.copy(entryStyle = previous) }
                                     }
                                 }
                             },
-                        )
-                GbSettingRow(
-                    icon = Icons.Rounded.Layers, title = "Conversation UI Entry Background", subtitle = "Change the Color of the Entry background",
+                        ) { option ->
+                            com.example.chat.ui.chats.detail.ChatEntryBar(
+                                entryStyle = option.legacyName, colors = composerColors,
+                                template = com.example.chat.core.templates.ComposerTemplate(com.example.chat.core.templates.ComposerActionPlacement.integrated),
+                                theme = config, text = strings.getString(com.example.chat.R.string.conv_ui_preview_f1fbb2), onTextChange = {}, onCamera = {}, onSend = {},
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                GbCardContainer(headerText = strings.getString(com.example.chat.R.string.conv_ui_colours_eb4e91)) {
+                    Column {
+                ConversationColorRow(
+                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.layers), title = strings.getString(com.example.chat.R.string.conv_ui_bar_background_854515), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_the_color_of_the_entr_32703b),
                     colorValue = p.uiEntryBackgroundColor,
-                    onColorTap = { pickColor("Entry Background Color", p.uiEntryBackgroundColor) { c -> preferences.updateConversation(preferences.conversation.copy(uiEntryBackgroundColor = c)) } },
+                    onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_entry_background_color_edfc4d), (uiEntryBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(uiEntryBackgroundColor = c) } } },
+                    effectiveColor = uiEntryBg,
+                    onReset = { preferences.editConversation { latest -> latest.copy(uiEntryBackgroundColor = null) } },
                 )
-                GbSettingRow(
-                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.toggle), title = "Conversation UI Buttons Color", subtitle = "Change the Color of the Entry icons",
+                ConversationColorRow(
+                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.toggle), title = strings.getString(com.example.chat.R.string.conv_ui_icon_colour_38def4), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_the_color_of_the_entr_193a28),
                     colorValue = p.uiButtonsColor,
-                    onColorTap = { pickColor("UI Buttons Color", p.uiButtonsColor) { c -> preferences.updateConversation(preferences.conversation.copy(uiButtonsColor = c)) } },
+                    onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_ui_buttons_color_9dd723), (composerColors.uiButtons).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(uiButtonsColor = c) } } },
+                    effectiveColor = composerColors.uiButtons,
+                    onReset = { preferences.editConversation { latest -> latest.copy(uiButtonsColor = null) } },
                 )
-                GbSettingRow(
-                    icon = Icons.Rounded.Mood, title = "Emoji Button Color", subtitle = "Emoji button in conversation screen color",
+                ConversationColorRow(
+                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.emoji), title = strings.getString(com.example.chat.R.string.conv_ui_emoji_icon_464a44), subtitle = strings.getString(com.example.chat.R.string.conv_ui_emoji_button_in_conversation_40bf37),
                     colorValue = p.emojiButtonColor,
-                    onColorTap = { pickColor("Emoji Button Color", p.emojiButtonColor) { c -> preferences.updateConversation(preferences.conversation.copy(emojiButtonColor = c)) } },
+                    onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_emoji_icon_464a44), (composerColors.emojiButton).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(emojiButtonColor = c) } } },
+                    effectiveColor = composerColors.emojiButton,
+                    onReset = { preferences.editConversation { latest -> latest.copy(emojiButtonColor = null) } },
                 )
-                GbSettingRow(
-                    icon = Icons.Rounded.Send, title = "Send Button Color", subtitle = "Send/Mic color in the conversation screen",
+                ConversationColorRow(
+                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.send), title = strings.getString(com.example.chat.R.string.conv_ui_send_fill_f4a388), subtitle = strings.getString(com.example.chat.R.string.conv_ui_colour_behind_the_send_glyph_11e831),
                     colorValue = p.sendButtonColor,
-                    onColorTap = { pickColor("Send Button Color", p.sendButtonColor) { c -> preferences.updateConversation(preferences.conversation.copy(sendButtonColor = c)) } },
+                    onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_send_icon_ff1d9a), (composerColors.sendFill).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(sendButtonColor = c) } } },
+                    effectiveColor = composerColors.sendFill,
+                    onReset = { preferences.editConversation { latest -> latest.copy(sendButtonColor = null) } },
                 )
-                GbSettingRow(
-                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.radioOn), title = "Mic/Send Background circle", subtitle = "Change the color of the circle behind Send/Mic",
+                ConversationColorRow(
+                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.radioOn), title = strings.getString(com.example.chat.R.string.conv_ui_send_button_7c13d0), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_the_color_of_the_circ_79cb96),
                     colorValue = p.micSendBgCircleColor,
-                    onColorTap = { pickColor("Mic/Send Circle Color", p.micSendBgCircleColor) { c -> preferences.updateConversation(preferences.conversation.copy(micSendBgCircleColor = c)) } },
+                    onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_mic_send_circle_color_d894d6), (composerColors.micCircleFill).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(micSendBgCircleColor = c) } } },
+                    effectiveColor = composerColors.micCircleFill,
+                    onReset = { preferences.editConversation { latest -> latest.copy(micSendBgCircleColor = null) } },
                 )
-                GbSettingRow(
-                    icon = Icons.Rounded.FormatColorFill, title = "Text Entry Background", subtitle = "Text Entry Background",
+                ConversationColorRow(
+                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.paintFill), title = strings.getString(com.example.chat.R.string.conv_ui_field_background_062e6c), subtitle = strings.getString(com.example.chat.R.string.conv_ui_colour_behind_the_typing_are_e5c837),
                     colorValue = p.textEntryBackgroundColor,
-                    onColorTap = { pickColor("Text Entry Background Color", p.textEntryBackgroundColor) { c -> preferences.updateConversation(preferences.conversation.copy(textEntryBackgroundColor = c)) } },
+                    onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_field_background_color_ec1969), (composerColors.inputBg).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(textEntryBackgroundColor = c) } } },
+                    effectiveColor = composerColors.inputBg,
+                    onReset = { preferences.editConversation { latest -> latest.copy(textEntryBackgroundColor = null) } },
                 )
-                GbSettingRow(
-                    icon = Icons.Rounded.FormatColorText, title = "Text Entry Color", subtitle = "Change text color in the conversation box",
+                ConversationColorRow(
+                    icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.textFormat), title = strings.getString(com.example.chat.R.string.conv_ui_field_text_a2f608), subtitle = strings.getString(com.example.chat.R.string.conv_ui_change_text_color_in_the_con_bc662f),
                     colorValue = p.textEntryColor,
-                    onColorTap = { pickColor("Text Entry Color", p.textEntryColor) { c -> preferences.updateConversation(preferences.conversation.copy(textEntryColor = c)) } },
+                    onColorTap = { pickColor(strings.getString(com.example.chat.R.string.conv_ui_field_text_a2f608), (composerColors.inputText).toArgb().toLong() and 0xFFFFFFFFL) { c -> preferences.editConversation { latest -> latest.copy(textEntryColor = c) } } },
+                    effectiveColor = composerColors.inputText,
+                    onReset = { preferences.editConversation { latest -> latest.copy(textEntryColor = null) } },
                 )
                     }
+                    androidx.compose.material3.TextButton(onClick = {
+                        preferences.editConversation { latest -> latest.copy(uiEntryBackgroundColor = null, uiButtonsColor = null,
+                            emojiButtonColor = null, sendButtonColor = null, micSendBgCircleColor = null,
+                            textEntryBackgroundColor = null, textEntryColor = null) }
+                    }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_entry_colours_b2d814)) }
                 }
             }
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
     pickers.Host()
 }
 
+/* Obsolete static renderer. The real ChatEntryBar above is the only active preview.
 @Composable
 private fun EntryStylePreview(style: String, pc: EntryPreviewColors) {
     @Composable fun emojiI(size: Dp = 22.dp) = com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.emoji, semanticLabel = null, color = pc.emoji, modifier = Modifier.size(size))
@@ -329,3 +370,5 @@ private fun EntryStylePreview(style: String, pc: EntryPreviewColors) {
             row { field(leading = { emojiI() }, trailing = { attachI(); sp(8); cameraI() }); sp(8); micCircle() }
     }
 }
+
+*/

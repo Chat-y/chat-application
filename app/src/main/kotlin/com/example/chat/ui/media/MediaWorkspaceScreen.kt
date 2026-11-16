@@ -25,12 +25,14 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -40,6 +42,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -60,6 +63,9 @@ import com.example.chat.ui.media.icons.ChatyMediaIcon
 import com.example.chat.ui.theme.ChatyAsyncImage
 import kotlinx.coroutines.launch
 import java.io.File
+import androidx.compose.ui.semantics.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 
 /** Exact port of lib/features/media/ui/workspace/media_workspace_screen.dart.
  *
@@ -93,10 +99,38 @@ fun MediaWorkspaceScreen(
     }
     @Suppress("UNUSED_EXPRESSION") tick
 
-    LaunchedEffect(Unit) { library.refreshLibrary() }
+    LaunchedEffect(library) { library.refreshLibrary() }
 
     val isDark = isSystemInDarkTheme()
+    var cleanupConfirm by remember { mutableStateOf(false) }
+    var cleanupEstimate by remember { mutableStateOf<Long?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
 
+    if (cleanupConfirm) AlertDialog(
+        onDismissRequest = { cleanupConfirm = false },
+        title = { Text("Clean temporary media?") },
+        text = {
+            // DOC-R4-201 / DOC-R1-052 / DOC-R4-202: scope, exclusions, estimate, no undo promise.
+            Text(
+                "This deletes files in the Chaty temporary media cache (chaty_media) that are older than 24 hours. " +
+                    (cleanupEstimate?.let { "About %.1f MB can be reclaimed now. ".format(it / (1024.0 * 1024.0)) } ?: "Estimating reclaimable space... ") +
+                    "Files newer than 24 hours are kept, and your library documents are not touched. This cannot be undone.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                cleanupConfirm = false
+                scope.launch {
+                    val result = sanitizer.cleanExpiredTempFiles()
+                    library.refreshLibrary()
+                    // DOC-R4-167: name the exact scope cleaned and report its freed bytes, not library-wide totals.
+                    val freedMb = "%.1f MB".format(result.freedBytes / (1024.0 * 1024.0))
+                    snackbar.showSnackbar("Cleared the Chaty temporary media cache (chaty_media, files older than 24 hours only): ${result.deleted} deleted ($freedMb freed), ${result.skipped} kept, ${result.failed} failed.")
+                }
+            }) { Text("Delete old files", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(onClick = { cleanupConfirm = false }) { Text("Keep files") } },
+    )
     Scaffold(
         containerColor = if (isDark) Color(0xFF0F131A) else Color(0xFFF8FAFC),
         snackbarHost = { SnackbarHost(snackbar) },
@@ -109,16 +143,16 @@ fun MediaWorkspaceScreen(
                 actions = {
                     IconButton(onClick = {
                         ChatyHapticsPort.light(view)
-                        scope.launch {
-                            sanitizer.cleanExpiredTempFiles(maxAgeMs = 0)
-                            library.refreshLibrary()
-                            snackbar.showSnackbar("Temporary media cache cleaned successfully.")
-                        }
+                        // DOC-R4-201 / DOC-R1-052: confirm with scope, exclusions and an estimate first.
+                        cleanupEstimate = null
+                        cleanupConfirm = true
+                        scope.launch { cleanupEstimate = sanitizer.estimateExpiredTempBytes() }
                     }) {
                         Icon(Icons.Rounded.CleaningServices, contentDescription = "Clean temporary cache")
                     }
-                    IconButton(onClick = { scope.launch { library.refreshLibrary() } }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh library")
+                    // DOC-R4-187: refresh exposes its updating state instead of allowing redundant scans.
+                    IconButton(onClick = { scope.launch { refreshing = true; try { library.refreshLibrary() } finally { refreshing = false } } }, enabled = !refreshing) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library")
                     }
                     Spacer(Modifier.width(6.dp))
                 },
@@ -126,14 +160,18 @@ fun MediaWorkspaceScreen(
         },
     ) { padding ->
         val files = library.files
-        val totalBytes = files.fold(0L) { sum, f -> sum + f.sizeBytes }
+        // DOC-R4-168 / DOC-R4-205: total and breakdown come from one service snapshot, and an
+        // incomplete scan is shown as partial or unmeasured, never as a measured empty library.
         val breakdown = library.getStorageBreakdown()
+        val totalBytes = breakdown.values.fold(0L) { sum, v -> if (v > Long.MAX_VALUE - sum) Long.MAX_VALUE else sum + v }
+        // DOC-R4-162: audio taps enqueue every audio file in this list - make that scope visible on the row.
+        val audioCount = files.count { it.category == MediaCategory.audio }
 
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 90.dp),
             ) {
-                item { StorageOverviewCard(isDark, totalBytes, breakdown) }
+                item { StorageOverviewCard(isDark, totalBytes, breakdown, measured = breakdown.scanCompleted, complete = breakdown.isComplete) }
                 item { Spacer(Modifier.height(20.dp)) }
 
                 item {
@@ -148,8 +186,10 @@ fun MediaWorkspaceScreen(
                 }
                 item { Spacer(Modifier.height(12.dp)) }
                 item {
-                    Row {
-                        Box(Modifier.weight(1f)) {
+                    // DOC-R4-194 / DOC-R5-256: below 340dp the two studio cards stack vertically
+                    // so neither card clips its subtitle in split-screen.
+                    androidx.compose.foundation.layout.BoxWithConstraints {
+                        val explorer = @Composable {
                             ActionCard(
                                 icon = ChatyIconType.folder,
                                 title = "File Explorer",
@@ -159,8 +199,7 @@ fun MediaWorkspaceScreen(
                                 onTap = onOpenFileExplorer,
                             )
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Box(Modifier.weight(1f)) {
+                        val studio = @Composable {
                             ActionCard(
                                 icon = ChatyIconType.pdf,
                                 title = "PDF Studio",
@@ -170,13 +209,27 @@ fun MediaWorkspaceScreen(
                                 onTap = onOpenPdfStudio,
                             )
                         }
+                        if (maxWidth < 340.dp) {
+                            Column(Modifier.fillMaxWidth()) {
+                                explorer()
+                                Spacer(Modifier.height(12.dp))
+                                studio()
+                            }
+                        } else {
+                            Row {
+                                Box(Modifier.weight(1f)) { explorer() }
+                                Spacer(Modifier.width(12.dp))
+                                Box(Modifier.weight(1f)) { studio() }
+                            }
+                        }
                     }
                 }
                 item { Spacer(Modifier.height(24.dp)) }
 
                 item {
                     Text(
-                        "RECENT ATTACHMENTS & FILES",
+                        // DOC-R4-161: the library sorts by modifiedAt, not last opened - label it accurately.
+                        "RECENTLY MODIFIED FILES",
                         style = MaterialTheme.typography.labelMedium.copy(
                             letterSpacing = 1.1.sp,
                             fontWeight = FontWeight.W800,
@@ -195,21 +248,37 @@ fun MediaWorkspaceScreen(
                                 .background(if (isDark) Color(0xFF161C26) else Color.White)
                                 .padding(28.dp),
                             contentAlignment = Alignment.Center,
-                        ) { Text("No files or media found in Chaty storage.") }
+                        ) { Text("No files or media found in Chaty storage. Convert or import a file and it will show up here.") }
                     }
                 } else {
-                    items(files.take(15).size, key = { files[it].id }) { idx ->
+                    items(files.size, key = { files[it].id }) { idx ->
                         val file = files[idx]
+                        // DOC-R4-188: the row names its action - Play for audio, Open otherwise.
+                        val rowAction = if (file.category == MediaCategory.audio) "Play ${file.name}" else "Open ${file.name}"
                         Box(
                             Modifier
                                 .springInteractiveScale(0.98f)
+                                .semantics(mergeDescendants = true) { contentDescription = rowAction }
                                 .clickable {
-                                    if (file.category == MediaCategory.audio) {
+                                    // DOC-R4-164: a descriptor can outlive its file - verify at the
+                                    // play/open boundary and refresh instead of failing silently.
+                                    if (!file.exists) {
                                         scope.launch {
-                                            playerCoordinator.playTrack(
-                                                file,
-                                                queue = files.filter { it.category == MediaCategory.audio },
-                                            )
+                                            snackbar.showSnackbar("${file.name} is no longer on disk. Refreshing the library.")
+                                            library.refreshLibrary()
+                                        }
+                                    } else if (file.category == MediaCategory.audio) {
+                                        scope.launch {
+                                            // DOC-R4-163: a failed play must surface, not vanish into the coroutine.
+                                            try {
+                                                playerCoordinator.playTrack(
+                                                    file,
+                                                    queue = files.filter { it.category == MediaCategory.audio },
+                                                )
+                                            } catch (e: Exception) {
+                                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                                snackbar.showSnackbar("Playback: could not play ${file.name}. Try opening it in an external app.")
+                                            }
                                         }
                                     } else {
                                         onOpenDocument(file)
@@ -239,13 +308,33 @@ fun MediaWorkspaceScreen(
                                         fontWeight = FontWeight.W700,
                                         fontSize = 13.sp,
                                     )
+                                    // DOC-R1-046: 12sp readable metadata baseline (was 11sp).
+                                    // DOC-R4-169: explicit type label instead of a bare generic icon category.
+                                    // DOC-R4-206: say why the item is recent (its modified time).
                                     Text(
-                                        "${file.humanReadableSize} • ${file.category.name.uppercase()}",
-                                        fontSize = 11.sp,
+                                        buildString {
+                                            append(file.humanReadableSize)
+                                            append(" • ")
+                                            append(file.extension.uppercase().ifEmpty { file.category.name.uppercase() })
+                                            append(" • ")
+                                            append(describeModified(file.modifiedAt))
+                                            if (file.category == MediaCategory.audio) {
+                                                append(" • queues with ")
+                                                append(audioCount)
+                                                append(" audio")
+                                            }
+                                        },
+                                        fontSize = 12.sp,
                                         color = if (isDark) Color.White.copy(alpha = 0.54f) else Color.Black.copy(alpha = 0.54f),
                                     )
                                 }
-                                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = Color.Gray)
+                                // DOC-R4-208: audio rows play immediately rather than open, so they get a
+                                // play affordance with an action-specific label instead of a generic chevron.
+                                if (file.category == MediaCategory.audio) {
+                                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.playArrow, semanticLabel = "Play ${file.name}", color = Color(0xFF10B981))
+                                } else {
+                                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = Color.Gray)
+                                }
                             }
                         }
                         Spacer(Modifier.height(8.dp))
@@ -262,7 +351,7 @@ fun MediaWorkspaceScreen(
 }
 
 @Composable
-private fun StorageOverviewCard(isDark: Boolean, totalBytes: Long, breakdown: Map<MediaCategory, Long>) {
+private fun StorageOverviewCard(isDark: Boolean, totalBytes: Long, breakdown: Map<MediaCategory, Long>, measured: Boolean = true, complete: Boolean = true) {
     val mb = totalBytes / (1024.0 * 1024.0)
     Column(
         modifier = Modifier
@@ -283,11 +372,28 @@ private fun StorageOverviewCard(isDark: Boolean, totalBytes: Long, breakdown: Ma
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Chaty Media Storage",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W800),
-            )
-            Spacer(Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Chaty Media Storage",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W800),
+                )
+                // DOC-R4-210: this is Chaty usage, never device capacity.
+                Text(
+                    "Storage used by Chaty on this device",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                )
+                // DOC-R4-205: an unreadable directory is not zero storage - say so.
+                if (!measured) {
+                    Text("Measuring storage...", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                } else if (!complete) {
+                    Text(
+                        "Some folders could not be read. These totals are partial.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
             Text(
                 "${"%.1f".format(mb)} MB Used",
                 fontWeight = FontWeight.W700,
@@ -307,14 +413,19 @@ private fun StorageOverviewCard(isDark: Boolean, totalBytes: Long, breakdown: Ma
             StorageSegment(breakdown[MediaCategory.audio] ?: 0, totalBytes, Color(0xFF10B981))
             StorageSegment(breakdown[MediaCategory.pdf] ?: 0, totalBytes, Color(0xFFEF4444))
             StorageSegment(breakdown[MediaCategory.document] ?: 0, totalBytes, Color(0xFFF59E0B))
+            StorageSegment(breakdown[MediaCategory.archive] ?: 0, totalBytes, MaterialTheme.colorScheme.secondary)
+            StorageSegment(breakdown[MediaCategory.other] ?: 0, totalBytes, MaterialTheme.colorScheme.outline)
         }
         Spacer(Modifier.height(14.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(breakdown.entries.joinToString("; ") { "${it.key.name}: ${it.value} bytes" }, style = MaterialTheme.typography.bodySmall)
+        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             LegendDot("Photos", Color(0xFF38BDF8))
             LegendDot("Videos", Color(0xFFA855F7))
             LegendDot("Audio", Color(0xFF10B981))
             LegendDot("PDFs", Color(0xFFEF4444))
             LegendDot("Docs", Color(0xFFF59E0B))
+            LegendDot("Archives", MaterialTheme.colorScheme.secondary)
+            LegendDot("Other", MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -343,7 +454,8 @@ private fun ActionCard(
     isDark: Boolean,
     onTap: () -> Unit,
 ) {
-    Box(Modifier.springInteractiveScale(0.96f).clickable(onClick = onTap)) {
+    // DOC-R4-181: one merged button node so the icon, title and subtitle read as a single command.
+    Box(Modifier.springInteractiveScale(0.96f).semantics(mergeDescendants = true) { role = Role.Button }.clickable(onClick = onTap)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -369,7 +481,8 @@ private fun ActionCard(
             Spacer(Modifier.height(12.dp))
             Text(title, fontWeight = FontWeight.W700, fontSize = 14.sp)
             Spacer(Modifier.height(2.dp))
-            Text(subtitle, fontSize = 11.sp, color = Color.Gray)
+            // DOC-R1-046: 12sp readable metadata baseline (was 11sp).
+            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
         }
     }
 }
@@ -401,5 +514,19 @@ private fun FileThumb(file: MediaFileDescriptor) {
             size = 18.dp,
             color = Color(0xFF448AFF), // Colors.blueAccent
         )
+    }
+}
+
+
+/** DOC-R4-206: relative "modified" label for the recently-modified list (DOC-R4-161). */
+private fun describeModified(instant: java.time.Instant): String {
+    val age = java.time.Duration.between(instant, java.time.Instant.now())
+    return when {
+        age.isNegative || age.toMinutes() < 1 -> "Modified just now"
+        age.toHours() < 1 -> "Modified ${age.toMinutes()} min ago"
+        age.toDays() < 1 -> "Modified ${age.toHours()} h ago"
+        age.toDays() < 30 -> "Modified ${age.toDays()} d ago"
+        else -> "Modified " + java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy")
+            .withZone(java.time.ZoneId.systemDefault()).format(instant)
     }
 }

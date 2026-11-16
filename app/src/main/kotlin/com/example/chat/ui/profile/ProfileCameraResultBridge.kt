@@ -17,6 +17,7 @@ object ProfileCameraResultBridge {
     private var waiter: CompletableDeferred<File?>? = null
     private var context: Context? = null
     private var registeredActivity: ComponentActivity? = null
+    private var pendingUri: android.net.Uri? = null
     private const val KEY = "chaty.profile.camera.terminal.v1"
 
     fun register(activity: ComponentActivity) {
@@ -57,6 +58,7 @@ object ProfileCameraResultBridge {
         // Direct registry registration is not owned by a disappearing Composable. Stable key
         // lets the restored Activity registry route its terminal result to this same owner.
         launcher = activity.activityResultRegistry.register(KEY, ActivityResultContracts.TakePicture()) { ok ->
+            revokePendingGrant()
             val pending = waiter
             waiter = null
             try {
@@ -86,6 +88,19 @@ object ProfileCameraResultBridge {
         }
     }
 
+    /** The camera app's FileProvider grant is revoked as soon as the terminal result arrives (P2-33). */
+    private fun revokePendingGrant() {
+        val uri = pendingUri ?: return
+        pendingUri = null
+        runCatching {
+            context?.revokeUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+    }
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     suspend fun pick(): File? {
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
@@ -100,8 +115,10 @@ object ProfileCameraResultBridge {
         waiter = pending
         try {
             val uri = FileProvider.getUriForFile(app, app.packageName + ".fileprovider", file)
+            pendingUri = uri
             activeLauncher.launch(uri)
         } catch (error: Exception) {
+            revokePendingGrant()
             waiter = null
             terminal.launchFailed()
             throw error

@@ -2,15 +2,29 @@ package com.example.chat.ui.camera
 
 import kotlin.math.*
 
+/** Minimum paper footprint in normalized frame coordinates (CAM-R4-024). */
+const val MIN_PAPER_AREA_FRACTION = 0.05
+
 data class PaperPoint(val x: Float, val y: Float)
 data class PaperQuad(val topLeft: PaperPoint, val topRight: PaperPoint, val bottomRight: PaperPoint, val bottomLeft: PaperPoint) {
     val points: List<PaperPoint> get() = listOf(topLeft,topRight,bottomRight,bottomLeft)
+    /** Shoelace area, independent of preview/capture pixel resolution. Non-finite is invalid. */
+    val areaFraction: Double get() {
+        val p = points
+        if (p.any { !it.x.isFinite() || !it.y.isFinite() }) return 0.0
+        return abs(p.indices.sumOf { i ->
+            val a = p[i]; val b = p[(i + 1) % p.size]
+            a.x.toDouble() * b.y - b.x.toDouble() * a.y
+        }) / 2.0
+    }
     fun isValid(): Boolean {
         if (points.any { !it.x.isFinite() || !it.y.isFinite() || it.x !in 0f..1f || it.y !in 0f..1f }) return false
         val crosses=points.indices.map { i -> val a=points[i]; val b=points[(i+1)%4]; val c=points[(i+2)%4]; (b.x-a.x)*(c.y-b.y)-(b.y-a.y)*(c.x-b.x) }
         if (crosses.any { it <= .0001f }) return false
-        val area=abs(points.indices.sumOf { i -> val a=points[i];val b=points[(i+1)%4];(a.x*b.y-b.x*a.y).toDouble() })/2
-        return area >= .02
+        // Original threshold allowed a paper occupying only 2% of the frame:
+        // val area=abs(points.indices.sumOf { i -> val a=points[i];val b=points[(i+1)%4];(a.x*b.y-b.x*a.y).toDouble() })/2
+        // return area >= .02
+        return areaFraction >= MIN_PAPER_AREA_FRACTION
     }
     fun moved(index: Int, point: PaperPoint): PaperQuad {
         require(index in 0..3)

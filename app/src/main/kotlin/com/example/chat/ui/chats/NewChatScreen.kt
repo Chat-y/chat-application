@@ -3,6 +3,28 @@ package com.example.chat.ui.chats
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import com.example.chat.R
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -42,6 +64,10 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,11 +89,13 @@ import androidx.compose.ui.unit.sp
 import com.example.chat.domain.models.Conversation
 import com.example.chat.domain.models.UserProfile
 import com.example.chat.ui.chats.newchat.NewChatRules
+import com.example.chat.ui.chats.newchat.NewChatPresentationRules
 import com.example.chat.ui.theme.LocalAppColors
 import com.example.chat.ui.theme.LocalThemeConfig
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 /** Port of new_chat_screen.dart (api branch anchor 3bee780): contact/user
  *  directory search with the 250ms debounce + epoch gate, direct-chat open,
@@ -122,38 +150,65 @@ fun NewChatScreen(
         if (configApi.authSnapshot() === configOwner) groupUi = choices?.applyTo(defaults) ?: defaults
     }
 
-    var searchText by remember { mutableStateOf("") }
+    val titleLimit = groupUi.nameMaxLength.coerceAtLeast(1)
+    val draftAccountKey = configApi.currentAccountHash().orEmpty()
+    var searchText by rememberSaveable(configOwner, key = "newchat-query:$draftAccountKey") { mutableStateOf("") }
     var groupDetails by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<String?>(null) }
-    val memberNames = remember { mutableMapOf<String, String>() }
-    var groupName by remember { mutableStateOf("") }
+    val memberNames = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+    val memberUsernames = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+    var groupName by rememberSaveable(configOwner, key = "newchat-title:$draftAccountKey") { mutableStateOf("") }
     var selectedMembers by remember { mutableStateOf(setOf<String>()) }
+    LaunchedEffect(selectedMembers) {
+        // Retain identity labels only while they support an intentional selection.
+        memberNames.keys.toList().filterNot { it in selectedMembers }.forEach { memberNames.remove(it) }
+        memberUsernames.keys.toList().filterNot { it in selectedMembers }.forEach { memberUsernames.remove(it) }
+    }
     var results by remember { mutableStateOf(emptyList<UserProfile>()) }
     var acceptedContacts by remember { mutableStateOf(emptyList<UserProfile>()) }
     var contactLoadError by remember { mutableStateOf<String?>(null) }
     var searchError by remember { mutableStateOf<String?>(null) }
-    var isCreatingGroup by remember { mutableStateOf(startInGroupMode || startInBroadcastMode) }
-    var isBroadcast by remember { mutableStateOf(startInBroadcastMode) }
+    var isCreatingGroup by rememberSaveable(configOwner, key = "newchat-group:$draftAccountKey") { mutableStateOf(startInGroupMode || startInBroadcastMode) }
+    var isBroadcast by rememberSaveable(configOwner, key = "newchat-broadcast:$draftAccountKey") { mutableStateOf(startInBroadcastMode) }
     var queryLoading by remember { mutableStateOf(false) }
+    var contactsLoading by remember { mutableStateOf(false) }
+    var isDeletingUser by remember { mutableStateOf(false) }
     var isSubmittingGroup by remember { mutableStateOf(false) }
-    val isLoading = queryLoading || isSubmittingGroup
+    var isOpeningDirect by remember(configOwner) { mutableStateOf(false) }
+    val isLoading = queryLoading || contactsLoading || isSubmittingGroup || isOpeningDirect || isDeletingUser
+    val operationLabel = stringResource(when {
+        isSubmittingGroup -> R.string.social_newchat_creating
+        isOpeningDirect -> R.string.social_newchat_opening
+        isDeletingUser -> R.string.social_newchat_deleting
+        queryLoading -> R.string.social_newchat_checking
+        else -> R.string.social_newchat_loading_contacts
+    })
     var epoch by remember { mutableIntStateOf(0) }
     var debounceJob by remember { mutableStateOf<Job?>(null) }
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+    androidx.compose.runtime.DisposableEffect(configOwner) {
+        onDispose { debounceJob?.cancel(); searchJob?.cancel() }
+    }
     var sheetUser by remember { mutableStateOf<UserProfile?>(null) }
     var deleteCandidate by remember { mutableStateOf<UserProfile?>(null) }
 
     fun errorText(error: Throwable): String =
-        (error.message ?: error.toString()).removePrefix("Exception: ")
+        configContext.getString(when (error) {
+            is java.io.IOException -> R.string.social_newchat_error_connection
+            is SecurityException -> R.string.social_newchat_error_permission
+            else -> R.string.social_newchat_error_request
+        })
 
     // Contacts plane state (research 5.3). Empty/absent on pre-plane servers.
     var contactIds by remember { mutableStateOf(setOf<String>()) }
     var contactUsernames by remember { mutableStateOf(setOf<String>()) }
     var contactRequests by remember { mutableStateOf(listOf<com.example.chat.data.api.ApiContactsClient.ContactRequestItem>()) }
     var requestedUsernames by remember { mutableStateOf(setOf<String>()) }
+    var sendingRequestUsernames by remember(configOwner) { mutableStateOf(setOf<String>()) }
     var respondingRequestIds by remember { mutableStateOf(setOf<String>()) }
 
     fun isContact(user: UserProfile): Boolean =
-        user.id in contactIds || user.username.lowercase() in contactUsernames
+        user.id in contactIds || NewChatRules.usernameKey(user.username) in contactUsernames
 
     fun contactProfile(entry: com.example.chat.data.api.ApiContactsClient.ContactEntry): UserProfile =
         contacts.firstOrNull { it.id == entry.userId } ?: UserProfile(
@@ -169,25 +224,29 @@ fun NewChatScreen(
 
     // Empty search is the accepted-contacts list, never the workspace directory.
     suspend fun refreshAcceptedContacts() {
-        queryLoading = true
+        if (contactsLoading || configApi.authSnapshot() !== configOwner) return
+        contactsLoading = true
         contactLoadError = null
         try {
             if (loadContactRelations != null) {
                 val (entries, inbox) = loadContactRelations()
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (configApi.authSnapshot() !== configOwner) return
                 contactIds = entries.map { it.userId }.toSet()
-                contactUsernames = entries.map { it.username.lowercase() }.toSet()
-                acceptedContacts = entries.map(::contactProfile)
+                contactUsernames = entries.map { NewChatRules.usernameKey(it.username) }.toSet()
+                acceptedContacts = entries.map(::contactProfile).distinctBy { it.id }
                 contactRequests = inbox
             } else {
-                contactLoadError = "The contacts list is unavailable on this server. Search a username explicitly."
+                contactLoadError = configContext.getString(R.string.social_newchat_contacts_server_unavailable)
             }
             if (searchText.isBlank()) results = acceptedContacts
-        } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-        catch (error: Exception) {
-            contactLoadError = "Could not load contacts. ${errorText(error)}"
+        } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel } catch (error: Exception) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (configApi.authSnapshot() === configOwner) {
+                contactLoadError = configContext.getString(R.string.social_newchat_contacts_load_failure, errorText(error))
+            }
         } finally {
-            queryLoading = false
+            contactsLoading = false
         }
     }
 
@@ -199,35 +258,49 @@ fun NewChatScreen(
         respondingRequestIds = respondingRequestIds + req.requestId
         scope.launch {
             try {
-                checkNotNull(responder) { "Contact requests are unavailable on this server." }
+                checkNotNull(responder) { configContext.getString(R.string.social_newchat_requests_unavailable) }
+                if (configApi.authSnapshot() !== configOwner) return@launch
                 responder.invoke(req.requestId, accept)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() !== configOwner) return@launch
                 contactRequests = contactRequests.filterNot { it.requestId == req.requestId }
                 if (accept) {
                     contactIds = contactIds + req.from.userId
-                    contactUsernames = contactUsernames + req.from.username.lowercase()
+                    contactUsernames = contactUsernames + NewChatRules.usernameKey(req.from.username)
                     acceptedContacts = (acceptedContacts + contactProfile(req.from)).distinctBy { it.id }
                     if (searchText.isBlank()) results = acceptedContacts
                 }
-                snackbar.showSnackbar(if (accept) "${req.from.displayName} added to your contacts" else "Request declined")
+                snackbar.showSnackbar(if (accept) configContext.getString(R.string.social_newchat_contact_added, req.from.displayName) else configContext.getString(R.string.social_newchat_request_declined))
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                snackbar.showSnackbar(errorText(error))
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() === configOwner) snackbar.showSnackbar(configContext.getString(R.string.social_newchat_request_update_failure))
             } finally { respondingRequestIds = respondingRequestIds - req.requestId }
         }
     }
 
     fun runSearch(query: String, searchEpoch: Int) {
-        scope.launch {
+        searchJob = scope.launch {
             try {
-                val users = searchUsersRemote(query)
+                if (configApi.authSnapshot() !== configOwner || !NewChatRules.isCurrentEpoch(searchEpoch, epoch)) return@launch
+                val users = kotlinx.coroutines.withTimeout(10_000L) { searchUsersRemote(query) }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (configApi.authSnapshot() !== configOwner) return@launch
                 if (!NewChatRules.isCurrentEpoch(searchEpoch, epoch)) return@launch
-                results = users
+                // The production host already does this; repeat the fail-closed contract at the UI seam.
+                results = NewChatRules.exactUsernameMatch(users, query, configOwner.userId)
                 queryLoading = false
-            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-            catch (error: Exception) {
-                if (!NewChatRules.isCurrentEpoch(searchEpoch, epoch)) return@launch
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() !== configOwner || !NewChatRules.isCurrentEpoch(searchEpoch, epoch)) return@launch
+                queryLoading = false
+                results = emptyList()
+                searchError = configContext.getString(R.string.social_newchat_lookup_timeout)
+                snackbar.showSnackbar(searchError!!)
+            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel } catch (error: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() !== configOwner || !NewChatRules.isCurrentEpoch(searchEpoch, epoch)) return@launch
                 queryLoading = false
                 results = emptyList()
                 searchError = errorText(error)
@@ -242,6 +315,7 @@ fun NewChatScreen(
         searchText = value
         searchError = null
         debounceJob?.cancel()
+        searchJob?.cancel()
         val query = value.trim()
         val nextEpoch = ++epoch // Also invalidate an in-flight search when cleared.
         if (query.isEmpty()) {
@@ -261,16 +335,18 @@ fun NewChatScreen(
         val title = NewChatRules.effectiveGroupTitle(groupName, isBroadcast, selectedMembers.size)
         if (!NewChatRules.canCreateGroup(groupName, isBroadcast, selectedMembers.size, isLoading)) return
         if (!groupDetails || isSubmittingGroup || configApi.authSnapshot() !== configOwner) return
-        if (groupName.length > groupUi.nameMaxLength) { createError = "Group name must be at most ${groupUi.nameMaxLength} characters."; return }
+        if (groupName.length > titleLimit) { createError = configContext.getString(R.string.social_newchat_name_too_long); return }
         val capturedMembers = selectedMembers.toList()
         isSubmittingGroup = true // Independent of search/contact loaders, which may finish concurrently.
         createError = null
         scope.launch {
             try {
                 val conversation = createGroup(title, capturedMembers)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (configApi.authSnapshot() === configOwner) onOpenConversation(conversation)
-            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-            catch (error: Exception) {
+            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel } catch (error: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() !== configOwner) return@launch
                 createError = errorText(error)
                 snackbar.showSnackbar(errorText(error))
             } finally { isSubmittingGroup = false }
@@ -278,46 +354,68 @@ fun NewChatScreen(
     }
 
     fun openDirectChat(user: UserProfile) {
-        if (isLoading || configApi.authSnapshot() !== configOwner) return
+        if (isOpeningDirect || isSubmittingGroup || isDeletingUser || queryLoading || contactsLoading || configApi.authSnapshot() !== configOwner) return
+        isOpeningDirect = true
         scope.launch {
-            queryLoading = true
             try {
                 val conversation = openDirectConversation(user)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (configApi.authSnapshot() === configOwner) onOpenConversation(conversation)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
-                queryLoading = false
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (configApi.authSnapshot() !== configOwner) return@launch
                 snackbar.showSnackbar(errorText(error))
-            }
+            } finally { isOpeningDirect = false }
         }
     }
 
+    // Prefer the latest lookup/accepted profile over an older directory snapshot.
+    val selectionProfiles = remember(contacts, acceptedContacts, results) {
+        (contacts + acceptedContacts + results).associateBy { it.id }
+    }
+    val selectedMemberControl: @Composable (String) -> Unit = { id ->
+        val current = selectionProfiles[id]
+        val name = current?.displayName?.takeIf { it.isNotBlank() } ?: memberNames[id]
+            ?: stringResource(R.string.social_newchat_unavailable_member)
+        val username = current?.username?.takeIf { it.isNotBlank() } ?: memberUsernames[id]
+        val identity = stringResource(R.string.social_newchat_selected_identity, NewChatPresentationRules.identityText(name),
+            NewChatPresentationRules.identityText(username?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: id))
+        val display = if (current == null) stringResource(R.string.social_newchat_unavailable_identity, identity) else identity
+        val removeLabel = stringResource(R.string.social_newchat_remove_member, display)
+        TextButton(enabled = !isLoading, onClick = { selectedMembers = selectedMembers - id },
+            modifier = Modifier.widthIn(max = 360.dp)) {
+            Text(removeLabel, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
     val selectedSection: @Composable () -> Unit = {
-                if (isCreatingGroup) {
-                    Text(if (groupDetails) "2 of 2 · Review group" else "1 of 2 · Select people", color = colors.foregroundSecondary)
-                    if (groupUi.showSelectedCount) Text("${selectedMembers.size} people selected", color = colors.foregroundSecondary)
-                    val selectedNames: @Composable () -> Unit = {
-                        selectedMembers.forEach { id ->
-                            TextButton(onClick = { if (!isLoading) selectedMembers = selectedMembers - id }) {
-                                Text("${memberNames[id] ?: contacts.firstOrNull { it.id == id }?.displayName ?: "Selected member"} · Remove")
-                            }
-                        }
-                    }
-                    if (groupUi.selectedDisplay == "list") Column { selectedNames() }
-                    else androidx.compose.foundation.lazy.LazyRow {
-                        items(selectedMembers.toList(), key = { it }) { id ->
-                            TextButton(onClick = { if (!isLoading) selectedMembers = selectedMembers - id }) {
-                                Text("${memberNames[id] ?: contacts.firstOrNull { it.id == id }?.displayName ?: "Selected member"} · Remove")
-                            }
-                        }
-                    }
-                    createError?.let { Text(it, color = colors.error) }
-                }
+        if (isCreatingGroup) {
+            Text(if (groupDetails) stringResource(R.string.social_newchat_review_step) else stringResource(R.string.social_newchat_selection_step),
+                color = colors.foregroundSecondary, modifier = Modifier.semantics { heading() })
+            if (groupUi.showSelectedCount) Text(
+                pluralStringResource(R.plurals.social_newchat_selected_count, selectedMembers.size, selectedMembers.size),
+                color = colors.foregroundSecondary, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            if (groupUi.selectedDisplay == "list") Column(
+                Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
+            ) {
+                selectedMembers.forEach { id -> androidx.compose.runtime.key(id) { selectedMemberControl(id) } }
+            } else androidx.compose.foundation.lazy.LazyRow {
+                items(selectedMembers.toList(), key = { it }) { id -> selectedMemberControl(id) }
+            }
+            createError?.let { Text(it, color = colors.error) }
+        }
     }
     val searchSection: @Composable () -> Unit = {
                 if (!groupDetails) NewChatInput(
                     value = searchText,
                     onValueChange = { onSearchChanged(it) },
-                    hint = if (isCreatingGroup) groupUi.searchLabel else "Enter exact @username...",
+                    hint = if (isCreatingGroup) groupUi.searchLabel else stringResource(R.string.social_newchat_username_hint),
+                    label = stringResource(R.string.social_newchat_username_label),
+                    fieldError = searchError,
+                    imeAction = ImeAction.Search,
+                    onImeAction = { onSearchChanged(searchText) },
                     leading = {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search,
                             semanticLabel = null,
@@ -327,9 +425,9 @@ fun NewChatScreen(
                     },
                     trailing = if (searchText.isNotEmpty()) {
                         {
-                            IconButton(onClick = { onSearchChanged("") }, modifier = Modifier.size(32.dp)) {
+                            IconButton(onClick = { onSearchChanged("") }, modifier = Modifier.size(48.dp)) {
                                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
-                                    semanticLabel = "Clear search",
+                                    semanticLabel = stringResource(R.string.social_newchat_clear_search),
                                     color = colors.foregroundSecondary,
                                     modifier = Modifier.size(18.dp),
                                 )
@@ -339,42 +437,114 @@ fun NewChatScreen(
                         null
                     },
                 )
+                if (queryLoading && !groupDetails) Text(
+                    stringResource(R.string.social_newchat_checking), color = colors.foregroundSecondary,
+                    fontSize = 14.sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                )
     }
-    val contactsSection: @Composable () -> Unit = {
+    val requestsContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+            // Incoming contact requests inbox (research 5.3: Signal's
+            // message-request pattern applied to contacts).
+            if (!isCreatingGroup && contactRequests.isNotEmpty()) {
+                item(key = "request-header", contentType = "header") {
+                    Text(
+                        stringResource(R.string.social_newchat_requests_title),
+                        color = colors.primary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp).semantics { heading() },
+                    )
+                }
+                    items(contactRequests.distinctBy { it.requestId }, key = { "request:${it.requestId}" }, contentType = { "contact-request" }) { req ->
+                        val pending = req.requestId in respondingRequestIds
+                        val acceptLabel = stringResource(R.string.social_newchat_accept_request, req.from.username)
+                        val declineLabel = stringResource(R.string.social_newchat_decline_request, req.from.username)
+                        val pendingLabel = stringResource(R.string.social_newchat_request_updating)
+                        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(
+                                    NewChatPresentationRules.identityText(req.from.displayName),
+                                    color = colors.foreground,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text("@${NewChatPresentationRules.identityText(req.from.username)}", color = colors.foregroundSecondary, fontSize = 12.sp,
+                                    style = TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
+                            TextButton(
+                                enabled = !pending, onClick = { respondToRequest(req, true) },
+                                modifier = Modifier.semantics {
+                                    contentDescription = acceptLabel
+                                    if (pending) stateDescription = pendingLabel
+                                },
+                            ) {
+                                Text(stringResource(R.string.social_newchat_accept), color = colors.primary, fontWeight = FontWeight.Bold)
+                            }
+                            TextButton(
+                                enabled = !pending, onClick = { respondToRequest(req, false) },
+                                modifier = Modifier.semantics {
+                                    contentDescription = declineLabel
+                                    if (pending) stateDescription = pendingLabel
+                                },
+                            ) {
+                                Text(stringResource(R.string.social_newchat_decline), color = colors.error)
+                            }
+                            }
+                        }
+                    }
+                item(key = "request-spacing", contentType = "spacing") { Spacer(Modifier.height(4.dp)) }
+            }
+    }
+    val contactsContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
             when {
                 groupDetails -> Unit
                 isLoading && results.isEmpty() -> {
-                    LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
-                        items(8) { SkeletonTile() }
-                    }
+                    items(8, key = { "loading:$it" }, contentType = { "newchat-loading" }) { SkeletonTile() }
                 }
-                results.isEmpty() && searchText.trim().isNotEmpty() -> {
+                results.isEmpty() && searchText.trim().isNotEmpty() -> item(key = "username-feedback", contentType = "feedback") {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                     ) {
                         Text(
-                            searchError?.let { "Could not check username" } ?: "No account with that exact username",
+                            searchError?.let { stringResource(R.string.social_newchat_lookup_failed_title) } ?: stringResource(R.string.social_newchat_lookup_empty_title),
                             color = colors.foreground,
-                            fontSize = 16.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            searchError ?: "Check the full username. Names and email addresses are not searched.",
+                            stringResource(R.string.social_newchat_checked_username,
+                                NewChatPresentationRules.identityText(NewChatRules.normalizedUsername(searchText))),
+                            style = TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
+                            color = colors.foregroundSecondary, fontSize = 14.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            searchError ?: stringResource(R.string.social_newchat_lookup_empty_body),
                             color = colors.foregroundSecondary,
-                            fontSize = 13.sp,
+                            fontSize = 14.sp,
                         )
                         Spacer(Modifier.height(12.dp))
+                        if (searchError != null) TextButton(onClick = { onSearchChanged(searchText) }) {
+                            Text(stringResource(R.string.social_newchat_lookup_retry), color = colors.primary)
+                        }
                         TextButton(onClick = { onSearchChanged("") }) {
-                            Text("Clear search", color = colors.primary, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.social_newchat_clear_search), color = colors.primary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
-                results.isEmpty() -> {
+                results.isEmpty() -> item(key = "contacts-feedback", contentType = "feedback") {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                     ) {
@@ -386,44 +556,51 @@ fun NewChatScreen(
                         )
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            if (contactLoadError == null) "No contacts yet" else "Contacts unavailable",
+                            if (contactLoadError == null) stringResource(R.string.social_newchat_contacts_empty_title) else stringResource(R.string.social_newchat_contacts_unavailable_title),
                             color = colors.foreground,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            contactLoadError ?: "Accepted contacts appear here. Search a username to send a request.",
+                            contactLoadError ?: stringResource(R.string.social_newchat_contacts_empty_body),
                             color = colors.foregroundSecondary,
                             fontSize = 13.sp,
                         )
                         if (contactLoadError != null && loadContactRelations != null) {
                             TextButton(onClick = { scope.launch { refreshAcceptedContacts() } }) {
-                                Text("Retry", color = colors.accent)
+                                Text(stringResource(R.string.social_newchat_retry), color = colors.accent)
                             }
                         }
                     }
                 }
                 else -> {
-                    LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
-                        itemsIndexed(results, key = { index, u -> "${u.id}_$index" }) { index, user ->
+                    item(key = "contact-results-header", contentType = "header") {
+                        Text(pluralStringResource(R.plurals.social_newchat_result_count, results.size, results.size),
+                            color = colors.foregroundSecondary, modifier = Modifier.padding(vertical = 4.dp).semantics { heading() })
+                    }
+                        itemsIndexed(results, key = { _, u -> "person:${u.id}" }, contentType = { _, _ -> "newchat-person" }) { index, user ->
                             val isSelected = selectedMembers.contains(user.id)
+                            val activateUser: () -> Unit = {
+                                if (!isLoading && !groupDetails) {
+                                    if (isCreatingGroup) {
+                                        memberNames[user.id] = user.displayName
+                                        memberUsernames[user.id] = user.username
+                                        selectedMembers = NewChatRules.toggleMember(selectedMembers, user.id)
+                                    } else if (loadContactRelations != null && !isContact(user)) sheetUser = user
+                                    else openDirectChat(user)
+                                }
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        if (isLoading || groupDetails) return@clickable
-                                        if (isCreatingGroup) {
-                                            memberNames[user.id] = user.displayName
-                                            selectedMembers = NewChatRules.toggleMember(selectedMembers, user.id)
-                                        } else if (loadContactRelations != null && !isContact(user)) {
-                                            // Contacts plane: non-contacts go
-                                            // through the request flow first.
-                                            sheetUser = user
-                                        } else {
-                                            openDirectChat(user)
-                                        }
-                                    }
+                                    .then(if (isCreatingGroup) Modifier.toggleable(
+                                        value = isSelected, enabled = !isLoading && !groupDetails,
+                                        role = Role.Checkbox, onValueChange = { activateUser() },
+                                    ) else Modifier.clickable(
+                                        enabled = !isLoading && !groupDetails, role = Role.Button, onClick = activateUser,
+                                    ))
+                                    .sizeIn(minHeight = 48.dp)
                                     .padding(vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
@@ -431,32 +608,37 @@ fun NewChatScreen(
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        user.displayName,
+                                        NewChatPresentationRules.identityText(user.displayName),
                                         color = colors.foreground,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         letterSpacing = (-0.2).sp,
-                                        maxLines = 1,
+                                        maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
-                                        "@${user.username}" +
-                                            (if (isContact(user)) " • contact" else if (user.username.lowercase() in requestedUsernames) " • requested" else "") +
-                                            (if (user.about.isNotEmpty()) " • ${user.about}" else ""),
-                                        color = colors.foregroundSecondary,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                        "@${NewChatPresentationRules.identityText(user.username)}",
+                                        style = TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
+                                        color = colors.foregroundSecondary, fontSize = 12.sp,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    )
+                                    val relationshipLabel = when {
+                                        isContact(user) -> stringResource(R.string.social_newchat_contact_badge)
+                                        NewChatRules.usernameKey(user.username) in requestedUsernames -> stringResource(R.string.social_newchat_requested_badge)
+                                        else -> null
+                                    }
+                                    relationshipLabel?.let { Text(it, color = colors.primary, fontSize = 12.sp) }
+                                    if (user.about.isNotEmpty()) Text(
+                                        NewChatPresentationRules.identityText(user.about),
+                                        color = colors.foregroundSecondary, fontSize = 12.sp,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                                 if (isCreatingGroup) {
                                     Checkbox(
                                         checked = isSelected,
                                         enabled = !isLoading && !groupDetails,
-                                        onCheckedChange = {
-                                            memberNames[user.id] = user.displayName
-                                            selectedMembers = NewChatRules.toggleMember(selectedMembers, user.id)
-                                        },
+                                        onCheckedChange = null, // The full row owns the single toggle action.
                                         colors = androidx.compose.material3.CheckboxDefaults.colors(
                                             checkedColor = colors.primary,
                                         ),
@@ -479,10 +661,25 @@ fun NewChatScreen(
                                 )
                             }
                         }
-                    }
                 }
             }
     }
+    fun handleBack() {
+        if (isSubmittingGroup || isOpeningDirect || isDeletingUser) return
+        debounceJob?.cancel()
+        searchJob?.cancel()
+        epoch++
+        queryLoading = false
+        if (isCreatingGroup && groupDetails) {
+            groupDetails = false
+        } else if (isCreatingGroup) {
+            isCreatingGroup = false
+            isBroadcast = false
+            selectedMembers = emptySet()
+        } else onBack()
+    }
+    androidx.activity.compose.BackHandler(enabled = sheetUser == null && deleteCandidate == null) { handleBack() }
+
     Scaffold(
         containerColor = colors.background,
         snackbarHost = { SnackbarHost(snackbar) },
@@ -491,25 +688,14 @@ fun NewChatScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = {
-                    if (isLoading) return@IconButton
-                    if (isCreatingGroup && groupDetails) {
-                        groupDetails = false
-                    } else if (isCreatingGroup) {
-                        isCreatingGroup = false
-                        isBroadcast = false
-                        selectedMembers = emptySet()
-                    } else {
-                        onBack()
-                    }
-                }) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = colors.foreground)
+                IconButton(onClick = ::handleBack) {
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = stringResource(R.string.social_newchat_back), color = colors.foreground)
                 }
                 Text(
                     if (isCreatingGroup) {
-                        if (isBroadcast) "New Broadcast (${selectedMembers.size})" else "${groupUi.title} (${selectedMembers.size})"
+                        if (isBroadcast) stringResource(R.string.social_newchat_broadcast_title, selectedMembers.size) else stringResource(R.string.social_newchat_configured_title_count, groupUi.title, selectedMembers.size)
                     } else {
-                        "New Conversation"
+                        stringResource(R.string.social_newchat_title)
                     },
                     color = colors.foreground,
                     fontSize = 17.sp,
@@ -522,7 +708,10 @@ fun NewChatScreen(
                     CircularProgressIndicator(
                         strokeWidth = 2.2.dp,
                         color = colors.primary,
-                        modifier = Modifier.padding(horizontal = 16.dp).size(18.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp).size(18.dp).semantics {
+                            contentDescription = operationLabel
+                            if (!queryLoading) liveRegion = LiveRegionMode.Polite
+                        },
                     )
                 }
                 if (isCreatingGroup && !isLoading) {
@@ -546,27 +735,31 @@ fun NewChatScreen(
             }
         },
     ) { padding ->
-        // R2/R3: lists capped at 720dp centered on larger windows (approved
-        // responsive plan 8 Nov 2026).
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.fillMaxWidth().widthIn(max = 720.dp)) {
+        // Lists are capped at 720dp and centered on larger windows.
+        // Source layout intent only; actual responsive pixels still need verification.
+        Box(Modifier.fillMaxSize().testTag("newchat-screen").padding(padding).imePadding().navigationBarsPadding(), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.widthIn(max = 720.dp).fillMaxWidth()) {
             if (isCreatingGroup && !groupDetails) {
-                groupUi.order.forEach { section ->
+                com.example.chat.ui.chats.newchat.NewChatPresentationRules.sections(groupUi.order).forEach { section ->
                     when (section) {
                         "search" -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { searchSection() }
                         "selected" -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { selectedSection() }
-                        "contacts" -> Box(Modifier.fillMaxWidth().weight(1f)) { contactsSection() }
+                        "contacts" -> LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("newchat-group-results"), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), content = contactsContent)
                     }
                 }
             } else {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Column(Modifier.fillMaxWidth().then(if (groupDetails) Modifier.weight(1f).verticalScroll(rememberScrollState()) else Modifier)
+                .padding(horizontal = 16.dp, vertical = 8.dp)) {
                 selectedSection()
                 if (isCreatingGroup && groupDetails) {
-                    Text("Review the people and name before creating. This sends one group-creation request. Standard chats are not end-to-end encrypted in this build.", color = colors.foregroundSecondary)
+                    Text(stringResource(R.string.social_newchat_review_explanation), color = colors.foregroundSecondary)
                     NewChatInput(
                         value = groupName,
-                        onValueChange = { groupName = it.take(groupUi.nameMaxLength); createError = null },
-                        hint = if (isBroadcast) "Enter broadcast list name..." else groupUi.nameLabel,
+                        onValueChange = { groupName = com.example.chat.ui.chats.newchat.NewChatPresentationRules.clampTitle(it, titleLimit); createError = null },
+                        hint = if (isBroadcast) stringResource(R.string.social_newchat_broadcast_hint) else groupUi.nameLabel,
+                        label = stringResource(if (isBroadcast) R.string.social_newchat_broadcast_label else R.string.social_newchat_group_label),
+                        fieldError = createError,
+                        imeAction = ImeAction.Done,
                         leading = {
                             Icon(
                                 if (isBroadcast) Icons.Rounded.Cast else Icons.Rounded.GroupWork,
@@ -576,15 +769,27 @@ fun NewChatScreen(
                             )
                         },
                     )
+                    Text(stringResource(R.string.social_newchat_name_length, groupName.length, titleLimit),
+                        color = colors.foregroundSecondary, fontSize = 14.sp)
+                    val finalTitle = NewChatRules.effectiveGroupTitle(groupName, isBroadcast, selectedMembers.size)
+                    if (finalTitle.isNotBlank()) {
+                        Text(stringResource(R.string.social_newchat_final_title_label), color = colors.foregroundSecondary,
+                            modifier = Modifier.padding(top = 8.dp).semantics { heading() })
+                        Text(finalTitle, color = colors.foreground, modifier = Modifier.fillMaxWidth())
+                    }
                     Spacer(Modifier.height(8.dp))
                 }
                 searchSection()
 
             }
+            if (!groupDetails) LazyColumn(
+                Modifier.fillMaxWidth().weight(1f).testTag("newchat-unified-list"),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            ) {
             if (!isCreatingGroup) {
-                NewChatEntryCard(
-                    title = "Create New Group",
-                    subtitle = "Choose people, then review the group name",
+                item(key = "create-group", contentType = "entry") { NewChatEntryCard(
+                    title = stringResource(R.string.social_newchat_create_group_entry),
+                    subtitle = stringResource(R.string.social_newchat_create_group_body),
                     icon = { tint ->
                         Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
                     },
@@ -594,10 +799,10 @@ fun NewChatScreen(
                         isCreatingGroup = true
                         isBroadcast = false
                     },
-                )
-                NewChatEntryCard(
-                    title = "New Broadcast List",
-                    subtitle = "Send broadcast messages to multiple contacts at once",
+                ) }
+                item(key = "create-broadcast", contentType = "entry") { NewChatEntryCard(
+                    title = stringResource(R.string.social_newchat_create_broadcast_entry),
+                    subtitle = stringResource(R.string.social_newchat_create_broadcast_body),
                     icon = { tint ->
                         Icon(Icons.Rounded.Cast, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
                     },
@@ -607,48 +812,12 @@ fun NewChatScreen(
                         isCreatingGroup = true
                         isBroadcast = true
                     },
-                )
-                Spacer(Modifier.height(4.dp))
+                ) }
+                item(key = "entry-spacing", contentType = "spacing") { Spacer(Modifier.height(4.dp)) }
             }
-            // Incoming contact requests inbox (research 5.3: Signal's
-            // message-request pattern applied to contacts).
-            if (!isCreatingGroup && contactRequests.isNotEmpty()) {
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    Text(
-                        "Contact requests",
-                        color = colors.primary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    )
-                    contactRequests.forEach { req ->
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    req.from.displayName,
-                                    color = colors.foreground,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text("@${req.from.username}", color = colors.foregroundSecondary, fontSize = 12.sp)
-                            }
-                            TextButton(onClick = { respondToRequest(req, true) }) {
-                                Text("Accept", color = colors.primary, fontWeight = FontWeight.Bold)
-                            }
-                            TextButton(onClick = { respondToRequest(req, false) }) {
-                                Text("Decline", color = colors.error)
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-            contactsSection()
+            requestsContent()
+            contactsContent()
+            } // Unified entry/request/contact LazyColumn.
             }
         }
         }
@@ -662,39 +831,55 @@ fun NewChatScreen(
             containerColor = colors.surface,
             shape = com.example.chat.ui.kit.ChatyModalShape,
         ) {
-            Column(Modifier.padding(bottom = 24.dp)) {
+            val sheetPane = stringResource(R.string.social_newchat_person_actions, sheetTarget.username)
+            Column(Modifier.padding(bottom = 24.dp).semantics { paneTitle = sheetPane }) {
                 Text(
-                    sheetTarget.displayName,
+                    "${NewChatPresentationRules.identityText(sheetTarget.displayName)} (@${NewChatPresentationRules.identityText(sheetTarget.username)})",
                     color = colors.foreground,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(16.dp),
                 )
                 if (sendContactRequest != null && !isContact(sheetTarget)) {
-                    if (sheetTarget.username.lowercase() in requestedUsernames) {
-                        SheetAction(label = "Contact request pending", tint = colors.foregroundTertiary, onClick = {})
+                    if (NewChatRules.usernameKey(sheetTarget.username) in requestedUsernames) {
+                        Text(stringResource(R.string.social_newchat_request_pending), color = colors.foregroundTertiary, modifier = Modifier.padding(16.dp).semantics { liveRegion = LiveRegionMode.Polite })
+                    } else if (NewChatRules.usernameKey(sheetTarget.username) in sendingRequestUsernames) {
+                        Text(stringResource(R.string.social_newchat_request_sending), color = colors.foregroundTertiary,
+                            modifier = Modifier.padding(16.dp).semantics { liveRegion = LiveRegionMode.Polite })
                     } else {
                         SheetAction(
-                            label = "Send Contact Request",
+                            label = stringResource(R.string.social_newchat_send_request),
                             tint = colors.primary,
                             onClick = {
                                 val target = sheetTarget
+                                val targetKey = NewChatRules.usernameKey(target.username)
+                                if (targetKey !in sendingRequestUsernames && targetKey !in requestedUsernames && configApi.authSnapshot() === configOwner) {
+                                sendingRequestUsernames = sendingRequestUsernames + targetKey
                                 sheetUser = null
                                 scope.launch {
                                     try {
+                                        if (configApi.authSnapshot() !== configOwner) return@launch
                                         sendContactRequest(target.username)
-                                        requestedUsernames = requestedUsernames + target.username.lowercase()
-                                        snackbar.showSnackbar("Request sent to ${target.displayName}")
+                                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                        if (configApi.authSnapshot() !== configOwner) return@launch
+                                        requestedUsernames = requestedUsernames + NewChatRules.usernameKey(target.username)
+                                        snackbar.showSnackbar(configContext.getString(R.string.social_newchat_request_sent, target.displayName))
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                        throw cancelled
                                     } catch (error: Exception) {
-                                        snackbar.showSnackbar(errorText(error))
+                                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                        if (configApi.authSnapshot() === configOwner) snackbar.showSnackbar(configContext.getString(R.string.social_newchat_request_send_failure))
+                                    } finally {
+                                        sendingRequestUsernames = sendingRequestUsernames - targetKey
                                     }
+                                }
                                 }
                             },
                         )
                     }
                 }
                 SheetAction(
-                    label = "Start Chat",
+                    label = stringResource(R.string.social_newchat_start_chat),
                     tint = colors.primary,
                     onClick = {
                         sheetUser = null
@@ -719,7 +904,7 @@ fun NewChatScreen(
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { deleteCandidate = null },
             containerColor = colors.surface,
-            title = { Text("Delete ${deleteTarget.displayName}?", color = colors.foreground) },
+            title = { Text("Delete ${deleteTarget.displayName} (@${deleteTarget.username})?", color = colors.foreground, modifier = Modifier.semantics { heading() }) },
             text = {
                 Text(
                     "This user will be permanently removed from your directory and workspace.",
@@ -727,19 +912,23 @@ fun NewChatScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(onClick = confirmDelete@ {
+                    if (isDeletingUser || isSubmittingGroup || isOpeningDirect || queryLoading || contactsLoading || deleteCandidate?.id != deleteTarget.id || configApi.authSnapshot() !== configOwner) return@confirmDelete
+                    isDeletingUser = true
                     deleteCandidate = null
                     scope.launch {
-                        queryLoading = true
                         try {
+                            if (configApi.authSnapshot() !== configOwner) return@launch
                             deleteUser(deleteTarget.id)
+                            if (configApi.authSnapshot() !== configOwner) return@launch
                             acceptedContacts = acceptedContacts.filterNot { it.id == deleteTarget.id }
                             results = results.filterNot { it.id == deleteTarget.id }
                             snackbar.showSnackbar("${deleteTarget.displayName} deleted")
                         } catch (error: Exception) {
-                            snackbar.showSnackbar("Failed to delete user: $error")
+                            if (error is kotlinx.coroutines.CancellationException) throw error
+                            if (configApi.authSnapshot() === configOwner) snackbar.showSnackbar("Unable to delete this user. Try again.")
                         } finally {
-                            queryLoading = false
+                            isDeletingUser = false
                         }
                     }
                 }) {
@@ -762,36 +951,45 @@ private fun NewChatInput(
     value: String,
     onValueChange: (String) -> Unit,
     hint: String,
+    label: String,
+    fieldError: String? = null,
+    imeAction: ImeAction = ImeAction.Done,
+    onImeAction: () -> Unit = {},
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalAppColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.inputFill, RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (leading != null) {
-            leading()
-            Spacer(Modifier.width(8.dp))
+    val keyboard = LocalSoftwareKeyboardController.current
+    Column {
+        Text(label, color = colors.foregroundSecondary, fontSize = 14.sp,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 48.dp)
+                .background(colors.inputFill, RoundedCornerShape(14.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (leading != null) { leading(); Spacer(Modifier.width(8.dp)) }
+            BasicTextField(
+                value = value, onValueChange = onValueChange, singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = imeAction, autoCorrect = false),
+                keyboardActions = KeyboardActions(
+                    onSearch = { onImeAction(); keyboard?.hide() },
+                    onDone = { onImeAction(); keyboard?.hide() },
+                ),
+                textStyle = TextStyle(color = colors.foreground, fontSize = 16.sp),
+                cursorBrush = SolidColor(colors.primary),
+                modifier = Modifier.weight(1f).semantics {
+                    contentDescription = label
+                    fieldError?.let { error(it) }
+                },
+                decorationBox = { inner ->
+                    if (value.isEmpty()) Text(hint, color = colors.foregroundTertiary, fontSize = 16.sp)
+                    inner()
+                },
+            )
+            if (trailing != null) trailing()
         }
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            textStyle = TextStyle(color = colors.foreground, fontSize = 14.5.sp),
-            cursorBrush = SolidColor(colors.primary),
-            modifier = Modifier.weight(1f),
-            decorationBox = { inner ->
-                if (value.isEmpty()) {
-                    Text(hint, color = colors.foregroundTertiary, fontSize = 14.5.sp)
-                }
-                inner()
-            },
-        )
-        if (trailing != null) trailing()
     }
 }
 
@@ -807,10 +1005,10 @@ private fun NewChatEntryCard(
     val colors = LocalAppColors.current
     Row(
         modifier = Modifier
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .padding(vertical = 4.dp)
             .fillMaxWidth()
             .background(colors.surface, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -823,8 +1021,9 @@ private fun NewChatEntryCard(
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Text(subtitle, color = colors.foregroundSecondary, fontSize = 12.sp)
+            Text(title, color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Spacer(Modifier.height(8.dp))
+            Text(subtitle, color = colors.foregroundSecondary, fontSize = 14.sp)
         }
         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = null, color = chevronTint)
     }
@@ -839,6 +1038,12 @@ private fun NewChatEntryCard(
 @Composable
 private fun NewChatAvatar(user: UserProfile) {
     val colors = LocalAppColors.current
+    val presenceLabel = stringResource(when (user.presence) {
+        com.example.chat.domain.models.PresenceState.online -> R.string.social_newchat_presence_online
+        com.example.chat.domain.models.PresenceState.away -> R.string.social_newchat_presence_away
+        com.example.chat.domain.models.PresenceState.typing -> R.string.social_newchat_presence_typing
+        com.example.chat.domain.models.PresenceState.offline -> R.string.social_newchat_presence_offline
+    })
     val presenceColor = when (user.presence) {
         com.example.chat.domain.models.PresenceState.online -> colors.success
         com.example.chat.domain.models.PresenceState.away -> colors.warning
@@ -868,7 +1073,7 @@ private fun NewChatAvatar(user: UserProfile) {
                 .offset(x = 1.dp, y = 1.dp)
                 .size(((42f * 0.28f).coerceIn(10f, 14f)).dp)
                 .border(2.dp, colors.background, CircleShape)
-                .background(presenceColor, CircleShape),
+                .background(presenceColor, CircleShape).semantics { contentDescription = presenceLabel },
         )
     }
 }
@@ -878,7 +1083,7 @@ private fun NewChatAvatar(user: UserProfile) {
 @Composable
 private fun SkeletonTile() {
     val colors = LocalAppColors.current
-    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clearAndSetSemantics {}.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(42.dp).background(colors.borderSubtle, CircleShape))
         Spacer(Modifier.width(12.dp))
         Column {
@@ -898,7 +1103,8 @@ private fun SheetAction(label: String, tint: Color, onClick: () -> Unit) {
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .sizeIn(minHeight = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
     )
 }

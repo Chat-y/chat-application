@@ -24,6 +24,8 @@ class LockCredentialSetupFlow(
     private val service: LockSetupService,
     private val replaceExisting: Boolean = false,
 ) {
+    private var generation = 0L
+    var initialized = false; private set
     var step: SetupStep = SetupStep.enterNew; private set
     var hasExistingSecret = false; private set
     var error = ""; private set
@@ -44,10 +46,23 @@ class LockCredentialSetupFlow(
     private fun changed() = listeners.forEach { it() }
 
     suspend fun init() {
-        val hasCred = service.hasCredential(method)
-        hasExistingSecret = hasCred && !replaceExisting
-        step = if (hasExistingSecret) SetupStep.enterCurrent else SetupStep.enterNew
+        val owner = ++generation
+        initialized = false
+        busy = true
+        error = ""
         changed()
+        try {
+            val hasCred = service.hasCredential(method)
+            if (owner != generation) return
+            hasExistingSecret = hasCred && !replaceExisting
+            step = if (hasExistingSecret) SetupStep.enterCurrent else SetupStep.enterNew
+            initialized = true
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            if (owner == generation) error = "Could not read lock settings. Close and reopen setup to retry."
+        } finally {
+            if (owner == generation) { busy = false; changed() }
+        }
     }
 
     fun setPatternDrawnClear(isConfirm: Boolean) {
@@ -56,19 +71,35 @@ class LockCredentialSetupFlow(
         changed()
     }
 
+    /** Drop in-progress secrets when the sheet closes or the app backgrounds. */
+    fun clearSensitiveState() {
+        generation++
+        initialized = false
+        newSecret = ""
+        firstPatternDrawn = null
+        confirmPatternDrawn = null
+        error = ""
+        busy = false
+        step = if (hasExistingSecret) SetupStep.enterCurrent else SetupStep.enterNew
+        changed()
+    }
+
     fun onPatternReset() = setPatternDrawnClear(step == SetupStep.confirmNew)
 
     /** PIN and Password share Dart's _handleContinue. [input] is the joined PIN or the raw password field. */
     suspend fun handleContinue(input: String): SetupOutcome {
+        if (!initialized || busy) return SetupOutcome.none
+        val owner = generation
         error = ""; changed()
         if (isPin) {
+            if (input.any { it !in '0'..'9' }) { error = "Use digits 0 to 9."; changed(); return SetupOutcome.none }
             val pin = input
             if (pin.length != pinLength) { error = "Enter all $pinLength digits."; changed(); return SetupOutcome.none }
             when (step) {
                 SetupStep.enterCurrent -> {
                     busy = true; changed()
-                    val ok = service.verifyCredential("PIN", pin)
-                    busy = false; changed()
+                    val ok = verifySafely("PIN", pin)
+                    if (owner != generation) return SetupOutcome.none
                     return if (ok) {
                         step = SetupStep.enterNew; error = ""; changed(); SetupOutcome.clearPin
                     } else {
@@ -76,9 +107,7 @@ class LockCredentialSetupFlow(
                     }
                 }
                 SetupStep.enterNew -> {
-                    if (Regex("^(\\d)\\1+$").containsMatchIn(pin)) {
-                        error = "Weak PIN. Avoid repeating digits like 0000."; changed(); return SetupOutcome.none
-                    }
+                    CredentialStrength.pinError(pin)?.let { error = it; changed(); return SetupOutcome.none }
                     newSecret = pin
                     step = SetupStep.confirmNew; error = ""; changed()
                     return SetupOutcome.clearPin
@@ -91,13 +120,13 @@ class LockCredentialSetupFlow(
                 }
             }
         } else if (isPassword) {
-            val pass = input.trim()
-            if (pass.isEmpty()) { error = "Please enter a password."; changed(); return SetupOutcome.none }
+            val pass = input // Preserve spaces, including existing credentials.
+            if (pass.isBlank()) { error = "Please enter a password."; changed(); return SetupOutcome.none }
             when (step) {
                 SetupStep.enterCurrent -> {
                     busy = true; changed()
-                    val ok = service.verifyCredential("Password", pass)
-                    busy = false; changed()
+                    val ok = verifySafely("Password", pass)
+                    if (owner != generation) return SetupOutcome.none
                     return if (ok) {
                         step = SetupStep.enterNew; error = ""; changed(); SetupOutcome.clearText
                     } else {
@@ -105,7 +134,7 @@ class LockCredentialSetupFlow(
                     }
                 }
                 SetupStep.enterNew -> {
-                    if (pass.length < 6) { error = "Password must contain at least 6 characters."; changed(); return SetupOutcome.none }
+                    CredentialStrength.passwordError(pass)?.let { error = it; changed(); return SetupOutcome.none }
                     newSecret = pass
                     step = SetupStep.confirmNew; error = ""; changed()
                     return SetupOutcome.clearText
@@ -119,22 +148,49 @@ class LockCredentialSetupFlow(
         return SetupOutcome.none
     }
 
+    private suspend fun verifySafely(method: String, secret: String): Boolean {
+        val owner = generation
+        return try {
+        service.verifyCredential(method, secret)
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
+    } finally {
+        if (owner == generation) { busy = false; changed() }
+    }
+    }
+
     private suspend fun saveFinalCredential(secret: String): SetupOutcome {
+        val owner = generation
         busy = true; error = ""; changed()
         return try {
             service.setCredential(method, secret, if (isPin) pinLength else null)
-            SetupOutcome.saved
-        } catch (e: Exception) {
-            busy = false
-            error = (e.message ?: e.toString()).replaceFirst("Invalid argument(s): ", "")
-            changed()
+            if (owner == generation) { newSecret = ""; SetupOutcome.saved } else SetupOutcome.none
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (owner == generation) error = "Could not save the credential. Try again."
             SetupOutcome.none
+        } finally {
+            if (owner == generation) { busy = false; changed() }
         }
     }
 
     fun onPatternComplete(pattern: String) {
-        val nodes = pattern.split('-').filter { it.isNotEmpty() }
-        if (nodes.size < 4) { error = "Connect at least 4 dots."; changed(); return }
+        if (!initialized || busy) return
+        // New enrollment only. Existing credential verification stays backward compatible.
+        val nodes = if (pattern.length <= 17) pattern.split('-') else emptyList()
+        val valid = if (step == SetupStep.enterCurrent) {
+            // Historical verifier accepts normalized legacy node encodings.
+            val legacy = pattern.split('-').filter { it.isNotEmpty() }.map { it.toIntOrNull() }
+            legacy.size >= 4 && legacy.all { it != null && it in 0..8 } && legacy.toSet().size == legacy.size
+        } else nodes.size in 4..9 && nodes.all { it.length == 1 && it[0] in '0'..'8' } && nodes.toSet().size == nodes.size
+        if (!valid) {
+            if (step == SetupStep.confirmNew) confirmPatternDrawn = null else firstPatternDrawn = null
+            error = "Connect at least 4 dots using each dot once."
+            changed(); return
+        }
         error = ""
         when (step) {
             SetupStep.enterCurrent, SetupStep.enterNew -> firstPatternDrawn = pattern
@@ -144,9 +200,11 @@ class LockCredentialSetupFlow(
     }
 
     val canContinuePattern: Boolean
-        get() = (if (step == SetupStep.confirmNew) confirmPatternDrawn != null else firstPatternDrawn != null) && !busy
+        get() = (if (step == SetupStep.confirmNew) confirmPatternDrawn != null else firstPatternDrawn != null) && initialized && !busy
 
     suspend fun handlePatternContinue(): SetupOutcome {
+        if (!initialized || busy) return SetupOutcome.none
+        val owner = generation
         val pattern = if (step == SetupStep.confirmNew) confirmPatternDrawn else firstPatternDrawn
         if (pattern == null) {
             error = if (step == SetupStep.confirmNew) "Draw the confirmation pattern first." else "Draw your pattern first."
@@ -155,8 +213,8 @@ class LockCredentialSetupFlow(
         when (step) {
             SetupStep.enterCurrent -> {
                 busy = true; changed()
-                val ok = service.verifyCredential("Pattern", pattern)
-                busy = false
+                val ok = verifySafely("Pattern", pattern)
+                if (owner != generation) return SetupOutcome.none
                 if (ok) { firstPatternDrawn = null; step = SetupStep.enterNew; error = "" }
                 else { firstPatternDrawn = null; error = "Current pattern is incorrect." }
                 changed(); return SetupOutcome.resetPad
@@ -179,16 +237,23 @@ class LockCredentialSetupFlow(
     }
 
     suspend fun verifyNativeMethod(): SetupOutcome {
-        if (busy) return SetupOutcome.none
+        if (!initialized || busy) return SetupOutcome.none
+        val owner = generation
         busy = true; error = ""; changed()
-        val success = if (isBiometric) service.authenticateBiometric("Verify your biometric to enable Chaty Lock")
-        else service.authenticateDeviceCredential("Verify your device screen lock to enable Chaty Lock")
-        if (success) return SetupOutcome.saved
-        busy = false
-        error = if (isBiometric) "Biometric verification was cancelled or unavailable."
-        else "Device credential verification was cancelled or unavailable."
-        changed()
-        return SetupOutcome.none
+        return try {
+            val success = if (isBiometric) service.authenticateBiometric("Verify your biometric to enable Chaty Lock")
+            else service.authenticateDeviceCredential("Verify your device screen lock to enable Chaty Lock")
+            if (owner != generation) SetupOutcome.none
+            else if (success) SetupOutcome.saved else {
+                error = if (isBiometric) "Biometric verification was cancelled or unavailable."
+                else "Device credential verification was cancelled or unavailable."
+                SetupOutcome.none
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            if (owner == generation) error = "Authentication unavailable. Try again."
+            SetupOutcome.none
+        } finally { if (owner == generation) { busy = false; changed() } }
     }
 
     fun stepTitle(): String = when (step) {
@@ -202,7 +267,7 @@ class LockCredentialSetupFlow(
         SetupStep.enterNew -> when {
             isPin -> "Choose a $pinLength-digit PIN code."
             isPattern -> "Draw an unlock pattern connecting at least 4 dots."
-            isPassword -> "Enter a password (min 6 characters)."
+            isPassword -> "Enter a password (min 8 characters). Spaces are preserved."
             else -> "Choose your credential."
         }
         SetupStep.confirmNew -> "Re-enter the same $method to ensure accuracy."

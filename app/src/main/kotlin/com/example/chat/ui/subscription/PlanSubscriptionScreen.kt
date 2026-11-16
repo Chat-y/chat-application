@@ -17,6 +17,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +39,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.LayersClear
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.WorkspacePremium
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +77,72 @@ import kotlinx.coroutines.launch
 /** Success green used by plan_subscription_screen.dart (SnackBar background,
  *  feature check icons, annual-save badge). */
 private val SuccessGreen = Color(0xFF10B981)
+
+private const val PLAN_TAG = "PlanSubscription"
+
+/** SUB-R1-003: defensive price parse (Number or numeric String). Null = unusable. */
+private fun planPrice(plan: Map<String, Any?>, key: String): Double? {
+    val v = plan[key] ?: return null
+    return (v as? Number)?.toDouble() ?: v.toString().trim().toDoubleOrNull()
+}
+
+/** SUB-R1-012: single predicate for "free". */
+private fun isFreePlanData(plan: Map<String, Any?>): Boolean =
+    plan["tier"] == "free" || planPrice(plan, "monthly_price") == 0.0
+
+/** SUB-R1-001: 499.0 -> "499", 499.5 -> "499.50". */
+private fun formatPlanAmount(amount: Double): String =
+    if (amount == Math.rint(amount)) amount.toLong().toString()
+    else String.format(java.util.Locale.US, "%.2f", amount)
+
+/** SUB-R1-002: INR keeps the existing rupee sign; other ISO codes use the
+ *  platform symbol, falling back to the ISO code itself. */
+private fun planCurrencySymbol(currency: String): String {
+    val code = currency.trim().uppercase()
+    if (code == "INR") return "\u20B9"
+    return try {
+        java.util.Currency.getInstance(code).getSymbol(java.util.Locale.getDefault())
+    } catch (e: Exception) {
+        code
+    }
+}
+
+/** SUB-R1-004: whole-percent annual saving from loaded data, null when unknown. */
+private fun annualSavingPercent(plans: List<Map<String, Any?>>): Int? {
+    val percents = plans.mapNotNull { plan ->
+        val m = planPrice(plan, "monthly_price")
+        val a = planPrice(plan, "annual_price")
+        if (m == null || a == null || m <= 0.0 || a <= 0.0) null
+        else Math.round((1.0 - a / (m * 12.0)) * 100.0).toInt()
+    }.filter { it > 0 }
+    return percents.minOrNull()
+}
+
+/** SUB-R1-016: canned copy; raw detail goes to the log only. */
+private fun planErrorCopy(e: Exception): String {
+    android.util.Log.w(PLAN_TAG, "plan request failed: ${e.javaClass.simpleName}")
+    return when (e) {
+        is java.net.UnknownHostException, is java.net.ConnectException ->
+            "You appear to be offline. Check your connection and try again."
+        is java.net.SocketTimeoutException, is kotlinx.coroutines.TimeoutCancellationException ->
+            "The server took too long to respond. Please try again."
+        else -> "Something went wrong. Please try again."
+    }
+}
+
+/** SUB-R1-020: drop plans with a negative price or no id, de-dupe ids. */
+private fun validatePlans(raw: List<Map<String, Any?>>): List<Map<String, Any?>> {
+    val seen = HashSet<String>()
+    return raw.filter { plan ->
+        val id = plan["id"]?.toString()
+        val bad = id.isNullOrBlank() ||
+            (planPrice(plan, "monthly_price") ?: 0.0) < 0.0 ||
+            (planPrice(plan, "annual_price") ?: 0.0) < 0.0 ||
+            !seen.add(id)
+        if (bad) android.util.Log.w(PLAN_TAG, "dropping unusable plan row")
+        !bad
+    }
+}
 
 /** Port of lib/features/subscription/plan_subscription_screen.dart.
  *
@@ -93,47 +171,55 @@ fun PlanSubscriptionScreen(
 
     var isLoadingPlans by remember { mutableStateOf(true) }
     var isSubmitting by remember { mutableStateOf(false) }
-    var isAnnual by remember { mutableStateOf(false) }
-    var selectedPlanId by remember { mutableStateOf<String?>(null) }
+    var isAnnual by rememberSaveable { mutableStateOf(false) }
+    var selectedPlanId by rememberSaveable { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var plans by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
 
-    fun friendlyError(e: Exception): String =
-        (e.message ?: e.toString()).removePrefix("Exception: ")
+    fun friendlyError(e: Exception): String = planErrorCopy(e)
 
     fun loadPlansNow() {
+        if (organizationId.isBlank()) {
+            // SUB-R1-010: fail fast instead of calling the server with no workspace.
+            plans = emptyList()
+            selectedPlanId = null
+            errorMessage = "Workspace is not ready yet. Please go back and try again."
+            isLoadingPlans = false
+            return
+        }
         isLoadingPlans = true
         errorMessage = null
         scope.launch {
             try {
-                val loaded = loadPlans(organizationId)
+                val loaded = validatePlans(kotlinx.coroutines.withTimeout(15_000) { loadPlans(organizationId) })
                 plans = loaded
-                selectedPlanId = if (loaded.isNotEmpty()) {
+                val previousChoice = selectedPlanId
+                val keepChoice = previousChoice != null &&
+                    loaded.any { it["id"]?.toString() == previousChoice }
+                selectedPlanId = if (loaded.isEmpty()) {
+                    null
+                } else if (keepChoice) {
+                    // SUB-R2-003: keep the earlier choice when it is still offered.
+                    previousChoice
+                } else {
                     // Dart: default to the first highlighted or free-tier plan.
                     val defaultPlan = loaded.firstOrNull {
                         it["highlighted"] == true || it["tier"] == "free"
                     } ?: loaded.first()
                     defaultPlan["id"]?.toString()
-                } else {
-                    null
                 }
                 isLoadingPlans = false
             } catch (e: Exception) {
                 errorMessage = friendlyError(e)
                 plans = emptyList()
-                selectedPlanId = null
                 isLoadingPlans = false
             }
         }
     }
 
-    fun isFreePlan(plan: Map<String, Any?>): Boolean =
-        plan["tier"] == "free" ||
-            (plan["monthly_price"] != null && (plan["monthly_price"] as? Number)?.toDouble() == 0.0)
+    fun isFreePlan(plan: Map<String, Any?>): Boolean = isFreePlanData(plan)
 
-    fun anyFreePlan(): Boolean = plans.any {
-        it["tier"] == "free" || (((it["monthly_price"] as? Number)?.toDouble()) ?: 1.0) == 0.0
-    }
+    fun anyFreePlan(): Boolean = plans.any(::isFreePlanData)
 
     fun buttonText(): String {
         if (plans.isEmpty()) return "No Plans Available"
@@ -141,19 +227,27 @@ fun PlanSubscriptionScreen(
         return if (isFreePlan(selected)) "Activate Free Plan" else "Subscribe & Activate Workspace"
     }
 
-    fun handleSubscribe() {
-        val planId = selectedPlanId
+    // SUB-R1-011: one pipeline for the CTA and the free-plan shortcut.
+    fun subscribePlan(planId: String?) {
         if (planId == null || isSubmitting) return
+        val chosen = plans.firstOrNull { it["id"]?.toString() == planId }
+        if (chosen == null) {
+            // SUB-R2-004: the selected plan is no longer offered.
+            errorMessage = "That plan is no longer available. Please choose another."
+            return
+        }
+        // SUB-R1-005: a free plan never uses the annual duration.
+        val months = if (isFreePlan(chosen)) 1 else if (isAnnual) 12 else 1
         isSubmitting = true
         errorMessage = null
         scope.launch {
             try {
-                subscribe(organizationId, planId, if (isAnnual) 12 else 1)
+                subscribe(organizationId, planId, months)
                 val planName = (plans.firstOrNull { it["id"]?.toString() == planId }
                     ?.get("name") ?: "Plan").toString()
                 launch {
                     snackbarHostState.showSnackbar(
-                        "Subscribed to $planName! Workspace \"$organizationName\" is now active.",
+                        "Subscribed to $planName! Workspace \"${organizationName.take(24)}${if (organizationName.length > 24) "\u2026" else ""}\" is now active.",
                     )
                 }
                 onSubscribed(planName)
@@ -164,7 +258,41 @@ fun PlanSubscriptionScreen(
         }
     }
 
+    var showConfirm by rememberSaveable { mutableStateOf(false) }
+
+    // SUB-R1-009: paid plans get a price recap before the commit tap.
+    fun handleSubscribe() {
+        val chosen = plans.firstOrNull { it["id"]?.toString() == selectedPlanId }
+        if (chosen != null && !isFreePlan(chosen)) showConfirm = true else subscribePlan(selectedPlanId)
+    }
+
     LaunchedEffect(organizationId) { loadPlansNow() }
+
+    if (showConfirm) {
+        val chosen = plans.firstOrNull { it["id"]?.toString() == selectedPlanId }
+        if (chosen == null) {
+            showConfirm = false
+        } else {
+            val amount = planPrice(chosen, if (isAnnual) "annual_price" else "monthly_price") ?: 0.0
+            val symbol = planCurrencySymbol(chosen["currency"]?.toString() ?: "INR")
+            AlertDialog(
+                onDismissRequest = { showConfirm = false },
+                title = { Text("Confirm subscription") },
+                text = {
+                    Text(
+                        "${chosen["name"] ?: "Plan"}: $symbol${formatPlanAmount(amount)}" +
+                            "${if (isAnnual) " per year" else " per month"} for \"$organizationName\".",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { showConfirm = false; subscribePlan(selectedPlanId) }) {
+                        Text("Subscribe")
+                    }
+                },
+                dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancel") } },
+            )
+        }
+    }
 
     Scaffold(
         containerColor = Color(theme.backgroundColor),
@@ -199,6 +327,7 @@ fun PlanSubscriptionScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .semantics { paneTitle = "Subscription plans" }
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -206,7 +335,8 @@ fun PlanSubscriptionScreen(
             // Dart AppBar: back arrow only outside the registration flow.
             if (!isNewRegistration) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                    AuthBackButton(onClick = onBack)
+                    // SUB-R1-008: no leaving mid-subscribe.
+                    if (!isSubmitting) AuthBackButton(onClick = onBack)
                 }
             }
 
@@ -252,6 +382,9 @@ fun PlanSubscriptionScreen(
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.4).sp,
                     textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { heading() },
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -263,7 +396,7 @@ fun PlanSubscriptionScreen(
                 )
                 Spacer(Modifier.height(24.dp))
 
-                BillingCycleSwitcher(theme, isAnnual) { isAnnual = it }
+                BillingCycleSwitcher(theme, isAnnual, annualSavingPercent(plans)) { isAnnual = it }
                 Spacer(Modifier.height(24.dp))
 
                 errorMessage?.let { msg ->
@@ -273,7 +406,8 @@ fun PlanSubscriptionScreen(
                             .fillMaxWidth()
                             .background(Color(argbWithAlpha(theme.dangerColor, 0.1)), RoundedCornerShape(12.dp))
                             .border(1.dp, Color(argbWithAlpha(theme.dangerColor, 0.3)), RoundedCornerShape(12.dp))
-                            .padding(12.dp),
+                            .padding(12.dp)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.errorOutline,
@@ -283,7 +417,7 @@ fun PlanSubscriptionScreen(
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            msg,
+                            "Error: $msg",
                             color = Color(theme.dangerColor),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
@@ -316,7 +450,7 @@ fun PlanSubscriptionScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "No active product plans were returned from the server.",
+                            "Plans are not available right now. Check your connection and try again.",
                             color = Color(theme.secondaryTextColor),
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center,
@@ -334,8 +468,8 @@ fun PlanSubscriptionScreen(
                             theme = theme,
                             plan = plan,
                             isAnnual = isAnnual,
-                            isSelected = selectedPlanId == (plan["id"]?.toString() ?: ""),
-                            onSelect = { selectedPlanId = plan["id"]?.toString() ?: "" },
+                            isSelected = selectedPlanId == plan["id"]?.toString(),
+                            onSelect = { plan["id"]?.toString()?.let { selectedPlanId = it } },
                         )
                     }
                 }
@@ -344,7 +478,7 @@ fun PlanSubscriptionScreen(
                 Button(
                     onClick = { handleSubscribe() },
                     enabled = !isSubmitting && selectedPlanId != null && plans.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp).testTag("subscribe_cta"),
                     shape = RoundedCornerShape(16.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -378,37 +512,16 @@ fun PlanSubscriptionScreen(
                 }
 
                 if (isNewRegistration && anyFreePlan()) {
-                    val freePlan = plans.firstOrNull {
-                        it["tier"] == "free" || (((it["monthly_price"] as? Number)?.toDouble()) ?: 1.0) == 0.0
-                    } ?: plans.first()
+                    val freePlan = plans.firstOrNull(::isFreePlanData) ?: plans.first()
                     Spacer(Modifier.height(16.dp))
                     TextButton(
                         onClick = {
-                            selectedPlanId = freePlan["id"]?.toString()
-                            // Dart calls _handleSubscribe right after setState;
-                            // subscribe with the freshly selected id directly.
                             val planId = freePlan["id"]?.toString()
-                            if (planId != null && !isSubmitting) {
-                                isSubmitting = true
-                                errorMessage = null
-                                scope.launch {
-                                    try {
-                                        subscribe(organizationId, planId, if (isAnnual) 12 else 1)
-                                        val planName = (freePlan["name"] ?: "Plan").toString()
-                                        launch {
-                                            snackbarHostState.showSnackbar(
-                                                "Subscribed to $planName! Workspace \"$organizationName\" is now active.",
-                                            )
-                                        }
-                                        onSubscribed(planName)
-                                    } catch (e: Exception) {
-                                        errorMessage = friendlyError(e)
-                                        isSubmitting = false
-                                    }
-                                }
-                            }
+                            selectedPlanId = planId
+                            subscribePlan(planId)
                         },
                         enabled = !isSubmitting,
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("free_plan_shortcut"),
                     ) {
                         Text(
                             "Start with Free Plan (${(freePlan["name"] ?: "Free")})",
@@ -425,7 +538,7 @@ fun PlanSubscriptionScreen(
 }
 
 @Composable
-private fun BillingCycleSwitcher(theme: ThemeConfig, isAnnual: Boolean, onChange: (Boolean) -> Unit) {
+private fun BillingCycleSwitcher(theme: ThemeConfig, isAnnual: Boolean, savingPercent: Int?, onChange: (Boolean) -> Unit) {
     Row(
         modifier = Modifier
             .background(Color(argbWithAlpha(theme.surfaceColor, 0.6)), RoundedCornerShape(14.dp))
@@ -433,7 +546,7 @@ private fun BillingCycleSwitcher(theme: ThemeConfig, isAnnual: Boolean, onChange
             .padding(4.dp),
     ) {
         BillingTab(theme, "Monthly Billing", !isAnnual, null) { onChange(false) }
-        BillingTab(theme, "Annual Billing", isAnnual, "Save 20%") { onChange(true) }
+        BillingTab(theme, "Annual Billing", isAnnual, savingPercent?.let { "Save $it%" }) { onChange(true) }
     }
 }
 
@@ -453,7 +566,9 @@ private fun BillingTab(
     Row(
         modifier = Modifier
             .background(background, RoundedCornerShape(10.dp))
-            .clickable(onClick = onTap)
+            // Selectable tab with a 48dp minimum touch height.
+            .heightIn(min = 48.dp)
+            .selectable(selected = isSelected, role = Role.Tab, onClick = onTap)
             .padding(vertical = 8.dp, horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -467,7 +582,7 @@ private fun BillingTab(
             Spacer(Modifier.width(6.dp))
             Text(
                 badge,
-                color = if (isSelected) Color.White else SuccessGreen,
+                color = if (isSelected) Color(theme.onAccentColor) else SuccessGreen,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.ExtraBold,
                 modifier = Modifier
@@ -492,17 +607,23 @@ private fun PlanCard(
 ) {
     val name = plan["name"]?.toString() ?: "Plan"
     val isHighlighted = plan["highlighted"] == true
-    val monthlyPrice = (plan["monthly_price"] as? Number)?.toDouble() ?: 0.0
-    val annualPrice = (plan["annual_price"] as? Number)?.toDouble() ?: 0.0
+    val monthlyPrice = planPrice(plan, "monthly_price") ?: 0.0
+    val annualPrice = planPrice(plan, "annual_price") ?: 0.0
     val currency = plan["currency"]?.toString() ?: "INR"
-    val currencySymbol = if (currency.uppercase() == "INR") "₹" else "$"
+    val currencySymbol = planCurrencySymbol(currency)
     val price = if (isAnnual) annualPrice else monthlyPrice
     val period = if (isAnnual) "/year" else "/month"
     val description = plan["description"]?.toString()
     val productName = plan["product_name"]?.toString()
 
     val features = mutableListOf<String>()
-    (plan["features"] as? List<*>)?.forEach { f ->
+    // SUB-R3-003: accept a list, or a newline/comma separated string.
+    val rawFeatures: List<*> = when (val raw = plan["features"]) {
+        is List<*> -> raw
+        is String -> raw.split('\n', ',')
+        else -> emptyList<Any?>()
+    }
+    rawFeatures.forEach { f ->
         val text = f?.toString()?.trim()
         if (!text.isNullOrEmpty()) features.add(text)
     }
@@ -533,7 +654,7 @@ private fun PlanCard(
             )
             .background(cardBackground, RoundedCornerShape(18.dp))
             .border(if (isSelected) 2.dp else 1.2.dp, borderColor, RoundedCornerShape(18.dp))
-            .clickable(onClick = onSelect)
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onSelect)
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -549,7 +670,7 @@ private fun PlanCard(
                     Text(
                         productName.uppercase(),
                         color = Color(theme.accentColor),
-                        fontSize = 9.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.3.sp,
                         modifier = Modifier
@@ -562,7 +683,7 @@ private fun PlanCard(
                     Text(
                         "RECOMMENDED",
                         color = Color(theme.onAccentColor),
-                        fontSize = 9.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 0.4.sp,
                         modifier = Modifier
@@ -595,8 +716,7 @@ private fun PlanCard(
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                // Dart interpolates the raw double: 499.0 renders "₹499.0".
-                if (price <= 0) "Free" else "$currencySymbol$price",
+                if (price <= 0) "Free" else "$currencySymbol${formatPlanAmount(price)}",
                 color = Color(theme.primaryTextColor),
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Black,
@@ -615,7 +735,7 @@ private fun PlanCard(
         }
         if (!description.isNullOrEmpty()) {
             Spacer(Modifier.height(6.dp))
-            Text(description, color = Color(theme.secondaryTextColor), fontSize = 13.sp)
+            Text(description, color = Color(theme.secondaryTextColor), fontSize = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
         }
         if (features.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))

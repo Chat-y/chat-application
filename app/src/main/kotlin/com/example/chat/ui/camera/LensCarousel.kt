@@ -1,6 +1,8 @@
 package com.example.chat.ui.camera
 
 import android.util.Log
+import androidx.compose.ui.semantics.CollectionInfo
+import androidx.compose.ui.semantics.collectionInfo
 
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -153,6 +155,12 @@ fun LensCarousel(
         centerOn(index)
     }
 
+    LaunchedEffect(managerSelectedId, listState.isScrollInProgress) {
+        if (!listState.isScrollInProgress) {
+            val selectedIndex = catalog.indexOfFirst { it.id == managerSelectedId }
+            catalog.getOrNull(selectedIndex)?.let { lens -> view.announceForAccessibility("${lens.name}, lens ${selectedIndex + 1} of ${catalog.size}") }
+        }
+    }
     // Selection follows the true scroll position: nearest slot to the offset.
     LaunchedEffect(listState, catalog) {
         snapshotFlow {
@@ -160,7 +168,7 @@ fun LensCarousel(
         }.collectLatest { offsetPx ->
             // Programmatic centering owns selection; user drags always cancel it
             // first, so a skipped frame here is never a skipped user scroll.
-            if (programmaticTarget != null) return@collectLatest
+            if (programmaticTarget != null || catalog.isEmpty()) return@collectLatest
             val nearest = (offsetPx / slotPx).roundToInt().coerceIn(0, catalog.size - 1)
             if (nearest == currentIndex || catalog.isEmpty()) return@collectLatest
             if (com.example.chat.BuildConfig.DEBUG) Log.i("LENS-DIAG", "watcher select nearest=" + nearest + " offsetPx=" + offsetPx + " prevIndex=" + currentIndex + " slotPx=" + slotPx + " firstVisible=" + listState.firstVisibleItemIndex + "+" + listState.firstVisibleItemScrollOffset)
@@ -184,9 +192,9 @@ fun LensCarousel(
         state = listState,
         flingBehavior = rememberSnapFlingBehavior(lazyListState = listState),
         contentPadding = PaddingValues(horizontal = ((viewportWidthDp - slotExtent) / 2).coerceAtLeast(0.dp)),
-        modifier = Modifier.height(selectedDiameter + 26.dp),
+        modifier = Modifier.height(selectedDiameter + 26.dp).semantics { collectionInfo = CollectionInfo(1, catalog.size) },
     ) {
-        items(catalog.size) { index ->
+        items(catalog.size, key = { catalog[it].id }) { index ->
             val lens = catalog[index]
             val selected = index == currentIndex
             val onItemTap: () -> Unit = {

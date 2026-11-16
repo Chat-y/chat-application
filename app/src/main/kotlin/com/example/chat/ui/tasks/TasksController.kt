@@ -69,6 +69,7 @@ class TasksController(
      *  load keeps the prior snapshot AND its account marker. */
     @Volatile private var loadedAccountKey: String? = null
     private var hasSnapshot = false
+    private var loadGeneration = 0L
 
     /** True only when a completed (200) load for the CURRENT account exists.
      *  False after account switch until the next successful load, so stale
@@ -81,11 +82,16 @@ class TasksController(
 
     /** Dart loadTasks: replace on 200, keep prior state on failure. */
     suspend fun loadTasks() {
+        // TAS-007: bind the load to the account that started it.
+        val startedFor = accountKey()
+        // TAS-010: a newer load invalidates older in-flight ones.
+        val generation = synchronized(lock) { ++loadGeneration }
         val fetched = client.listTasks() ?: return
         synchronized(lock) {
+            if (generation != loadGeneration || accountKey() != startedFor) return
             _tasks.clear()
             _tasks.addAll(fetched)
-            loadedAccountKey = accountKey()
+            loadedAccountKey = startedFor
             hasSnapshot = true
         }
         notifyListeners()
@@ -106,14 +112,16 @@ class TasksController(
         return task
     }
 
-    /** Dart updateTaskStatus: replace at index on 200, silent otherwise. */
-    suspend fun updateTaskStatus(taskId: String, status: TaskStatus) {
-        val updated = client.updateTaskStatus(taskId, status) ?: return
+    /** Dart updateTaskStatus: replace at index on 200. Returns false when the
+     *  server did not confirm (TAS-001), so callers can report it. */
+    suspend fun updateTaskStatus(taskId: String, status: TaskStatus): Boolean {
+        val updated = client.updateTaskStatus(taskId, status) ?: return false
         synchronized(lock) {
             val index = _tasks.indexOfFirst { it.id == taskId }
             if (index != -1) _tasks[index] = updated
         }
         notifyListeners()
+        return true
     }
 
     /** Dart updateTask (full edit): replace at index on 200. */
@@ -124,21 +132,23 @@ class TasksController(
         assigneeIds: List<String>,
         priority: String,
         dueAtIso: String,
-    ) {
+    ): Boolean {
         val updated = client.updateTask(taskId, title, description, assigneeIds, priority, dueAtIso)
-            ?: return
+            ?: return false
         synchronized(lock) {
             val index = _tasks.indexOfFirst { it.id == taskId }
             if (index != -1) _tasks[index] = updated
         }
         notifyListeners()
+        return true
     }
 
     /** Dart deleteTask: remove locally only on 200. */
-    suspend fun deleteTask(taskId: String) {
-        if (!client.deleteTask(taskId)) return
+    suspend fun deleteTask(taskId: String): Boolean {
+        if (!client.deleteTask(taskId)) return false
         synchronized(lock) { _tasks.removeAll { it.id == taskId } }
         notifyListeners()
+        return true
     }
 
     /** The SINGLE transition use-case from tasks_screen.dart _moveTask:
@@ -153,7 +163,12 @@ class TasksController(
         }
         if (move == null) return MoveResult.NoOp
         return try {
-            updateTaskStatus(task.id, target)
+            // TAS-001: record history only when the server confirmed the move.
+            if (!updateTaskStatus(task.id, target)) {
+                return MoveResult.Failed(
+                    "Could not move \"${task.title}\" to ${TaskWorkflow.label(target)}: the server did not confirm the change.",
+                )
+            }
             recordMove(task, move.from, move.to)
             MoveResult.Moved
         } catch (error: Exception) {

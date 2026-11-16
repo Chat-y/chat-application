@@ -66,7 +66,7 @@ object NavigationDestinationsLogic {
         primary.add(id)
     }
 
-    /** _reorder: swap-style move by delta, bounds-checked. */
+    /** _reorder: moves the item at [index] by [delta] positions (remove + insert, not a swap), bounds-checked. */
     fun reorder(list: MutableList<String>, index: Int, delta: Int) {
         val next = index + delta
         if (next < 0 || next >= list.size) return

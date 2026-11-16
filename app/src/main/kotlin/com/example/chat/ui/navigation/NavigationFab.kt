@@ -59,6 +59,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -116,6 +120,12 @@ fun ContextualNavigationFab(
     prefs: NavigationFabPrefs = NavigationFabPrefs(),
     actions: NavigationFabActions = NavigationFabActions(),
     onNotify: (String) -> Unit = {},
+    /** Optional Home entry point. The owner must resolve commands against the
+     * current account when opened/executed, and expose navigation only. */
+    onOpenHomeCommandPalette: (() -> Unit)? = null,
+    /** Explicit user choice only. The containing shell must also move the FAB
+     * slot to the physical bottom-left and apply system/gesture safe insets. */
+    leftHandedCompose: Boolean = false,
 ) {
     if (prefs.hideFab || activeDestinationId == ChatyNavigationDestinationIds.calls) return
     val scope = rememberCoroutineScope()
@@ -192,13 +202,25 @@ fun ContextualNavigationFab(
 
     @Composable
     fun standardFab(onClick: () -> Unit) {
+        // MOTION (presentational only): brief press scale; no scale when animations are disabled.
+        val fabInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        val fabPressed by androidx.compose.foundation.interaction.collectIsPressedAsState(fabInteraction)
+        val fabReducedMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
+        val fabScale by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (fabPressed && !fabReducedMotion) 0.94f else 1f,
+            animationSpec = androidx.compose.animation.core.tween(durationMillis = if (fabReducedMotion) 0 else 90),
+            label = "fabPressScale",
+        )
         Box(
             contentAlignment = Alignment.Center,
             modifier = modifier
+                .graphicsLayer { scaleX = fabScale; scaleY = fabScale }
                 .shadow(4.5.dp, mainFabShape)
                 .clip(mainFabShape)
                 .background(effectiveFabColor)
-                .clickable(onClick = onClick)
+                // A11Y: the icon is decorative, so name the control for TalkBack; focusable by default for keyboard.
+                .semantics(mergeDescendants = true) { contentDescription = spec.tooltip }
+                .clickable(interactionSource = fabInteraction, indication = androidx.compose.foundation.LocalIndication.current, role = Role.Button, onClick = onClick)
                 .padding(16.dp),
         ) {
             fabIcon { defaultDestinationIcon() }
@@ -210,6 +232,12 @@ fun ContextualNavigationFab(
     } else {
         // Speed dial assembly (Dart quickActions order and flags).
         val quickActions = mutableListOf<DialActionLike>()
+        // Opt-in, chats-only entry: no inactive or placeholder command is shown.
+        onOpenHomeCommandPalette?.let { openPalette ->
+            quickActions.add(DialActionLike("home-command-palette", "Home commands", Icons.Rounded.GridView) {
+                openPalette()
+            })
+        }
         if (!prefs.hideNewMessageFab) {
             quickActions.add(DialActionLike("new-message", "New message", Icons.Rounded.MarkChatUnread) { spec.action() })
         }
@@ -237,20 +265,22 @@ fun ContextualNavigationFab(
         }
         quickActions.add(DialActionLike("more-tools", "More Actions & Tools", Icons.Rounded.GridView) { quickActionsOpen = true })
 
+        /* Removed unreachable fallback, preserved for review:
         if (quickActions.isEmpty()) {
             if (!prefs.hideNewMessageFab) standardFab(spec.action)
-        } else {
-            HomeSpeedDialFab(
-                actions = quickActions,
-                normalColor = effectiveFabColor,
-                iconColor = effectiveIconColor,
-                surfaceColor = colors.surfaceElevated,
-                textColor = colors.foreground,
-                showMetaAiIcon = prefs.showMetaAiIcon,
-                mainFabShape = mainFabShape,
-                modifier = modifier,
-            )
         }
+        More Actions & Tools is always present, including when other actions are hidden. */
+        HomeSpeedDialFab(
+            actions = quickActions,
+            normalColor = effectiveFabColor,
+            iconColor = effectiveIconColor,
+            surfaceColor = colors.surfaceElevated,
+            textColor = colors.foreground,
+            showMetaAiIcon = prefs.showMetaAiIcon,
+            mainFabShape = mainFabShape,
+            modifier = modifier,
+            leftHandedCompose = leftHandedCompose,
+        )
     }
 
     if (restartConfirm) {
@@ -265,7 +295,8 @@ fun ContextualNavigationFab(
                         try {
                             actions.onRestartApp()
                         } catch (error: Throwable) {
-                            onNotify("Chaty could not restart: ${error.message ?: error}")
+                            // Removed raw exception output: onNotify("Chaty could not restart: ${error.message ?: error}")
+                            onNotify("Chaty could not restart. Close and reopen the app.")
                         }
                     }
                 }) { Text("Restart") }
@@ -294,7 +325,7 @@ fun ContextualNavigationFab(
             openDirectConversation = actions.openDirectConversation,
             onOpenConversation = actions.onOpenConversation,
             onDismiss = { directNumberOpen = false },
-            onError = { onNotify("Could not start chat: $it") },
+            onError = { onNotify("Could not start chat. Check the recipient and try again.") },
         )
     }
 }
@@ -311,14 +342,19 @@ private fun HomeSpeedDialFab(
     textColor: Color,
     showMetaAiIcon: Boolean,
     modifier: Modifier = Modifier,
+    leftHandedCompose: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(expanded) {expanded=false}
     Column(modifier = modifier, horizontalAlignment = Alignment.End) {
         if (expanded) {
             actions.forEach { action ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 9.dp),
+                    modifier = Modifier.padding(bottom = 9.dp).heightIn(min=48.dp)
+                        .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
+                        .semantics(mergeDescendants=true) {contentDescription=action.label}
+                        .clickable(role=Role.Button) {expanded=false;action.onPressed()},
                 ) {
                     Box(
                         modifier = Modifier
@@ -333,15 +369,13 @@ private fun HomeSpeedDialFab(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(43.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
-                            .background(normalColor)
-                            .clickable {
-                                expanded = false
-                                action.onPressed()
-                            },
+                            .background(normalColor),
+                            // The whole labeled row now owns this click, rather than the icon alone.
+                            // .clickable { expanded=false;action.onPressed() }
                     ) {
-                        Icon(action.icon, contentDescription = action.label, tint = iconColor, modifier = Modifier.size(19.dp))
+                        Icon(action.icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(19.dp))
                     }
                 }
             }
@@ -349,10 +383,11 @@ private fun HomeSpeedDialFab(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
+                .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
                 .shadow(4.5.dp, mainFabShape)
                 .clip(mainFabShape)
                 .background(normalColor)
-                .clickable { expanded = !expanded }
+                .clickable(role = Role.Button, onClickLabel = if (expanded) "Close quick actions" else "Open quick actions") { expanded = !expanded }
                 .padding(16.dp),
         ) {
             if (expanded) {
@@ -377,6 +412,22 @@ private fun HomeSpeedDialFab(
                 }
             }
         }
+        // This FAB opens a mixed speed dial, not the new-conversation screen.
+        // Keep its purpose visible rather than relying on the chat icon alone.
+        Text(
+            "Quick actions",
+            color = textColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
+                .padding(top = 6.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(surfaceColor)
+                .clickable(role = Role.Button, onClickLabel = if (expanded) "Close quick actions" else "Open quick actions") { expanded = !expanded }
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 11.dp, vertical = 8.dp),
+        )
     }
 }
 

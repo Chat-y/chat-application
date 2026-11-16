@@ -71,6 +71,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -86,6 +87,9 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -98,8 +102,11 @@ import com.example.chat.core.theme.argbWithAlpha
 import com.example.chat.domain.models.UserProfile
 import com.example.chat.ui.theme.LocalThemeConfig
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 enum class CallContactPickerMode { contacts, dialpad }
+
+private val NON_DIGITS = Regex("[^0-9]")
 
 private data class DialKey(val digit: String, val subtitle: String)
 
@@ -143,16 +150,20 @@ fun CallContactPickerScreen(
             tones?.startTone(androidTone, durationMs) == true
         }
     }
+    // CALLS-R1-33: read the system tone preference and ringer mode once at screen entry
+    // instead of two binder calls per keypress; the read must never block dialing.
+    val dialpadSoundsEnabled = remember {
+        runCatching { Settings.System.getInt(context.contentResolver, Settings.System.DTMF_TONE_WHEN_DIALING, 1) != 0 }.getOrDefault(true)
+    }
+    val normalRingerMode = remember {
+        runCatching { context.getSystemService(AudioManager::class.java)?.ringerMode == AudioManager.RINGER_MODE_NORMAL }.getOrDefault(true)
+    }
     fun playDialTone(digit: String) {
-        // Preference/audio-service reads must not prevent the digit from appearing
-        // on devices whose platform service is unavailable or denies the read.
-        runCatching {
-            val audio = context.getSystemService(AudioManager::class.java)
-            val enabled = Settings.System.getInt(context.contentResolver, Settings.System.DTMF_TONE_WHEN_DIALING, 1) != 0
-            toneDispatcher.dispatch(digit, enabled, audio?.ringerMode == AudioManager.RINGER_MODE_NORMAL)
-        }
+        runCatching { toneDispatcher.dispatch(digit, dialpadSoundsEnabled, normalRingerMode) }
     }
 
+    // CALLS-R1-23: dialed-but-never-connected digits are highly sensitive; this state must
+    // never be captured into analytics or crash breadcrumbs.
     var query by remember { mutableStateOf("") }
     var isDialpad by remember { mutableStateOf(initialMode == CallContactPickerMode.dialpad) }
     var isKeypadCollapsed by remember { mutableStateOf(false) }
@@ -160,8 +171,9 @@ fun CallContactPickerScreen(
     val listState = rememberLazyListState()
 
     // Dart _handleScroll: scrolling down in dialpad mode collapses the keypad.
-    LaunchedEffect(isDialpad) {
-        if (!isDialpad) return@LaunchedEffect
+    // CALLS-R1-31: stop collecting scroll frames once the keypad has collapsed.
+    LaunchedEffect(isDialpad, isKeypadCollapsed) {
+        if (!isDialpad || isKeypadCollapsed) return@LaunchedEffect
         snapshotFlow { listState.firstVisibleItemScrollOffset to listState.firstVisibleItemIndex }
             .collect { (offset, index) ->
                 if ((index > 0 || offset > 24) && !isKeypadCollapsed) {
@@ -170,13 +182,13 @@ fun CallContactPickerScreen(
             }
     }
 
-    val visibleContacts by remember(query, contacts, currentUserId) {
-        derivedStateOf {
-            contacts.filter { contact ->
-                contact.id != currentUserId &&
-                    matchesDialerContact(query, contact.displayName, contact.phone)
-            }
-        }
+    // CALLS-R1-30: T9/digit forms computed once per contact, not per keystroke.
+    val contactIndex = remember(contacts, currentUserId) {
+        contacts.filter { it.id != currentUserId }
+            .map { it to dialerContactSearchBlob(it.displayName, it.phone) }
+    }
+    val visibleContacts by remember(query, contactIndex) {
+        derivedStateOf { contactIndex.filter { matchesDialerBlob(query, it.second) }.map { it.first } }
     }
 
     fun initials(name: String): String {
@@ -184,18 +196,26 @@ fun CallContactPickerScreen(
         return if (normalized.isEmpty()) "?" else normalized.substring(0, 1).uppercase()
     }
 
+    val scope = rememberCoroutineScope()
     fun startCall(contact: UserProfile, isVideo: Boolean) {
         if (startingContactId != null) return
         startingContactId = contact.id
+        // CALLS-R1-58: confirm the consequential action with haptics.
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         onStartCall(contact, isVideo)
-        // The owner completes the async initiate; the spinner clears when the
-        // screen recomposes with a fresh startingContactId (null) on return.
-        startingContactId = null
+        // CALLS-R1-10: the owner completes the async initiate; hold the guard (and the
+        // spinner) through that window instead of reopening it synchronously.
+        scope.launch {
+            delay(3000)
+            if (startingContactId == contact.id) startingContactId = null
+        }
     }
 
+    var digitLimitHit by remember { mutableStateOf(false) }
     fun appendDigit(digit: String) {
         if (startingContactId != null) return
-        if (query.length >= 25) return
+        if (query.length >= 25) { digitLimitHit = true; return }
+        digitLimitHit = false
         query += digit
         playDialTone(digit)
         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -203,6 +223,7 @@ fun CallContactPickerScreen(
 
     fun removeDigit() {
         if (query.isEmpty()) return
+        digitLimitHit = false
         query = query.substring(0, query.length - 1)
         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
@@ -220,21 +241,23 @@ fun CallContactPickerScreen(
     }
 
     fun triggerCall() {
-        val digits = query.replace(Regex("[^0-9]"), "")
-        val matches = contacts.filter { contact ->
+        val digits = query.replace(NON_DIGITS, "")
+        // CALLS-R1-11: only a full normalized number match auto-starts; suffix-only matches
+        // never dial on their own - the user taps the candidate row instead.
+        val exact = contacts.filter { contact ->
             if (contact.id == currentUserId) return@filter false
-            val phoneDigits = contact.phone.replace(Regex("[^0-9]"), "")
-            digits.length >= 7 && (phoneDigits == digits || phoneDigits.endsWith(digits))
+            contact.phone.replace(NON_DIGITS, "") == digits
         }
-        if (matches.size != 1) {
-            showToast(
-                if (matches.isEmpty()) "Enter a registered Chaty number to call."
-                else "More than one contact matches. Choose the right contact below.",
-                matches.isEmpty(),
-            )
+        if (exact.size == 1 && digits.length >= 7) {
+            startCall(exact.single(), isVideo = false)
             return
         }
-        startCall(matches.single(), isVideo = false)
+        // CALLS-R1-13: one neutral message - never confirm whether a typed number is registered.
+        showToast(
+            if (exact.size > 1) "More than one contact matches. Choose the right contact below."
+            else "No call can be started for this number. Tap a matching contact below to call.",
+            true,
+        )
     }
 
     Scaffold(
@@ -247,7 +270,7 @@ fun CallContactPickerScreen(
             if (isDialpad && isKeypadCollapsed) {
                 FloatingActionButton(
                     onClick = { isKeypadCollapsed = false },
-                    containerColor = Color(0xFF48D597),
+                    containerColor = Color(theme.successColor),
                     contentColor = Color.White,
                 ) {
                     Icon(Icons.Rounded.Dialpad, contentDescription = "Show dialpad", modifier = Modifier.size(28.dp))
@@ -277,6 +300,7 @@ fun CallContactPickerScreen(
                 IconButton(onClick = { isDialpad = !isDialpad },
                     modifier = Modifier.size(48.dp).semantics(mergeDescendants = true) {
                         contentDescription = if (isDialpad) "Show contacts" else "Open dialpad"
+                        stateDescription = if (isDialpad) "Dialpad mode" else "Contacts mode"
                     }) {
                     Icon(
                         if (isDialpad) Icons.Rounded.Contacts else Icons.Rounded.Dialpad,
@@ -327,10 +351,19 @@ fun CallContactPickerScreen(
                         cursorColor = Color(theme.accentColor),
                     ),
                     shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).semantics { if (isDialpad) liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
                 )
             }
 
+            if (isDialpad && digitLimitHit) {
+                Text(
+                    "Number too long",
+                    color = Color(theme.dangerColor),
+                    fontSize = 12.sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+                    textAlign = TextAlign.Center,
+                )
+            }
             if (isDialpad && query.isNotEmpty()) {
                 Text(
                     when {
@@ -394,9 +427,11 @@ fun CallContactPickerScreen(
                             val name = contact.displayName.trim()
                             val phone = contact.phone.trim()
                             val about = contact.about.trim()
+                            // CALLS-R1-14: prefer the contact's about line over exposing the raw
+                            // number in every row (shoulder-surfing/screenshots).
                             val subtitle = when {
-                                phone.isNotEmpty() -> phone
                                 about.isNotEmpty() -> about
+                                phone.isNotEmpty() -> phone
                                 else -> "Chaty contact"
                             }
                             val isThisCallStarting = startingContactId == contact.id
@@ -431,11 +466,21 @@ fun CallContactPickerScreen(
                                     )
                                 }
                                 if (isThisCallStarting) {
-                                    CircularProgressIndicator(
-                                        strokeWidth = 2.2.dp,
-                                        color = Color(theme.accentColor),
-                                        modifier = Modifier.size(40.dp).padding(10.dp),
-                                    )
+                                    // CALLS-R1-55: the spinner keeps the 96dp button slot so the row
+                                    // doesn't jump; CALLS-R1-44: announced to screen readers.
+                                    Box(
+                                        Modifier.width(96.dp).semantics(mergeDescendants = true) {
+                                            contentDescription = "Starting call to $name"
+                                            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+                                        },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        CircularProgressIndicator(
+                                            strokeWidth = 2.2.dp,
+                                            color = Color(theme.accentColor),
+                                            modifier = Modifier.size(40.dp).padding(10.dp),
+                                        )
+                                    }
                                 } else {
                                     Row {
                                         IconButton(
@@ -501,7 +546,14 @@ fun CallContactPickerScreen(
                                         .width(68.dp)
                                     .aspectRatio(1f)
                                         .testTag("dial-key-${key.digit}")
-                                        .semantics(mergeDescendants = true) { contentDescription = "Dial ${key.digit}" }
+                                        .semantics(mergeDescendants = true) {
+                                            contentDescription = "Dial ${key.digit}${if (key.subtitle.isNotEmpty()) ", ${key.subtitle}" else ""}${if (key.digit == "0") ", long press for plus" else ""}"
+                                            if (key.digit == "0") {
+                                                customActions = listOf(
+                                                    androidx.compose.ui.semantics.CustomAccessibilityAction("Insert plus") { appendDigit("+"); true },
+                                                )
+                                            }
+                                        }
                                         .clip(CircleShape)
                                         .background(
                                             Color(argbWithAlpha(theme.cardColor, 0.5)),
@@ -522,14 +574,10 @@ fun CallContactPickerScreen(
                                             fontWeight = FontWeight.Normal,
                                             letterSpacing = (-0.2).sp,
                                         )
-                                        if (key.digit == "1") {
-                                            Icon(
-                                                com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.voicemail),
-                                                contentDescription = null,
-                                                tint = Color(theme.secondaryTextColor),
-                                                modifier = Modifier.size(13.dp),
-                                            )
-                                        } else if (key.subtitle.isNotEmpty()) {
+                                        // CALLS-R1-43: voicemail glyph removed - it implied an action
+                                        // that doesn't exist (no fake affordances). Restore when voicemail lands:
+                                        // if (key.digit == "1") { Icon(ChatyGlyphVectors.of(ChatyIconId.voicemail), ...) } else if
+                                        if (key.subtitle.isNotEmpty()) {
                                             Text(
                                                 key.subtitle,
                                                 color = Color(theme.secondaryTextColor),
@@ -561,7 +609,7 @@ fun CallContactPickerScreen(
                                 .testTag("dial-call")
                                 .semantics(mergeDescendants = true) { contentDescription = "Call number" }
                                 .clip(CircleShape)
-                                .background(Color(0xFF48D597), CircleShape)
+                                .background(Color(theme.successColor), CircleShape)
                                 .clickable { triggerCall() },
                         ) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio,
@@ -578,15 +626,19 @@ fun CallContactPickerScreen(
                                 .semantics(mergeDescendants = true) {
                                     contentDescription = "Delete digit"
                                     role = Role.Button
-                                    // Semantic actions are for accessibility only. Pointer input below
-                                    // keeps ownership of touch gestures, so a tap deletes only once.
-                                    onClick(label = "Delete one digit") {
-                                        if (startingContactId == null && query.isNotEmpty()) removeDigit()
-                                        true
-                                    }
-                                    onLongClick(label = "Delete digits repeatedly") {
-                                        if (startingContactId == null && query.isNotEmpty()) backspaceRepeating = true
-                                        true
+                                    // CALLS-R1-59: no actions while the field is empty - the dimmed
+                                    // icon is then honestly disabled, not tappable-but-dead.
+                                    if (query.isNotEmpty()) {
+                                        // Semantic actions are for accessibility only. Pointer input below
+                                        // keeps ownership of touch gestures, so a tap deletes only once.
+                                        onClick(label = "Delete one digit") {
+                                            if (startingContactId == null) removeDigit()
+                                            true
+                                        }
+                                        onLongClick(label = "Delete digits repeatedly") {
+                                            if (startingContactId == null) backspaceRepeating = true
+                                            true
+                                        }
                                     }
                                 }
                                 .pointerInput(Unit) {

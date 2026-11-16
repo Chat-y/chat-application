@@ -2,7 +2,13 @@ package com.example.chat.ui.camera
 
 import java.io.File
 
-/** Only paths explicitly created by this capture entry may be registered. Never register an imported source. */
+/** Only paths explicitly created by this capture entry may be registered. Never register an imported source.
+ *
+ * Staging rule (CAM-R4-040): keep unsent camera-created files under the app's private cache
+ * or private internal staging directory. Do not publish/move them to shared storage merely
+ * to preview or review them. Sharing is a separate explicit confirmed handoff. Ownership
+ * here is not a Unix-mode check, backup audit, crash janitor or permission to delete a source.
+ */
 class CameraOwnedFiles : AutoCloseable {
     private val files = mutableSetOf<File>()
     private var closed = false

@@ -1,4 +1,9 @@
 package com.example.chat.ui.calls.bundles
+// CALL-R1-08: DEAD CODE - no call sites in the tree (GlobalCallHost renders
+// BundleIncomingCallView for incoming and OngoingCallScreen for ongoing). This file also
+// contains non-functional buttons (keypad/dialpad/message onClick = {}). Do not wire it
+// back in without removing or implementing those controls. Deletion decision: parent.
+
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -76,7 +81,7 @@ fun BundleCompactCallCard(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = session.remoteDisplayName.take(1).uppercase().ifEmpty { "C" },
+                            text = com.example.chat.ui.calls.callInitials(session.remoteDisplayName),
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = tokens.primaryAccent,
@@ -171,8 +176,9 @@ private fun MiniCardAction(
         modifier = Modifier.clickable { onClick() },
     ) {
         Box(
+            // CALL-R1-45: 40dp was under the 48dp platform minimum.
             modifier = Modifier
-                .size(40.dp)
+                .size(48.dp)
                 .background(Color.White.copy(alpha = 0.1f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {

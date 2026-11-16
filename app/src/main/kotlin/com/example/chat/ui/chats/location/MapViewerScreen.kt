@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -97,8 +98,10 @@ fun MapViewerScreen(
     var rendererReady by remember { mutableStateOf(false) }
     var layersOpen by remember { mutableStateOf(false) }
     var selectedStyle by remember { mutableStateOf(if (systemDark) "dark" else "positron") }
+    // MAP-R1-003: an explicit style choice survives system theme changes.
+    var styleChosenByUser by remember { mutableStateOf(false) }
     LaunchedEffect(systemDark) {
-        selectedStyle = if (systemDark) "dark" else "positron"
+        if (!styleChosenByUser) selectedStyle = if (systemDark) "dark" else "positron"
         buildingsEnabled = false
         mapView?.setTheme(systemDark)
         mapView?.selectStyle(selectedStyle)
@@ -205,14 +208,14 @@ fun MapViewerScreen(
                 Text("Map", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.titleMedium)
                 IconButton(onClick = { friendsMapOpen = true }, modifier = Modifier.size(48.dp).semantics { contentDescription = "Friends map" }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.groups, semanticLabel = null) }
             }
-            Box(Modifier.fillMaxWidth().weight(1f)) {
+            Box(Modifier.fillMaxWidth().weight(1f).semantics { paneTitle = "Map" }) { // MAP-R4-168
             if (mapActive) {
                 AndroidView(
                     factory = { viewContext -> GeoLibreLocationMapView(viewContext,
                         onPinSelected = { point -> stopLocate(); select(LocationDraft(point, LocationSource.manualPin)); status = "Pin selected locally. Nothing is sent." },
                         onUnavailable = { status = it }, onAttributionLink = onAttributionLink,
                         onMapReady = { rendererReady = true; mapView?.selectStyle(selectedStyle); if (buildingsEnabled) mapView?.control("toggleBuildings"); status = ""; onMapReady() }, nativeLayers = true,
-                        systemDark = systemDark, onStyleChanged = { selectedStyle = it }, onViewChanged = { buildingsEnabled = it },
+                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true }, onViewChanged = { buildingsEnabled = it },
                     ).also { mapView = it; draft?.let { selected -> it.showPin(selected.coordinate) } } },
                     modifier = Modifier.fillMaxSize(),
                     update = { it.setTheme(systemDark) },

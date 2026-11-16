@@ -68,9 +68,12 @@ data class SplitChatSessionState(
                 }
                 val focused = value.getString("focusedId")
                 val minimized = value.getBoolean("isMinimized", false)
+                val kept = items.take(4)
                 return SplitChatSessionState(
-                    paneItems = items.take(4),
-                    focusedConversationId = focused ?: items.firstOrNull()?.conversationId,
+                    paneItems = kept,
+                    // SPL-01: never point focus at a pane that was not restored.
+                    focusedConversationId = focused?.takeIf { id -> kept.any { it.conversationId == id } }
+                        ?: kept.firstOrNull()?.conversationId,
                     isMiniWindowMinimized = minimized,
                     freeLayout = value.getBoolean("freeLayout", false),
                 )

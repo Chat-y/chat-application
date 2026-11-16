@@ -70,10 +70,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import com.example.chat.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -91,11 +95,11 @@ import com.example.chat.data.services.StatusViewer
 import com.example.chat.domain.models.UserProfile
 import com.example.chat.ui.core.theme.ChatyColors
 import com.example.chat.ui.tasks.TaskAvatar
-import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 /** Media picked by the platform picker for a status update. The Dart
  *  screen's StatusService.pickAndPublish launches the picker itself; in
@@ -150,6 +154,11 @@ fun UpdatesScreen(
     onNotify: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val paneLabel = stringResource(R.string.social_updates_title)
+    val loadingLabel = stringResource(R.string.social_updates_loading)
+    val ownLabel = stringResource(R.string.social_updates_own)
+    val statusAvailable = statusService.isAvailable()
     // Dart Image.network(..., fit: BoxFit.contain, errorBuilder:
     // broken_image_outlined 72 @ 40% onSurface) over the shared wrapper.
     val defaultRemoteImage: @Composable (String, Modifier) -> Unit = { url, m ->
@@ -171,7 +180,9 @@ fun UpdatesScreen(
         )
     }
     val effectiveRemoteImage = remoteImage ?: defaultRemoteImage
-    val viewSession = remember { StatusViewSession() }
+    val viewSession = remember(currentUser.id) { StatusViewSession() }
+    var feedError by remember(currentUser.id) { mutableStateOf(false) }
+    var feedAttempt by remember(currentUser.id) { mutableStateOf(0) }
     // collectAsState kept the 60s status poll running while the app sat
     // backgrounded on this tab. Gate collection on STARTED instead: polling
     // pauses in the background and the cold flow re-polls immediately on
@@ -181,47 +192,94 @@ fun UpdatesScreen(
         initialValue = null,
         statuses,
         lifecycleOwner,
+        currentUser.id,
+        feedAttempt,
     ) {
+        value = null
         lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-            statuses.collect { value = it }
+            feedError = false
+            try { statuses.collect { value = it; feedError = false } } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { feedError = true }
         }
     }
-    var composerOpen by remember { mutableStateOf(false) }
-    var openStatus by remember { mutableStateOf<StatusRecord?>(null) }
+    var composerOpen by remember(currentUser.id) { mutableStateOf(false) }
+    var openStatus by remember(currentUser.id) { mutableStateOf<StatusRecord?>(null) }
+    var cameraBusy by remember(currentUser.id) { mutableStateOf(false) }
+    var pendingStory by remember(currentUser.id) { mutableStateOf<StatusPendingStory?>(null) }
+    val activeUserId by androidx.compose.runtime.rememberUpdatedState(currentUser.id)
 
     fun showError(error: Throwable) {
-        onNotify((error.message ?: error.toString()).removePrefix("Exception: "))
+        onNotify(context.getString(R.string.social_updates_error))
     }
 
-    fun captureAndPublishStory() {
+    fun publishStory(action: StatusPendingStory) {
+        val ownerId = action.ownerId
+        if (activeUserId != ownerId || !action.consumeOnce()) return
+        val result = action.captured
+        cameraBusy = true
         scope.launch {
-            val result = captureStory() ?: return@launch
-            if (confirmBeforeSendingStatus()) {
-                // The Dart flow shows ChatyConfirmDialog('Post this status?',
-                // 'Your update will be shared with your contacts for 24
-                // hours.', 'Send') - handled by the camera seam returning a
-                // confirmed capture or by the host's confirm dialog; see the
-                // integration note.
-            }
             try {
+                if (activeUserId != ownerId) return@launch
                 statusService.publishMediaBytes(
                     bytes = result.bytes,
                     displayName = "chaty_story.jpg",
                     mediaType = "image",
                     text = result.caption,
                 )
-                onNotify("Status posted.")
-            } catch (error: Throwable) {
-                showError(error)
-            }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (activeUserId == ownerId) onNotify(context.getString(R.string.social_updates_posted))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (activeUserId == ownerId) onNotify(context.getString(R.string.social_updates_post_failure))
+            } finally { cameraBusy = false }
         }
     }
 
+    fun captureAndPublishStory() {
+        if (cameraBusy || pendingStory != null) return
+        val ownerId = currentUser.id
+        cameraBusy = true
+        scope.launch {
+            var handedToPublisher = false
+            try {
+                val result = captureStory() ?: return@launch
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (activeUserId != ownerId) return@launch
+                val action = StatusPendingStory(ownerId, result)
+                if (confirmBeforeSendingStatus()) pendingStory = action
+                else { handedToPublisher = true; publishStory(action) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (activeUserId == ownerId) onNotify(context.getString(R.string.social_updates_capture_failure))
+            } finally { if (!handedToPublisher) cameraBusy = false }
+        }
+    }
+
+    pendingStory?.let { action ->
+        val captured = action.captured
+        UpdatesConfirmDialog(
+            title = stringResource(R.string.social_updates_camera_confirm_title),
+            message = stringResource(R.string.social_updates_camera_confirm_body) +
+                if (captured.caption.isBlank()) "" else stringResource(R.string.social_updates_caption, captured.caption),
+            confirmLabel = stringResource(R.string.social_updates_send),
+            colors = colors,
+            onConfirm = {
+                if (pendingStory === action && !cameraBusy && activeUserId == action.ownerId) {
+                    pendingStory = null
+                    publishStory(action)
+                }
+            },
+            onDismiss = { if (pendingStory === action) pendingStory = null },
+        )
+    }
+
+    ProvideStatusTime {
     val titleAlreadyVisible = com.example.chat.ui.navigation.LocalDestinationTitlePresentation.current ==
         com.example.chat.core.templates.ChatyNavigationDestinationIds.updates
-    Column(modifier = modifier.fillMaxSize().semantics { paneTitle = "Updates" }.verticalScroll(rememberScrollState())) {
+    Column(modifier = modifier.fillMaxSize().semantics { paneTitle = paneLabel }.verticalScroll(rememberScrollState())) {
         if (!titleAlreadyVisible) Text(
-            "Updates",
+            paneLabel,
             color = colors.foreground,
             fontSize = 22.sp,
             fontWeight = FontWeight.ExtraBold,
@@ -236,7 +294,7 @@ fun UpdatesScreen(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
                 .background(colors.surfaceElevated)
-                .clickable { composerOpen = true }
+                .clickable(enabled = statusAvailable) { composerOpen = true }
                 .padding(8.dp),
         ) {
             Box {
@@ -255,14 +313,14 @@ fun UpdatesScreen(
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    myNameOverride().ifEmpty { "My Status" },
+                    myNameOverride().ifEmpty { ownLabel },
                     color = colors.foreground,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "Share photo, video, audio or thought",
+                    stringResource(R.string.social_updates_composer_summary),
                     color = colors.foregroundSecondary,
                     fontSize = 12.5.sp,
                 )
@@ -270,11 +328,11 @@ fun UpdatesScreen(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(22.dp))
-                    .clickable { captureAndPublishStory() }
+                    .clickable(enabled = statusAvailable && !cameraBusy && pendingStory == null) { captureAndPublishStory() }
                     .padding(8.dp),
             ) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera,
-                    semanticLabel = "Capture photo for status",
+                    semanticLabel = stringResource(R.string.social_updates_capture_photo),
                     color = colors.primary,
                     modifier = Modifier.size(24.dp),
                 )
@@ -291,7 +349,8 @@ fun UpdatesScreen(
                 .padding(start = 20.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
         ) {
             Text(
-                "RECENT UPDATES",
+                stringResource(R.string.social_updates_recent_heading),
+                modifier = Modifier.semantics { heading() },
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = recentUpdatesTextColor()?.let(::Color) ?: colors.primary,
@@ -300,9 +359,20 @@ fun UpdatesScreen(
         }
 
         val list = statusList
-        if (list == null) {
+        if (!statusAvailable) {
+            Text(
+                stringResource(R.string.social_updates_unavailable),
+                color = colors.foregroundSecondary,
+                modifier = Modifier.padding(24.dp),
+            )
+        } else if (feedError) {
+            Column(Modifier.padding(24.dp)) {
+                Text(stringResource(R.string.social_updates_feed_failure), color = colors.foregroundSecondary)
+                androidx.compose.material3.TextButton(onClick = { feedAttempt++ }) { Text(stringResource(R.string.social_updates_retry_feed)) }
+            }
+        } else if (list == null) {
             Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(strokeWidth = 2.2.dp)
+                CircularProgressIndicator(strokeWidth = 2.2.dp, modifier = Modifier.semantics { contentDescription = loadingLabel })
             }
         } else if (list.isEmpty()) {
             Column(
@@ -311,7 +381,7 @@ fun UpdatesScreen(
             ) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.autoAwesome, semanticLabel = null, color = colors.foregroundTertiary, modifier = Modifier.size(40.dp))
                 Spacer(Modifier.height(8.dp))
-                Text("No recent updates", color = colors.foregroundSecondary, fontSize = 12.5.sp)
+                Text(stringResource(R.string.social_updates_empty), color = colors.foregroundSecondary, fontSize = 12.5.sp)
             }
         } else {
             StatusList(
@@ -328,6 +398,7 @@ fun UpdatesScreen(
     }
 
     if (composerOpen) {
+        androidx.compose.runtime.key(currentUser.id) {
         UpdatesComposerSheet(
             statusService = statusService,
             colors = colors,
@@ -336,9 +407,27 @@ fun UpdatesScreen(
             onDismiss = { composerOpen = false },
             onError = ::showError,
         )
+        }
+    }
+
+    LaunchedEffect(statusList, currentUser.id, openStatus?.id) {
+        val selected = openStatus
+        val current = statusList
+        if (selected != null && current != null) {
+            openStatus = current.firstOrNull { it.id == selected.id && it.expiresAt.isAfter(java.time.Instant.now()) }
+        }
     }
 
     openStatus?.let { status ->
+        LaunchedEffect(status.id, status.expiresAt) {
+            while (true) {
+                val wait = StatusRelativeTimeRules.expiryWaitMillis(status.expiresAt, java.time.Instant.now())
+                if (wait == 0L) break
+                kotlinx.coroutines.delay(wait)
+            }
+            openStatus = null
+        }
+        androidx.compose.runtime.key(currentUser.id, status.id) {
         StatusViewerDialog(
             status = status,
             statusService = statusService,
@@ -351,6 +440,8 @@ fun UpdatesScreen(
             openUrl = openUrl,
             onDismiss = { openStatus = null },
         )
+        }
+    }
     }
 }
 
@@ -433,21 +524,13 @@ private fun StatusList(
 private fun isMyStatus(status: StatusRecord, currentUser: UserProfile) =
     status.userId == currentUser.id
 
+@Composable
 private fun statusTitle(status: StatusRecord, currentUser: UserProfile, getUser: (String) -> UserProfile?): String =
-    if (isMyStatus(status, currentUser)) "My Status"
-    else getUser(status.userId)?.displayName ?: "Contact"
+    if (isMyStatus(status, currentUser)) stringResource(R.string.social_updates_own)
+    else getUser(status.userId)?.displayName?.let(StatusIdentityLabelRules::display) ?: stringResource(R.string.social_updates_contact)
 
 private fun statusSubtitle(status: StatusRecord): String =
-    status.text.ifEmpty { status.mediaName ?: status.mediaType }
-
-/** Screen-level relative time: 'Just now' / 'Xm' / 'Xh' / 'Xd'. */
-private fun relativeTime(value: Instant, now: Instant = Instant.now()): String {
-    val diff = Duration.between(value, now)
-    if (diff.toMinutes() < 1) return "Just now"
-    if (diff.toMinutes() < 60) return "${diff.toMinutes()}m"
-    if (diff.toHours() < 24) return "${diff.toHours()}h"
-    return "${diff.toDays()}d"
-}
+    status.text.ifEmpty { status.mediaName?.let { StatusMediaReadRules.displayName(it) } ?: status.mediaType }
 
 @Composable
 private fun StatusAvatar(
@@ -460,7 +543,7 @@ private fun StatusAvatar(
     val mine = isMyStatus(status, currentUser)
     val user = if (mine) null else getUser(status.userId)
     TaskAvatar(
-        initials = if (mine) currentUser.avatarInitials else user?.avatarInitials ?: "U",
+        initials = StatusIdentityLabelRules.display(if (mine) currentUser.avatarInitials else user?.avatarInitials ?: "U"),
         colorHex = if (mine) currentUser.avatarColorHex else user?.avatarColorHex ?: "0xFF6366F1",
         size = size,
         colors = colors,
@@ -471,6 +554,17 @@ private fun StatusAvatar(
 private fun statusNameColor(colors: ChatyColors, contactNameColor: () -> Long?): Color =
     contactNameColor()?.let(::Color) ?: colors.foreground
 
+/** Describes the declared type only, not decode support, playback or read state. */
+@Composable
+private fun statusMediaTypeLabel(status: StatusRecord): String = stringResource(when (status.mediaType) {
+    "text" -> R.string.social_updates_type_text
+    "image" -> R.string.social_updates_type_image
+    "video" -> R.string.social_updates_type_video
+    "audio" -> R.string.social_updates_type_audio
+    "document" -> R.string.social_updates_type_file
+    else -> R.string.social_updates_type_unknown
+})
+
 @Composable
 private fun CircularStatusCard(
     status: StatusRecord,
@@ -480,13 +574,15 @@ private fun CircularStatusCard(
     contactNameColor: () -> Long?,
     onOpen: (StatusRecord) -> Unit,
 ) {
+    val mediaTypeLabel = statusMediaTypeLabel(status)
     val mine = isMyStatus(status, currentUser)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(98.dp)
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onOpen(status) },
+            .semantics(mergeDescendants = true) { stateDescription = mediaTypeLabel }
+                .clickable { onOpen(status) },
     ) {
         Box(
             modifier = Modifier
@@ -516,7 +612,7 @@ private fun CircularStatusCard(
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(2.dp))
-        Text(relativeTime(status.createdAt), color = colors.foregroundTertiary, fontSize = 12.sp)
+        StatusTimeLabel(status.createdAt, colors.foregroundTertiary)
     }
 }
 
@@ -530,6 +626,7 @@ internal fun GridStatusCard(
     contactNameColor: () -> Long?,
     onOpen: (StatusRecord) -> Unit,
 ) {
+    val mediaTypeLabel = statusMediaTypeLabel(status)
     androidx.compose.material3.Surface(
         shadowElevation = template.cardElevation.dp,
         color = colors.surface,
@@ -538,6 +635,7 @@ internal fun GridStatusCard(
     ) {
         Column(
             modifier = Modifier
+                .semantics(mergeDescendants = true) { stateDescription = mediaTypeLabel }
                 .clickable { onOpen(status) }
                 .padding(12.dp),
         ) {
@@ -569,7 +667,7 @@ internal fun GridStatusCard(
                 fontSize = 12.sp,
             )
             Spacer(Modifier.height(4.dp))
-            Text(relativeTime(status.createdAt), color = colors.foregroundTertiary, fontSize = 12.sp)
+            StatusTimeLabel(status.createdAt, colors.foregroundTertiary)
         }
     }
 }
@@ -584,6 +682,7 @@ private fun SquircleStatusCard(
     contactNameColor: () -> Long?,
     onOpen: (StatusRecord) -> Unit,
 ) {
+    val mediaTypeLabel = statusMediaTypeLabel(status)
     androidx.compose.material3.Surface(
         shadowElevation = template.cardElevation.dp,
         color = colors.surface,
@@ -593,6 +692,7 @@ private fun SquircleStatusCard(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
+                .semantics(mergeDescendants = true) { stateDescription = mediaTypeLabel }
                 .clickable { onOpen(status) }
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
@@ -624,7 +724,7 @@ private fun SquircleStatusCard(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            Text(relativeTime(status.createdAt), color = colors.foregroundTertiary, fontSize = 12.sp)
+            StatusTimeLabel(status.createdAt, colors.foregroundTertiary)
         }
     }
 }
@@ -638,11 +738,13 @@ private fun MinimalStatusTile(
     contactNameColor: () -> Long?,
     onOpen: (StatusRecord) -> Unit,
 ) {
+    val mediaTypeLabel = statusMediaTypeLabel(status)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onOpen(status) }
+            .semantics(mergeDescendants = true) { stateDescription = mediaTypeLabel }
+                .clickable { onOpen(status) }
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         StatusAvatar(status, 34, colors, currentUser, getUser)
@@ -664,6 +766,6 @@ private fun MinimalStatusTile(
                 fontSize = 12.sp,
             )
         }
-        Text(relativeTime(status.createdAt), color = colors.foregroundTertiary, fontSize = 12.sp)
+        StatusTimeLabel(status.createdAt, colors.foregroundTertiary)
     }
 }

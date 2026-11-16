@@ -111,6 +111,7 @@ fun TasksScreen(
     var tabIndex by remember { mutableIntStateOf(0) }
     var priorityFilter by remember { mutableStateOf("All") }
     var historyTask by remember { mutableStateOf<ChatTask?>(null) }
+    var pendingDelete by remember { mutableStateOf<ChatTask?>(null) }
 
     fun moveTask(task: ChatTask, target: TaskStatus) {
         scope.launch {
@@ -243,7 +244,7 @@ fun TasksScreen(
                     onOpenDetail = onOpenDetail,
                     onEditTask = onEditTask,
                     onCreateTask = onCreateTask,
-                    onDeleteTask = { task -> scope.launch { controller.deleteTask(task.id) } },
+                    onDeleteTask = { task -> pendingDelete = task },
                 )
             } else {
                 KanbanBoard(
@@ -256,6 +257,17 @@ fun TasksScreen(
                 )
             }
         }
+    }
+
+    // TAS-004: confirm list deletion with the same dialog as detail.
+    pendingDelete?.let { task ->
+        DeleteTaskDialog(
+            onCancel = { pendingDelete = null },
+            onDelete = {
+                pendingDelete = null
+                scope.launch { runCatching { controller.deleteTask(task.id) } }
+            },
+        )
     }
 
     historyTask?.let { task ->
@@ -399,7 +411,7 @@ private fun TaskListCard(
                 Spacer(Modifier.width(4.dp))
             }
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(24.dp)) {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.moreOptions, semanticLabel = "Task options", color = colors.foregroundSecondary, modifier = Modifier.size(20.dp))
                 }
                 DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -690,24 +702,24 @@ private fun KanbanCardBody(
             TaskPriorityBadge(task.priority, colors)
             Spacer(Modifier.weight(1f))
             if (showActions) {
-                IconButton(onClick = onEditTask, modifier = Modifier.size(28.dp)) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.history, semanticLabel = "Edit task", color = colors.primary, modifier = Modifier.size(18.dp))
+                IconButton(onClick = onEditTask, modifier = Modifier.size(48.dp)) {
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit task", color = colors.primary, modifier = Modifier.size(18.dp))
                 }
-                IconButton(onClick = onShowHistory, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onShowHistory, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Rounded.History, contentDescription = "History", tint = colors.primary, modifier = Modifier.size(18.dp))
                 }
                 if (previous != null) {
-                    IconButton(onClick = { onMove(task, previous) }, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = { onMove(task, previous) }, modifier = Modifier.size(48.dp)) {
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight,
-                            semanticLabel = "Move back",
+                            semanticLabel = "Move to ${com.example.chat.domain.models.TaskWorkflow.label(previous)}",
                             color = colors.primary,
                             modifier = Modifier.size(18.dp).mirrored(),
                         )
                     }
                 }
                 if (next != null) {
-                    IconButton(onClick = { onMove(task, next) }, modifier = Modifier.size(28.dp)) {
-                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = "Move forward", color = colors.primary, modifier = Modifier.size(18.dp))
+                    IconButton(onClick = { onMove(task, next) }, modifier = Modifier.size(48.dp)) {
+                        com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, semanticLabel = "Move to ${com.example.chat.domain.models.TaskWorkflow.label(next)}", color = colors.primary, modifier = Modifier.size(18.dp))
                     }
                 }
             }

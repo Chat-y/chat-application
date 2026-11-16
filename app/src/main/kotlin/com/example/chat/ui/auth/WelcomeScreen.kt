@@ -71,7 +71,7 @@ fun WelcomeScreen(onLogin: () -> Unit, onRegister: () -> Unit) {
             }
             AuthPrimaryButton(text = authCopy("Log In"), theme = theme, onClick = onLogin)
             Spacer(Modifier.height(ChatyUiTokens.space16))
-            AuthSecondaryButton(text = "Register", theme = theme, onClick = onRegister)
+            AuthSecondaryButton(text = authCopy("Register"), theme = theme, onClick = onRegister)
             Spacer(Modifier.height(ChatyUiTokens.space24))
             }
         }

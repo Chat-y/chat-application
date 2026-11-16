@@ -20,6 +20,9 @@ data class MessageInteractionPlacement(
     val menuTopDp: Dp,
     val menuLeftDp: Dp,
     val menuMaxHeightDp: Dp,
+    val menuMaxWidthDp: Dp = 260.dp,
+    val reactionRailMaxWidthDp: Dp = 260.dp,
+    val reactionRailMaxHeightDp: Dp = 48.dp,
 )
 
 object MessageInteractionAnchorPolicy {
@@ -34,6 +37,46 @@ object MessageInteractionAnchorPolicy {
         menuWidthDp: Dp = 260.dp,
         marginDp: Dp = 8.dp,
     ): MessageInteractionPlacement {
+        fun extent(value: Float): Float = if (value.isFinite()) value.coerceAtLeast(0f) else 0f
+        val width = extent(viewportWidthDp.value)
+        val height = extent(viewportHeightDp.value)
+        val margin = extent(marginDp.value).coerceAtMost(minOf(width, height) / 2f)
+        val railHeight = extent(railHeightDp.value).coerceAtMost((height - 2f * margin).coerceAtLeast(0f))
+        val menuWidth = extent(menuWidthDp.value).coerceAtMost((width - 2f * margin).coerceAtLeast(0f))
+        val usableBounds = bubbleBounds?.takeIf {
+            density.isFinite() && density > 0f &&
+                it.left.isFinite() && it.right.isFinite() && it.top.isFinite() && it.bottom.isFinite() &&
+                it.right >= it.left && it.bottom >= it.top
+        }
+        val left = (usableBounds?.let { it.left / density } ?: margin).coerceIn(margin, width - margin)
+        val right = (usableBounds?.let { it.right / density } ?: width - margin).coerceIn(margin, width - margin)
+        val top = (usableBounds?.let { it.top / density } ?: height * 0.35f).coerceIn(margin, height - margin)
+        val bottom = (usableBounds?.let { it.bottom / density } ?: top + 60f).coerceIn(margin, height - margin)
+        val idealLeft = if (isOutgoing) right - menuWidth else left
+        val menuLeft = idealLeft.coerceIn(margin, (width - menuWidth - margin).coerceAtLeast(margin))
+        val railAbove = top - margin >= railHeight + margin
+        val railTop = (if (railAbove) top - railHeight - margin else bottom + margin)
+            .coerceIn(margin, (height - railHeight - margin).coerceAtLeast(margin))
+        // 120dp is a preferred room allocation, never a minimum larger than the viewport.
+        val preferredMenuHeight = 120f.coerceAtMost((height - 2f * margin).coerceAtLeast(0f))
+        val idealMenuTop = if (railAbove) bottom + margin else railTop + railHeight + margin
+        val menuTop = idealMenuTop.coerceIn(margin, (height - preferredMenuHeight - margin).coerceAtLeast(margin))
+        val availableMenuHeight = (height - menuTop - margin).coerceAtLeast(0f)
+
+        return MessageInteractionPlacement(
+            reactionRailTopDp = railTop.dp,
+            reactionRailLeftDp = menuLeft.dp,
+            menuTopDp = menuTop.dp,
+            menuLeftDp = menuLeft.dp,
+            menuMaxHeightDp = availableMenuHeight.dp,
+            menuMaxWidthDp = menuWidth.dp,
+            reactionRailMaxWidthDp = (width - menuLeft - margin).coerceAtLeast(0f).dp,
+            reactionRailMaxHeightDp = railHeight.dp,
+        )
+    }
+}
+
+/* Previous fixed-minimum geometry retained as disabled reference per the source-edit rules.
         if (density <= 0f || viewportWidthDp <= 0.dp || viewportHeightDp <= 0.dp) {
             return MessageInteractionPlacement(
                 reactionRailTopDp = marginDp,
@@ -84,5 +127,4 @@ object MessageInteractionAnchorPolicy {
             menuLeftDp = clampedMenuLeftDp,
             menuMaxHeightDp = availableMenuHeight,
         )
-    }
-}
+*/

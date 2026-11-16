@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="social_status_just_now">Just now</string>
+    <string name="social_status_minutes_short">%1$sm</string>
+    <string name="social_status_hours_short">%1$sh</string>
+    <string name="social_status_days_short">%1$sd</string>
+    <string name="social_status_time_description">%1$s. %2$s</string>
+    <plurals name="social_status_minutes_ago">
+        <item quantity="one">%1$s minute ago</item>
+        <item quantity="other">%1$s minutes ago</item>
+    </plurals>
+    <plurals name="social_status_hours_ago">
+        <item quantity="one">%1$s hour ago</item>
+        <item quantity="other">%1$s hours ago</item>
+    </plurals>
+    <plurals name="social_status_days_ago">
+        <item quantity="one">%1$s day ago</item>
+        <item quantity="other">%1$s days ago</item>
+    </plurals>
+    <string name="social_status_time_unavailable">Time unavailable</string>
+    <string name="social_status_audio_position">Audio position</string>
+    <string name="social_status_audio_duration_unavailable">Duration unavailable</string>
+    <string name="social_status_audio_seek_description">%1$s of %2$s</string>
+    <string name="social_status_audio_minutes_seconds">%1$s %2$s</string>
+    <plurals name="social_status_audio_seconds">
+        <item quantity="one">%d second</item>
+        <item quantity="other">%d seconds</item>
+    </plurals>
+    <plurals name="social_status_audio_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <string name="social_status_picking_media">Choosing media</string>
+    <string name="social_status_posting_text">Posting update</string>
+    <string name="social_status_uploading_media">Uploading media and posting update</string>
+    <string name="social_status_confirm_text">Share this text with your contacts for 24 hours?\n\n%1$s</string>
+    <string name="social_status_confirm_media">Share %1$s with your contacts for 24 hours?</string>
+    <string name="social_status_confirm_caption">\n\nCaption: %1$s</string>
+    <string name="social_status_confirm_text_title">Post text status?</string>
+    <string name="social_status_confirm_media_title">Post this status update?</string>
+    <string name="social_status_send">Send</string>
+    <string name="social_status_audio_interrupted">Playback paused. Audio may be in use elsewhere. Tap Play to try again.</string>
+    <string name="social_status_composer_title">New Update</string>
+    <string name="social_status_composer_expiry">Updates expire automatically after 24 hours.</string>
+    <string name="social_status_composer_input">Update text or caption</string>
+    <string name="social_status_composer_hint">Write an update or add a caption…</string>
+    <string name="social_status_photo">Photo</string>
+    <string name="social_status_video">Video</string>
+    <string name="social_status_audio">Audio</string>
+    <string name="social_status_file">File</string>
+    <string name="social_status_publishing">Publishing update</string>
+    <string name="social_status_publish">Publish Update</string>
+    <string name="social_status_audio_failure">Audio could not be played in Chaty.</string>
+    <string name="social_status_audio_retry">Retry</string>
+    <string name="social_status_audio_pause">Pause audio</string>
+    <string name="social_status_audio_play">Play audio</string>
+    <string name="social_status_audio_loading">Loading audio</string>
+    <string name="social_status_media_failure">Unable to load this update.</string>
+    <string name="social_status_audio_name">Audio update</string>
+    <string name="social_status_photo_description">Status photo</string>
+    <string name="social_status_zoom_out">Zoom out</string>
+    <string name="social_status_zoom_in">Zoom in</string>
+    <string name="social_status_zoom_reset">Reset zoom</string>
+    <string name="social_status_unsupported_media">This media type cannot be previewed in Chaty.</string>
+    <string name="social_status_external_open">Open in another app</string>
+    <string name="social_status_views_loading">Loading view count</string>
+    <string name="social_status_views_unavailable">View count unavailable · Retry</string>
+    <string name="social_status_viewers_title">Viewed by</string>
+    <string name="social_status_viewers_failure_title">Unable to load views</string>
+    <string name="social_status_viewers_failure_body">Something went wrong while fetching viewers. Please try again.</string>
+    <string name="social_status_viewers_retry">Retry</string>
+    <string name="social_status_viewers_loading">Loading status viewers</string>
+    <string name="social_status_viewers_empty_title">No views yet</string>
+    <string name="social_status_viewers_empty_body">Views will appear here after someone sees your update.</string>
+    <plurals name="social_status_view_count">
+        <item quantity="one">%d view</item>
+        <item quantity="other">%d views</item>
+    </plurals>
+    <string name="social_status_viewer_pane">Status viewer</string>
+    <string name="social_status_media_loading">Loading status media</string>
+    <string name="social_status_viewer_back">Back</string>
+    <string name="social_status_viewer_own">My Status</string>
+    <string name="social_status_viewer_contact">Contact</string>
+    <string name="social_status_audio_output_disconnected">Playback paused after an audio output change. Check your output before tapping Play.</string>
+    <string name="social_status_external_disclosure">Opening in another app shares this media link with that app. It may keep a copy outside Chaty.</string>
+</resources>

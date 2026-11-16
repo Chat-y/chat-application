@@ -52,7 +52,9 @@ private class PrefsFileStore(
 
     private fun writeAll(bytes: ByteArray?) {
         val prefs = app.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
-        val editor = prefs.edit().clear()
+        // BKP-R3-143: with an allowlist, only remove the allowed keys; never wipe unrelated keys in the file.
+        val editor = prefs.edit()
+        if (allowedKeys == null) editor.clear() else allowedKeys.forEach { editor.remove(it) }
         if (bytes != null) {
             val obj = JSONObject(String(bytes, Charsets.UTF_8))
             for (k in obj.keys()) {
@@ -126,7 +128,8 @@ private class UserPreferencesStore(
             @Suppress("UNCHECKED_CAST")
             val map = if (prior == null) emptyMap()
             else org.json.JSONObject(String(prior, Charsets.UTF_8)).toMap() as Map<String, Any?>
-            storage.savePreferences(map, userId)
+            // BKP-R3-138: a failed rollback save must surface so the caller reports an incomplete rollback.
+            if (!storage.savePreferences(map, userId)) throw IllegalStateException("preferences rollback write failed")
         }
     }
 
@@ -215,10 +218,17 @@ private class MediaRestoreStore(
 
     override fun rollback(prior: ByteArray?) {
         val resolver = app.contentResolver
+        // BKP-R3-131: keep undeleted URIs and report them instead of claiming a clean rollback.
+        val undeleted = mutableListOf<android.net.Uri>()
         for (uri in createdUris) {
-            try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+            val deleted = try { resolver.delete(uri, null, null) > 0 } catch (_: Exception) { false }
+            if (!deleted) undeleted += uri
         }
         createdUris.clear()
+        if (undeleted.isNotEmpty()) {
+            createdUris += undeleted
+            throw IllegalStateException("${undeleted.size} restored media file(s) could not be removed")
+        }
     }
 }
 

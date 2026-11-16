@@ -11,7 +11,8 @@ object MediaCacheSettings {
 
     fun limitMb(context: Context): Int {
         val v = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY, DEFAULT_MB)
-        return if (v in OPTIONS_MB) v else DEFAULT_MB
+        // ST1-08: map an unknown stored value to the nearest option instead of silently resetting to 1 GB.
+        return if (v in OPTIONS_MB) v else OPTIONS_MB.minByOrNull { kotlin.math.abs(it - v) } ?: DEFAULT_MB
     }
 
     fun limitBytes(context: Context): Long = limitMb(context) * 1024L * 1024L

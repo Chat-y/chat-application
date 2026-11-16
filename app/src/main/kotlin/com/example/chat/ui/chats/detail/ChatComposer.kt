@@ -57,6 +57,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -132,14 +133,8 @@ private val videoHoldIds = java.util.concurrent.atomic.AtomicLong()
 const val STOCK_ENTRY_STYLE = "Stock"
 const val SECOND_REFERENCE_ENTRY_STYLE = "Reference 2"
 
-fun normalizeEntryStyle(raw: String): String {
-    val v = raw.trim()
-    return if (v.isEmpty() || v == "Stock (Chaty Default)" || v == STOCK_ENTRY_STYLE) {
-        STOCK_ENTRY_STYLE
-    } else {
-        v
-    }
-}
+// Legacy labels remain accepted by the registry, including Stock (Chaty Default).
+fun normalizeEntryStyle(raw: String): String = com.example.chat.core.theme.ConversationEntryStyles.layoutName(raw)
 
 /** The conversation composer. Stock renders the integrated/split/powerRow
  *  arrangements from the canonical ComposerTemplate; any other entry style
@@ -734,10 +729,11 @@ private fun ComposerActionButton(
                 // hold/record stays gesture-only, so a11y activation invokes the
                 // same mode-toggle/send callback as a tap and can never start a
                 // recording. Visuals and gesture handling are unchanged.
-                if (onLongClick != null) {
+                if (!enabled) disabled()
+                if (enabled && onLongClick != null) {
                     this.onLongClick(label = "Send options") { longClickNow?.invoke(); true }
                 }
-                if (onTap != null) {
+                if (enabled && onTap != null) {
                     this.role = Role.Button
                     // MicGestureDiag (bounded, DEBUG-only): run-131 saw ONE a11y
                     // ACTION_CLICK produce TWO toggle callbacks 432ms apart.
@@ -866,7 +862,7 @@ private fun SendMicMorph(
 }
 
 /** Dart composer TextField port: hint 'Message\u2026  /task or #reply', dense
- *  padding (default h12/v11), 14sp * fontScale, min 1 / max 5 lines. */
+ *  padding (default h12/v11), 16sp * fontScale, min 1 / max 5 lines. */
 @Composable
 private fun ComposerTextField(
     text: String,
@@ -883,7 +879,8 @@ private fun ComposerTextField(
     onTextInputFocused: () -> Unit,
 ) {
     val shape = CircleShape
-    val fontSize = (14 * theme.fontScale).sp
+    // Previous text/placeholder size: val fontSize = (14 * theme.fontScale).sp
+    val fontSize = (16 * theme.fontScale).sp
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier

@@ -57,6 +57,8 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -107,7 +109,10 @@ fun ScheduledMessagesScreen(
 
     var showSchedule by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { service.refresh() }
+    var isScheduling by remember { mutableStateOf(false) }
+
+    // AUT-005: restart when a different (account-bound) service is injected.
+    LaunchedEffect(service) { service.refresh() }
 
     Scaffold(
         topBar = {
@@ -122,7 +127,7 @@ fun ScheduledMessagesScreen(
                 },
                 actions = {
                     IconButton(onClick = { scope.launch { service.refresh() } }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh scheduled messages")
                     }
                 },
             )
@@ -151,7 +156,24 @@ fun ScheduledMessagesScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(
+                    modifier = Modifier.semantics { contentDescription = "Loading scheduled messages" },
+                )
+            }
+        } else if (service.messages.isEmpty() && service.lastError != null) {
+            // AUT-001: a failed fetch is not an empty queue.
+            Column(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "Could not load scheduled messages",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { scope.launch { service.refresh() } }) { Text("Retry") }
             }
         } else if (service.messages.isEmpty()) {
             Column(
@@ -250,7 +272,17 @@ fun ScheduledMessagesScreen(
                                 Spacer(Modifier.weight(1f))
                                 if (isPending) {
                                     TextButton(
-                                        onClick = { scope.launch { service.cancelScheduledMessage(msg.id) } },
+                                        onClick = {
+                                            scope.launch {
+                                                // AUT-003: surface cancel failures; the entry stays until confirmed.
+                                                try {
+                                                    service.cancelScheduledMessage(msg.id)
+                                                } catch (e: Exception) {
+                                                    if (e is kotlinx.coroutines.CancellationException) throw e
+                                                    snackbarHostState.showSnackbar("Could not cancel the scheduled message. Please try again.")
+                                                }
+                                            }
+                                        },
                                     ) {
                                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
                                             semanticLabel = null,
@@ -269,22 +301,39 @@ fun ScheduledMessagesScreen(
         }
     }
 
+    // AUT-118: do not leave showSchedule true with no sheet when chats disappear.
+    val noConversations = conversationsProvider().isEmpty()
+    LaunchedEffect(showSchedule, noConversations) {
+        if (showSchedule && noConversations) {
+            showSchedule = false
+            snackbarHostState.showSnackbar("No active conversations found to schedule for.")
+        }
+    }
+
     if (showSchedule) {
         ScheduleMessageSheet(
             conversations = conversationsProvider(),
+            confirmEnabled = !isScheduling,
             onDismiss = { showSchedule = false },
             onConfirm = { conversationId, body, scheduledAt ->
-                showSchedule = false
-                scope.launch {
-                    try {
-                        service.scheduleMessage(
-                            conversationId = conversationId,
-                            body = body,
-                            scheduledAt = scheduledAt,
-                        )
-                        snackbarHostState.showSnackbar("Message scheduled successfully!")
-                    } catch (e: Exception) {
-                        snackbarHostState.showSnackbar("Failed to schedule: $e")
+                // AUT-002: keep the draft open until creation is confirmed.
+                if (!isScheduling) {
+                    isScheduling = true
+                    scope.launch {
+                        try {
+                            service.scheduleMessage(
+                                conversationId = conversationId,
+                                body = body,
+                                scheduledAt = scheduledAt,
+                            )
+                            showSchedule = false
+                            snackbarHostState.showSnackbar("Message scheduled successfully!")
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            snackbarHostState.showSnackbar("Failed to schedule: $e")
+                        } finally {
+                            isScheduling = false
+                        }
                     }
                 }
             },

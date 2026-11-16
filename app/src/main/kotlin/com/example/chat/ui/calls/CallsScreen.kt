@@ -1,6 +1,7 @@
 package com.example.chat.ui.calls
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,7 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Call
@@ -35,6 +37,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,7 +47,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.paneTitle
 import com.example.chat.ui.navigation.LocalDestinationTitlePresentation
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +65,7 @@ import com.example.chat.domain.models.CallType
 import com.example.chat.domain.models.UserProfile
 import com.example.chat.ui.theme.LocalThemeConfig
 import java.time.ZoneId
+import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 
 /** Port of features/calls/calls_screen.dart: the protected recent-calls log
@@ -65,6 +76,7 @@ fun CallsScreen(
     records: List<CallRecord>,
     historyUnavailable: Boolean,
     currentUserId: String,
+    // CALLS-R1-27: this lookup runs per row per composition - it must be O(1) (map-backed).
     contactFor: (String) -> UserProfile?,
     showCallActions: Boolean = true,
     onRefresh: () -> Unit,
@@ -74,14 +86,57 @@ fun CallsScreen(
     onDeleteEntry: (CallRecord) -> Unit = {},
     onClearAll: (() -> Unit)? = null,
 ) {
-    var showClearConfirm by remember { mutableStateOf(false) }
+    var showClearConfirm by rememberSaveable { mutableStateOf(false) }
     val theme = LocalThemeConfig.current
     val titlePresentedByShell = LocalDestinationTitlePresentation.current ==
         com.example.chat.core.templates.ChatyNavigationDestinationIds.calls
-    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val zone = remember { ZoneId.systemDefault() }
+    // CALLS-R1-07: honor the user's 12/24h locale clock instead of a hardcoded 24h pattern.
+    val localeTimeFormat = remember { android.text.format.DateFormat.getTimeFormat(context) }
+    // CALLS-R1-01 + R1-22: single-flight + 5s cooldown against double-tap / spam redials.
+    var lastRedialTarget by remember { mutableStateOf<String?>(null) }
+    var lastRedialAtMs by remember { mutableStateOf(0L) }
+    fun tryRedial(id: String, name: String, initials: String?, colorHex: String?, isVideo: Boolean) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRedialAtMs < 1000) return
+        if (lastRedialTarget == id && now - lastRedialAtMs < 5000) return
+        lastRedialAtMs = now
+        lastRedialTarget = id
+        onRedial(id, name, initials, colorHex, isVideo)
+    }
+    // CALLS-R1-19: per-entry delete is a soft delete with Undo; the real delete commits on snackbar timeout.
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val pendingDeletes = remember { mutableStateMapOf<String, CallRecord>() }
+    val visibleRecords = records.filter { it.id !in pendingDeletes }
+    fun softDelete(call: CallRecord) {
+        pendingDeletes[call.id] = call
+        scope.launch {
+            val result = snackbarHostState.showSnackbar("Call entry deleted", actionLabel = "Undo")
+            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                pendingDeletes.remove(call.id)
+            } else {
+                pendingDeletes.remove(call.id)
+                onDeleteEntry(call)
+            }
+        }
+    }
+    // CALLS-R1-06: day buckets for timestamps (Today / Yesterday / weekday / date).
+    fun dayLabel(ts: java.time.Instant): String {
+        val date = ts.atZone(zone).toLocalDate()
+        val today = java.time.LocalDate.now(zone)
+        return when {
+            date.isEqual(today) -> "Today"
+            date.isEqual(today.minusDays(1)) -> "Yesterday"
+            date.isAfter(today.minusDays(7)) -> date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
+            else -> date.format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM))
+        }
+    }
 
     Scaffold(
         modifier = Modifier.semantics { paneTitle = "Calls" },
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         containerColor = com.example.chat.ui.navigation.LocalReferenceContentSurface.current ?: Color(theme.backgroundColor),
         floatingActionButton = {
             if (showCallActions) {
@@ -140,7 +195,7 @@ fun CallsScreen(
             }
 
             when {
-                historyUnavailable && records.isEmpty() -> item {
+                historyUnavailable && visibleRecords.isEmpty() -> item {
                     CallEmptyState(
                         icon = {
                             Icon(
@@ -152,13 +207,13 @@ fun CallsScreen(
                         },
                         title = "Call history unavailable",
                         titleColor = Color(theme.primaryTextColor),
-                        message = "Chaty could not load your protected call history. Pull down or retry.",
+                        message = "Chaty could not load your protected call history. Tap retry to try again.",
                         messageColor = Color(theme.secondaryTextColor),
                         actionLabel = "Retry",
                         onAction = onRefresh,
                     )
                 }
-                records.isEmpty() -> item {
+                visibleRecords.isEmpty() -> item {
                     CallEmptyState(
                         icon = {
                             Icon(
@@ -170,25 +225,41 @@ fun CallsScreen(
                         },
                         title = "No recent calls",
                         titleColor = Color(theme.primaryTextColor),
-                        message = "Completed, missed, and declined server call sessions will appear here.",
+                        message = "Your recent calls will appear here.",
                         messageColor = Color(theme.secondaryTextColor),
                     )
                 }
-                else -> items(records, key = { it.id }) { call ->
-                    val remoteUserId = call.participantIds.firstOrNull { it.isNotEmpty() && it != currentUserId }
-                        ?: call.callerId
+                else -> {
+                    var lastBucket: String? = null
+                    for (call in visibleRecords) {
+                        val bucket = dayLabel(call.timestamp)
+                        if (bucket != lastBucket) {
+                            lastBucket = bucket
+                            item(key = "bucket-$bucket") {
+                                Text(
+                                    bucket,
+                                    color = Color(theme.secondaryTextColor),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp),
+                                )
+                            }
+                        }
+                        item(key = "${call.id}#${call.timestamp}") {
                     val swipeDelete = listOf(
                         com.example.chat.ui.chats.home.HomeSwipeAction(
                             icon = com.example.chat.ui.icons.ChatyIconId.delete,
                             label = "Delete",
                             color = Color(theme.dangerColor),
-                            onTriggered = { onDeleteEntry(call) },
+                            onTriggered = { softDelete(call) },
                         ),
                     )
+                    val remoteUserId = call.participantIds.singleOrNull { it.isNotEmpty() && it != currentUserId } ?: ""
+                    val isGroupRecord = call.participantIds.count { it.isNotEmpty() && it != currentUserId } > 1
                     val contact = contactFor(remoteUserId)
                     val isMissed = call.direction == CallDirection.missed
                     val isVideo = call.type == CallType.video
-                    val canCall = remoteUserId.isNotEmpty() && remoteUserId != currentUserId
+                    val canCall = remoteUserId.isNotEmpty()
                     val name = contact?.displayName?.trim()?.takeIf { it.isNotEmpty() }
                         ?: call.remoteDisplayName
                         ?: contact?.username?.trim()?.takeIf { it.isNotEmpty() }
@@ -196,10 +267,10 @@ fun CallsScreen(
                         ?: "Chaty contact"
                     val initials = contact?.avatarInitials ?: name.take(1).uppercase()
                     val colorHex = contact?.avatarColorHex
-                    val subtitle = buildString {
-                        append(call.timestamp.atZone(ZoneId.systemDefault()).format(timeFormatter))
-                        append(" • ")
-                        append(if (call.durationSeconds > 0) "${call.durationSeconds}s" else "No connection")
+                    val timeText = remember(call.id) { localeTimeFormat.format(java.util.Date(call.timestamp.toEpochMilli())) }
+                    val subtitle = remember(call.id, call.durationSeconds, isGroupRecord) {
+                        if (isGroupRecord) "$timeText • Group call"
+                        else timeText + " • " + (if (call.durationSeconds > 0) formatCallLogDuration(call.durationSeconds) else "No connection")
                     }
 
                     com.example.chat.ui.chats.home.HomeSwipeActions(
@@ -210,8 +281,20 @@ fun CallsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = when (call.direction) {
+                                    CallDirection.incoming -> "Incoming call with $name, ${dayLabel(call.timestamp)} at $timeText, $subtitle"
+                                    CallDirection.outgoing -> "Outgoing call to $name, ${dayLabel(call.timestamp)} at $timeText, $subtitle"
+                                    CallDirection.missed -> "Missed call from $name, ${dayLabel(call.timestamp)} at $timeText, $subtitle"
+                                }
+                                role = Role.Button
+                                customActions = listOf(
+                                    CustomAccessibilityAction(label = "Call back", action = { tryRedial(remoteUserId, name, initials, colorHex, isVideo); true }),
+                                    CustomAccessibilityAction(label = "Delete call entry", action = { softDelete(call); true }),
+                                )
+                            }
                             .clickable(enabled = canCall) {
-                                onRedial(remoteUserId, name, initials, colorHex, isVideo)
+                                tryRedial(remoteUserId, name, initials, colorHex, isVideo)
                             }
                             .padding(horizontal = 8.dp, vertical = 10.dp),
                     ) {
@@ -242,14 +325,14 @@ fun CallsScreen(
                                 Text(
                                     subtitle,
                                     color = Color(theme.secondaryTextColor),
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }
                         IconButton(
-                            onClick = { onRedial(remoteUserId, name, initials, colorHex, isVideo) },
+                            onClick = { tryRedial(remoteUserId, name, initials, colorHex, isVideo) },
                             enabled = canCall,
                         ) {
                             Icon(
@@ -262,6 +345,8 @@ fun CallsScreen(
                     }
                     }
                 }
+                    }
+                }
             }
         }
         }
@@ -271,7 +356,7 @@ fun CallsScreen(
             shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showClearConfirm = false },
             title = { Text("Clear call log?", color = Color(theme.primaryTextColor)) },
-            text = { Text("This removes the call history on this account only.", color = Color(theme.secondaryTextColor)) },
+            text = { Text("This removes the call history on this account. This can't be undone.", color = Color(theme.secondaryTextColor)) },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
             },
@@ -297,12 +382,12 @@ private fun CallEmptyState(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxSize().padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
     ) {
-        Spacer(Modifier.height(120.dp))
         icon()
         Spacer(Modifier.height(12.dp))
-        Text(title, color = titleColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = titleColor, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() })
         Spacer(Modifier.height(5.dp))
         Text(message, color = messageColor, fontSize = 13.sp)
         if (actionLabel != null && onAction != null) {
@@ -313,3 +398,6 @@ private fun CallEmptyState(
         }
     }
 }
+
+/** CALLS-R1-53: m:ss like every mainstream phone app, not raw seconds. */
+private fun formatCallLogDuration(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)

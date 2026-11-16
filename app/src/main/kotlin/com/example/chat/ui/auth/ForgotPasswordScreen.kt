@@ -1,5 +1,7 @@
 package com.example.chat.ui.auth
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import com.example.chat.ui.core.components.auth.ChatyUiTokens
 
 import androidx.compose.foundation.layout.imePadding
@@ -61,12 +63,21 @@ fun ForgotPasswordScreen(
     fun validateEmail(raw: String): String? {
         val value = raw.trim()
         if (value.isEmpty()) return authCopy("Please enter your email")
-        if (!Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+\$").matches(value)) return authCopy("Please enter a valid email")
-        return null
+        // A1-02: use the shared validator so Login, Register and Forgot password accept the same addresses.
+        return com.example.chat.core.validators.ChatyValidators.validateEmail(value)?.let { authCopy(it) }
     }
 
+    // A1-19: client-side resend cooldown (60 s), same monotonic helper as the OTP screen.
+    var resendNotBefore by remember { mutableStateOf(0L) }
     fun handleSend() {
         if (isLoading) return
+        if (emailSent) {
+            val waitSeconds = OtpVerificationLogic.cooldownSeconds(resendNotBefore, android.os.SystemClock.elapsedRealtime())
+            if (waitSeconds > 0) {
+                errorMessage = authCopy("Please wait $waitSeconds seconds before requesting another code.")
+                return
+            }
+        }
         emailError = validateEmail(email)
         if (emailError != null || isLoading) return
         isLoading = true
@@ -77,6 +88,7 @@ fun ForgotPasswordScreen(
                 authRequest { sendRecovery(submittedEmail) }
                 isLoading = false
                 emailSent = true
+                resendNotBefore = OtpVerificationLogic.cooldownDeadline(android.os.SystemClock.elapsedRealtime(), 60)
                 onSent(submittedEmail)
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (e: Exception) {
@@ -109,6 +121,7 @@ fun ForgotPasswordScreen(
                         fontSize = com.example.chat.ui.core.components.auth.ChatyUiTokens.text26,
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = (-0.5).sp,
+modifier = androidx.compose.ui.Modifier.semantics { heading() },
                     )
                     Spacer(Modifier.height(ChatyUiTokens.space8))
                     Text(

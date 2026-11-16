@@ -64,20 +64,41 @@ data class HomeStyleSpec(
     }
 }
 
-/** Filter chip sets (build(): forcedType == null ? full : reduced). */
+/** Stable internal filter IDs (R1-43). They equal the strings Home has always used as
+ *  filter keys, so saved/in-memory selections stay valid. Logic must compare IDs, never
+ *  translated labels; UI copy is looked up per ID with [homeFilterLabel]. */
+object HomeFilterIds {
+    const val ALL = "All"
+    const val UNREAD = "Unread"
+    const val GROUPS = "Groups"
+    const val DIRECT = "Direct"
+}
+
+/** Filter chip sets (build(): forcedType == null ? full : reduced). The returned values are
+ *  the stable IDs above; render them through [homeFilterLabel]. */
 fun homeFilters(forcedType: ConversationType?): List<String> =
-    if (forcedType == null) listOf("All", "Unread", "Groups", "Direct")
-    else listOf("All", "Unread")
+    if (forcedType == null) listOf(HomeFilterIds.ALL, HomeFilterIds.UNREAD, HomeFilterIds.GROUPS, HomeFilterIds.DIRECT)
+    else listOf(HomeFilterIds.ALL, HomeFilterIds.UNREAD)
+
+/** Display text for a filter ID. [localized] lets a caller supply a string-resource lookup;
+ *  with the default, or when it returns null, the existing English label is shown. */
+fun homeFilterLabel(id: String, localized: (String) -> String? = { null }): String = localized(id) ?: id
 
 /** The where() chain from build(): tasks excluded, forcedType enforced,
  *  hidden locked chats excluded, search query matches title or last message,
  *  then the selected filter chip. */
-fun filterHomeConversations(
+fun filterHomeConversations(conversations:List<Conversation>,query:String,selectedFilter:String,
+    forcedType:ConversationType?,isConversationHidden:(String)->Boolean):List<Conversation> =
+    filterPrivateHomeConversations(conversations,query,selectedFilter,forcedType,isConversationHidden)
+
+fun filterPrivateHomeConversations(
     conversations: List<Conversation>,
     query: String,
     selectedFilter: String,
     forcedType: ConversationType?,
     isConversationHidden: (String) -> Boolean,
+    isConversationLocked:(String)->Boolean={false},
+    displayTitleFor:(Conversation)->String={it.title},
 ): List<Conversation> {
     val q = query.trim().lowercase()
     return conversations.filter { conversation ->
@@ -85,13 +106,13 @@ fun filterHomeConversations(
         if (forcedType != null && conversation.type != forcedType) return@filter false
         if (isConversationHidden(conversation.id)) return@filter false
         if (q.isNotEmpty() &&
-            !conversation.title.lowercase().contains(q) &&
-            !conversation.lastMessageText.lowercase().contains(q)
+            !displayTitleFor(conversation).lowercase().contains(q) &&
+            (isConversationLocked(conversation.id) || !conversation.lastMessageText.lowercase().contains(q))
         ) return@filter false
         when (selectedFilter) {
-            "Unread" -> conversation.unreadCount > 0
-            "Groups" -> conversation.type == ConversationType.group
-            "Direct" -> conversation.type == ConversationType.direct
+            HomeFilterIds.UNREAD -> conversation.unreadCount > 0
+            HomeFilterIds.GROUPS -> conversation.type == ConversationType.group
+            HomeFilterIds.DIRECT -> conversation.type == ConversationType.direct
             else -> true
         }
     }
@@ -108,17 +129,16 @@ fun buildHomeEntries(
     gbHideArchiveHome: Boolean,
     archiveChatsOnTop: Boolean,
 ): List<HomeEntry> {
-    val archived = conversations.filter { it.isArchived }
-    val pinned = conversations.filter { it.isPinned && !it.isArchived }
-    val unreadFirst = if (normalizedHomeStyle == "Productivity") {
-        conversations.filter { it.unreadCount > 0 && !it.isPinned && !it.isArchived }
-    } else {
-        emptyList()
-    }
-    val recent = conversations.filter {
-        !it.isPinned && !it.isArchived &&
-            !(normalizedHomeStyle == "Productivity" && it.unreadCount > 0)
-    }
+    val archived=mutableListOf<Conversation>()
+    val pinned=mutableListOf<Conversation>()
+    val unreadFirst=mutableListOf<Conversation>()
+    val recent=mutableListOf<Conversation>()
+    conversations.forEach {conversation -> when {
+        conversation.isArchived -> archived.add(conversation)
+        conversation.isPinned -> pinned.add(conversation)
+        normalizedHomeStyle=="Productivity" && conversation.unreadCount>0 -> unreadFirst.add(conversation)
+        else -> recent.add(conversation)
+    }}
     val entries = mutableListOf<HomeEntry>()
     val shouldShowArchived = archived.isNotEmpty() && !isSearchOpen &&
         !hideArchivedChats && !gbHideArchiveHome

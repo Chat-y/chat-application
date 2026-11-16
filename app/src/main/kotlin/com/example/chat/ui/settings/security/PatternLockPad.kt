@@ -8,6 +8,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -40,8 +41,12 @@ internal object PatternGeometry {
 
     fun hitTest(p: Offset, width: Float, height: Float): Int? {
         val radius = min(width, height) / 7f
-        centers(width, height).forEachIndexed { i, c ->
-            if (hypot(c.x - p.x, c.y - p.y) <= radius) return i
+        val cellWidth = width / 3f
+        val cellHeight = height / 3f
+        for (i in 0 until 9) {
+            val x = cellWidth * ((i % 3) + 0.5f)
+            val y = cellHeight * ((i / 3) + 0.5f)
+            if (hypot(x - p.x, y - p.y) <= radius) return i
         }
         return null
     }
@@ -72,8 +77,13 @@ fun PatternLockPad(
     clearOnFinish: Boolean = true,
     state: PatternLockPadState = remember { PatternLockPadState() },
 ) {
-    state.onReset = onPatternReset
+    val currentComplete by rememberUpdatedState(onPatternComplete)
+    val currentReset by rememberUpdatedState(onPatternReset)
+    state.onReset = { currentReset?.invoke() }
     val view = androidx.compose.ui.platform.LocalView.current
+    // Gesture scratch state is not UI state: haptic timing must not trigger recomposition.
+    val lastHapticAt = remember(state) { longArrayOf(-1L) }
+    val tracePath = remember(state) { Path() }
     val activeColor = MaterialTheme.colorScheme.primary
     val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
     val availableWidth = (LocalConfiguration.current.screenWidthDp - 32).coerceIn(168, 280).dp
@@ -82,20 +92,24 @@ fun PatternLockPad(
     fun selectAt(p: Offset, w: Float, h: Float) {
         val hit = PatternGeometry.hitTest(p, w, h) ?: return
         if (state.selected.contains(hit)) return
-        if (enableHaptics) ChatyHapticsPort.selection(view)
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (enableHaptics && (lastHapticAt[0] < 0L || now - lastHapticAt[0] >= 30L)) {
+            ChatyHapticsPort.selection(view)
+            lastHapticAt[0] = now
+        }
         state.selected.add(hit)
         state.pointer = p
     }
 
     fun finish() {
-        if (state.selected.isNotEmpty()) onPatternComplete(state.selected.joinToString("-"))
+        if (state.selected.isNotEmpty()) currentComplete(state.selected.joinToString("-"))
         state.pointer = null
     }
 
     Canvas(
         modifier.size(effective)
             .semantics { contentDescription = "Pattern lock grid 3 by 3" }
-            .pointerInput(clearOnFinish, enableHaptics) {
+            .pointerInput(state, clearOnFinish, enableHaptics) {
                 detectDragGestures(
                     onDragStart = { p ->
                         if (clearOnFinish) state.reset()
@@ -106,14 +120,16 @@ fun PatternLockPad(
                         state.pointer = change.position
                     },
                     onDragEnd = { finish() },
-                    onDragCancel = { finish() },
+                    onDragCancel = { state.reset() },
                 )
             },
     ) {
         val centers = PatternGeometry.centers(this.size.width, this.size.height)
         val selected = state.selected
         if (!hideTrace && selected.isNotEmpty()) {
-            val path = Path().apply {
+            // Previously allocated Path() per draw. Keep one scratch path per pad instead.
+            val path = tracePath.apply {
+                reset()
                 moveTo(centers[selected.first()].x, centers[selected.first()].y)
                 selected.drop(1).forEach { lineTo(centers[it].x, centers[it].y) }
                 state.pointer?.let { lineTo(it.x, it.y) }

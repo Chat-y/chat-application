@@ -59,10 +59,25 @@ fun MessageTranslateDialog(
     targetLanguage: ChatTranslationPolicy.Language,
     client: GTranslateClient,
     onDismiss: () -> Unit,
+    isSourceEligible: () -> Boolean = { true },
 ) {
     val colors = LocalAppColors.current
-    val result by produceState<Result<String>?>(initialValue = null, sourceText, targetLanguage.code) {
-        value = runCatching { client.translate(sourceText, targetLanguage.code) }
+    val currentEligibility by androidx.compose.runtime.rememberUpdatedState(isSourceEligible)
+    var approved by remember(sourceText, targetLanguage.code) { mutableStateOf(false) }
+    var retry by remember(sourceText, targetLanguage.code) { mutableStateOf(0) }
+    val result by produceState<Result<String>?>(initialValue = null, sourceText, targetLanguage.code, approved, retry) {
+        value = null
+        if (approved) {
+            value = try {
+                check(currentEligibility()) { "This message is no longer available for translation." }
+                val translated = client.translate(sourceText, targetLanguage.code)
+                check(currentEligibility()) { "This message is no longer available for translation." }
+                Result.success(translated)
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                Result.failure(error)
+            }
+        }
     }
     ChatyConfirmationDialog(
         onDismissRequest = onDismiss,
@@ -71,7 +86,10 @@ fun MessageTranslateDialog(
             Column {
                 Text(sourceText, color = colors.foregroundSecondary, fontStyle = FontStyle.Italic)
                 Spacer(Modifier.height(12.dp))
+                Text("Online translation sends this message text to Google's translation service. It leaves the chat's encrypted channel.",
+                    color = colors.foregroundSecondary)
                 when {
+                    !approved -> Text("Choose Translate to continue.", color = colors.foregroundSecondary)
                     result == null -> Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.padding(end = 10.dp).height(20.dp), strokeWidth = 2.dp)
                         Text("Translating online…", color = colors.foregroundSecondary)
@@ -84,7 +102,12 @@ fun MessageTranslateDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        confirmButton = {
+            if (!approved) TextButton(onClick = { approved = true }) { Text("Translate") }
+            else if (result?.isFailure == true) TextButton(onClick = { retry += 1 }) { Text("Retry") }
+            else TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

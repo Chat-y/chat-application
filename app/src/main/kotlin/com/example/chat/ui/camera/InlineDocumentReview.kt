@@ -48,17 +48,24 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
             bitmap=result.first
             pending=null
             quad=result.second?:PaperQuad.inset
-            note=if(result.second==null) "Paper edges not found. Drag all four corners around the paper." else "Suggested paper edges. Check and adjust all four corners."
+            // Original null proposal copy: "Paper edges not found. Drag all four corners around the paper."
+            note=if(result.second==null) "Paper edges not found. Move closer and retake, or drag all four corners around the paper." else "Suggested paper edges. Check and adjust all four corners."
         } catch(cancelled:kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch(e:Exception) { note=e.message?:"Could not read image. Original kept." }
+        // Original raw exception could expose a local path: note=e.message?:"Could not read image. Original kept."
+        catch(_:Exception) { note="Could not read this image. Retake it or choose another image. Original kept." }
         catch(e:OutOfMemoryError) { note="Not enough memory to open this image. Original kept." }
         finally { pending?.recycle() }
     }
     Column(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)) {
         Text("Document · adjust paper corners",color=Color.White)
-        Text(note,color=Color.LightGray)
+        // Original: Text(note,color=Color.LightGray)
+        Text(if (bitmap != null && quad.areaFraction < MIN_PAPER_AREA_FRACTION)
+            "Move closer and retake, or expand the corners. Paper must fill at least 5% of the image."
+            else note, color=Color.LightGray)
         val image=bitmap
-        if(image!=null) Canvas(Modifier.fillMaxWidth().weight(1f).semantics { contentDescription = "Adjust paper corners" }.pointerInput(image){
+        if(image!=null) Canvas(Modifier.fillMaxWidth().weight(1f).semantics { contentDescription = "Adjust paper corners" }.pointerInput(image,busy){
+            // Original pointerInput(image) stayed draggable during an in-flight crop.
+            if (busy) return@pointerInput
             var selected=-1
             fun frame():FloatArray {val scale=minOf(size.width.toFloat()/image.width,size.height.toFloat()/image.height);val w=image.width*scale;val h=image.height*scale;return floatArrayOf((size.width-w)/2,(size.height-h)/2,w,h)}
             detectDragGestures(onDragStart={point->val f=frame();selected=quad.points.indices.minBy{ i->val p=quad.points[i];(Offset(f[0]+p.x*f[2],f[1]+p.y*f[3])-point).getDistance()}},onDragEnd={selected=-1},onDragCancel={selected=-1}){change,_->
@@ -73,11 +80,17 @@ fun InlineDocumentReview(path:String,onRetake:()->Unit,onCropped:(String)->Unit)
         } else Spacer(Modifier.weight(1f))
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             Button(shape = com.example.chat.ui.kit.ChatyActionShape, onClick=onRetake,enabled=!busy){Text("Retake")}
-            Button(shape = com.example.chat.ui.kit.ChatyActionShape, enabled=image!=null&&quad.isValid()&&!busy,onClick={busy=true;scope.launch{
+            Button(shape = com.example.chat.ui.kit.ChatyActionShape, enabled=image!=null&&quad.isValid()&&!busy,onClick=cropClick@{
+                // Original onClick set busy but read mutable quad from the worker later.
+                if (busy) return@cropClick
+                val confirmedQuad = quad
+                busy=true;scope.launch{
                 var produced:String?=null
-                try{val result=withContext(Dispatchers.IO){InlineDocumentProcessor.crop(path,quad,File(context.cacheDir,"paper_crops")).also{produced=it}};onCropped(result);produced=null}
+                // Original worker call: InlineDocumentProcessor.crop(path,quad,File(context.cacheDir,"paper_crops"))
+                try{val result=withContext(Dispatchers.IO){InlineDocumentProcessor.crop(path,confirmedQuad,File(context.cacheDir,"paper_crops")).also{produced=it}};onCropped(result);produced=null}
                 catch(cancelled:kotlinx.coroutines.CancellationException){throw cancelled}
-                catch(e:Exception){note=e.message?:"Crop failed. Original kept."}
+                // Original: catch(e:Exception){note=e.message?:"Crop failed. Original kept."}
+                catch(_:Exception){note="Could not crop this image. Check the corners and device storage, then try again. Original kept."}
                 catch(e:OutOfMemoryError){note="Not enough memory to crop this full-resolution image. Original kept."}finally{produced?.let{File(it).delete()};busy=false}
             }}){Text(if(busy)"Cropping…" else "Crop paper")}
         }

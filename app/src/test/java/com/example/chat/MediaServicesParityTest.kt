@@ -201,12 +201,25 @@ class MediaServicesParityTest {
         assertEquals(4, service.filteredFiles.size)
     }
 
-    @Test fun `storage breakdown sums by category`() {
+    // Original fixture summed debug demo bytes as if they occupied disk; retained for review:
+    // assertEquals(2569011L + 1145728L, breakdown[MediaCategory.document])
+    // assertEquals(5033164L + 1843200L, breakdown[MediaCategory.audio])
+    @Test fun `storage breakdown sums actual files not debug samples`() {
+        val directory = java.nio.file.Files.createTempDirectory("storage-breakdown-").toFile()
+        try {
+            File(directory, "first.pdf").writeBytes("%PDF-1.7".toByteArray())
+            File(directory, "second.pdf").writeBytes("%PDF-1.7-more".toByteArray())
+            val service = MediaLibraryService(libraryDirectories = { listOf(directory) })
+            kotlinx.coroutines.runBlocking { service.refreshLibrary() }
+            val breakdown = service.getStorageBreakdown()
+            assertTrue(breakdown.isComplete)
+            assertEquals(File(directory, "first.pdf").length() + File(directory, "second.pdf").length(), breakdown[MediaCategory.pdf])
+        } finally { directory.deleteRecursively() }
+    }
+    @Test fun `debug sample descriptors never inflate measured storage`() {
         val service = MediaLibraryService(libraryDirectories = { emptyList() })
         kotlinx.coroutines.runBlocking { service.refreshLibrary() }
-        val breakdown = service.getStorageBreakdown()
-        assertEquals(2569011L + 1145728L, breakdown[MediaCategory.document])
-        assertEquals(5033164L + 1843200L, breakdown[MediaCategory.audio])
+        assertTrue(service.getStorageBreakdown().isEmpty())
     }
 
     @Test fun `refresh scans directories skipping hidden files`() {

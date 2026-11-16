@@ -72,6 +72,9 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -140,7 +143,9 @@ fun OngoingCallScreen(
 ) {
     val reduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
     val theme = LocalThemeConfig.current
-    val bundleTokens = bundleId?.let { themedCallBundle(it) }
+    // CALL-R1-28: token copy + color merge computed once per (bundle, theme), not per recomposition.
+    val bundleAppColors = com.example.chat.ui.theme.LocalAppColors.current
+    val bundleTokens = remember(bundleId, bundleAppColors) { bundleId?.let { themedCallBundleTokens(it, bundleAppColors) } }
     val iosLayout = bundleId == com.example.chat.ui.calls.bundles.CallBundleId.APPLE_IOS ||
         bundleId == com.example.chat.ui.calls.bundles.CallBundleId.CHATY_DEFAULT
     val callAccent = com.example.chat.ui.theme.LocalAppColors.current.accent
@@ -163,7 +168,8 @@ fun OngoingCallScreen(
     }
 
     // Dart _startAutoHideTimer: controls hide after 5s unless focus mode.
-    LaunchedEffect(controlsVisible, focusMode, autoHideControls, session?.isVideo) {
+    // CALL-R1-31: interaction with the draggable preview restarts the hide timer.
+    LaunchedEffect(controlsVisible, focusMode, autoHideControls, session?.isVideo, localPipOffsetX, localPipOffsetY) {
         if (session?.isVideo == true && autoHideControls && controlsVisible && !focusMode) {
             delay(5000)
             controlsVisible = false
@@ -171,7 +177,10 @@ fun OngoingCallScreen(
     }
 
     if (session == null) {
-        LaunchedEffect(Unit) { onSessionGone() }
+        // CALL-R1-05: with a setup error the user reads it and closes; without one, pop silently.
+        if (setupError == null) {
+            LaunchedEffect(Unit) { onSessionGone() }
+        }
         Scaffold(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing), contentWindowInsets = WindowInsets(0, 0, 0, 0), containerColor = callBackdrop()) { padding ->
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -209,7 +218,8 @@ fun OngoingCallScreen(
 
     LaunchedEffect(session.callId, session.state) {
         if (session.state == CallSessionState.busy || session.state == CallSessionState.failed) {
-            delay(2400)
+            // CALL-R1-04: 2.4s was too fast to read the reason; 5s minimum.
+            delay(5000)
             onSessionGone()
         }
     }
@@ -230,6 +240,12 @@ fun OngoingCallScreen(
                     val colors = com.example.chat.ui.theme.LocalAppColors.current
                     Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.linearGradient(
                         listOf(colors.background, colors.accent.copy(alpha = 0.22f), colors.surfaceSecondary, colors.background))))
+                    // CALL-R1-53: scrim behind the header zone so name/status text keeps
+                    // contrast at the gradient's brightest stop.
+                    Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to colors.background.copy(alpha = 0.55f),
+                        0.35f to Color.Transparent,
+                    )))
                 } else VoiceCallBackdrop(session, callDurationSeconds, bundleTokens)
             }
 
@@ -244,12 +260,19 @@ fun OngoingCallScreen(
                         .size(120.dp, 160.dp)
                         .background(callBackdrop(), RoundedCornerShape(16.dp))
                         .pointerInput(screenW, screenH) {
-                            detectDragGestures { change, dragAmount ->
+                            // CALL-R1-52: keep a 16dp margin from edges (clear of cutouts/status bar)
+                            // and snap to the nearest horizontal edge on release, like InAppCallPip.
+                            detectDragGestures(
+                                onDragEnd = {
+                                    val rightEdge = (screenW - 120f - 16f).coerceAtLeast(16f)
+                                    localPipOffsetX = if (localPipOffsetX + 60f < screenW / 2f) 16f else rightEdge
+                                },
+                            ) { change, dragAmount ->
                                 change.consume()
                                 localPipOffsetX = (localPipOffsetX + dragAmount.x / density)
-                                    .coerceIn(0f, (screenW - 120f).coerceAtLeast(0f))
+                                    .coerceIn(16f, (screenW - 120f - 16f).coerceAtLeast(16f))
                                 localPipOffsetY = (localPipOffsetY + dragAmount.y / density)
-                                    .coerceIn(0f, (screenH - 160f).coerceAtLeast(0f))
+                                    .coerceIn(16f, (screenH - 160f - 16f).coerceAtLeast(16f))
                             }
                         },
                 ) {
@@ -307,6 +330,8 @@ fun OngoingCallScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .offset(y = topOffset)
+                    // CALL-R1-38: hidden panels leave the semantics tree too.
+                    .then(if (!controlsVisible && session.isVideo) Modifier.clearAndSetSemantics { } else Modifier)
                     .then(if (iosLayout && !session.isVideo) Modifier else topPanelDecoration(template))
                     .then(topPanelPadding(template)),
             ) {
@@ -342,10 +367,13 @@ fun OngoingCallScreen(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
+                            // CALL-R1-41: connection-state changes are announced (this label only
+                            // ticks with the timer once connected - status transitions dominate).
                             statusLabel(session, callDurationSeconds),
                             color = callSecondary(),
                             fontSize = if (iosLayout && !session.isVideo) 16.sp else 13.sp,
                             fontWeight = FontWeight.Medium,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         )
                     }
                     }
@@ -355,7 +383,8 @@ fun OngoingCallScreen(
                     if (session.isVideo) {
                         IconButton(
                             onClick = onEnterNativePip,
-                            enabled = isActive, // Dart: only isActive gates; the disabled-in-settings case shows a message in the host
+                            // CALL-R1-01: honor the settings parameter at the point of use (it was a dead param).
+                            enabled = isActive && pictureInPictureEnabled,
                         ) {
                             Icon(
                                 Icons.Rounded.PictureInPicture,
@@ -372,7 +401,10 @@ fun OngoingCallScreen(
                             )
                         }
                     }
-                    IconButton(onClick = { focusMode = !focusMode }) {
+                    IconButton(
+                        onClick = { focusMode = !focusMode },
+                        modifier = Modifier.semantics { stateDescription = if (focusMode) "Focus mode on" else "Focus mode off" },
+                    ) {
                         Icon(
                             if (focusMode) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
                             contentDescription = if (focusMode) "Exit focus mode" else "Focus mode",
@@ -382,10 +414,22 @@ fun OngoingCallScreen(
                 }
             }
 
+            // CALL-R1-18: a persistent in-app reminder while the screen is being shared.
+            if (session.isSharingScreen) {
+                Row(
+                    Modifier.align(Alignment.TopCenter).padding(top = 56.dp)
+                        .background(callSurface(), RoundedCornerShape(16.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.ScreenShare, contentDescription = null, tint = callAccent(), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("You are sharing your screen", color = callForeground(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
             if (callToolsStatus != null || reactionText != null) {
                 Column(Modifier.align(Alignment.Center).background(callSurface(), RoundedCornerShape(24.dp)).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     callToolsStatus?.let { Text(it, color = callForeground()) }
-                    reactionText?.let { Text(it, color = callForeground(), fontSize = 24.sp) }
+                    reactionText?.let { Text(it, color = callForeground(), fontSize = 24.sp, modifier = Modifier.clearAndSetSemantics { }) }
                 }
             }
             // Bottom control bar.
@@ -395,11 +439,13 @@ fun OngoingCallScreen(
                     .heightIn(max = (LocalConfiguration.current.screenHeightDp * if (session.isVideo) 0.48f else 0.65f).dp)
                     .verticalScroll(rememberScrollState())
                     .offset(y = bottomOffset)
+                    .then(if (!controlsVisible && session.isVideo) Modifier.clearAndSetSemantics { } else Modifier)
                     .then(if (iosLayout && !session.isVideo) Modifier else bottomPanelDecoration(template))
                     .then(bottomPanelPadding(template)),
             ) {
                 var showMore by remember { mutableStateOf(false) }
-                val actions = buildList {
+                val actions = remember(session.isMuted, session.isCameraOff, session.isSharingScreen, session.audioRoute, session.isVideo, hasLocalMedia, session.isDemo, onReturnToAudio) {
+                    buildList {
                     add(CallControlAction(if (session.isMuted) "Unmute" else "Mute",
                         if (session.isMuted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
                         session.isMuted, hasLocalMedia || session.isDemo, onToggleMute))
@@ -419,6 +465,7 @@ fun OngoingCallScreen(
                         session.audioRoute == AudioRouteType.speaker, hasLocalMedia || session.isDemo) {
                         onToggleAudioRoute(if (session.audioRoute == AudioRouteType.speaker) AudioRouteType.earpiece else AudioRouteType.speaker)
                     })
+                    }
                 }
                 if (!session.isVideo && iosLayout) {
                     IosSupportedAudioControls(session, hasLocalMedia || session.isDemo,
@@ -465,14 +512,13 @@ fun OngoingCallScreen(
                             }
                         }
                     }
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(54.dp)
+                    // CALL-R1-51: end-call is standardized at >= 56dp across bundles.
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(56.dp)
                         .clip(CircleShape).background(endCallColor)
-                        .semantics {
-                            contentDescription = "End call"
-                            role = Role.Button
-                            onClick(label = "End call") { onEndCall(); true }
-                        }) {
-                        Box(Modifier.matchParentSize().clip(CircleShape).clickable { onEndCall() })
+                       ) {
+                        // CALL-R1-02: one activation path only (was: parent semantics + child clickable).
+                        Box(Modifier.matchParentSize().clip(CircleShape)
+                            .clickable(onClick = onEndCall, onClickLabel = "End call", role = Role.Button))
                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callEnd, semanticLabel = null, color = com.example.chat.ui.theme.LocalAppColors.current.onError, modifier = Modifier.size(28.dp))
                     }
                 }
@@ -503,10 +549,15 @@ fun statusLabel(session: ChatyCallSession, callDurationSeconds: Int): String =
         CallSessionState.idle -> "Preparing call…"
     }
 
-/** Dart _formatDuration: mm:ss. */
+/** Dart _formatDuration: mm:ss, switching to h:mm:ss after 59:59 (CALL-R1-03). */
 fun formatCallDuration(totalSeconds: Int): String {
-    val m = (totalSeconds / 60).toString().padStart(2, '0')
     val s = (totalSeconds % 60).toString().padStart(2, '0')
+    if (totalSeconds >= 3600) {
+        val h = totalSeconds / 3600
+        val m = ((totalSeconds % 3600) / 60).toString().padStart(2, '0')
+        return "$h:$m:$s"
+    }
+    val m = (totalSeconds / 60).toString().padStart(2, '0')
     return "$m:$s"
 }
 
@@ -523,9 +574,7 @@ private fun RemoteVideoSurface(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CallAvatar(
-                    initials = session.remoteAvatarInitials
-                        ?: (if (session.remoteDisplayName.isEmpty()) "U"
-                            else session.remoteDisplayName.substring(0, 1).uppercase()),
+                    initials = session.remoteAvatarInitials ?: callInitials(session.remoteDisplayName),
                     colorHex = session.remoteAvatarColorHex,
                     size = 108.dp,
                 )
@@ -549,11 +598,13 @@ private fun RemoteVideoSurface(
     AndroidView(
         factory = { context ->
             SurfaceViewRenderer(context).apply {
+                // CALL-R1-26: fill the frame, crop overflow - the usual phone-call framing.
+                setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                 videoSurfaces.attachRemoteRenderer(this)
             }
         },
         modifier = Modifier.fillMaxSize(),
-        onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) },
+        onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) }, // detachRenderer() releases the EGL surface internally
     )
 }
 
@@ -563,11 +614,12 @@ private fun LocalVideoSurface(videoSurfaces: CallVideoSurfaceProvider, mirror: B
         factory = { context ->
             SurfaceViewRenderer(context).apply {
                 setMirror(mirror)
+                setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
                 videoSurfaces.attachLocalRenderer(this)
             }
         },
         modifier = Modifier.fillMaxSize(),
-        onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) },
+        onRelease = { renderer -> videoSurfaces.detachRenderer(renderer) }, // detachRenderer() releases the EGL surface internally
     )
 }
 
@@ -589,12 +641,7 @@ private fun VoiceCallBackdrop(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             CallAvatar(
-                initials = session.remoteAvatarInitials
-                    ?: (if (session.remoteDisplayName.isNotEmpty()) {
-                        session.remoteDisplayName.substring(0, 1).uppercase()
-                    } else {
-                        "U"
-                    }),
+                initials = session.remoteAvatarInitials ?: callInitials(session.remoteDisplayName),
                 colorHex = session.remoteAvatarColorHex,
                 size = identity.avatarDp.dp,
             )
@@ -696,7 +743,15 @@ private fun GoogleLatestProductionControls(
                         Modifier.weight(1f).height(80.dp)
                             .clip(RoundedCornerShape(if (action.active) 20.dp else 40.dp))
                             .background(if (action.active) accent else surface)
-                            .semantics { contentDescription = action.label }
+                            .semantics {
+                                contentDescription = action.label
+                                role = Role.Button
+                                stateDescription = when {
+                                    !action.enabled -> "Unavailable"
+                                    action.active -> "On"
+                                    else -> "Off"
+                                }
+                            }
                             .clickable(enabled = action.enabled, onClick = action.onClick)
                             .padding(horizontal = 8.dp, vertical = 10.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -715,14 +770,12 @@ private fun GoogleLatestProductionControls(
         Box(
             Modifier.width(availableWidthDp.coerceAtMost(144).coerceAtLeast(1).dp).height(64.dp).clip(RoundedCornerShape(32.dp))
                 .background(endColor)
-                .semantics {
-                    contentDescription = "End call"
-                    role = Role.Button
-                    onClick(label = "End call") { onEndCall(); true }
-                },
+,
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.matchParentSize().clip(RoundedCornerShape(32.dp)).clickable(onClick = onEndCall))
+            // CALL-R1-02: one activation path only.
+            Box(Modifier.matchParentSize().clip(RoundedCornerShape(32.dp))
+                .clickable(onClick = onEndCall, onClickLabel = "End call", role = Role.Button))
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callEnd, semanticLabel = null, color = com.example.chat.ui.theme.LocalAppColors.current.onError, modifier = Modifier.size(32.dp))
         }
     }
@@ -748,7 +801,15 @@ private fun BundleProductionControls(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { action ->
                     Column(Modifier.weight(1f)
-                        .semantics { contentDescription = action.label }
+                        .semantics {
+                            contentDescription = action.label
+                            role = Role.Button
+                            stateDescription = when {
+                                !action.enabled -> "Unavailable"
+                                action.active -> "On"
+                                else -> "Off"
+                            }
+                        }
                         .clickable(enabled = action.enabled, onClick = action.onClick)
                         .padding(vertical = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally) {
@@ -780,14 +841,11 @@ private fun BundleProductionControls(
 private fun BundleEndAction(color: Color, onEnd: () -> Unit, wide: Boolean, availableWidthDp: Int) {
     Box(Modifier.width((if (wide) availableWidthDp.coerceAtMost(280) else 64).coerceAtMost(availableWidthDp).coerceAtLeast(1).dp)
         .height(64.dp).clip(RoundedCornerShape(32.dp)).background(color)
-        .semantics {
-            contentDescription = "End call"
-            role = Role.Button
-            // One node carries label + role + action; the child layer is pointer-only.
-            onClick(label = "End call") { onEnd(); true }
-        },
+,
         contentAlignment = Alignment.Center) {
-        Box(Modifier.matchParentSize().clip(RoundedCornerShape(32.dp)).clickable(onClick = onEnd))
+        // CALL-R1-02: one activation path only.
+        Box(Modifier.matchParentSize().clip(RoundedCornerShape(32.dp))
+            .clickable(onClick = onEnd, onClickLabel = "End call", role = Role.Button))
         Row(verticalAlignment = Alignment.CenterVertically) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callEnd, semanticLabel = null, color = com.example.chat.ui.theme.LocalAppColors.current.onError, modifier = Modifier.size(28.dp))
             if (wide) { Spacer(Modifier.width(8.dp)); Text("End call", color = com.example.chat.ui.theme.LocalAppColors.current.onError, maxLines = 1) }

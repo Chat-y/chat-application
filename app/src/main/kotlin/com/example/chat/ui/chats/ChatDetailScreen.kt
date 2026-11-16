@@ -2,6 +2,7 @@ package com.example.chat.ui.chats
 
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
@@ -99,6 +100,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.alpha
@@ -126,6 +130,7 @@ import androidx.compose.ui.window.Dialog
 import com.example.chat.core.templates.ComposerActionPlacement
 import com.example.chat.core.templates.ComposerTemplate
 import com.example.chat.core.theme.ThemeConfig
+import com.example.chat.core.messages.ConversationRecoverableDraft
 import com.example.chat.domain.models.ChatMessage
 import com.example.chat.domain.models.ChatTask
 import com.example.chat.domain.models.ConnectionHealthState
@@ -356,8 +361,14 @@ fun ChatDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Dart initState: the composer restores the persisted draft.
-    var composerText by remember(conversation.id) { mutableStateOf(conversation.draftText) }
-    var sending by remember { mutableStateOf(false) }
+    var composerText by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(conversation.draftText) }
+    var sending by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+    val draftOwner = Triple(conversation.id, currentUserId, messageSessionIdentity)
+    val currentDraftOwner by rememberUpdatedState(draftOwner)
+    val currentActionMessages by rememberUpdatedState(messages)
+    var draftRevision by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
+    var recoverableDraft by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ConversationRecoverableDraft?>(null) }
+    var recoveredViewOnceNeedsChoice by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
     var viewOnceTextTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
     val viewOnceOwner = remember(conversation.id, currentUserId, messageSessionIdentity) { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
     viewOnceTextTarget?.let { target ->
@@ -367,8 +378,8 @@ fun ChatDetailScreen(
             onDismiss = { viewOnceTextTarget = null },
         )
     }
-    var scheduleDraft by remember(conversation.id, currentUserId) { mutableStateOf<String?>(null) }
-    var scheduling by remember(conversation.id, currentUserId) { mutableStateOf(false) }
+    var scheduleDraft by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+    var scheduling by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
     val scheduleOwner = remember(conversation.id, currentUserId, messageSessionIdentity) { com.example.chat.ServiceLocator.apiBackend.authSnapshot() }
     scheduleDraft?.let { draft ->
         com.example.chat.ui.automation.ScheduleMessageSheet(
@@ -376,40 +387,49 @@ fun ChatDetailScreen(
             initialBody = draft, confirmEnabled = !scheduling,
             onDismiss = { if (!scheduling) scheduleDraft = null },
             onConfirm = { cid, body, at ->
-                if (!scheduling) {
+                if (!scheduling && currentDraftOwner == draftOwner && isMessageSessionCurrent()) {
+                    val submittedOwner = draftOwner
                     scheduling = true
                     scope.launch {
                         try {
+                            check(currentDraftOwner == submittedOwner && isMessageSessionCurrent()) { "Chat session changed." }
+                            check(cid == conversation.id) { "Conversation changed." }
                             check(!secureChannelEnabled) { "Scheduling is unavailable in encrypted chats." }
                             check(com.example.chat.ServiceLocator.apiBackend.authSnapshot() === scheduleOwner) { "Account changed. Open this chat again." }
                             com.example.chat.ServiceLocator.scheduledMessageService.scheduleMessage(cid, body, at,
                                 expectedSession = com.example.chat.ServiceLocator.apiBackend.scheduledMessagesClient(scheduleOwner))
-                            scheduleDraft = null
-                            snackbarHostState.showSnackbar("Schedule confirmed. Check Scheduled messages for its status.")
+                            if (currentDraftOwner == submittedOwner && isMessageSessionCurrent()) {
+                                scheduleDraft = null
+                                snackbarHostState.showSnackbar("Schedule confirmed. Your draft was kept. Check Scheduled messages for its status.")
+                            }
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
-                            snackbarHostState.showSnackbar(e.message ?: "Could not schedule message")
-                        } finally { scheduling = false }
+                            if (currentDraftOwner == submittedOwner && isMessageSessionCurrent()) {
+                                snackbarHostState.showSnackbar("Scheduling was not confirmed. Your draft was kept. Check Scheduled messages before trying again.")
+                            }
+                        } finally {
+                            if (currentDraftOwner == submittedOwner) scheduling = false
+                        }
                     }
                 }
             })
     }
-    var replyTarget by remember { mutableStateOf<ChatMessage?>(null) }
-    var editingMessage by remember { mutableStateOf<ChatMessage?>(null) }
-    var selectedIds by remember(conversation.id) { mutableStateOf<Set<String>>(emptySet()) }
-    val contextMenuMessageState = remember { mutableStateOf<ChatMessage?>(null) }
+    var replyTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+    var editingMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+    var selectedIds by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Set<String>>(emptySet()) }
+    val contextMenuMessageState = remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
     var contextMenuMessage by contextMenuMessageState
-    var singleTapMessage by remember(conversation.id) { mutableStateOf<ChatMessage?>(null) }
-    var avatarQuickViewSenderId by remember(conversation.id) { mutableStateOf<String?>(null) }
-    var infoMessage by remember(conversation.id) { mutableStateOf<ChatMessage?>(null) }
-    var showStarredInChat by remember(conversation.id) { mutableStateOf(false) }
+    var singleTapMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+    var avatarQuickViewSenderId by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+    var infoMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
+    var showStarredInChat by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
     val shareContext = androidx.compose.ui.platform.LocalContext.current
     // Chaty #35 / GTranslate route: client-side online translation, no backend.
     val translatorStore = remember(shareContext) {
         com.example.chat.data.translate.TranslatorLanguageStore(shareContext)
     }
     val gTranslateClient = remember { com.example.chat.data.translate.GTranslateClient() }
-    var translateMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var translateMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
     var choosingTranslatorLanguage by remember { mutableStateOf(false) }
     var translatorTarget by remember { mutableStateOf(translatorStore.target()) }
     val localMessageStore = remember(localOverrideAccountKey, conversation.id) {
@@ -421,7 +441,7 @@ fun ChatDetailScreen(
     var choosingDoubleTapEmoji by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableStateOf(false) }
     var quoteMessageId by remember(currentUserId, conversation.id, messageSessionIdentity) { mutableStateOf<String?>(null) }
 
-    var copySelectionMessage by remember(conversation.id) { mutableStateOf<ChatMessage?>(null) }
+    var copySelectionMessage by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
     var taskMenuTarget by remember { mutableStateOf<Pair<ChatTask, Rect>?>(null) }
     var contextMenuAnchor by remember { mutableStateOf<Rect?>(null) }
     var attachmentSheetOpen by remember { mutableStateOf(false) }
@@ -524,36 +544,48 @@ fun ChatDetailScreen(
     }
     var pendingBelowCount by remember { mutableIntStateOf(0) }
     var localPinMenu by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
-    var searchOpen by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    var searchMatchIndex by remember { mutableIntStateOf(0) }
-    var highlightedMessageId by remember { mutableStateOf<String?>(null) }
-    var wallpaperOverride by remember(conversation.id) { mutableStateOf(wallpaperPatternId) }
+    var searchOpen by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+    var searchQuery by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf("") }
+    var searchMatchIndex by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
+    var highlightedMessageId by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+    var wallpaperOverride by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(wallpaperPatternId) }
     var wallpaperPickerOpen by remember { mutableStateOf(false) }
     var clearConfirmOpen by remember { mutableStateOf(false) }
     var emojiComposerOpen by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
     val composerFocusRequester = remember { FocusRequester() }
     val composerKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val composerFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    val emojiReactionTargetState = remember { mutableStateOf<ChatMessage?>(null) }
+    val emojiReactionTargetState = remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<ChatMessage?>(null) }
     var emojiReactionTarget by emojiReactionTargetState
     var connectionSheetOpen by remember { mutableStateOf(false) }
     var connectionTesting by remember { mutableStateOf(false) }
     val menuView = LocalView.current
     val menuConfig = LocalConfiguration.current
     val menuDensity = LocalDensity.current
-    var typingPublished by remember(conversation.id) { mutableStateOf(false) }
-    var lastTypingPublishedAt by remember(conversation.id) { mutableStateOf(0L) }
-    var typingIdleJob by remember(conversation.id) { mutableStateOf<Job?>(null) }
+    var typingPublished by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+    var lastTypingPublishedAt by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(0L) }
+    var typingIdleJob by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Job?>(null) }
+    // Typing is best-effort presence, never a reason to lose or block a local draft/send.
+    // Each effect/callback captures its own room-bound publisher at composition time.
+    fun publishTypingSafely(active: Boolean) {
+        try {
+            onTypingChanged(active)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // No offline replay, message-content logging or per-keystroke failure snackbar.
+        }
+    }
+
     val typingLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(conversation.id, typingLifecycle) {
+    DisposableEffect(conversation.id, currentUserId, messageSessionIdentity, typingLifecycle) {
         // Capture this room's account-bound callback, not the next room's callback at disposal.
         val stopTyping = {
             typingIdleJob?.cancel()
             typingIdleJob = null
             if (typingPublished) {
                 typingPublished = false
-                onTypingChanged(false)
+                publishTypingSafely(false)
             }
         }
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -572,6 +604,50 @@ fun ChatDetailScreen(
     val isSelectionMode = selectedMessages.isNotEmpty()
     val selectionActions = remember(selectedMessages) { com.example.chat.ui.chats.detail.SelectionActionPolicy.available(selectedMessages) }
     androidx.activity.compose.BackHandler(isSelectionMode) { selectedIds = emptySet() }
+    val currentSelectionIds by rememberUpdatedState(selectedIds)
+
+    fun currentPermittedMessage(id: String, action: com.example.chat.ui.chats.detail.SelectionAction): ChatMessage? {
+        if (id.isBlank() || currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return null
+        val current = currentActionMessages.singleOrNull { it.id == id && it.conversationId == conversation.id } ?: return null
+        return current.takeIf { action in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(it)) }
+    }
+
+    fun currentEditableMessage(id: String): ChatMessage? =
+        currentPermittedMessage(id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.takeIf { target ->
+            target.senderId == currentUserId && MessageActionRegistry.getAvailableActions(target, true)
+                .any { it.type == MessageActionType.edit }
+        }
+
+    fun toggleCurrentReaction(messageId: String, emoji: String) {
+        if (!ReleaseFeatures.MESSAGE_REACTIONS || emoji.isBlank()) return
+        currentPermittedMessage(messageId, com.example.chat.ui.chats.detail.SelectionAction.star)?.let { current ->
+            onToggleReaction(current.id, emoji)
+        }
+    }
+
+    fun retryCurrentMessage(messageId: String) {
+        if (messageId.isBlank() || currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+        val current = currentActionMessages.singleOrNull { it.id == messageId && it.conversationId == conversation.id } ?: return
+        if (current.senderId == currentUserId && current.deliveryState == DeliveryState.failed &&
+            current.type != com.example.chat.domain.models.MessageType.system &&
+            !current.isDeletedForMe && !current.isDeletedForEveryone && !current.isRevokedBySender) {
+            onRetryMessage(current.id)
+        }
+    }
+
+    fun performSelectionAction(
+        action: com.example.chat.ui.chats.detail.SelectionAction,
+        block: (List<ChatMessage>) -> Unit,
+    ) {
+        if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+        val ids = currentSelectionIds
+        if (ids.isEmpty() || ids.any { it.isBlank() }) return
+        val current = currentActionMessages.filter { it.id in ids && it.conversationId == conversation.id }
+        // Missing/duplicated/cross-room identities must not turn a bulk action into a partial one.
+        if (current.size != ids.size || current.map { it.id }.toSet().size != ids.size) return
+        if (action !in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(current)) return
+        block(current)
+    }
 
     // One projection owns both rendered rows and all scroll destinations.
     // Selection and menus do not change projection or tile geometry. Validated album
@@ -602,7 +678,7 @@ fun ChatDetailScreen(
     }
     // Transition-guarded presence toasts: the initial snapshot (was == null) never toasts,
     // only a real false->true flip does. Typing toasts are direct-chat only.
-    var lastPresenceOnline by remember(conversation.id) { mutableStateOf<Boolean?>(null) }
+    var lastPresenceOnline by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(presenceIsOnline) {
         val was = lastPresenceOnline
         lastPresenceOnline = presenceIsOnline
@@ -612,7 +688,7 @@ fun ChatDetailScreen(
             com.example.chat.ui.chats.detail.PresenceToastPolicy.text(event)?.let { text -> scope.launch { snackbarHostState.showSnackbar(text) } }
         }
     }
-    var lastPeerTyping by remember(conversation.id) { mutableStateOf<Boolean?>(null) }
+    var lastPeerTyping by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(peerTyping) {
         val was = lastPeerTyping
         lastPeerTyping = peerTyping
@@ -639,12 +715,15 @@ fun ChatDetailScreen(
     // G10: messages that mention the current user. Structured metadata wins
     // (backend mention type pending); text fallback matches the host-passed
     // @handles. Own, deleted and revoked messages never count.
-    val mentionMessageIds = remember(messages, currentUserId, currentUserMentionHandles) {
-        val handles = currentUserMentionHandles.map { it.trim().lowercase().removePrefix("@") }.filter { it.isNotEmpty() }
+    val mentionPatterns = remember(currentUserMentionHandles) {
+        currentUserMentionHandles.map { it.trim().removePrefix("@") }.filter { it.isNotEmpty() }.distinct()
+            .map { handle -> Regex("(?<![\\p{L}\\p{N}_])@" + Regex.escape(handle) + "(?![\\p{L}\\p{N}_])", RegexOption.IGNORE_CASE) }
+    }
+    val mentionMessageIds = remember(messages, currentUserId, mentionPatterns) {
         messages.mapNotNull { m ->
             if (m.senderId == currentUserId || m.isDeletedForEveryone || m.isDeletedForMe || m.isRevokedBySender) return@mapNotNull null
             val metaMentions = (m.metadata["mentions"] as? List<*>)?.filterIsInstance<String>().orEmpty()
-            val hit = currentUserId in metaMentions || handles.any { h -> Regex("(?<![\\p{L}\\p{N}_])@" + Regex.escape(h) + "(?![\\p{L}\\p{N}_])", RegexOption.IGNORE_CASE).containsMatchIn(m.text) }
+            val hit = currentUserId in metaMentions || mentionPatterns.any { it.containsMatchIn(m.text) }
             if (hit) m.id else null
         }
     }
@@ -656,12 +735,17 @@ fun ChatDetailScreen(
     }
     val dayHeaderLocale = LocalConfiguration.current.locales[0] ?: java.util.Locale.getDefault()
     val dayHeaderFormatter = remember(dayHeaderLocale) { DateTimeFormatter.ofPattern("d MMM yyyy", dayHeaderLocale) }
-    var pendingScrollTarget by remember(conversation.id) { mutableStateOf<String?>(null) }
-    LaunchedEffect(pendingScrollTarget, timelineRows) {
+    var pendingScrollTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
+    LaunchedEffect(pendingScrollTarget, timelineRows, loadingMessages) {
         val target = pendingScrollTarget ?: return@LaunchedEffect
         val rowIndex = com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowIndex(timelineRows, target)
-        if (rowIndex >= 0) listState.animateScrollToItem(rowIndex)
-        pendingScrollTarget = null
+        if (rowIndex >= 0) {
+            listState.animateScrollToItem(rowIndex)
+            pendingScrollTarget = null
+        } else if (!loadingMessages) {
+            snackbarHostState.showSnackbar("That message is not in the loaded history.")
+            pendingScrollTarget = null
+        }
     }
     var previousCount by remember(conversation.id, messageSessionIdentity) { mutableIntStateOf(messages.size) }
     var openedAtLatest by remember(conversation.id, messageSessionIdentity) { mutableStateOf(false) }
@@ -700,25 +784,36 @@ fun ChatDetailScreen(
         }
     }
 
-    // New messages: follow the bottom when pinned, else count the unseen.
-    LaunchedEffect(messages.size) {
-        val delta = messages.size - previousCount
-        previousCount = messages.size
-        if (delta <= 0 || !initialPositionSettled) return@LaunchedEffect
+    // Compare identity/order, not list size: a history prepend is never a new arrival.
+    var previousMessageIds by remember(conversation.id, currentUserId, messageSessionIdentity) {
+        mutableStateOf(messages.map { it.id }.toSet())
+    }
+    val orderedMessageIds = messages.map { it.id }
+    LaunchedEffect(orderedMessageIds) {
+        val appended = com.example.chat.core.messages.ConversationArrivalPolicy.appendedIds(previousMessageIds, orderedMessageIds)
+        previousMessageIds = orderedMessageIds.toSet()
+        if (appended.isEmpty() || !initialPositionSettled) return@LaunchedEffect
         if (isNearBottom) {
             scrollToBottom()
             pendingBelowCount = 0
         } else {
-            pendingBelowCount += delta
+            pendingBelowCount += appended.size
         }
     }
 
     // Dart _performInChatSearch: case-insensitive substring over message
     // text in timeline order; first match auto-highlights.
     val searchMatchedIds = remember(messages, searchQuery) {
-        val q = searchQuery.trim().lowercase()
+        val q = searchQuery.trim()
         if (q.isEmpty()) emptyList()
-        else messages.filter { it.text.lowercase().contains(q) }.map { it.id }
+        else com.example.chat.ui.chats.detail.ConversationSearchPolicy.matchingIds(messages, q)
+    }
+
+    var pendingSearchJump by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf(false) }
+
+    LaunchedEffect(searchMatchedIds) {
+        searchMatchIndex = if (searchMatchedIds.isEmpty()) 0 else searchMatchIndex.coerceIn(1, searchMatchedIds.size)
+        if (highlightedMessageId !in searchMatchedIds) highlightedMessageId = null
     }
 
     var highlightClearJob by remember { mutableStateOf<Job?>(null) }
@@ -740,6 +835,8 @@ fun ChatDetailScreen(
     // synthesized placeholder task in orElse, so a linked id missing from the tasks
     // list still yields a card with message-derived fields (dueAt = createdAt + 3d).
     fun resolveTask(message: ChatMessage): ChatTask? = message.linkedTaskId?.let { id ->
+        tasks.firstOrNull { it.id == id }
+        /* Legacy synthesized task intentionally disabled. No authoritative due date exists.
         tasks.firstOrNull { it.id == id } ?: ChatTask(
             id = id,
             sourceConversationId = conversation.id,
@@ -752,6 +849,7 @@ fun ChatDetailScreen(
             createdAt = message.createdAt,
             updatedAt = message.createdAt,
         )
+        */
     }
 
     // Dart _toggleTaskStatus: lightImpact haptic + completed<->inbox flip (source :1200).
@@ -765,15 +863,22 @@ fun ChatDetailScreen(
 
     fun performSearch(query: String) {
         searchQuery = query
-        val q = query.trim().lowercase()
-        if (q.isEmpty()) {
+        if (query.isBlank()) {
+            pendingSearchJump = false
             searchMatchIndex = 0
             highlightedMessageId = null
-            return
+        } else {
+            // The memoized projection above is the only query scan; jump after it updates.
+            pendingSearchJump = true
         }
-        val matched = messages.filter { it.text.lowercase().contains(q) }.map { it.id }
-        searchMatchIndex = if (matched.isNotEmpty()) 1 else 0
-        matched.firstOrNull()?.let(::highlightAndJump)
+    }
+
+    LaunchedEffect(searchQuery, searchMatchedIds, pendingSearchJump) {
+        if (pendingSearchJump) {
+            pendingSearchJump = false
+            searchMatchIndex = if (searchMatchedIds.isEmpty()) 0 else 1
+            searchMatchedIds.firstOrNull()?.let(::highlightAndJump)
+        }
     }
 
     fun jumpToMatch(index: Int) {
@@ -828,18 +933,21 @@ fun ChatDetailScreen(
     // Dart _handleComposerChanged: persist draft, publish typing with a 5s
     // idle reset, and open the quick-reply overlay on '#'.
     fun handleComposerChanged(value: String) {
+        if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+        draftRevision += 1
         composerText = value
+        if (value.isEmpty()) recoveredViewOnceNeedsChoice = false
         onDraftChanged(value)
         val shouldType = value.trim().isNotEmpty()
         val tick = android.os.SystemClock.elapsedRealtime()
         if (com.example.chat.data.api.TypingCadencePolicy.shouldPublish(shouldType, typingPublished, tick, lastTypingPublishedAt)) {
             typingPublished = true
             lastTypingPublishedAt = tick
-            onTypingChanged(true)
+            publishTypingSafely(true)
         }
         if (!shouldType && typingPublished) {
             typingPublished = false
-            onTypingChanged(false)
+            publishTypingSafely(false)
         }
         typingIdleJob?.cancel()
         if (shouldType) {
@@ -847,7 +955,7 @@ fun ChatDetailScreen(
                 delay(com.example.chat.data.api.TypingCadencePolicy.IDLE_MS)
                 if (typingPublished) {
                     typingPublished = false
-                    onTypingChanged(false)
+                    publishTypingSafely(false)
                 }
             }
         }
@@ -879,7 +987,12 @@ fun ChatDetailScreen(
     }
 
     fun runAction(selected: ChatMessage, type: MessageActionType) {
-        val message = messages.firstOrNull { it.id == selected.id } ?: return
+        if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+        val message = currentActionMessages.singleOrNull { it.id == selected.id && it.conversationId == conversation.id } ?: return
+        if (message.id.isBlank()) return
+        // Recheck ownership-dependent menu eligibility at activation, not only when opening.
+        val validActions = MessageActionRegistry.getAvailableActions(message, message.senderId == currentUserId)
+        if (type !in setOf(MessageActionType.translate, MessageActionType.react) && validActions.none { it.type == type }) return
         // Anchored menus and the single-tap dialog share the same protected-content rules.
         val capabilities = com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(message))
         val required = when (type) {
@@ -898,6 +1011,7 @@ fun ChatDetailScreen(
             MessageActionType.edit -> {
                 // Dart sets the editing id + text and keeps the reply target.
                 editingMessage = message
+                recoveredViewOnceNeedsChoice = false
                 handleComposerChanged(message.text)
             }
             MessageActionType.star -> onToggleStar(message.id)
@@ -934,25 +1048,53 @@ fun ChatDetailScreen(
     // leading /task command routes to task creation instead of sending;
     // the reply target is cleared once the send starts.
     fun sendCurrent() {
-        val text = composerText.trim()
+        if (currentDraftOwner != draftOwner || !isMessageSessionCurrent()) return
+        val submittedDraft = composerText
+        val text = submittedDraft.trim()
         if (text.isEmpty() || sending) return
+        if (recoveredViewOnceNeedsChoice && editingMessage == null) {
+            scope.launch { snackbarHostState.showSnackbar("Choose a send mode for the recovered view-once text first. Nothing was sent.") }
+            return
+        }
+        val submittedOwner = draftOwner
         val editTarget = editingMessage
         if (editTarget != null) {
             sending = true
             handleComposerChanged("")
             editingMessage = null
             replyTarget = null
+            val editClearedRevision = draftRevision
             scope.launch {
                 try {
-                    onEditMessage(editTarget.id, text)
+                    if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
+                    val currentTarget = currentEditableMessage(editTarget.id)
+                        ?: throw IllegalStateException("The original message is no longer editable. Your edit is kept.")
+                    check(currentTarget.text == editTarget.text && currentTarget.editedAt == editTarget.editedAt) {
+                        "The original message changed. Review the restored edit before trying again."
+                    }
+                    onEditMessage(currentTarget.id, text)
                 } catch (error: Exception) {
-                    editingMessage = editTarget
-                    composerText = text
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    if (currentDraftOwner != submittedOwner) return@launch
+                    when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
+                        currentDraftOwner == submittedOwner, editClearedRevision, draftRevision, composerText)) {
+                        com.example.chat.core.messages.ConversationDraftRecovery.Decision.restore -> {
+                            val currentTarget = currentEditableMessage(editTarget.id)
+                            if (currentTarget != null) {
+                                editingMessage = currentTarget
+                                handleComposerChanged(submittedDraft)
+                            } else {
+                                recoverableDraft = ConversationRecoverableDraft(submittedDraft, ConversationRecoverableDraft.Kind.edit, editTarget.id)
+                            }
+                        }
+                        com.example.chat.core.messages.ConversationDraftRecovery.Decision.keepSeparately -> recoverableDraft = ConversationRecoverableDraft(submittedDraft, ConversationRecoverableDraft.Kind.edit, editTarget.id)
+                        com.example.chat.core.messages.ConversationDraftRecovery.Decision.ignore -> return@launch
+                    }
                     snackbarHostState.showSnackbar(
                         error.message?.removePrefix("Exception: ") ?: "Could not edit message",
                     )
                 } finally {
-                    sending = false
+                    if (currentDraftOwner == submittedOwner) sending = false
                 }
             }
             return
@@ -966,18 +1108,29 @@ fun ChatDetailScreen(
         sending = true
         handleComposerChanged("")
         replyTarget = null
+        val clearedRevision = draftRevision
         scope.launch {
             try {
+                if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
                 onSend(text)
+                if (currentDraftOwner != submittedOwner) return@launch
                 // Chaty #33: sending lands on the newest message even when the
                 // user was scrolled up reading history.
                 scrollToBottom()
             } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (currentDraftOwner != submittedOwner) return@launch
+                when (com.example.chat.core.messages.ConversationDraftRecovery.decide(
+                    currentDraftOwner == submittedOwner, clearedRevision, draftRevision, composerText)) {
+                    com.example.chat.core.messages.ConversationDraftRecovery.Decision.restore -> handleComposerChanged(submittedDraft)
+                    com.example.chat.core.messages.ConversationDraftRecovery.Decision.keepSeparately -> recoverableDraft = ConversationRecoverableDraft(submittedDraft)
+                    com.example.chat.core.messages.ConversationDraftRecovery.Decision.ignore -> return@launch
+                }
                 snackbarHostState.showSnackbar(
-                    error.message?.removePrefix("Exception: ") ?: "Could not send message",
+                    "Send was not confirmed. Draft kept; check the chat before sending again.",
                 )
             } finally {
-                sending = false
+                if (currentDraftOwner == submittedOwner) sending = false
             }
         }
     }
@@ -1254,16 +1407,16 @@ fun ChatDetailScreen(
                                     onMenu = { item, rect -> openMessageMenu(item, rect) },
                                     onReply = { item -> replyTarget = item },
                                     onReact = if (disableDoubleTapReaction || !ReleaseFeatures.MESSAGE_REACTIONS) null else ({ item ->
-                                        if (com.example.chat.ui.chats.detail.SelectionAction.star in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(item))) onToggleReaction(item.id, doubleTapReactionEmoji)
+                                        toggleCurrentReaction(item.id, doubleTapReactionEmoji)
                                     }))
                             }) else null,
                             onSwipeReply = if (row.messages.size > 1) null else ({ replyTarget = message }),
                             onDoubleTap = if (disableDoubleTapReaction || !ReleaseFeatures.MESSAGE_REACTIONS || row.messages.size > 1 || com.example.chat.ui.chats.detail.SelectionAction.star !in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(message))) {
                                 null
                             } else {
-                                { onToggleReaction(message.id, doubleTapReactionEmoji) }
+                                { toggleCurrentReaction(message.id, doubleTapReactionEmoji) }
                             },
-                            onReactionTap = { emoji -> if (ReleaseFeatures.MESSAGE_REACTIONS && com.example.chat.ui.chats.detail.SelectionAction.star in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(message))) onToggleReaction(message.id, emoji) },
+                            onReactionTap = { emoji -> toggleCurrentReaction(message.id, emoji) },
                             onMediaTapWithBounds = { rect -> onMediaTapWithBounds?.invoke(message, rect) ?: onMediaTap(message) },
                             onMediaTap = if (message.attachment == null) {
                                 null
@@ -1292,18 +1445,15 @@ fun ChatDetailScreen(
                                 }
                             },
                             onRetry = if (isMine && message.deliveryState == DeliveryState.failed) {
-                                { onRetryMessage(message.id) }
+                                { retryCurrentMessage(message.id) }
                             } else {
                                 null
                             },
                             task = resolveTask(message),
                             onTaskTap = {
                                 val currentTask = resolveTask(message)
-                                if (currentTask != null) {
-                                    onOpenTaskDetails(currentTask)
-                                } else {
-                                    onCreateTaskFromMessage(message)
-                                }
+                                if (currentTask != null) onOpenTaskDetails(currentTask)
+                                else scope.launch { snackbarHostState.showSnackbar("Task details are not available in the loaded data.") }
                             },
                             onTaskToggle = { resolveTask(message)?.let(::toggleTask) },
                             onTaskMenu = { rect ->
@@ -1430,7 +1580,7 @@ fun ChatDetailScreen(
                 AnchoredMessageContextMenu(
                     messageState = contextMenuMessageState, anchorRect = contextMenuAnchor, regionTop = messageRegionTop,
                     currentUserId = currentUserId, theme = theme, onAction = ::runAction,
-                    onToggleReaction = onToggleReaction, reactionTargetState = emojiReactionTargetState,
+                    onToggleReaction = ::toggleCurrentReaction, reactionTargetState = emojiReactionTargetState,
                 )
             }
 
@@ -1475,6 +1625,7 @@ fun ChatDetailScreen(
                             color = Color(theme.accentColor), modifier = Modifier.size(18.dp))
                     },
                     title = "Editing message",
+                    closeLabel = "Cancel editing message",
                     titleColor = Color(theme.accentColor),
                     subtitle = editing.text,
                     onClose = {
@@ -1484,6 +1635,45 @@ fun ChatDetailScreen(
                 )
             }
 
+            recoverableDraft?.let { failed ->
+                fun eligibleEditTarget(): ChatMessage? = failed.editMessageId?.let(::currentEditableMessage)
+                val canRestoreEdit = failed.kind != ConversationRecoverableDraft.Kind.edit || eligibleEditTarget() != null
+                val recoveryLabel = when (failed.kind) {
+                    ConversationRecoverableDraft.Kind.edit -> "Restore failed edit"
+                    ConversationRecoverableDraft.Kind.viewOnce -> "Restore failed view-once text (choose send mode again)"
+                    ConversationRecoverableDraft.Kind.message -> "Restore failed message"
+                }
+                TextButton(
+                    enabled = composerText.isEmpty() && editingMessage == null && canRestoreEdit,
+                    onClick = {
+                        if (currentDraftOwner != draftOwner || !isMessageSessionCurrent() || composerText.isNotEmpty() || editingMessage != null) return@TextButton
+                        if (failed.kind == ConversationRecoverableDraft.Kind.edit) {
+                            val target = eligibleEditTarget() ?: return@TextButton
+                            editingMessage = target
+                            replyTarget = null
+                        }
+                        handleComposerChanged(failed.text)
+                        recoveredViewOnceNeedsChoice = failed.kind == ConversationRecoverableDraft.Kind.viewOnce
+                        recoverableDraft = null
+                    },
+                ) {
+                    Text(when {
+                        !canRestoreEdit -> "Failed edit kept. Original message is no longer editable."
+                        editingMessage != null -> "Failed draft kept. Finish or cancel the current edit before restoring it."
+                        composerText.isNotEmpty() -> "Failed draft kept. Clear this draft before restoring it."
+                        else -> recoveryLabel
+                    })
+                }
+            }
+            if (recoveredViewOnceNeedsChoice && composerText.isNotEmpty()) {
+                Text("Recovered view-once text: choose Send as view once again, or explicitly use regular send.",
+                    color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 16.dp))
+                TextButton(onClick = {
+                    if (currentDraftOwner == draftOwner && isMessageSessionCurrent() && editingMessage == null) {
+                        recoveredViewOnceNeedsChoice = false
+                    }
+                }) { Text("Use regular send for recovered text") }
+            }
             // Reply banner (Dart _replyTarget section).
             replyTarget?.let { target ->
                 BannerRow(
@@ -1493,6 +1683,7 @@ fun ChatDetailScreen(
                             color = Color(theme.accentColor), modifier = Modifier.size(18.dp))
                     },
                     title = "Replying to ${resolveSenderName(target.senderId)}",
+                    closeLabel = "Cancel reply",
                     titleColor = Color(theme.accentColor),
                     subtitle = target.text,
                     onClose = { replyTarget = null },
@@ -1503,37 +1694,44 @@ fun ChatDetailScreen(
                     Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
                 SelectionActions(
                     theme = theme,
+                    selectedCount = selectedMessages.size,
                     actions = if (onForwardSelection != null || selectedMessages.size == 1) selectionActions
                         else selectionActions - com.example.chat.ui.chats.detail.SelectionAction.forward,
                     onCopy = {
-                        val msgs = messages
-                            .filter { selectedIds.contains(it.id) }
-                            .joinToString("\n") { m ->
-                                if (hideDateAndName) {
-                                    m.text
-                                } else {
-                                    val timeStr = selectionCopyFormatter.format(
-                                        m.createdAt.atZone(ZoneId.systemDefault()),
-                                    )
+                        performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.copy) { current ->
+                            val msgs = current.joinToString("\n") { m ->
+                                if (hideDateAndName) m.text else {
+                                    val timeStr = selectionCopyFormatter.format(m.createdAt.atZone(ZoneId.systemDefault()))
                                     "[$timeStr, ${resolveSenderName(m.senderId)}]: ${m.text}"
                                 }
                             }
-                        clipboard.setText(AnnotatedString(msgs))
-                        selectedIds = emptySet()
-                        scope.launch { snackbarHostState.showSnackbar("Messages copied") }
+                            clipboard.setText(AnnotatedString(msgs))
+                            selectedIds = emptySet()
+                            scope.launch { snackbarHostState.showSnackbar("Messages copied") }
+                        }
                     },
                     onForward = {
-                        onForwardSelection?.invoke(selectedMessages)
-                            ?: selectedMessages.singleOrNull()?.let(onForward)
-                        selectedIds = emptySet()
+                        performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.forward) { current ->
+                            if (onForwardSelection != null) {
+                                onForwardSelection(current)
+                                selectedIds = emptySet()
+                            } else if (current.size == 1) {
+                                onForward(current.single())
+                                selectedIds = emptySet()
+                            }
+                        }
                     },
                     onStar = {
-                        selectedIds.forEach(onToggleStar)
-                        selectedIds = emptySet()
+                        performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.star) { current ->
+                            current.forEach { onToggleStar(it.id) }
+                            selectedIds = emptySet()
+                        }
                     },
                     onDelete = {
-                        selectedIds.forEach { onDeleteMessage(it, false) }
-                        selectedIds = emptySet()
+                        performSelectionAction(com.example.chat.ui.chats.detail.SelectionAction.delete) { current ->
+                            current.forEach { onDeleteMessage(it.id, false) }
+                            selectedIds = emptySet()
+                        }
                     },
                 )
                     }
@@ -1597,31 +1795,48 @@ fun ChatDetailScreen(
                     onVideoHoldCancel = onVideoHoldCancel,
                     onSend = ::sendCurrent,
                     onSendViewOnce = {
-                        val plain = composerText.trim()
-                        if (!sending && plain.isNotEmpty() && editingMessage == null) {
+                        val submittedDraft = composerText
+                        val plain = submittedDraft.trim()
+                        if (currentDraftOwner == draftOwner && isMessageSessionCurrent() && !sending && plain.isNotEmpty() && editingMessage == null) {
                             if (!conversation.isDirect || secureChannelEnabled) scope.launch {
                                 snackbarHostState.showSnackbar("View-once text requires a regular direct chat. Nothing was sent.")
                             } else {
+                                val submittedOwner = draftOwner
                                 sending = true
                                 scope.launch {
+                                    var clearedRevision: Int? = null
                                     try {
+                                        check(currentDraftOwner == submittedOwner && isMessageSessionCurrent()) { "Chat session changed." }
                                         check(com.example.chat.ServiceLocator.apiBackend.supportsViewOnceText(viewOnceOwner)) {
                                             "View-once text is unavailable on this server. Nothing was sent."
                                         }
-                                        // The draft may have changed while capability validation suspended.
+                                        // Capability validation can suspend; recheck owner and unchanged draft before clearing.
+                                        check(currentDraftOwner == submittedOwner && isMessageSessionCurrent()) { "Chat session changed." }
                                         check(composerText.trim() == plain) { "Draft changed. Choose Send as view once again." }
                                         handleComposerChanged("")
+                                        clearedRevision = draftRevision
                                         com.example.chat.ServiceLocator.apiBackend.sendViewOnceText(conversation.id, plain, viewOnceOwner)
                                     } catch (e: Exception) {
                                         if (e is kotlinx.coroutines.CancellationException) throw e
-                                        snackbarHostState.showSnackbar(e.message ?: "Send not confirmed. Check the chat before sending again.")
-                                    } finally { sending = false }
+                                        if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
+                                        val revision = clearedRevision
+                                        if (revision != null) {
+                                            recoverableDraft = ConversationRecoverableDraft(submittedDraft, ConversationRecoverableDraft.Kind.viewOnce)
+                                            snackbarHostState.showSnackbar("View-once send was not confirmed. Text kept separately; check the chat before choosing a send mode again.")
+                                        } else {
+                                            snackbarHostState.showSnackbar("View-once text could not be started. Your draft was not cleared.")
+                                        }
+                                    } finally {
+                                        if (currentDraftOwner == submittedOwner) sending = false
+                                    }
                                 }
                             }
                         }
                     },
                     onScheduleSend = {
-                        if (!sending && editingMessage == null && composerText.isNotBlank()) {
+                        if (recoveredViewOnceNeedsChoice) {
+                            scope.launch { snackbarHostState.showSnackbar("Choose regular send for this recovered text before scheduling it. Nothing was scheduled.") }
+                        } else if (!sending && editingMessage == null && composerText.isNotBlank()) {
                             if (secureChannelEnabled) scope.launch { snackbarHostState.showSnackbar("Scheduling is unavailable in encrypted chats.") }
                             else scheduleDraft = composerText.trim()
                         }
@@ -1670,23 +1885,29 @@ fun ChatDetailScreen(
                     localEditText = localMessageStore.text(tapped) ?: tapped.text
                 },
                 com.example.chat.ui.chats.detail.MessageMoreOption("Copy", textAllowed) { runAction(tapped, MessageActionType.copy) },
-                com.example.chat.ui.chats.detail.MessageMoreOption("Copy Selection", textAllowed) { copySelectionMessage = tapped },
-                com.example.chat.ui.chats.detail.MessageMoreOption("Translate", textAllowed) { translateMessage = tapped },
+                com.example.chat.ui.chats.detail.MessageMoreOption("Copy Selection", textAllowed) {
+                    currentPermittedMessage(tapped.id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.let { copySelectionMessage = it }
+                },
+                com.example.chat.ui.chats.detail.MessageMoreOption("Translate", textAllowed) { runAction(tapped, MessageActionType.translate) },
                 com.example.chat.ui.chats.detail.MessageMoreOption("Change Translator Language", true) { choosingTranslatorLanguage = true },
                 com.example.chat.ui.chats.detail.MessageMoreOption("interaction", ReleaseFeatures.MESSAGE_REACTIONS && standard) { emojiReactionTarget = tapped },
                 com.example.chat.ui.chats.detail.MessageMoreOption("Double Tap Reaction", ReleaseFeatures.MESSAGE_REACTIONS && onDoubleTapReactionEmojiChanged != null) { choosingDoubleTapEmoji = true },
-                com.example.chat.ui.chats.detail.MessageMoreOption("Image quote", textAllowed) { quoteMessageId = tapped.id },
+                com.example.chat.ui.chats.detail.MessageMoreOption("Image quote", textAllowed) {
+                    currentPermittedMessage(tapped.id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.let { quoteMessageId = it.id }
+                },
                 com.example.chat.ui.chats.detail.MessageMoreOption("Share", textAllowed) {
-                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(android.content.Intent.EXTRA_TEXT, tapped.text)
-                    }
-                    try { shareContext.startActivity(android.content.Intent.createChooser(intent, "Share message")) }
-                    catch (_: android.content.ActivityNotFoundException) {
-                        scope.launch { snackbarHostState.showSnackbar("No app is available to share this message.") }
+                    currentPermittedMessage(tapped.id, com.example.chat.ui.chats.detail.SelectionAction.copy)?.let { current ->
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_TEXT, current.text)
+                        }
+                        try { shareContext.startActivity(android.content.Intent.createChooser(intent, "Share message")) }
+                        catch (_: android.content.ActivityNotFoundException) {
+                            scope.launch { snackbarHostState.showSnackbar("No app is available to share this message.") }
+                        }
                     }
                 },
-                com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.isStarred) "Unstar" else "Star", standard) { onToggleStar(tapped.id) },
+                com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.isStarred) "Unstar" else "Star", standard) { runAction(tapped, MessageActionType.star) },
                 com.example.chat.ui.chats.detail.MessageMoreOption("Starred messages", true) { showStarredInChat = true },
                 com.example.chat.ui.chats.detail.MessageMoreOption(if (tapped.id in readAlertWatchedIds) "Stop Read Notification" else "Notify When Message Read", com.example.chat.ui.chats.detail.ReadAlertPolicy.canWatch(tapped, currentUserId, conversation.isDirect) || tapped.id in readAlertWatchedIds) { scope.launch {
                     try {
@@ -1750,14 +1971,37 @@ fun ChatDetailScreen(
         )
     }
     translateMessage?.let { target ->
-        val language = com.example.chat.core.translate.ChatTranslationPolicy.languages
-            .first { it.code == translatorTarget }
-        com.example.chat.ui.chats.detail.MessageTranslateDialog(
-            sourceText = target.text,
-            targetLanguage = language,
-            client = gTranslateClient,
-            onDismiss = { translateMessage = null },
-        )
+        // Only known online server choices may offer the external provider approval dialog.
+        val onlineTranslationAllowed = when (translateOption.trim().lowercase(java.util.Locale.ROOT)) {
+            "server", "server + no outside apps", "server + in-outside apps" -> true
+            else -> false
+        }
+        if (!onlineTranslationAllowed) {
+            com.example.chat.ui.kit.ChatyConfirmationDialog(
+                onDismissRequest = { translateMessage = null },
+                title = { Text("Translation unavailable") },
+                text = { Text("Your translation setting does not allow this online provider. Nothing was sent. On-device translation is not available here.") },
+                confirmButton = { TextButton(onClick = { translateMessage = null }) { Text("Close") } },
+            )
+        } else {
+            val language = com.example.chat.core.translate.ChatTranslationPolicy.languages
+                .firstOrNull { it.code == translatorTarget }
+                ?: com.example.chat.core.translate.ChatTranslationPolicy.languages.first()
+            com.example.chat.ui.chats.detail.MessageTranslateDialog(
+                sourceText = target.text,
+                targetLanguage = language,
+                client = gTranslateClient,
+                isSourceEligible = {
+                    val current = currentActionMessages.singleOrNull { it.id == target.id && it.conversationId == conversation.id }
+                    currentDraftOwner == draftOwner && isMessageSessionCurrent() &&
+                        current != null && current.text == target.text &&
+                        com.example.chat.ui.chats.detail.SelectionAction.copy in
+                            com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(current)) &&
+                        com.example.chat.ui.chats.detail.ConversationSearchPolicy.matchingIds(listOf(current), current.text).isNotEmpty()
+                },
+                onDismiss = { translateMessage = null },
+            )
+        }
     }
     if (choosingTranslatorLanguage) {
         com.example.chat.ui.chats.detail.TranslatorLanguageDialog(
@@ -1772,7 +2016,7 @@ fun ChatDetailScreen(
     quoteMessageId?.let { id -> messages.firstOrNull { it.id == id } }
         ?.takeIf { com.example.chat.ui.chats.detail.SelectionAction.copy in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(it)) }?.let { target ->
         com.example.chat.ui.chats.detail.MessageQuoteDialog(target, resolveQuoteSender(target.senderId), resolveSenderName(target.senderId),
-            currentMessage = { if (isMessageSessionCurrent()) messages.firstOrNull { it.id == target.id } else null }, onClose = { quoteMessageId = null })
+            currentMessage = { currentPermittedMessage(target.id, com.example.chat.ui.chats.detail.SelectionAction.copy) }, onClose = { quoteMessageId = null })
     }
     localEditMessageId?.let { id -> messages.firstOrNull { it.id == id } }
         ?.takeIf { com.example.chat.core.messages.LocalMessageOverridePolicy.editable(it) }?.let { target ->
@@ -1955,7 +2199,7 @@ fun ChatDetailScreen(
                 headerIconsColor = convPrefs.emojiHeaderIconsColor?.let(::Color),
                 backgroundColor = convPrefs.emojiPickerBgColor?.let(::Color),
                 onEmojiPicked = { emoji ->
-                    if (emoji.isNotEmpty() && ReleaseFeatures.MESSAGE_REACTIONS) onToggleReaction(target.id, emoji)
+                    toggleCurrentReaction(target.id, emoji)
                     emojiReactionTarget = null
                 },
             )
@@ -2380,6 +2624,9 @@ private fun AnchoredMessageContextMenu(
                 Row(
                     Modifier
                         .offset(x = placement.reactionRailLeftDp, y = placement.reactionRailTopDp)
+                        .widthIn(max = placement.reactionRailMaxWidthDp)
+                        .heightIn(max = placement.reactionRailMaxHeightDp)
+                        .clip(CircleShape)
                         .background(surface, CircleShape)
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                         .shadow(elevation = 6.dp, shape = CircleShape)
@@ -2423,7 +2670,7 @@ private fun AnchoredMessageContextMenu(
             Column(
                 Modifier
                     .offset(x = placement.menuLeftDp, y = placement.menuTopDp)
-                    .widthIn(max = 260.dp)
+                    .widthIn(max = placement.menuMaxWidthDp)
                     .heightIn(max = placement.menuMaxHeightDp)
                     .shadow(elevation = 12.dp, shape = com.example.chat.ui.kit.ChatyModalShape)
                     .clip(com.example.chat.ui.kit.ChatyModalShape)
@@ -2485,44 +2732,47 @@ private fun AnchoredMessageContextMenu(
 
 @Composable
 private fun SelectionHeader(theme: ThemeConfig, count: Int, onCancel: () -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Color(theme.surfaceColor)), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onCancel) {
+    Row(Modifier.fillMaxWidth().background(Color(theme.surfaceColor)).focusGroup(), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onCancel, modifier = Modifier.size(48.dp)) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Cancel selection", color = Color(theme.primaryTextColor))
         }
-        Text("$count selected", color = Color(theme.primaryTextColor), fontWeight = FontWeight.W700, fontSize = 16.sp)
+        Text("$count selected", modifier = Modifier.semantics { stateDescription = "$count selected messages" }, color = Color(theme.primaryTextColor), fontWeight = FontWeight.W700, fontSize = 16.sp)
     }
 }
 
 @Composable
 private fun SelectionActions(
     theme: ThemeConfig,
+    selectedCount: Int,
     actions: Set<com.example.chat.ui.chats.detail.SelectionAction>,
     onCopy: () -> Unit,
     onForward: () -> Unit,
     onStar: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(Modifier.background(Color(theme.surfaceColor), RoundedCornerShape(14.dp)).padding(vertical = 4.dp),
+    Row(Modifier.background(Color(theme.surfaceColor), RoundedCornerShape(14.dp))
+        .horizontalScroll(rememberScrollState()).focusGroup().padding(vertical = 4.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically) {
-        if (com.example.chat.ui.chats.detail.SelectionAction.forward in actions) SelectionActionButton(theme, "Forward", onForward) {
+        if (com.example.chat.ui.chats.detail.SelectionAction.forward in actions) SelectionActionButton(theme, "Forward", "Forward $selectedCount selected messages", onForward) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.forward, semanticLabel = null, color = Color(theme.primaryTextColor))
         }
-        if (com.example.chat.ui.chats.detail.SelectionAction.copy in actions) SelectionActionButton(theme, "Copy", onCopy) {
+        if (com.example.chat.ui.chats.detail.SelectionAction.copy in actions) SelectionActionButton(theme, "Copy", "Copy $selectedCount selected messages", onCopy) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.copy, semanticLabel = null, color = Color(theme.primaryTextColor))
         }
-        if (com.example.chat.ui.chats.detail.SelectionAction.delete in actions) SelectionActionButton(theme, "Delete", onDelete) {
+        if (com.example.chat.ui.chats.detail.SelectionAction.delete in actions) SelectionActionButton(theme, "Delete", "Delete $selectedCount selected messages", onDelete) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.deleteOutline, semanticLabel = null, color = Color(theme.primaryTextColor))
         }
-        if (com.example.chat.ui.chats.detail.SelectionAction.star in actions) SelectionActionButton(theme, "Star", onStar) {
-            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, color = Color(theme.primaryTextColor))
+        if (com.example.chat.ui.chats.detail.SelectionAction.star in actions) SelectionActionButton(theme, "Star", "Star $selectedCount selected messages", onStar) {
+            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, semanticLabel = null, color = Color(theme.primaryTextColor))
         }
     }
 }
 
 @Composable
-private fun SelectionActionButton(theme: ThemeConfig, label: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
-    TextButton(onClick = onClick) {
+private fun SelectionActionButton(theme: ThemeConfig, label: String, actionLabel: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp)
+        .semantics(mergeDescendants = true) { contentDescription = actionLabel }) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             icon()
             Text(label, color = Color(theme.primaryTextColor), fontSize = 11.sp)
@@ -2535,6 +2785,7 @@ private fun BannerRow(
     theme: ThemeConfig,
     icon: @Composable () -> Unit,
     title: String,
+    closeLabel: String,
     titleColor: Color,
     subtitle: String,
     onClose: () -> Unit,
@@ -2543,7 +2794,8 @@ private fun BannerRow(
         Modifier
             .fillMaxWidth()
             .background(Color(theme.cardColor))
-            .padding(horizontal = 14.dp, vertical = 7.dp),
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon()
@@ -2554,12 +2806,12 @@ private fun BannerRow(
                 subtitle,
                 color = Color(theme.secondaryTextColor),
                 fontSize = 11.5.sp,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(onClick = onClose) {
-            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Cancel",
+        IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
+            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = closeLabel,
                 color = Color(theme.primaryTextColor), modifier = Modifier.size(18.dp))
         }
     }
@@ -2587,7 +2839,7 @@ private fun SearchHeader(
             .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
+        IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back,
                 semanticLabel = "Back",
                 color = Color(theme.primaryTextColor),
@@ -2596,7 +2848,7 @@ private fun SearchHeader(
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    "Search conversation…",
+                    "Search loaded history",
                     color = Color(theme.secondaryTextColor),
                     fontSize = (15.5 * theme.fontScale).sp,
                 )
@@ -2609,18 +2861,25 @@ private fun SearchHeader(
                     fontSize = (15.5 * theme.fontScale).sp,
                 ),
                 cursorBrush = SolidColor(Color(theme.accentColor)),
-                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).semantics {
+                    contentDescription = "Search messages in loaded history"
+                },
+                singleLine = true,
             )
         }
+        if (query.isNotBlank() && matchCount == 0) Text("No matches", color = Color(theme.secondaryTextColor), fontSize = 12.sp,
+            modifier = Modifier.semantics { stateDescription = "No matches in loaded history" })
         if (matchCount > 0) {
             Text(
-                "$matchIndex of $matchCount",
+                "${matchIndex.coerceIn(1, matchCount)} of $matchCount",
                 color = Color(theme.secondaryTextColor),
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.W600,
-                modifier = Modifier.padding(horizontal = 6.dp),
+                modifier = Modifier.padding(horizontal = 6.dp).semantics {
+                    stateDescription = "Match ${matchIndex.coerceIn(1, matchCount)} of $matchCount in loaded history"
+                },
             )
-            IconButton(onClick = onPrevious) {
+            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.Rounded.KeyboardArrowUp,
                     contentDescription = "Previous match",
@@ -2628,7 +2887,7 @@ private fun SearchHeader(
                     modifier = Modifier.size(22.dp),
                 )
             }
-            IconButton(onClick = onNext) {
+            IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.Rounded.KeyboardArrowDown,
                     contentDescription = "Next match",
@@ -2637,9 +2896,9 @@ private fun SearchHeader(
                 )
             }
         }
-        IconButton(onClick = onClose) {
+        IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
-                semanticLabel = "Clear search",
+                semanticLabel = if (query.isEmpty()) "Close search" else "Clear search",
                 color = Color(theme.primaryTextColor),
             )
         }
