@@ -44,12 +44,12 @@ class ScopedCallCoordinator(
         client!! to requestScope!!
     }
     fun socketSignal(expected: ApiAccountScope, signal: Map<String, Any?>) {
-        if (!legacyAllowed(expected)) { inboxWake(expected); return }
         guarded(expected) {
             synchronized(stateLock) {
                 if (account === expected && dedup.accept(expected.generation, signal, clock())) deliver(expected, signal)
             }
         }
+        if (!legacyAllowed(expected)) inboxWake(expected)
     }
     fun send(expected: ApiAccountScope, target: String, signal: Map<String, Any?>) {
         guarded(expected) {

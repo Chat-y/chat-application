@@ -1181,6 +1181,12 @@ object ServiceLocator {
                 if (cleanup != null) appScope.launch { cleanup() }
             }
             apiBackend.addScopedCallSignalListener { expected, data ->
+                val eventId = data["event_id"]?.toString() ?: data["id"]?.toString()
+                if (!eventId.isNullOrBlank()) {
+                    val accKey = com.example.chat.data.api.ApiAccountRoutingCanonicalizer.accountKey(expected.tenantId, expected.baseUrl, expected.userId.orEmpty()).orEmpty()
+                    val key = "${com.example.chat.data.api.ApiAccountRoutingCanonicalizer.accountHash(accKey)}:$eventId"
+                    handledCallInboxEvents.add(key)
+                }
                 appScope.launch {
                     svc.handleRemoteSignal(data,
                         validScope = { apiBackend.authSnapshot() === expected },

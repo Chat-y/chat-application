@@ -480,6 +480,8 @@ class ApiRealtimeClient(
                         val inner = signal["sender_id"]?.toString().orEmpty()
                         if (outer.isNotEmpty() && inner.isNotEmpty() && outer != inner) return
                         if (inner.isEmpty() && outer.isNotEmpty()) signal["sender_id"] = outer
+                        val eventId = payload.optString("event_id", "").ifEmpty { payload.optString("id", "") }
+                        if (eventId.isNotEmpty() && !signal.containsKey("event_id")) signal["event_id"] = eventId
                         listener?.onScopedCallSignal(signal, socketScope)
                     }
                 }
