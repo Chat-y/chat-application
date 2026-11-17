@@ -18,7 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import com.example.chat.ui.kit.chatyDepth
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -103,11 +103,31 @@ fun MessageTranslateDialog(
             }
         },
         confirmButton = {
-            if (!approved) TextButton(onClick = { approved = true }) { Text("Translate") }
-            else if (result?.isFailure == true) TextButton(onClick = { retry += 1 }) { Text("Retry") }
-            else TextButton(onClick = onDismiss) { Text("Close") }
+            if (!approved) // Previous stock text action:
+            // TextButton(onClick = { approved = true }) { Text("Translate") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Translate",
+                onClick = { approved = true },
+            )
+            else if (result?.isFailure == true) // Previous stock text action:
+            // TextButton(onClick = { retry += 1 }) { Text("Retry") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Retry",
+                onClick = { retry += 1 },
+            )
+            else // Previous stock text action:
+            // TextButton(onClick = onDismiss) { Text("Close") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Close",
+                onClick = onDismiss,
+            )
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { // Previous stock text action:
+        // TextButton(onClick = onDismiss) { Text("Cancel") }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = "Cancel",
+            onClick = onDismiss,
+        ) },
     )
 }
 
@@ -130,7 +150,8 @@ fun TranslatorLanguageDialog(
         ) {
             Column(
                 Modifier.widthIn(max = 480.dp).fillMaxWidth().heightIn(max = maxHeight * 0.80f)
-                    .shadow(20.dp, shape).clip(shape).background(colors.surfaceElevated),
+                    // .shadow(20.dp, shape).clip(shape).background(colors.surfaceElevated),
+                    .chatyDepth(20.dp, shape).clip(shape).background(colors.surfaceElevated),
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Translator language", color = colors.foreground, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -188,3 +209,9 @@ private fun TranslatorLanguageRow(language: ChatTranslationPolicy.Language, sele
         if (selected) ChatyIcon(ChatyIconId.check, semanticLabel = null, color = colors.accent)
     }
 }
+
+// Complete original-line retention for review (inactive).
+            //             if (!approved) TextButton(onClick = { approved = true }) { Text("Translate") }
+            //             else if (result?.isFailure == true) TextButton(onClick = { retry += 1 }) { Text("Retry") }
+            //             else TextButton(onClick = onDismiss) { Text("Close") }
+        //         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

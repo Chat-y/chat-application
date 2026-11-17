@@ -1,5 +1,7 @@
 package com.example.chat.ui.settings
 
+import com.example.chat.ui.navigation.ReferenceLayoutMetrics as ProfileMetrics
+
 import com.example.chat.ReleaseFeatures
 
 import androidx.compose.foundation.background
@@ -8,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.example.chat.ui.effects.iosItemEntrance
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -113,6 +116,9 @@ enum class SettingsDestination {
     Calls, StorageMedia, Permissions, BackupRestore, WasteCleaning, About, DynamicIsland,
     PrivacyPolicy, ShareChaty, ToastNotifications,
     EditProfile, SearchSettings, QrCode, NetworkUsage, DataUsage,
+    HomeViewOptions, HomeScratchpad, HomeSavedViews, HomeRecentViews,
+    HomeKeyboardShortcuts, HomeAppearanceCheck, HomeCatchUpGuide,
+    HomeNewGroup, HomeCameraEffects, HomeQrScan, HomeAccountSettings, HomeToggleBrightness,
 }
 
 /** Dart ProfileMediaSource. */
@@ -143,6 +149,23 @@ private val deferredDestinations: Set<SettingsDestination> = buildSet {
 private val rootGroups: List<RootGroup> by lazy(LazyThreadSafetyMode.PUBLICATION) { allRootGroups
     .map { g -> g.copy(rows = g.rows.filterNot { it.dest in deferredDestinations }) }
     .filter { it.rows.isNotEmpty() } }
+
+/** Moved Home actions. Only the live Home owner can advertise a working receiver.
+ * Account/brightness preserve the exact existing Home shortcuts, not replacement routes. */
+private val homeToolRows: List<RootRow> = listOf(
+    RootRow(SettingsDestination.HomeViewOptions, Icons.Outlined.Home, RootTint.primary, "Home view options", "Filter, grouping and order for this Home session"),
+    RootRow(SettingsDestination.HomeScratchpad, Icons.Outlined.Edit, RootTint.primary, "Temporary scratchpad", "Temporary text, not saved, synced or sent"),
+    RootRow(SettingsDestination.HomeSavedViews, Icons.Outlined.Home, RootTint.primary, "Saved Home views", "Named views for this account's Home session"),
+    RootRow(SettingsDestination.HomeRecentViews, Icons.Outlined.Home, RootTint.primary, "Recent Home views", "Restore a view from this Home session"),
+    RootRow(SettingsDestination.HomeKeyboardShortcuts, Icons.Outlined.Info, RootTint.primary, "Keyboard shortcuts", "Show the existing Home shortcut guide"),
+    RootRow(SettingsDestination.HomeAppearanceCheck, Icons.Outlined.Palette, RootTint.primary, "Check Home appearance", "Open the existing Home appearance check"),
+    RootRow(SettingsDestination.HomeCatchUpGuide, Icons.Outlined.Info, RootTint.primary, "How to catch up", "Show the Home catch-up guide"),
+    RootRow(SettingsDestination.HomeNewGroup, Icons.Outlined.ChatBubbleOutline, RootTint.primary, "New Group", "Choose people for a new group"),
+    RootRow(SettingsDestination.HomeCameraEffects, Icons.Outlined.Wallpaper, RootTint.primary, "Camera Effects", "Open the existing camera effects"),
+    RootRow(SettingsDestination.HomeQrScan, Icons.Outlined.Widgets, RootTint.primary, "QR / Scan", "Open the existing QR action"),
+    RootRow(SettingsDestination.HomeAccountSettings, Icons.Outlined.Edit, RootTint.primary, "Account settings", "Open the same Profile screen as the Home shortcut"),
+    RootRow(SettingsDestination.HomeToggleBrightness, Icons.Outlined.ColorLens, RootTint.primary, "Toggle light / dark", "Switch the current theme brightness"),
+)
 
 private val allRootGroups: List<RootGroup> = listOf(
     RootGroup("Devices", listOf(
@@ -201,6 +224,8 @@ fun SettingsRootScreen(
     onPickAvatar: suspend (ProfileMediaSource) -> Unit,
     onPickBanner: suspend (ProfileMediaSource) -> Unit,
     onLogout: () -> Unit,
+    // Empty by default: never show moved actions without an installed Home receiver.
+    availableHomeTools: Set<SettingsDestination> = emptySet(),
 ) {
     // Superseded broad preference invalidation: rememberPreferencesVersion(preferences)
     val colors = LocalAppColors.current
@@ -233,8 +258,14 @@ fun SettingsRootScreen(
     val rootPreferences by rootPreferencesFlow.collectSettingsState()
     // Previous broad controller read: val callAudience = preferences.privacy.whoCanCallMe
     val callAudience = rootPreferences.first
-    val renderedRootGroups = remember(callAudience) {
-        rootGroups.map { group ->
+    // Existing groups and moved Home tools share the same row renderer and theme tokens.
+    val renderedRootGroups = remember(callAudience, availableHomeTools) {
+        val movedRows = homeToolRows.filter { it.dest in availableHomeTools }
+        val groups = if (movedRows.isEmpty()) rootGroups else rootGroups.toMutableList().apply {
+            add(indexOfFirst { it.title == "Messages and calls" }.coerceAtLeast(0), RootGroup("Home tools", movedRows))
+        }
+        // Previous source: rootGroups.map { group -> ... }
+        groups.map { group ->
             RootGroup(group.title, group.rows.map { row ->
                 if (row.dest == SettingsDestination.Calls) row.copy(subtitle = "Who can call you: $callAudience") else row
             })
@@ -297,7 +328,9 @@ fun SettingsRootScreen(
                 else Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_settings), Modifier.weight(1f).semantics { heading() }, color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 20.sp) // was: "Settings"
                 IconButton(onClick = { onNavigate(SettingsDestination.EditProfile) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit profile", modifier = Modifier.size(24.dp), color = colors.foreground) }
                 IconButton(onClick = { onNavigate(SettingsDestination.SearchSettings) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = "Search settings", modifier = Modifier.size(24.dp), color = colors.foreground) }
-                IconButton(onClick = { onNavigate(SettingsDestination.QrCode) }) { Icon(Icons.Rounded.QrCode2, "QR code", Modifier.size(25.dp), tint = colors.foreground) }
+                IconButton(onClick = { onNavigate(SettingsDestination.QrCode) }) {
+//Icon(Icons.Rounded.QrCode2, "QR code", Modifier.size(25.dp), tint = colors.foreground)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.qrCode, Icons.Rounded.QrCode2, "QR code", Modifier.size(25.dp), tint = colors.foreground) }
             }
             // R2/R3: grouped lists capped at 720dp centered on larger
             // windows (approved responsive plan 8 Nov 2026).
@@ -328,6 +361,7 @@ fun SettingsRootScreen(
                         .border(1.dp, colors.borderSubtle, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                         .navigationBarsPadding().padding(top = 12.dp, bottom = 16.dp),
                 ) {
+                    var settingsRowOrdinal = -1
                     renderedRootGroups.forEach { group ->
                         Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp)) {
                             Text(group.title, Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp).semantics { heading() }, color = colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -336,6 +370,11 @@ fun SettingsRootScreen(
                                     .border(1.dp, colors.borderSubtle, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)),
                             ) {
                                 group.rows.forEachIndexed { i, row ->
+                                    settingsRowOrdinal += 1
+                                    // Row 9 (iOS-style content motion): staggered entrance per settings row.
+// Previous implementation retained:                                     RootItemTile(row.icon, when (row.tint) {
+                                    androidx.compose.runtime.key(group.title + ":" + row.dest) {
+                                    Box(Modifier.iosItemEntrance(settingsRowOrdinal, group.title + ":" + row.dest)) {
                                     RootItemTile(row.icon, when (row.tint) {
                                         RootTint.foregroundSecondary -> colors.foregroundSecondary
                                         RootTint.info -> colors.info
@@ -349,6 +388,8 @@ fun SettingsRootScreen(
                                         SettingsDestination.ShareChaty -> Icons.Rounded.Share
                                         else -> null
                                     }) { open(row.dest) }
+                                    }
+                                    }
                                     if (i < group.rows.lastIndex) HorizontalDivider(Modifier.padding(start = RootTileDividerInset, end = 16.dp), thickness = 1.dp, color = colors.divider)
                                 }
                             }
@@ -403,7 +444,9 @@ fun SettingsRootScreen(
             containerColor = colors.surfaceElevated,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Shield, null, tint = colors.accent)
+
+//Icon(Icons.Outlined.Shield, null, tint = colors.accent)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.shield, Icons.Outlined.Shield, null, tint = colors.accent)
                     Spacer(Modifier.width(8.dp))
                     Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_root_privacy_policy), color = colors.foreground, fontSize = 18.sp) // was: "Privacy Policy"
                 }
@@ -506,12 +549,13 @@ private fun SettingsProfileHeader(
                     // SET-NARROW: measure the real container width so narrow panes and split-screen size the banner correctly.
                     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                         val bannerWidth = maxWidth.coerceAtLeast(0.dp)
-                        val bannerHeight = if (bannerWidth > 480.dp) 180.dp else bannerWidth * 9f / 16f
+                        // Previous: if (bannerWidth > 480.dp) 180.dp else bannerWidth * 9f / 16f
+                        val bannerHeight = com.example.chat.ui.profile.profileBannerHeight(bannerWidth)
                         Box(
                             Modifier.fillMaxWidth().height(bannerHeight)
-                                .background(colors.surface, RoundedCornerShape(24.dp)) // SET-R3-041: one card radius (24dp)
-                                .border(1.dp, colors.borderSubtle, RoundedCornerShape(24.dp))
-                                .clip(RoundedCornerShape(23.dp)),
+                                .background(colors.surface, com.example.chat.ui.profile.profileBannerShape()) // SET-R3-041: one card radius (24dp)
+                                .border(1.dp, colors.borderSubtle, com.example.chat.ui.profile.profileBannerShape())
+                                .clip(com.example.chat.ui.profile.profileBannerShape()),
                         ) {
                             val banner = user.bannerUrl?.trim().orEmpty()
                             if (banner.isEmpty()) {
@@ -520,7 +564,9 @@ private fun SettingsProfileHeader(
                                     contentAlignment = Alignment.Center,
                                 ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(34.dp), color = accent.copy(alpha = 0.65f)) }
                             } else {
-                                val model = if (banner.startsWith("http://") || banner.startsWith("https://") || banner.startsWith("content://")) banner else "file://" + banner.removePrefix("file://")
+                                // Previous relative server URL was incorrectly converted to a device file path:
+                                // val model = if (banner.startsWith("http://") || banner.startsWith("https://") || banner.startsWith("content://")) banner else "file://" + banner.removePrefix("file://")
+                                val model = banner
                                 val fallback: @Composable () -> Unit = {
                                     Box(Modifier.fillMaxSize().background(colors.surfaceElevated), contentAlignment = Alignment.Center) {
                                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = null, modifier = Modifier.size(30.dp), color = colors.foregroundSecondary)
@@ -528,10 +574,11 @@ private fun SettingsProfileHeader(
                                 }
                                 // SET-R1-033 / SET-R3-030: avoid decoding original banner pixels
                                 // into a capped preview. Previous call omitted requestSize.
-                                val decodeSize = with(density) {
-                                    coil.size.Size(bannerWidth.roundToPx().coerceAtLeast(1), bannerHeight.roundToPx().coerceAtLeast(1))
-                                }
-                                ChatyAsyncImage(model, "", Modifier.fillMaxSize(), placeholder = fallback, error = fallback, requestSize = decodeSize)
+                                // val decodeSize = with(density) {
+                                // coil.size.Size(bannerWidth.roundToPx().coerceAtLeast(1), bannerHeight.roundToPx().coerceAtLeast(1))
+                                // }
+                                // Previous banner renderer: ChatyAsyncImage with decodeSize/profileMediaBase.
+                                com.example.chat.ui.profile.ProfileBannerMedia(model, "Account banner", Modifier.fillMaxSize(), placeholder = fallback, error = fallback)
                             }
                         }
                         Box(
@@ -541,10 +588,10 @@ private fun SettingsProfileHeader(
                         ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.wallpaper, semanticLabel = "Change account banner", modifier = Modifier.size(19.dp), color = colors.foreground) }
                         // Dart Positioned(bottom: -40): 4dp padding ring around an 84dp avatar.
                         Box(
-                            Modifier.offset(y = 40.dp).size(92.dp)
+                            Modifier.offset(y = ProfileMetrics.profileAvatarOverlapDp.dp).size(ProfileMetrics.profileAvatarOuterDp.dp)
                                 .background(colors.background, CircleShape)
                                 .border(1.dp, colors.borderSubtle, CircleShape)
-                                .padding(4.dp).clip(CircleShape)
+                                .padding(ProfileMetrics.profileAvatarRingDp.dp).clip(CircleShape)
                                 .semantics { contentDescription = "Change profile photo" }
                                 .clickable(role = androidx.compose.ui.semantics.Role.Button) { onPickTarget(RootPick.Avatar) },
                             contentAlignment = Alignment.Center,
@@ -555,12 +602,13 @@ private fun SettingsProfileHeader(
                                 }
                             }
                             // SET-R1-033: decode the avatar at its 84dp display diameter.
-                            val avatarPixels = with(density) { 84.dp.roundToPx().coerceAtLeast(1) }
-                            if (!user.avatarUrl.isNullOrEmpty()) ChatyAsyncImage(user.avatarUrl, "Change profile photo", Modifier.fillMaxSize(), error = fallback, requestSize = coil.size.Size(avatarPixels, avatarPixels))
+                            val avatarPixels = with(density) { (ProfileMetrics.profileAvatarOuterDp - 2 * ProfileMetrics.profileAvatarRingDp).dp.roundToPx().coerceAtLeast(1) }
+                            if (!user.avatarUrl.isNullOrEmpty()) ChatyAsyncImage(user.avatarUrl, "Change profile photo", Modifier.fillMaxSize(), error = fallback, requestSize = coil.size.Size(avatarPixels, avatarPixels),
+                                profileMediaBase = com.example.chat.ServiceLocator.apiBackend.config.restApiBaseUrl.trimEnd('/').replace(Regex("/api/v[0-9]+$"), ""))
                             else fallback()
                         }
                     }
-                    Spacer(Modifier.height(48.dp))
+                    Spacer(Modifier.height((ProfileMetrics.profileAvatarOverlapDp + ProfileMetrics.profileHeaderFollowingGapDp).dp))
                     Row(
                         Modifier.clip(RoundedCornerShape(12.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Edit profile") { onEditProfile() }.padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -568,7 +616,9 @@ private fun SettingsProfileHeader(
                         Text(displayName, Modifier.weight(1f, fill = false), color = colors.foreground, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.35).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.width(4.dp))
                         // SET-R1-049: chevron-right matches the row's real destination (was KeyboardArrowDown)
-                        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)
+
+//Icon(Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)
                     }
                     Spacer(Modifier.height(3.dp))
                     Text(handle, color = colors.foregroundSecondary, fontSize = 13.sp)

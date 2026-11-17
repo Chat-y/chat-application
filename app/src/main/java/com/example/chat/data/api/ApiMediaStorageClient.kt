@@ -22,6 +22,8 @@ class ApiMediaStorageClient(
     private val tenantId: () -> String,
     private val token: () -> String?,
     private val client: OkHttpClient = com.example.chat.data.api.ChatyOkHttp.shared,
+    // Profile-only opt-in; historical chat attachment keys retain their legacy fallback.
+    private val strictProfileUrls: Boolean = false,
 ) : MediaStorageBackend {
 
     /** path -> server URL for files uploaded this session (the server
@@ -40,18 +42,41 @@ class ApiMediaStorageClient(
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", fileName, bytes.toRequestBody(contentType.toMediaType()))
             .build()
+        val uploadBase = baseUrl().trim().trimEnd('/')
         val request = Request.Builder()
-            .url("${baseUrl().trimEnd('/')}/chat/upload")
+            // Previous: .url("${baseUrl().trimEnd('/')}/chat/upload")
+            .url("$uploadBase/chat/upload")
             .header("Authorization", "Bearer $tok")
             .header("x-tenant-id", tenantId())
             .post(body)
             .build()
         onProgress?.invoke(0L, bytes.size.toLong())
         client.newCall(request).execute().use { response ->
+            // DEBUG TEMPORARY: status and URL form only. Never log body, credentials or URL.
+            if (strictProfileUrls && com.example.chat.BuildConfig.DEBUG) android.util.Log.d("ProfileMediaUpload", "upload-status=${response.code}")
             if (!response.isSuccessful) throw IOException("Upload failed (${response.code})")
-            val url = JSONObject(response.body?.string() ?: "{}")
-                .optJSONObject("data")?.optString("url").orEmpty()
-            if (url.isEmpty()) throw IOException("Upload failed: empty url in response")
+            // Previous parser/acceptance retained inactive:
+            // val url = JSONObject(response.body?.string() ?: "{}")
+            //     .optJSONObject("data")?.optString("url").orEmpty()
+            // if (url.isEmpty()) throw IOException("Upload failed: empty url in response")
+            val root = try { JSONObject(response.body?.string() ?: "{}") }
+                catch (_: Exception) {
+                    // DEBUG TEMPORARY: do not include the parse exception or body.
+                    if (strictProfileUrls && com.example.chat.BuildConfig.DEBUG) android.util.Log.d("ProfileMediaUpload", "upload-url-form=malformed-response")
+                    throw IOException("Upload response did not contain a usable image URL.")
+                }
+            val raw = root.optJSONObject("data")?.opt("url") as? String
+            // DEBUG TEMPORARY: form is an enum-like label, never the media address.
+            if (strictProfileUrls && com.example.chat.BuildConfig.DEBUG) android.util.Log.d("ProfileMediaUpload", "upload-url-form=${com.example.chat.data.remote.ProfileMediaUrl.form(raw)}")
+            val url = if (strictProfileUrls) {
+                com.example.chat.data.remote.ProfileMediaUrl.resolve(raw, uploadBase)
+                    ?: throw IOException("Upload response did not contain a usable HTTP image URL.")
+            } else {
+                // Keep non-profile response acceptance unchanged.
+                root.optJSONObject("data")?.optString("url").orEmpty().also {
+                    if (it.isEmpty()) throw IOException("Upload failed: empty url in response")
+                }
+            }
             uploadedUrls[path] = url
         }
         onProgress?.invoke(bytes.size.toLong(), bytes.size.toLong())
@@ -59,7 +84,9 @@ class ApiMediaStorageClient(
 
     override fun getPublicUrl(bucket: String, path: String): String =
         uploadedUrls[path]
-            ?: "${baseUrl().trimEnd('/')}/uploads/${path.substringAfterLast('/')}"
+            // Previous fabricated fallback: ?: "${baseUrl().trimEnd('/')}/uploads/${path.substringAfterLast('/')}"
+            ?: if (strictProfileUrls) throw IOException("No confirmed image URL is available for this upload.")
+            else "${baseUrl().trimEnd('/')}/uploads/${path.substringAfterLast('/')}"
 
     override suspend fun createSignedUrl(bucket: String, path: String, expiresInSeconds: Int): String =
         getPublicUrl(bucket, path)

@@ -40,7 +40,7 @@ import androidx.compose.material.icons.rounded.HistoryEdu
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.MicNone
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.NotificationsActive
+// Duplicate import retained inactive: import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.OnlinePrediction
 import androidx.compose.material.icons.rounded.Subtitles
@@ -265,7 +265,7 @@ fun NotificationSettingsPage(
     Box(Modifier.fillMaxWidth()) {
         ChatySettingsPage(
             title = "Notification settings",
-            subtitle = "Manage in-app alerts, Dynamic Island and toast preferences",
+            subtitle = "General notification privacy and optional Dynamic Island",
             onBack = onBack,
             trailingHeaderWidget = {
                 Row(
@@ -354,14 +354,18 @@ fun NotificationSettingsPage(
                         )
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = { scope.launch { refreshPermissions() } }) {
-                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text("Refresh permission status")
                         }
                     }
                     Row(Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 14.dp).fillMaxWidth()) {
                         OutlinedButton(onClick = { scope.launch { previewDynamicIsland() } }, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Rounded.PlayCircleOutline, null)
+
+//Icon(Icons.Rounded.PlayCircleOutline, null)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.playCircle, Icons.Rounded.PlayCircleOutline, null)
                             Spacer(Modifier.width(8.dp))
                             Text("Preview island + tone")
                         }
@@ -396,186 +400,190 @@ fun NotificationSettingsPage(
             }
             ChatySettingsSection(
                 title = "Realtime contact events",
-                description = "These alerts are generated from Supabase Realtime state changes, not simulations.",
+                description = "Additional supported event alerts. Online and typing controls are in Activity toasts.",
             ) {
                 Column {
-                ChatySwitchTile(
-                    icon = Icons.Rounded.OnlinePrediction, iconColor = colors.success, title = "Contact online alert", subtitle = "Show a toast when a conversation contact changes from offline to online", value = notif.notifyContactOnline,
-                    onChanged = { preferences.updateNotification(preferences.notification.copy(notifyContactOnline = it), "Contact Online Alert") },
-                )
-                ChatySwitchTile(
-                    icon = Icons.Outlined.KeyboardAlt, iconColor = colors.info, title = "Typing alert", subtitle = "Show a toast when a contact starts typing", value = notif.notifyTypingStarted,
-                    onChanged = { preferences.updateNotification(preferences.notification.copy(notifyTypingStarted = it), "Typing Alert") },
-                )
+// Prior duplicate event switch:                 ChatySwitchTile(
+// Prior duplicate event switch:                     icon = Icons.Rounded.OnlinePrediction, iconColor = colors.success, title = "Contact online alert", subtitle = "Show a toast when a conversation contact changes from offline to online", value = notif.notifyContactOnline,
+// Prior duplicate event switch:                     onChanged = { preferences.updateNotification(preferences.notification.copy(notifyContactOnline = it), "Contact Online Alert") },
+// Prior duplicate event switch:                 )
+
+// Prior duplicate event switch:                 ChatySwitchTile(
+// Prior duplicate event switch:                     icon = Icons.Outlined.KeyboardAlt, iconColor = colors.info, title = "Typing alert", subtitle = "Show a toast when a contact starts typing", value = notif.notifyTypingStarted,
+// Prior duplicate event switch:                     onChanged = { preferences.updateNotification(preferences.notification.copy(notifyTypingStarted = it), "Typing Alert") },
+// Prior duplicate event switch:                 )
+
                 ChatySwitchTile(
                     icon = Icons.Rounded.MicNone, iconColor = colors.error, title = "Recording alert", subtitle = "Show a toast when a contact starts recording a voice message", value = recordingAlert,
                     onChanged = { preferences.updateGbFeature("notify_recording_started", it, "Recording Alert") },
                 )
-                ChatySwitchTile(
-                    icon = Icons.Rounded.Visibility, iconColor = colors.accent, title = "Status / story viewed alert", subtitle = "Notify when the backend records a contact viewing your story", value = notif.notifyStatusViewed,
-                    onChanged = { preferences.updateNotification(preferences.notification.copy(notifyStatusViewed = it), "Status Viewed Alert") },
-                )
+// Prior duplicate event switch:                 ChatySwitchTile(
+// Prior duplicate event switch:                     icon = Icons.Rounded.Visibility, iconColor = colors.accent, title = "Status / story viewed alert", subtitle = "Notify when the backend records a contact viewing your story", value = notif.notifyStatusViewed,
+// Prior duplicate event switch:                     onChanged = { preferences.updateNotification(preferences.notification.copy(notifyStatusViewed = it), "Status Viewed Alert") },
+// Prior duplicate event switch:                 )
+
                 ChatySwitchTile(
                     icon = Icons.Rounded.DeleteSweep, iconColor = colors.error, title = "Message revoked alert", subtitle = "Notify when a contact deletes a message", value = notif.notifyMessageDeleted,
                     onChanged = { preferences.updateNotification(preferences.notification.copy(notifyMessageDeleted = it), "Message Revoked Alert") },
                 )
                 }
             }
-            ChatySettingsSection(title = "Contact online toast", description = "Preview and tune the alert shown when a contact comes online.") {
-                Column {
-                    Box(
-                        Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ToastPreview("Bandi Maya Online", p.onlineWithProfilePic, p.onlineElevation, p.onlineRadius, p.onlineBgColor, p.onlineTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
-                    }
-                    GbSwitchTile(
-                        icon = Icons.Rounded.NotificationsNone, title = "Notification in the Notification Bar", subtitle = "Show a notification on the phone's status bar", value = p.onlineInNotificationBar,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastInNotificationBar = it), "Online In Notification Bar") },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Rounded.ToggleOn, title = "Disable Contact Online Toast", subtitle = "Turn on to disable toast notifications", value = p.disableContactOnlineToast,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastEnabled = !it), "Disable Contact Online Toast") },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar next to toast message", value = p.onlineWithProfilePic,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastWithProfilePicture = it), "Online With Profile Pic") },
-                    )
-                    GbSwitchTile(
-                        icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.layers), title = "Elevation", subtitle = if (p.onlineElevation) "Enabled" else "Disabled", value = p.onlineElevation,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastElevation = it), "Online Toast Elevation") },
-                    )
-                    GbSliderTile(
-                        title = "Radius of toast notifications", subtitle = "Rounded corners radius", value = p.onlineRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastRadius = it.toDouble()), "Online Toast Radius") },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.MusicNote, title = "Ringtone", subtitle = p.onlineRingtone, hasSubScreen = true,
-                        onTap = { showRingtoneModal(p.onlineRingtone) { v -> preferences.updateToasts(preferences.toasts.copy(onlineToastRingtone = v), "Online Toast Ringtone") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.onlinePosition, hasSubScreen = true,
-                        onTap = { showPositionModal(p.onlinePosition) { v -> preferences.updateToasts(preferences.toasts.copy(onlineToastPosition = v), "Online Toast Position") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.onlineBgColor,
-                        onColorTap = { pickColor("Toast Background Color", p.onlineBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(onlineToastBgColor = c), "Online Toast Bg Color") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.onlineTextColor,
-                        onColorTap = { pickColor("Toast Text Color", p.onlineTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(onlineToastTextColor = c), "Online Toast Text Color") } },
-                    )
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            ChatySettingsSection(title = "Viewed story toast", description = "Preview and tune the alert shown when someone views your status.") {
-                Column {
-                    Box(
-                        Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ToastPreview("Bandi Maya Status", p.storyWithProfilePic, p.storyElevation, p.storyRadius, p.storyBgColor, p.storyTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
-                    }
-                    GbSwitchTile(
-                        icon = Icons.Rounded.NotificationsNone, title = "Notification in the Notification Bar", subtitle = "Show in status bar", value = p.storyInNotificationBar,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastInNotificationBar = it), "Story In Notification Bar") },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Rounded.HistoryEdu, title = "Viewed Story Toast", subtitle = "Know immediately when someone views your status via Toast message", value = p.viewedStoryToast,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastEnabled = it), "Viewed Story Toast") },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar next to status toast", value = p.storyWithProfilePic,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastWithProfilePicture = it), "Story With Profile Pic") },
-                    )
-                    GbSliderTile(
-                        title = "Radius of toast notifications", subtitle = "Corner curvature", value = p.storyRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastRadius = it.toDouble()), "Story Toast Radius") },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.storyPosition, hasSubScreen = true,
-                        onTap = { showPositionModal(p.storyPosition) { v -> preferences.updateToasts(preferences.toasts.copy(storyToastPosition = v), "Story Toast Position") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.storyBgColor,
-                        onColorTap = { pickColor("Story Toast Background Color", p.storyBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(storyToastBgColor = c), "Story Toast Bg Color") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.storyTextColor,
-                        onColorTap = { pickColor("Story Toast Text Color", p.storyTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(storyToastTextColor = c), "Story Toast Text Color") } },
-                    )
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            ChatySettingsSection(title = "Profile toast", description = "Preview and tune profile-view activity alerts.") {
-                Column {
-                    Box(
-                        Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ToastPreview("Bandi Maya Profile", p.profileWithProfilePic, p.profileElevation, p.profileRadius, p.profileBgColor, p.profileTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
-                    }
-                    GbSwitchTile(
-                        icon = Icons.Rounded.AccountBox, title = "Profile Toast", subtitle = "Know immediately when anyone views your profile via a Toast message", value = p.profileToast,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(profileToastEnabled = it), "Profile Toast") },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar", value = p.profileWithProfilePic,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(profileToastWithProfilePicture = it), "Profile With Profile Pic") },
-                    )
-                    GbSliderTile(
-                        title = "Radius of toast notifications", subtitle = "Corner curvature", value = p.profileRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(profileToastRadius = it.toDouble()), "Profile Toast Radius") },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.profilePosition, hasSubScreen = true,
-                        onTap = { showPositionModal(p.profilePosition) { v -> preferences.updateToasts(preferences.toasts.copy(profileToastPosition = v), "Profile Toast Position") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.profileBgColor,
-                        onColorTap = { pickColor("Profile Toast Background Color", p.profileBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(profileToastBgColor = c), "Profile Toast Bg Color") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.profileTextColor,
-                        onColorTap = { pickColor("Profile Toast Text Color", p.profileTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(profileToastTextColor = c), "Profile Toast Text Color") } },
-                    )
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            ChatySettingsSection(title = "Typing toast", description = "Preview and tune typing activity alerts.") {
-                Column {
-                    Box(
-                        Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ToastPreview("Bandi Maya Typing...", p.typingWithProfilePic, p.typingElevation, p.typingRadius, p.typingBgColor, p.typingTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
-                    }
-                    GbSwitchTile(
-                        icon = Icons.Rounded.Keyboard, title = "Typing Toast", subtitle = "Know immediately when anyone starts typing to you via a floating toast message", value = p.typingToast,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(typingToastEnabled = it), "Typing Toast") },
-                    )
-                    GbSwitchTile(
-                        icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar next to typing alert", value = p.typingWithProfilePic,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(typingToastWithProfilePicture = it), "Typing With Profile Pic") },
-                    )
-                    GbSliderTile(
-                        title = "Radius of toast notifications", subtitle = "Corner curvature", value = p.typingRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
-                        onChanged = { preferences.updateToasts(preferences.toasts.copy(typingToastRadius = it.toDouble()), "Typing Toast Radius") },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.typingPosition, hasSubScreen = true,
-                        onTap = { showPositionModal(p.typingPosition) { v -> preferences.updateToasts(preferences.toasts.copy(typingToastPosition = v), "Typing Toast Position") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.typingBgColor,
-                        onColorTap = { pickColor("Typing Toast Background Color", p.typingBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(typingToastBgColor = c), "Typing Toast Bg Color") } },
-                    )
-                    GbSettingRow(
-                        icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.typingTextColor,
-                        onColorTap = { pickColor("Typing Toast Text Color", p.typingTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(typingToastTextColor = c), "Typing Toast Text Color") } },
-                    )
-                }
-            }
+// Prior duplicate toast editor:             ChatySettingsSection(title = "Contact online toast", description = "Preview and tune the alert shown when a contact comes online.") {
+// Prior duplicate toast editor:                 Column {
+// Prior duplicate toast editor:                     Box(
+// Prior duplicate toast editor:                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+// Prior duplicate toast editor:                         contentAlignment = Alignment.Center,
+// Prior duplicate toast editor:                     ) {
+// Prior duplicate toast editor:                         ToastPreview("Bandi Maya Online", p.onlineWithProfilePic, p.onlineElevation, p.onlineRadius, p.onlineBgColor, p.onlineTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
+// Prior duplicate toast editor:                     }
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.NotificationsNone, title = "Notification in the Notification Bar", subtitle = "Show a notification on the phone's status bar", value = p.onlineInNotificationBar,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastInNotificationBar = it), "Online In Notification Bar") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.ToggleOn, title = "Disable Contact Online Toast", subtitle = "Turn on to disable toast notifications", value = p.disableContactOnlineToast,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastEnabled = !it), "Disable Contact Online Toast") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar next to toast message", value = p.onlineWithProfilePic,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastWithProfilePicture = it), "Online With Profile Pic") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.layers), title = "Elevation", subtitle = if (p.onlineElevation) "Enabled" else "Disabled", value = p.onlineElevation,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastElevation = it), "Online Toast Elevation") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSliderTile(
+// Prior duplicate toast editor:                         title = "Radius of toast notifications", subtitle = "Rounded corners radius", value = p.onlineRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(onlineToastRadius = it.toDouble()), "Online Toast Radius") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.MusicNote, title = "Ringtone", subtitle = p.onlineRingtone, hasSubScreen = true,
+// Prior duplicate toast editor:                         onTap = { showRingtoneModal(p.onlineRingtone) { v -> preferences.updateToasts(preferences.toasts.copy(onlineToastRingtone = v), "Online Toast Ringtone") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.onlinePosition, hasSubScreen = true,
+// Prior duplicate toast editor:                         onTap = { showPositionModal(p.onlinePosition) { v -> preferences.updateToasts(preferences.toasts.copy(onlineToastPosition = v), "Online Toast Position") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.onlineBgColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Toast Background Color", p.onlineBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(onlineToastBgColor = c), "Online Toast Bg Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.onlineTextColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Toast Text Color", p.onlineTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(onlineToastTextColor = c), "Online Toast Text Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                 }
+// Prior duplicate toast editor:             }
+// Prior duplicate toast editor:             Spacer(Modifier.height(14.dp))
+// Prior duplicate toast editor:             ChatySettingsSection(title = "Viewed story toast", description = "Preview and tune the alert shown when someone views your status.") {
+// Prior duplicate toast editor:                 Column {
+// Prior duplicate toast editor:                     Box(
+// Prior duplicate toast editor:                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+// Prior duplicate toast editor:                         contentAlignment = Alignment.Center,
+// Prior duplicate toast editor:                     ) {
+// Prior duplicate toast editor:                         ToastPreview("Bandi Maya Status", p.storyWithProfilePic, p.storyElevation, p.storyRadius, p.storyBgColor, p.storyTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
+// Prior duplicate toast editor:                     }
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.NotificationsNone, title = "Notification in the Notification Bar", subtitle = "Show in status bar", value = p.storyInNotificationBar,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastInNotificationBar = it), "Story In Notification Bar") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.HistoryEdu, title = "Viewed Story Toast", subtitle = "Know immediately when someone views your status via Toast message", value = p.viewedStoryToast,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastEnabled = it), "Viewed Story Toast") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar next to status toast", value = p.storyWithProfilePic,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastWithProfilePicture = it), "Story With Profile Pic") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSliderTile(
+// Prior duplicate toast editor:                         title = "Radius of toast notifications", subtitle = "Corner curvature", value = p.storyRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(storyToastRadius = it.toDouble()), "Story Toast Radius") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.storyPosition, hasSubScreen = true,
+// Prior duplicate toast editor:                         onTap = { showPositionModal(p.storyPosition) { v -> preferences.updateToasts(preferences.toasts.copy(storyToastPosition = v), "Story Toast Position") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.storyBgColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Story Toast Background Color", p.storyBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(storyToastBgColor = c), "Story Toast Bg Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.storyTextColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Story Toast Text Color", p.storyTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(storyToastTextColor = c), "Story Toast Text Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                 }
+// Prior duplicate toast editor:             }
+// Prior duplicate toast editor:             Spacer(Modifier.height(14.dp))
+// Prior duplicate toast editor:             ChatySettingsSection(title = "Profile toast", description = "Preview and tune profile-view activity alerts.") {
+// Prior duplicate toast editor:                 Column {
+// Prior duplicate toast editor:                     Box(
+// Prior duplicate toast editor:                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+// Prior duplicate toast editor:                         contentAlignment = Alignment.Center,
+// Prior duplicate toast editor:                     ) {
+// Prior duplicate toast editor:                         ToastPreview("Bandi Maya Profile", p.profileWithProfilePic, p.profileElevation, p.profileRadius, p.profileBgColor, p.profileTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
+// Prior duplicate toast editor:                     }
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.AccountBox, title = "Profile Toast", subtitle = "Know immediately when anyone views your profile via a Toast message", value = p.profileToast,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(profileToastEnabled = it), "Profile Toast") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar", value = p.profileWithProfilePic,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(profileToastWithProfilePicture = it), "Profile With Profile Pic") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSliderTile(
+// Prior duplicate toast editor:                         title = "Radius of toast notifications", subtitle = "Corner curvature", value = p.profileRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(profileToastRadius = it.toDouble()), "Profile Toast Radius") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.profilePosition, hasSubScreen = true,
+// Prior duplicate toast editor:                         onTap = { showPositionModal(p.profilePosition) { v -> preferences.updateToasts(preferences.toasts.copy(profileToastPosition = v), "Profile Toast Position") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.profileBgColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Profile Toast Background Color", p.profileBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(profileToastBgColor = c), "Profile Toast Bg Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.profileTextColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Profile Toast Text Color", p.profileTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(profileToastTextColor = c), "Profile Toast Text Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                 }
+// Prior duplicate toast editor:             }
+// Prior duplicate toast editor:             Spacer(Modifier.height(14.dp))
+// Prior duplicate toast editor:             ChatySettingsSection(title = "Typing toast", description = "Preview and tune typing activity alerts.") {
+// Prior duplicate toast editor:                 Column {
+// Prior duplicate toast editor:                     Box(
+// Prior duplicate toast editor:                         Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+// Prior duplicate toast editor:                         contentAlignment = Alignment.Center,
+// Prior duplicate toast editor:                     ) {
+// Prior duplicate toast editor:                         ToastPreview("Bandi Maya Typing...", p.typingWithProfilePic, p.typingElevation, p.typingRadius, p.typingBgColor, p.typingTextColor, colors.surfaceElevated) // was: Color(0xFF1E2630)
+// Prior duplicate toast editor:                     }
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.Keyboard, title = "Typing Toast", subtitle = "Know immediately when anyone starts typing to you via a floating toast message", value = p.typingToast,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(typingToastEnabled = it), "Typing Toast") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSwitchTile(
+// Prior duplicate toast editor:                         icon = Icons.Outlined.AccountCircle, title = "Notifications with profile picture", subtitle = "Show avatar next to typing alert", value = p.typingWithProfilePic,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(typingToastWithProfilePicture = it), "Typing With Profile Pic") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSliderTile(
+// Prior duplicate toast editor:                         title = "Radius of toast notifications", subtitle = "Corner curvature", value = p.typingRadius.toFloat(), min = 0f, max = 30f, divisions = 15,
+// Prior duplicate toast editor:                         onChanged = { preferences.updateToasts(preferences.toasts.copy(typingToastRadius = it.toDouble()), "Typing Toast Radius") },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.VerticalAlignTop, title = "Position of Toast", subtitle = p.typingPosition, hasSubScreen = true,
+// Prior duplicate toast editor:                         onTap = { showPositionModal(p.typingPosition) { v -> preferences.updateToasts(preferences.toasts.copy(typingToastPosition = v), "Typing Toast Position") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatPaint, title = "Toast Background Color", subtitle = "Custom background tint", colorValue = p.typingBgColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Typing Toast Background Color", p.typingBgColor) { c -> preferences.updateToasts(preferences.toasts.copy(typingToastBgColor = c), "Typing Toast Bg Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                     GbSettingRow(
+// Prior duplicate toast editor:                         icon = Icons.Rounded.FormatColorText, title = "Toast Text Color", subtitle = "Custom text tint", colorValue = p.typingTextColor,
+// Prior duplicate toast editor:                         onColorTap = { pickColor("Typing Toast Text Color", p.typingTextColor) { c -> preferences.updateToasts(preferences.toasts.copy(typingToastTextColor = c), "Typing Toast Text Color") } },
+// Prior duplicate toast editor:                     )
+// Prior duplicate toast editor:                 }
+// Prior duplicate toast editor:             }
+
 
             }
         }

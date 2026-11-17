@@ -6,6 +6,7 @@ import com.example.chat.data.services.CallSignalingService
 import com.example.chat.data.services.CallTransportState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -102,7 +103,8 @@ class CallIceRestartTest {
         // SDP alone is not proof that media has reconnected.
         service.handleRemoteSignal(mapOf(
             "signal_type" to "answer", "call_id" to callId,
-            "sender_id" to "peer", "ice_restart" to true, "sdp" to "restart-answer",
+// Previous implementation retained:             "sender_id" to "peer", "ice_restart" to true, "sdp" to "restart-answer",
+            "sender_id" to "peer", "ice_restart" to true, "restart_id" to restartOffers.single().second["restart_id"], "sdp" to "restart-answer",
         ))
         advanceUntilIdle()
         assertEquals(CallSessionState.reconnecting, service.currentSession!!.state)
@@ -119,14 +121,18 @@ class CallIceRestartTest {
         connectOutgoingCall(service, media, backgroundScope)
         advanceUntilIdle()
 
-        repeat(3) { media.onIceFailed?.invoke(); advanceUntilIdle() }
-        assertEquals(3, media.restartCount)
-        assertTrue(service.currentSession!!.state != CallSessionState.failed)
-
-        media.onIceFailed?.invoke()
-        advanceUntilIdle()
-        assertEquals(3, media.restartCount) // no 4th restart
-        assertEquals(CallSessionState.failed, service.currentSession!!.state)
+// Previous implementation retained:         repeat(3) { media.onIceFailed?.invoke(); advanceUntilIdle() }
+// Previous implementation retained:         assertEquals(3, media.restartCount)
+// Previous implementation retained:         assertTrue(service.currentSession!!.state != CallSessionState.failed)
+// Previous implementation retained: 
+// Previous implementation retained:         media.onIceFailed?.invoke()
+// Previous implementation retained:         advanceUntilIdle()
+// Previous implementation retained:         assertEquals(3, media.restartCount) // no 4th restart
+// Previous implementation retained:         assertEquals(CallSessionState.failed, service.currentSession!!.state)
+        repeat(3) { media.onIceFailed?.invoke(); runCurrent() }
+        assertEquals(1, media.restartCount) // One negotiation stays pending through its answer.
+        advanceTimeBy(25_000); runCurrent()
+        assertTrue(service.currentSession!!.state.isTerminal)
     }
 
     @Test
@@ -148,7 +154,8 @@ class CallIceRestartTest {
 
         service.handleRemoteSignal(mapOf(
             "signal_type" to "offer", "call_id" to "c-in", "sender_id" to "peer",
-            "ice_restart" to true, "sdp" to "restart-offer",
+// Previous implementation retained:             "ice_restart" to true, "sdp" to "restart-offer",
+            "ice_restart" to true, "restart_id" to "generation1", "sdp" to "restart-offer",
         ))
         // Same background-launch reasoning as the outgoing test above.
         runCurrent()
@@ -194,4 +201,51 @@ class CallIceRestartTest {
         advanceUntilIdle()
         assertEquals(1, media.restartCount)
     }
+    @Test fun calleeRequestsRestartWithoutCreatingAnOffer() = runTest {
+        val sender=Sender(); val media=RestartMedia(); val service=service(backgroundScope,sender,media)
+        service.handleRemoteSignal(mapOf("signal_type" to "offer","call_id" to "incoming","sender_id" to "peer","sdp" to "offer"))
+        runCurrent();service.acceptCall();media.onConnectionState?.invoke(CallTransportState.connected)
+        media.onIceFailed?.invoke();runCurrent()
+        assertTrue(sender.sent.any {it.first=="peer" && it.second["signal_type"]=="ice_refresh_request" && it.second["call_id"]=="incoming"})
+        assertEquals(0,media.offersCreated);assertEquals(0,media.restartCount)
+    }
+    @Test fun peerRefreshNeedsCurrentIdentityAndIsRateLimited() = runTest {
+        val sender=Sender();val media=RestartMedia();var tick=0L
+        val service=CallSignalingService(backgroundScope,{"me"},signalSender=sender.fn,mediaFactory={media},monotonicMillis={tick})
+        val id=connectOutgoingCall(service,media,backgroundScope)
+        fun request(senderId:String,callId:String)=mapOf("signal_type" to "ice_refresh_request","sender_id" to senderId,"call_id" to callId)
+        service.handleRemoteSignal(request("foreign",id));service.handleRemoteSignal(request("peer","stale"));runCurrent()
+        assertEquals(0,media.restartCount)
+        service.handleRemoteSignal(request("peer",id));runCurrent();assertEquals(1,media.restartCount)
+        media.onConnectionState?.invoke(CallTransportState.connected)
+        repeat(20) {service.handleRemoteSignal(request("peer",id));runCurrent()}
+        assertEquals(1,media.restartCount)
+// Previous implementation retained:         tick=30000;service.handleRemoteSignal(request("peer",id));runCurrent();assertEquals(2,media.restartCount)
+        tick=5000;service.handleRemoteSignal(request("peer",id));runCurrent();assertEquals(1,media.restartCount)
+        assertEquals(2,sender.sent.count {it.second["ice_restart"]==true && it.second["signal_type"]=="offer"})
+    }
+    @Test fun sameTransportDifferentNetworkIdentityRestarts() = runTest {
+        val sender=Sender();val media=RestartMedia();val service=service(backgroundScope,sender,media)
+        service.onNetworkTransportChanged("wifi:11")
+        connectOutgoingCall(service,media,backgroundScope)
+        service.onNetworkTransportChanged("wifi:11");runCurrent();assertEquals(0,media.restartCount)
+        service.onNetworkTransportChanged("wifi:22");runCurrent();assertEquals(1,media.restartCount)
+    }
+
+    @Test fun secondNetworkChangeCannotCreateAnotherOfferBeforeMatchingAnswer() = runTest {
+        val sender=Sender();val media=RestartMedia();val service=service(backgroundScope,sender,media)
+        val id=connectOutgoingCall(service,media,backgroundScope)
+        media.onIceFailed?.invoke();runCurrent()
+        val first=sender.sent.last {it.second["ice_restart"]==true}.second["restart_id"]
+        service.onNetworkTransportChanged("wifi:1");service.onNetworkTransportChanged("wifi:2");runCurrent()
+        assertEquals(1,media.restartCount)
+        val count=media.remoteDescriptions.size
+        service.handleRemoteSignal(mapOf("signal_type" to "answer","call_id" to id,"sender_id" to "peer",
+            "ice_restart" to true,"restart_id" to "old-generation","sdp" to "stale"))
+        assertEquals(count,media.remoteDescriptions.size)
+        service.handleRemoteSignal(mapOf("signal_type" to "answer","call_id" to id,"sender_id" to "peer",
+            "ice_restart" to true,"restart_id" to first,"sdp" to "fresh"))
+        assertTrue(media.remoteDescriptions.contains("fresh" to "answer"))
+    }
+
 }

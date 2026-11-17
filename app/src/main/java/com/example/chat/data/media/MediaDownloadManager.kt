@@ -82,7 +82,7 @@ class MediaDownloadManager(
         val trusted = resolver.trusted(req.ref)
         synchronized(lock) {
             val e = entryFor(req)
-            if (trusted == null || trusted.viewOnce || trusted.restricted) {
+            if (req.session in retiredSessions || trusted == null || trusted.viewOnce || trusted.restricted || trusted.encrypted) {
                 e.state.value = MediaDownloadState.Failed(0, req.totalBytes, MediaDownloadState.FailReason.NOT_ALLOWED); return
             }
             if (e.state.value.isActive || e.state.value == MediaDownloadState.Done) return
@@ -119,6 +119,22 @@ class MediaDownloadManager(
             runCatching { partsRoot.deleteRecursively() }
         }
         Unit
+    }
+
+    /** Stops exactly the captured account session and waits for its writers before removal. */
+    private val retiredSessions = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    suspend fun purgeSession(session: String) {
+        val snapshot = synchronized(lock) {
+            retiredSessions.add(session)
+            entries.values.filter { it.req.session == session }.also { selected ->
+                selected.forEach { cancelRun(it); entries.remove(key(it.req.session, it.req.ref)) }
+            }
+        }
+        snapshot.mapNotNull { it.job }.forEach { it.join() }
+        val hash = MessageDigest.getInstance("SHA-256").digest(session.toByteArray()).joinToString("") { "%02x".format(it) }.take(24)
+        val dir = File(partsRoot, hash)
+        check(!dir.exists() || dir.deleteRecursively()) { "Account download parts cleanup failed." }
     }
 
     /** Test seam: suspends until every queued run, cleanup and purge has finished. */
@@ -170,7 +186,7 @@ class MediaDownloadManager(
     private suspend fun run(e: Entry, cancelGenAtStart: Int) {
         val req = e.req
         val part = partFile(req)
-        fun policyOk() = req.currentSession() == req.session &&
+        fun policyOk() = req.session !in retiredSessions && req.currentSession() == req.session &&
             resolver.trusted(req.ref)?.let { !it.viewOnce && !it.restricted } == true
         try {
             if (!policyOk()) throw ResumableMediaDownloader.DownloadFailure(MediaDownloadState.FailReason.NOT_ALLOWED)
@@ -202,3 +218,9 @@ class MediaDownloadManager(
         }
     }
 }
+
+// Previous E2EE media wiring retained inactive:
+//             if (trusted == null || trusted.viewOnce || trusted.restricted) {
+
+// Previous implementation retained inactive (unified v4):
+//         fun policyOk() = req.currentSession() == req.session &&

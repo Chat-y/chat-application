@@ -25,6 +25,7 @@ internal fun microphoneCaptureLabelResource(state: CallMicrophoneCaptureState, m
     CallMicrophoneCaptureState.starting -> R.string.call_microphone_starting
     CallMicrophoneCaptureState.stopped -> R.string.call_microphone_stopped
     CallMicrophoneCaptureState.unknown -> R.string.call_microphone_unknown
+    CallMicrophoneCaptureState.unavailable -> R.string.call_microphone_unavailable
 }
 
 /** Native capture state, separate from mute/transmission and Android's own privacy indicator. */

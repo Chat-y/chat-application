@@ -5,6 +5,7 @@ import com.example.chat.data.demo.DemoMode
 import org.json.JSONObject
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -28,31 +29,47 @@ class AccountPushBindingRouter(context: Context, private val api: ApiBackendServ
         mapOf("Authorization" to "Bearer $token", "x-tenant-id" to meta.tenantId, "Content-Type" to "application/json")
 
     /** Register the SAME platform token independently for each retained account; never adopt or log out. */
-    suspend fun registerRetained(fcmToken: String) = withContext(Dispatchers.IO) { registerLock.withLock {
-        if (DemoMode.active || fcmToken.length !in 1..4096 || fcmToken.any { it !in 'A'..'Z' && it !in 'a'..'z' && it !in '0'..'9' && it !in ":-_." }) return@withLock
+    suspend fun registerRetained(fcmToken: String, deadlineEpochMs: Long = Long.MAX_VALUE): Boolean = withContext(Dispatchers.IO) { registerLock.withLock {
+        if (DemoMode.active || fcmToken.length !in 1..4096 || fcmToken.any { it !in 'A'..'Z' && it !in 'a'..'z' && it !in '0'..'9' && it !in ":-_." }) return@withLock true
+        var complete = true
+        val runContext = kotlin.coroutines.coroutineContext
+        fun mayContinue(): Boolean {
+            runContext.ensureActive()
+            return System.currentTimeMillis() < deadlineEpochMs
+        }
         val retained = api.multiAccount.accounts()
         prefs.all.keys.filter { binding -> prefs.getString(binding, null) !in retained.map { it.accountKey } }.forEach { prefs.edit().remove(it).commit() }
         retained.filter { !it.sessionExpired }.forEach { meta ->
-            val credentials = api.multiAccount.credentialsFor(meta.accountKey) ?: return@forEach
+            if (!mayContinue()) { complete = false; return@forEach }
+            val credentials = api.multiAccount.credentialsFor(meta.accountKey) ?: run { complete = false; return@forEach }
             val bearer = credentials.accessToken
-            val base = safeBase(meta.baseUrl) ?: return@forEach
-            if (!current(meta, bearer) || credentials.expiresAtEpochMs?.let { it <= System.currentTimeMillis() } == true) return@forEach
+            val base = safeBase(meta.baseUrl) ?: run { complete = false; return@forEach }
+            if (!current(meta, bearer) || credentials.expiresAtEpochMs?.let { it <= System.currentTimeMillis() } == true) { complete = false; return@forEach }
             try {
                 val body = JSONObject().put("fcm_token", fcmToken).put("device_type", "android").toString()
                 var response = transport.execute("POST", "$base/me/devices", headers(meta, bearer), body)
-                if (!current(meta, bearer)) return@forEach
+                if (!mayContinue() || !current(meta, bearer)) { complete = false; return@forEach }
                 if (response.first == 404) response = transport.execute("POST", "$base/app-users/me/devices", headers(meta, bearer), body)
-                if (!current(meta, bearer) || response.first !in 200..299) return@forEach
+                if (!mayContinue() || !current(meta, bearer) || response.first !in 200..299) { complete = false; return@forEach }
                 val root = JSONObject(response.second)
-                if (root.opt("success") != true) return@forEach
-                val data = root.optJSONObject("data") ?: return@forEach
+                if (root.opt("success") != true) { complete = false; return@forEach }
+                val data = root.optJSONObject("data") ?: run { complete = false; return@forEach }
                 val binding = data.optString("bindingId")
-                if (uuid(binding) && data.optString("accountId") == meta.userId && data.optString("tenantId") == meta.tenantId)
-                    prefs.edit().putString(binding, meta.accountKey).commit()
+                if (uuid(binding) && data.optString("accountId") == meta.userId && data.optString("tenantId") == meta.tenantId) {
+                    if (!prefs.edit().putString(binding, meta.accountKey).commit()) complete = false
+                } else complete = false
             } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-            catch (_: Exception) { /* Retry on an existing token/login wake; never log bearer/platform token. */ }
+            catch (_: Exception) { complete = false /* Worker retries without logging credentials/platform token. */ }
         }
+        complete
     } }
+
+    /** Mapping admission only, never authorizes content retrieval or switches an account. */
+    fun hasRetainedBindingMapping(bindingId: String): Boolean {
+        if (!uuid(bindingId) || DemoMode.active) return false
+        val key = prefs.getString(bindingId, null) ?: return false
+        return api.multiAccount.accountByKey(key)?.sessionExpired == false
+    }
 
     /** Stored hints only. Every worker still validates its binding using that retained account's own token. */
     fun retainedBindingHints(): List<String> = prefs.all.keys.filter { uuid(it) }.filter { binding ->
@@ -120,3 +137,31 @@ class AccountPushBindingRouter(context: Context, private val api: ApiBackendServ
 // Prior source:             } else if (callId == null) inactive(key)
 // Prior source:             // Inactive calls intentionally wait for durable peek+ACK protocol. No queue consumption here.
 // Prior source:         catch (_: Exception) { /* Unverified or unavailable: do not render notification or select another account. */ }
+
+// Registration implementation replaced by checked outcome for durable recovery.
+// Prior source:     suspend fun registerRetained(fcmToken: String) = withContext(Dispatchers.IO) { registerLock.withLock {
+// Prior source:         if (DemoMode.active || fcmToken.length !in 1..4096 || fcmToken.any { it !in 'A'..'Z' && it !in 'a'..'z' && it !in '0'..'9' && it !in ":-_." }) return@withLock
+// Prior source:         val retained = api.multiAccount.accounts()
+// Prior source:         prefs.all.keys.filter { binding -> prefs.getString(binding, null) !in retained.map { it.accountKey } }.forEach { prefs.edit().remove(it).commit() }
+// Prior source:         retained.filter { !it.sessionExpired }.forEach { meta ->
+// Prior source:             val credentials = api.multiAccount.credentialsFor(meta.accountKey) ?: return@forEach
+// Prior source:             val bearer = credentials.accessToken
+// Prior source:             val base = safeBase(meta.baseUrl) ?: return@forEach
+// Prior source:             if (!current(meta, bearer) || credentials.expiresAtEpochMs?.let { it <= System.currentTimeMillis() } == true) return@forEach
+// Prior source:             try {
+// Prior source:                 val body = JSONObject().put("fcm_token", fcmToken).put("device_type", "android").toString()
+// Prior source:                 var response = transport.execute("POST", "$base/me/devices", headers(meta, bearer), body)
+// Prior source:                 if (!current(meta, bearer)) return@forEach
+// Prior source:                 if (response.first == 404) response = transport.execute("POST", "$base/app-users/me/devices", headers(meta, bearer), body)
+// Prior source:                 if (!current(meta, bearer) || response.first !in 200..299) return@forEach
+// Prior source:                 val root = JSONObject(response.second)
+// Prior source:                 if (root.opt("success") != true) return@forEach
+// Prior source:                 val data = root.optJSONObject("data") ?: return@forEach
+// Prior source:                 val binding = data.optString("bindingId")
+// Prior source:                 if (uuid(binding) && data.optString("accountId") == meta.userId && data.optString("tenantId") == meta.tenantId)
+// Prior source:                     prefs.edit().putString(binding, meta.accountKey).commit()
+// Prior source:             } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+// Prior source:             catch (_: Exception) { /* Retry on an existing token/login wake; never log bearer/platform token. */ }
+// Prior source:         }
+// Prior source:     } }
+// Prior source:

@@ -1,0 +1,13 @@
+source	line	call	binding	status
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	30	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	35	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	40	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	41	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	71	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	78	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	79	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	84	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	103	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	104	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	117	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect
+app/src/main/kotlin/com/example/chat/ui/chats/home/HomeQuickViewDialog.kt	121	TextButton	com.example.chat.ui.kit.ChatyTextButton	already shared alias, not a stock-control defect

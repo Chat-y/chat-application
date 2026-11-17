@@ -172,16 +172,28 @@ fun InAppCallPip(
                 // Three 48dp action targets cannot fit a 120dp-wide row.
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     IconButton(onClick = onTap) {
-                        Icon(
-                            Icons.Rounded.Fullscreen,
+
+//Icon(
+//                            Icons.Rounded.Fullscreen,
+//                            contentDescription = "Expand call",
+//                            tint = callForeground(),
+//                            modifier = Modifier.size(22.dp),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.fullscreen, Icons.Rounded.Fullscreen,
                             contentDescription = "Expand call",
                             tint = callForeground(),
                             modifier = Modifier.size(22.dp),
                         )
                     }
                     IconButton(onClick = onCollapseToIsland) {
-                        Icon(
-                            Icons.Rounded.Minimize,
+
+//Icon(
+//                            Icons.Rounded.Minimize,
+//                            contentDescription = "Minimize to Island",
+//                            tint = callSecondary(),
+//                            modifier = Modifier.size(20.dp),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.pictureInPicture, Icons.Rounded.Minimize,
                             contentDescription = "Minimize to Island",
                             tint = callSecondary(),
                             modifier = Modifier.size(20.dp),

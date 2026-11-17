@@ -142,7 +142,10 @@ fun AttachmentSheetContent(
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.Science, contentDescription = null, tint = Color(theme.onAccentColor),
+
+//Icon(Icons.Rounded.Science, contentDescription = null, tint = Color(theme.onAccentColor),
+//                        modifier = Modifier.size(12.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.science, Icons.Rounded.Science, contentDescription = null, tint = Color(theme.onAccentColor),
                         modifier = Modifier.size(12.dp))
                     Box(Modifier.width(4.dp))
                     Text(

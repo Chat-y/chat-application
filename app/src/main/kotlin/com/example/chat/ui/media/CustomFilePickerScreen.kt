@@ -427,7 +427,9 @@ fun CustomFilePickerScreen(
                             )
                         }
                         IconButton(enabled = !importing, onClick = { pickFromDeviceStorage() }) {
-                            Icon(Icons.Rounded.AddToPhotos, contentDescription = "Browse device files")
+
+//Icon(Icons.Rounded.AddToPhotos, contentDescription = "Browse device files")
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.fileOpen, Icons.Rounded.AddToPhotos, contentDescription = "Browse device files")
                         }
                         Spacer(Modifier.width(6.dp))
                     },
@@ -1063,7 +1065,10 @@ private fun CategoryIcon(category: MediaCategory, size: Int = 32) {
         MediaCategory.pdf -> ChatyMediaIcon(icon = ChatyIconType.pdf, size = size.dp, color = MaterialTheme.colorScheme.error)
         MediaCategory.document -> ChatyMediaIcon(icon = ChatyIconType.document, size = size.dp, color = MaterialTheme.colorScheme.primary)
         MediaCategory.archive -> ChatyMediaIcon(icon = ChatyIconType.archive, size = size.dp, color = MaterialTheme.colorScheme.secondary)
-        MediaCategory.other -> Icon(Icons.Rounded.InsertDriveFile, contentDescription = null,
+        MediaCategory.other ->
+//Icon(Icons.Rounded.InsertDriveFile, contentDescription = null,
+//            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(size.dp))
+        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.document, Icons.Rounded.InsertDriveFile, contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(size.dp))
     }
 }
@@ -1096,7 +1101,9 @@ private fun FloatingActionDock(
         TextButton(onClick = onDeselect) { Text("Deselect") }
         Spacer(Modifier.width(8.dp))
         Button(onClick = onConfirm, shape = RoundedCornerShape(16.dp)) {
-            Icon(Icons.Rounded.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.arrowUp, Icons.Rounded.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(4.dp))
             Text(if (isWorkspaceMode) "Share" else "Attach")
         }
@@ -1115,7 +1122,9 @@ private fun EmptyState(isDark: Boolean, onBrowse: () -> Unit) {
                 .size(80.dp)
                 .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp)) }
+        ) {
+//Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
+        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.folder, Icons.Rounded.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp)) }
         Spacer(Modifier.height(16.dp))
         Text("No Files Found", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.W700))
         Spacer(Modifier.height(6.dp))
@@ -1126,7 +1135,9 @@ private fun EmptyState(isDark: Boolean, onBrowse: () -> Unit) {
         )
         Spacer(Modifier.height(20.dp))
         OutlinedButton(onClick = onBrowse, shape = RoundedCornerShape(14.dp)) {
-            Icon(Icons.Rounded.FileOpen, contentDescription = null)
+
+//Icon(Icons.Rounded.FileOpen, contentDescription = null)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.fileOpen, Icons.Rounded.FileOpen, contentDescription = null)
             Spacer(Modifier.width(6.dp))
             Text("Browse Files")
         }

@@ -20,6 +20,7 @@ class NetworkStatusMonitor(context: Context) {
         val downstreamKbps: Int = 0,
         val upstreamKbps: Int = 0,
         val transport: String = "unknown",
+        val networkHandle: Long? = null,
     )
 
     private val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -47,7 +48,9 @@ class NetworkStatusMonitor(context: Context) {
     fun stop() { if (started.compareAndSet(true, false)) runCatching { cm.unregisterNetworkCallback(callback) } }
 
     private fun current(): Status {
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+// Previous implementation retained:         val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        val network = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(network)
         val online = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
         val transport = when {
             caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
@@ -62,6 +65,7 @@ class NetworkStatusMonitor(context: Context) {
             downstreamKbps = caps?.linkDownstreamBandwidthKbps ?: 0,
             upstreamKbps = caps?.linkUpstreamBandwidthKbps ?: 0,
             transport = transport,
+            networkHandle = network?.networkHandle,
         )
     }
 }

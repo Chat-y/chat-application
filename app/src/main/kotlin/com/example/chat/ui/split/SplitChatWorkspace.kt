@@ -1,5 +1,7 @@
 package com.example.chat.ui.split
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -88,7 +90,9 @@ fun SplitChatWorkspace(
         contentByPane.getValue(item.stateKey())(item, modifier)
     }
     // Focus handling: BackHandler dismisses focused pane or closes entire workspace
-    BackHandler {
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(sessionState.focusedConversationId)
+    // Previous registration retained inactive: BackHandler {
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) {
         if (sessionState.count > 1 && sessionState.focusedConversationId != null) {
             onClosePane(sessionState.focusedConversationId)
         } else {
@@ -98,7 +102,7 @@ fun SplitChatWorkspace(
 
     // Full screen overlay for Multi-Pane Workspace
     Box(
-        Modifier
+        Modifier.chatyPredictiveBack(predictiveBack)
             .fillMaxSize()
             .background(colors.background)
             .safeDrawingPadding()

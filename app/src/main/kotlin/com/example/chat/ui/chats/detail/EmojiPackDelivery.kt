@@ -58,6 +58,7 @@ internal fun rememberPackStore(): ContentPackStore? {
  */
 @Composable
 internal fun rememberDownloadedEmojiArt(style: String, unicode: String): String? {
+    if (ChatyEmojiPack.normalize(style) == ChatyEmojiPack.SYSTEM) return null // Custom emoji display disabled.
     val store = rememberPackStore() ?: return null
     val revision by store.revision.collectAsState()
     val path = remember(style, unicode) {

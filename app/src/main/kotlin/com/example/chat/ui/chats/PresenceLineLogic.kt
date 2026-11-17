@@ -30,11 +30,13 @@ object PresenceLineLogic {
         approxBucket: String?,
         now: Instant = Instant.now(),
         zone: ZoneId = ZoneId.systemDefault(),
+        is24Hour: Boolean? = null,
     ): String? {
         if (online) return "online"
         approxBucketText(approxBucket)?.let { return it }
         if (lastSeen != null) {
-            return HomeFormatters.formatLastSeen(lastSeen, now, zone).ifEmpty { null }
+            // Previous implicit clock choice retained: HomeFormatters.formatLastSeen(lastSeen, now, zone)
+            return HomeFormatters.formatLastSeen(lastSeen, now, zone, is24Hour = is24Hour).ifEmpty { null }
         }
         return null
     }

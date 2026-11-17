@@ -88,11 +88,9 @@ class CreateNewPasswordLogicTest {
 
     @Test
     fun `user-facing constants match the Dart source verbatim`() {
-        // Deliberate divergence from Dart ("Password updated. Sign in with your
-        // new password."): the OTP reset flow signs the user in automatically,
-        // so telling them to sign in would be wrong.
+        // Reset completion requests an explicit login; never promise automatic sign-in.
         assertEquals(
-            "Password updated. Signing you in...",
+            "Password updated. Sign in with your new password.",
             CreateNewPasswordLogic.SUCCESS_MESSAGE,
         )
         assertEquals(

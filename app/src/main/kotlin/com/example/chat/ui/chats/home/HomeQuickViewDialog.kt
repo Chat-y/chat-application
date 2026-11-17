@@ -53,8 +53,19 @@ fun HomeSavedViewsDialog(saved:List<HomeSavedView>,
         Column {
             Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_named_combinations_of_filter_folder_and_order_for_))  // was: "Named combinations of filter, folder and order for this account's Home session. They are cleared when you switch accounts and never store search text or chat content."
             HorizontalDivider(Modifier.padding(vertical=12.dp))
-            OutlinedTextField(value=nameState.value,onValueChange={nameState.value=it},
-                label={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_name_this_view))},singleLine=true,modifier=Modifier.fillMaxWidth())  // was: "Name this view"
+            // Previous stock field:
+            // OutlinedTextField(value=nameState.value,onValueChange={nameState.value=it},
+            //                 label={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_name_this_view))},singleLine=true,modifier=Modifier.fillMaxWidth())
+            com.example.chat.ui.kit.ChatyTaskField(
+                value = nameState.value,
+                onValueChange = {nameState.value=it},
+                label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_name_this_view),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                maxLines = 1,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+            )  // was: "Name this view"
             if(HomeQuickViewPolicy.savedViewNameExists(saved,nameState.value))
                 Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_a_saved_view_with_this_name_already_exists_saving_))  // was: "A saved view with this name already exists; saving replaces it."
             TextButton(onClick={onSave(nameState.value);nameState.value=""},enabled=nameState.value.isNotBlank(),
@@ -109,3 +120,6 @@ fun HomeViewHistoryDialog(history:List<HomeViewState>,describe:(HomeViewState)->
         }
     },confirmButton={TextButton(onClick=onDismiss,label="Done")})
 }
+
+// Complete original-line retention for review (inactive).
+                //                 label={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_name_this_view))},singleLine=true,modifier=Modifier.fillMaxWidth())  // was: "Name this view"

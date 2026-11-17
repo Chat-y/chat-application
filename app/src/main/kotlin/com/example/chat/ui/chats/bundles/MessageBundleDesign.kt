@@ -46,7 +46,8 @@ internal fun messageBundleTheme(theme: ThemeConfig): ThemeConfig {
 internal fun messageBundleHome(templates: HomeTemplates): HomeTemplates {
     val design = rememberMessageBundleDesign() ?: return templates
     return templates.copy(chatList = templates.chatList.copy(itemHeight = design.rowHeight,
-        showDivider = design.divider, density = ChatListDensity.regular, referenceDefault = false))
+        // Preserve the selected bundle's explicit row geometry rather than applying default compaction.
+        showDivider = design.divider, density = ChatListDensity.regular, referenceDefault = false, compactDefault = false))
 }
 
 @Composable

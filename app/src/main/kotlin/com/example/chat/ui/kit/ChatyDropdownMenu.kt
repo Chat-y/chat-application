@@ -75,6 +75,10 @@ fun ChatyDropdownMenu(
     shape: Shape = ChatyModalShape,
     containerColor: Color = androidx.compose.ui.graphics.lerp(LocalAppColors.current.surface, LocalAppColors.current.primary, 0.035f),
     border: BorderStroke? = null,
+    // Keep existing menus below; bottom-anchored controls opt into above fallback.
+    preferBelow: Boolean = true,
+    // Previous shared fallback: Color.Black. Use the current theme shadow token.
+    shadowColor: Color = LocalAppColors.current.shadow,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = LocalAppColors.current
@@ -96,8 +100,8 @@ fun ChatyDropdownMenu(
     // fixed corner. The position provider reports where the anchor's centre falls
     // inside the placed popup; that point becomes the transform origin.
     var menuTransformOrigin by remember { mutableStateOf(TransformOrigin.Center) }
-    val position = remember(margin) {
-        ChatyMenuPositionProvider(margin, preferBelow = true, onAvailableHeight = { availableBelowPx = it }) { ox, oy -> menuTransformOrigin = TransformOrigin(ox, oy) }
+    val position = remember(margin, preferBelow) {
+        ChatyMenuPositionProvider(margin, preferBelow = preferBelow, onAvailableHeight = { availableBelowPx = it }) { ox, oy -> menuTransformOrigin = TransformOrigin(ox, oy) }
     }
     val menuScrollState = remember(rememberKey) { ScrollState(rememberKey?.let { chatyMenuScrollMemory[it] } ?: 0) }
     if (rememberKey != null) {
@@ -116,7 +120,7 @@ fun ChatyDropdownMenu(
                 androidx.compose.animation.scaleOut(androidx.compose.animation.core.tween(presentation.menuExitMs), targetScale = 0.98f, transformOrigin = menuTransformOrigin),
         ) {
         Column(
-            modifier.shadow(8.dp, effectiveShape).clip(effectiveShape)
+            modifier.shadow(8.dp, effectiveShape, ambientColor = shadowColor, spotColor = shadowColor).clip(effectiveShape)
                 .background(containerColor)
                 .border(border ?: BorderStroke(1.dp, colors.border), effectiveShape)
                 .widthIn(max = maxMenuWidth)
@@ -177,7 +181,9 @@ internal class ChatyMenuPositionProvider(
         val maxX = (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)
         val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
         val below = anchorBounds.bottom + margin
-        onAvailableHeight?.invoke((windowSize.height - below - margin).coerceAtLeast(1))
+        val belowSpace = (windowSize.height - below - margin).coerceAtLeast(1)
+        val aboveSpace = (anchorBounds.top - 2 * margin).coerceAtLeast(1)
+        onAvailableHeight?.invoke(if (preferBelow) belowSpace else maxOf(belowSpace, aboveSpace))
         val preferredY = if (preferBelow || below + popupContentSize.height <= windowSize.height - margin) below
             else anchorBounds.top - popupContentSize.height - margin
         val placed = IntOffset(preferredX.coerceIn(margin, maxX), preferredY.coerceIn(margin, if (preferBelow) (windowSize.height - margin).coerceAtLeast(margin) else maxY))

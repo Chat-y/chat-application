@@ -29,9 +29,13 @@ import kotlin.math.min
 import kotlin.math.sin
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 
-/** Local vector style interpretations. Sent is one complete mark; Delivered and
- * Read are two complete marks. Read uses readColor without an underline.
- * Duplicate style IDs stay readable through the explicit merge policy. */
+// Previous description incorrectly called every delivered design two complete marks.
+// Sent is one complete mark; Delivered and Read are two complete marks.
+/** Nineteen canonical silhouettes, each with its own state-specific drawing below.
+ * Classic uses one/two checks; Circle uses outline/check/filled check; other designs
+ * use their existing state detail. Read always uses the caller's readColor, never an
+ * added underline (Bandi, Nov 16). Legacy saved IDs map through canonicalDeliveryStyle.
+ * Do not collapse these branches to a repeated generic check or badge. */
 
 @Composable
 fun DeliveryStatusIcon(

@@ -45,8 +45,8 @@ import com.example.chat.ui.kit.ChatyAdaptiveLogic
  *  Reached from OtpVerificationScreen (ResetPassword purpose) after the
  *  forgot-password email arrives. AppRoot wires submitNewPassword to the
  *  custom backend: auth/reset-password with the emailed code, then an
- *  automatic sign-in with the new password (research 4a.6), landing on Home
- *  via onPasswordUpdated. showSuccess is wired to a Toast.
+ *  explicit login after completion. Previous behavior signed in automatically
+ *  with the new password and landed on Home. showSuccess is wired to a Toast.
  *
  *  [email] is part of the Dart widget contract (main.dart passes
  *  state.session?.user.email) but is never rendered in the source; kept
@@ -97,7 +97,8 @@ fun CreateNewPasswordScreen(
         scope.launch {
             try {
                 authRequest { submitNewPassword(submittedPassword) }
-                showSuccess(CreateNewPasswordLogic.SUCCESS_MESSAGE)
+                // Previous: showSuccess(CreateNewPasswordLogic.SUCCESS_MESSAGE)
+                showSuccess(authCopy(CreateNewPasswordLogic.SUCCESS_MESSAGE))
                 onPasswordUpdated()
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (e: Exception) {

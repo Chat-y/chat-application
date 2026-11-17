@@ -193,6 +193,36 @@ private fun ChatDetailHostContent(
         check(secureChannelResolved) { "Encryption preference could not be checked. Sending is blocked; reopen this chat to retry." }
         check(!secureChannel || secureRoutingAvailable) { "Secure routing is not available in this build. Nothing was sent." }
     }
+    val deviceKeyReviews by ServiceLocator.mls.deviceKeyReviews.collectAsState()
+    val deviceKeyFingerprints by ServiceLocator.mls.deviceKeyFingerprints.collectAsState()
+    var keySafetyOpen by remember(secureRoutingAccount) { mutableStateOf(false) }
+    if (keySafetyOpen) com.example.chat.ui.chats.detail.DeviceKeySafetyDialog(
+        deviceKeyFingerprints.filter { it.namespace == api.currentAccountHash() },
+        onDismiss = { keySafetyOpen = false },
+    )
+    var keyReviewDismissed by remember(secureRoutingAccount, deviceKeyReviews) { mutableStateOf(false) }
+    var keyReviewBusy by remember { mutableStateOf(false) }
+    var keyReviewError by remember { mutableStateOf<String?>(null) }
+    val keyReview = deviceKeyReviews.firstOrNull { it.namespace == api.currentAccountHash() }
+    if (keyReview != null && !keyReviewDismissed) {
+        com.example.chat.ui.chats.detail.DeviceKeyReviewDialog(keyReview, keyReviewBusy, keyReviewError,
+            onApprove = {
+                if (!keyReviewBusy) {
+                    keyReviewBusy = true
+                    scope.launch {
+                        try {
+                            check(api.authSnapshot() === secureRoutingAccount) { "Account changed." }
+                            ServiceLocator.mls.approveDeviceKey(keyReview) { api.authSnapshot() === secureRoutingAccount }
+                            loadNonce++
+                        } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                        catch (_: Exception) { keyReviewError = "Could not save this approval. Sending stays blocked." }
+                        finally { keyReviewBusy = false }
+                    }
+                }
+            },
+            onDismiss = { keyReviewDismissed = true },
+        )
+    }
     LaunchedEffect(conversation.id, secureRoutingAccount) {
         try {
             val requested = repo.isSecureChannel(conversation.id)
@@ -312,7 +342,7 @@ private fun ChatDetailHostContent(
     // Secure chats read decrypted MLS rows; other chats read the REST plane.
     // Recomposition is driven by the existing rev tick and post-action rev++.
     val messages = if (!secureChannelResolved) emptyList() else if (secureChannel) {
-        repo.messagesByChatId[conversation.id] ?: emptyList()
+        com.example.chat.data.messaging.SecureControlEnvelope.project(repo.messagesByChatId[conversation.id] ?: emptyList())
     } else {
         api.getMessages(conversation.id)
     }
@@ -333,6 +363,7 @@ private fun ChatDetailHostContent(
                 delivered
             },
         ) { message ->
+            check(message.attachment?.encryptedFile == null) { "Encrypted media has no REST URL; open it through authenticated local resolution." }
             val path = message.attachment?.url ?: throw IllegalStateException("Missing media path")
             ServiceLocator.chatMedia.createSignedUrl(path, 3600) { account.baseUrl }
         }
@@ -632,6 +663,8 @@ private fun ChatDetailHostContent(
                 presenceOnline,
                 if (currentFetchedPresence != null) fetchedLastSeen else api.lastSeenOf(otherId),
                 if (currentFetchedPresence != null) fetchedApprox else api.approxPresenceOf(otherId),
+                // Exact visible timestamps use the requested HH:mm; privacy buckets remain unchanged.
+                is24Hour = true,
             )
         }
     } else {
@@ -688,7 +721,7 @@ private fun ChatDetailHostContent(
         cameraEntryAuth = null
     }
     fun openChatCamera(preset: com.example.chat.ui.camera.CameraEntryPreset) {
-        if (!secureChannelResolved || secureChannel) { toast("Camera media cannot be sent until secure-media support is ready."); return }
+        if (!secureChannelResolved || (secureChannel && !secureRoutingAvailable)) { toast("Secure camera routing is unresolved."); return }
         closeChatCamera()
         var openedFlow: com.example.chat.ui.AttachFlow? = null
         val flow = attachments.openCaptureSession {
@@ -700,6 +733,14 @@ private fun ChatDetailHostContent(
         cameraEntryAuth = com.example.chat.ui.camera.ApiVideoAuthPort(api, flow.expectedScope)
         cameraEntryPreset = preset
         chatCameraOpen = true
+        // Bookkeeping hygiene only: drops retained-finals rows whose file already
+        // vanished by other means, across every account bucket (no ambient-account
+        // lookup here either). Never deletes a file; no retention window yet.
+        // audit-05 v1 (replaced in v3, kept inactive per standing rule):
+        // // Bookkeeping hygiene only: drops retained-finals rows whose file already
+        // // vanished by other means. Never deletes a file; no retention window yet.
+        // runCatching { com.example.chat.ui.camera.CameraRetainedFinals.pruneMissing(hostView.context) }
+        runCatching { com.example.chat.ui.camera.CameraRetainedFinals.pruneAllMissing(hostView.context) }
     }
     DisposableEffect(api, conversation.id) {
         onDispose { videoHoldRequest?.close(); cameraEntryFlow?.let(attachments.closeCaptureSession) }
@@ -748,7 +789,8 @@ private fun ChatDetailHostContent(
         ghostModeEnabled = prefs.home.ghostMode,
         onToggleGhostMode = { prefs.updateHome(prefs.home.copy(ghostMode = !prefs.home.ghostMode)) },
         secureChannelEnabled = secureChannel,
-        onToggleSecureChannel = if (!secureRoutingAvailable || !secureChannelResolved) null else ({
+        onToggleSecureChannel = if (!secureRoutingAvailable || !secureChannelResolved) null
+        else if (ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) ({ keySafetyOpen = true }) else ({
             val next = !secureChannel
             // Close the send gate synchronously, before any suspended setup/storage work.
             secureChannelResolved = false
@@ -958,8 +1000,16 @@ private fun ChatDetailHostContent(
             if (m != null) api.setMessageLocalState(conversation.id, id, "pinned", !m.isPinned)
         },
         onToggleReaction = { id, emoji ->
-            if (!secureChannelResolved || secureChannel) toast("Reactions are not supported for secure-routing chats yet.")
-            else {
+            if (!secureChannelResolved) toast("Secure reaction routing is unresolved.")
+            else if (secureChannel) {
+                val owner = api.authSnapshot()
+                scope.launch {
+                    try { repo.sendEncryptedReaction(conversation.id, id, emoji, owner); rev++ }
+                    catch (pending: com.example.chat.data.messaging.SecureSendPendingException) { toast("Encrypted reaction is queued until device setup completes."); rev++ }
+                    catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                    catch (_: Exception) { toast("Could not send encrypted reaction.") }
+                }
+            } else {
                 val owner = api.authSnapshot()
                 scope.launch {
                     try { api.toggleServerReaction(conversation.id, id, emoji, owner) } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e;
@@ -1036,11 +1086,12 @@ private fun ChatDetailHostContent(
         composerTemplate = ServiceLocator.templateController.composer,
         composerAppearance = com.example.chat.ui.chats.detail.ConversationComposerAppearance.fromMap(prefs.gbFeatures),
         onAttachmentAction = { action ->
-            if (!secureChannelResolved || secureChannel) toast("Attachments are unavailable until secure-media support is ready.") else when (action) {
+            if (!secureChannelResolved || (secureChannel && !secureRoutingAvailable)) toast("Secure media routing is unresolved.") else when (action) {
                 com.example.chat.ui.chats.detail.AttachmentAction.image -> attachments.onMedia("image")
                 com.example.chat.ui.chats.detail.AttachmentAction.video -> attachments.onMedia("video")
                 com.example.chat.ui.chats.detail.AttachmentAction.chatyDirect -> {
-                    if (!isDirect || otherId == null) toast("Chaty Direct is available in one-to-one chats.")
+                    if (secureChannel) toast("Use an encrypted attachment for this secure chat; direct invitations are not wired here.")
+                    else if (!isDirect || otherId == null) toast("Chaty Direct is available in one-to-one chats.")
                     else if (largePickerOwner == null) {
                         largePickerOwner = api.authSnapshot()
                         directOriginalSelection = true
@@ -1049,7 +1100,8 @@ private fun ChatDetailHostContent(
                     }
                 }
                 com.example.chat.ui.chats.detail.AttachmentAction.largeFile -> {
-                    if (!isDirect || otherId == null) toast("Large direct transfers are available in one-to-one chats.")
+                    if (secureChannel) toast("Use an encrypted attachment for this secure chat; direct invitations are not wired here.")
+                    else if (!isDirect || otherId == null) toast("Large direct transfers are available in one-to-one chats.")
                     else if (largePickerOwner == null) {
                         largePickerOwner = api.authSnapshot()
                         directOriginalSelection = false
@@ -1182,11 +1234,11 @@ private fun ChatDetailHostContent(
         // Previous unguarded callback: onVoiceTap = voice.onVoiceTap,
         onVoiceTap = {
             if (api.authSnapshot() !== messageAccountScope) toast("Account changed. Open the chat again.")
-            else if (!secureChannelResolved || secureChannel) toast("Voice notes are not sent in an encrypted chat yet; encrypted media is not wired.")
+            else if (!secureChannelResolved || (secureChannel && !secureRoutingAvailable)) toast("Secure voice routing is unresolved.")
             else voice.onVoiceTap()
         },
         onVoiceHoldStart = {
-            if (!secureChannelResolved || secureChannel) toast("Voice notes are not sent in an encrypted chat yet; encrypted media is not wired.")
+            if (!secureChannelResolved || (secureChannel && !secureRoutingAvailable)) toast("Secure voice routing is unresolved.")
             else voice.onVoiceHoldStart()
         },
         onVoiceMove = voice.onVoiceMove,
@@ -1222,7 +1274,9 @@ private fun ChatDetailHostContent(
     }
     voice.overlay()
     if (chatCameraOpen) {
-        androidx.activity.compose.BackHandler { closeChatCamera() }
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = messageAccountScope to cameraEntryFlow) {
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler { closeChatCamera() }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler { closeChatCamera() }
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
             val localVideoAuth = cameraEntryAuth
             val mountedCameraFlow = cameraEntryFlow
@@ -1271,9 +1325,12 @@ private fun ChatDetailHostContent(
             )
             }
         }
+            } // Camera entry presentation; capture child owners still win.
     }
     if (infoRoute != 0) {
-        androidx.activity.compose.BackHandler { infoRoute = if (infoRoute == 2) 1 else 0 }
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = messageAccountScope to infoRoute) {
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler { infoRoute = if (infoRoute == 2) 1 else 0 }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler { infoRoute = if (infoRoute == 2) 1 else 0 }
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
             if (!isDirect) {
                 com.example.chat.ui.chats.group_info.GroupInfoScreen(
@@ -1296,6 +1353,7 @@ private fun ChatDetailHostContent(
                 )
             } else if (other != null) {
                 com.example.chat.ui.chats.contact_info.ContactInfoScreen(
+                    bannerPlaybackSelected = infoRoute == 1 && viewerMessage == null,
                     conversation = live,
                     contact = infoProfile ?: other,
                     onStartCall = { startContactCall(it) },
@@ -1384,6 +1442,7 @@ private fun ChatDetailHostContent(
                 )
             }
         }
+            } // Overlay-local predictive presentation.
     }
     if (pollCreateOpen && secureChannelResolved && !secureChannel) {
         CreatePollDialog(
@@ -1403,7 +1462,9 @@ private fun ChatDetailHostContent(
         )
     }
     if (appearanceOpen && chatThemeKey != null) {
-        androidx.activity.compose.BackHandler { appearanceOpen = false }
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = messageAccountScope to chatThemeKey) {
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler { appearanceOpen = false }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler { appearanceOpen = false }
         var jsonWaiter by remember(messageAccountScope) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<String?>?>(null) }
         var imageWaiter by remember(messageAccountScope) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<File?>?>(null) }
         DisposableEffect(messageAccountScope) {
@@ -1494,6 +1555,7 @@ private fun ChatDetailHostContent(
                 onBack = { appearanceOpen = false },
             )
         }
+            } // Overlay-local predictive presentation.
     }
     val vm = viewerMessage?.let { requested ->
         messages.firstOrNull { it.id == requested.id && !it.isDeletedForEveryone && !it.isDeletedForMe && !it.isRevokedBySender }
@@ -1508,7 +1570,9 @@ private fun ChatDetailHostContent(
     val va = vm?.attachment
     val localP2pFile = p2pLocalViewer
     if (localP2pFile != null && localP2pFile.isFile) {
-        androidx.activity.compose.BackHandler { p2pLocalViewer = null }
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = messageAccountScope to localP2pFile) {
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler { p2pLocalViewer = null }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler { p2pLocalViewer = null }
         var ownedExternalBusy by remember(localP2pFile) { mutableStateOf(false) }
         fun launchOwnedExternal(share: Boolean) {
             if (ownedExternalBusy) return
@@ -1611,9 +1675,12 @@ private fun ChatDetailHostContent(
             onOwnedShare = { launchOwnedExternal(true) },
             onOwnedSaveToGallery = ::launchOwnedGallerySave,
         )
+            } // Overlay-local predictive presentation.
     }
     if (vm != null && va != null) {
-        androidx.activity.compose.BackHandler { viewerMessage = null }
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = messageAccountScope to vm.id) {
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler { viewerMessage = null }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler { viewerMessage = null }
         androidx.compose.runtime.key(attachmentBinding.session, conversation.id, vm.id) {
             val albumSequence = com.example.chat.ui.chats.detail.AlbumNavigationPolicy.sequence(
                 com.example.chat.ui.chats.detail.mediaTimelineRows(messages), vm.id)
@@ -1639,6 +1706,7 @@ private fun ChatDetailHostContent(
                 }
             }
         }
+            } // Overlay-local predictive presentation.
     }
 
     }
@@ -3787,3 +3855,6 @@ private fun ChatDetailHostContent(
 // Previous secure edit/delete calls retained (not executable):
 // repo.editMessage(conversation.id, id, newText)
 // repo.deleteMessage(conversation.id, id, forEveryone)
+
+// Previous implementation retained inactive (unified v4):
+//             else if (!secureChannelResolved || secureChannel) toast("Voice notes are not sent in an encrypted chat yet; encrypted media is not wired.")

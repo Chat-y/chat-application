@@ -300,7 +300,9 @@ private fun ToastSettingRow(
             Box(Modifier.size(28.dp).background(Color(colorValue), CircleShape).border(1.dp, colors.borderSubtle, CircleShape))
         } else if (hasSubScreen) {
             // Previous unavailable icon: Icons.AutoMirrored.Rounded.ChevronRight
-            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = colors.foregroundSecondary.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
+
+//Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = colors.foregroundSecondary.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = colors.foregroundSecondary.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
         }
     }
 }

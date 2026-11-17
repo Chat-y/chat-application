@@ -35,6 +35,8 @@ class ApiBackendService(
     chatTransport: ApiHttpTransport = OkHttpApiTransport(),
 ) {
     private val appContext = context.applicationContext
+    // Keep ordinary message loading's injected timeout/retry/redirect behavior unchanged.
+    private val ordinaryChatTransport = chatTransport
 
     private val authScopeLock = Any()
     val config = ApiBackendConfig(context, authScopeLock, ::notifyAuthScopeTransition)
@@ -306,6 +308,8 @@ class ApiBackendService(
         val event = data + ("client_event_id" to eventId)
         var queued = false
         withAuthScope(expected) { queued = realtime.sendCallSignal(targetUserId, event) }
+        if (!queued) com.example.chat.data.services.CallFailureDiagnostics.report(
+            com.example.chat.data.services.CallFailureStage.WS_SIGNAL_NOT_QUEUED)
         callCoordinator.send(expected, targetUserId, event)
         return queued // Enqueue only, not delivery/receipt.
     }
@@ -362,7 +366,9 @@ class ApiBackendService(
             deliver = { expected, data -> scopedCallListeners.forEach { it(expected, data) } },
             clock = { android.os.SystemClock.elapsedRealtime() },
             legacyAllowed = { expected -> callProtocolOwner === expected && !durableCallInbox },
-            inboxWake = ::wakeCallInbox)
+// Previous implementation retained: inboxWake = ::wakeCallInbox)
+            inboxWake = ::wakeCallInbox,
+            launchScope = { chatScope })
     }
     private fun startCallScopeMonitoring() {
         addAuthScopeListener(callCoordinator::transition)
@@ -468,6 +474,11 @@ class ApiBackendService(
 
         override fun onSecureMessage(data: Map<String, Any?>) {
             secureMessageIngest?.invoke(data)
+        }
+
+        override fun onRoomRetentionChanged(roomId: String, capturedScope: Any?) {
+            val owner = capturedScope as? ApiAccountScope ?: return
+            if (authSnapshot() === owner) secureRoomRetentionIngest?.invoke(roomId, owner)
         }
 
         override fun onSecureMessageEdited(data: Map<String, Any?>) {
@@ -602,7 +613,8 @@ class ApiBackendService(
             if ((normalized.conversationId == activeConversationId || normalized.conversationId in activeConversationIds) &&
                 normalized.senderId != session.currentUser?.id
             ) {
-                markConversationRead(normalized.conversationId)
+                // Previous ambient read: markConversationRead(normalized.conversationId)
+                markConversationRead(normalized.conversationId, expected)
             }
             schedulePersistRoomMessages(roomId, expected)
             schedulePersistConversations(expected)
@@ -951,27 +963,33 @@ class ApiBackendService(
         return queued
     }
 
-    /** Marks the room read on the server and clears the local unread badge. */
-    fun markConversationRead(chatId: String) {
-        if (session.token == null || chatId.isEmpty()) return
-        try { onConversationRead(chatId) } catch (_: Exception) {}
+    /** Fail closed until the account-scoped preference policy is wired and ready. */
+    @Volatile var shouldSendReadReceipts: (String, ApiAccountScope) -> Boolean = { _, _ -> false }
+
+    /** Clear our unread badge even when privacy suppresses the remote read acknowledgement. */
+    fun markConversationRead(chatId: String, expected: ApiAccountScope = authSnapshot()) {
+        if (expected.token.isNullOrBlank() || chatId.isBlank()) return
         var hadUnread = false
-        synchronized(chatLock) {
-            val idx = _conversations.indexOfFirst { it.id == chatId }
-            if (idx != -1 && _conversations[idx].unreadCount > 0) {
-                _conversations[idx] = _conversations[idx].copy(unreadCount = 0)
-                hadUnread = true
+        if (!withAuthScope(expected) {
+            try { onConversationRead(chatId) } catch (_: Exception) {}
+            synchronized(chatLock) {
+                val idx = _conversations.indexOfFirst { it.id == chatId }
+                if (idx != -1 && _conversations[idx].unreadCount > 0) {
+                    _conversations[idx] = _conversations[idx].copy(unreadCount = 0)
+                    hadUnread = true
+                }
             }
-        }
+        }) return
         if (hadUnread) notifyChatListeners()
-        // Prior: chatScope.launch { chat.markRoomRead(chatId) }
-        // Owner captured before launch: a sign-out or account switch in between must not mark
-        // another account's room read.
-        val owner = authSnapshot()
-        // Prefer PR #3 scoped WS receipts. A queued frame is not server acceptance;
-        // REST remains the offline fallback. Do not update message ticks from this ack.
-        if (!realtime.sendRoomReceipt(chatId, "read", owner)) {
-            chatScope.launch { if (authSnapshot() === owner) ownerChatClient(owner).markRoomRead(chatId) }
+        fun allowed(): Boolean = com.example.chat.data.api.ReadReceiptDispatchPolicy.allowed(
+            expected, ::authSnapshot, chatId, shouldSendReadReceipts)
+        if (!allowed()) return
+        // A queued WS frame is not server acceptance. Preserve the scoped REST fallback.
+        if (!realtime.sendRoomReceipt(chatId, "read", expected, ::allowed)) {
+            chatScope.launch {
+                // Re-evaluate at dispatch: privacy may change while the coroutine is queued.
+                if (allowed()) ownerChatClient(expected).markRoomRead(chatId, ::allowed)
+            }
         }
     }
 
@@ -1203,6 +1221,7 @@ class ApiBackendService(
 
     /** MLS edit fan-out (chat UI matrix): re-decrypt + update in place. */
     @Volatile var secureMessageEditIngest: ((Map<String, Any?>) -> Unit)? = null
+    @Volatile var secureRoomRetentionIngest: ((String, ApiAccountScope) -> Unit)? = null
 
     /** Delete-for-everyone fan-out: tombstone the local copy. */
     @Volatile var secureMessageDeleteIngest: ((Map<String, Any?>) -> Unit)? = null
@@ -1421,11 +1440,11 @@ class ApiBackendService(
         if (hydratedMessages) notifyChatListeners()
     }
 
-    private suspend fun hydrateRoomMessagesFromCacheIfNeeded(roomId: String) {
-        if (roomId.isBlank() || hydratedRoomSnapshots.contains(roomId)) return
-        val expected = authSnapshot()
+    // Previous hydration captured an ambient owner inside the suspend chain.
+    private suspend fun hydrateRoomMessagesFromCacheIfNeeded(roomId: String, expected: ApiAccountScope = authSnapshot()) {
+        if (authSnapshot() !== expected || roomId.isBlank() || hydratedRoomSnapshots.contains(roomId)) return
         val coord = snapshotCoordinator ?: run {
-            hydratedRoomSnapshots.add(roomId)
+            withAuthScope(expected) { hydratedRoomSnapshots.add(roomId) }
             return
         }
         val ns = snapshotNamespaceFor(expected) ?: return
@@ -1459,11 +1478,14 @@ class ApiBackendService(
         if (cleaned.isNotEmpty()) {
             realtime.connect()
             startBackgroundSync()
+            val readOwner = authSnapshot()
             cleaned.forEach { roomId ->
                 chatScope.launch {
                     try {
-                        loadMessagesIfNeeded(roomId)
-                        markConversationRead(roomId)
+                        if (authSnapshot() !== readOwner) return@launch
+                        loadMessagesIfNeeded(roomId, expected = readOwner)
+                        // Previous ambient dispatch: markConversationRead(roomId)
+                        markConversationRead(roomId, readOwner)
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (_: Exception) {
@@ -1536,10 +1558,16 @@ class ApiBackendService(
         withAuthScope(owner) {
             synchronized(chatLock) {
                 val profile = _users.firstOrNull { it.id == userId }
-                result = profile?.displayName?.trim()?.takeIf { it.isNotEmpty() }
-                    ?: profile?.username?.trim()?.takeIf { it.isNotEmpty() }
-                    ?: _conversations.firstOrNull { it.isDirect && userId in it.participantIds }
-                        ?.title?.trim()?.takeIf { it.isNotEmpty() && it != "Chat" }
+                // Previous name selection accepted non-empty placeholders such as "Chaty User".
+// Previous implementation retained: result = profile?.displayName?.trim()?.takeIf { it.isNotEmpty() }
+// Previous implementation retained:     ?: profile?.username?.trim()?.takeIf { it.isNotEmpty() }
+// Previous implementation retained:     ?: _conversations.firstOrNull { it.isDirect && userId in it.participantIds }
+// Previous implementation retained:         ?.title?.trim()?.takeIf { it.isNotEmpty() && it != "Chat" }
+                result = com.example.chat.data.services.CallContactName.first(
+                    profile?.displayName,
+                    profile?.username,
+                    _conversations.firstOrNull { it.isDirect && userId in it.participantIds }?.title,
+                )
             }
         }
         return result
@@ -1810,9 +1838,20 @@ class ApiBackendService(
     }
 
     /** loadMessages with monotonic delivery ticks and pending-message merge. */
-    suspend fun loadMessages(chatId: String) {
-        val expected = authSnapshot()
-        val remote = withContext(Dispatchers.IO) { chat.listMessages(chatId) } ?: return
+    // Previous ambient signature/read: loadMessages(chatId); chat.listMessages(chatId).
+    suspend fun loadMessages(chatId: String, expected: ApiAccountScope = authSnapshot()) {
+        if (authSnapshot() !== expected || expected.token.isNullOrBlank()) return
+        // Bind credentials/routing without substituting call-only timeouts or retry behavior.
+        val scopedReader = ApiChatClient(
+            baseUrl = { expected.baseUrl }, tenantId = { expected.tenantId }, token = { expected.token },
+            transport = ApiHttpTransport { method, url, headers, body ->
+                if (authSnapshot() !== expected) throw ApiScopeChangedException()
+                val response = ordinaryChatTransport.execute(method, url, headers, body)
+                if (authSnapshot() !== expected) throw ApiScopeChangedException()
+                response
+            },
+        )
+        val remote = withContext(Dispatchers.IO) { scopedReader.listMessages(chatId) } ?: return
         applyLoadedMessages(chatId, remote, expected)
     }
 
@@ -1879,9 +1918,11 @@ class ApiBackendService(
      * fetching from the backend only when the room has not been synced yet,
      * is marked dirty/stale, the socket is disconnected, or server preview leads cache.
      */
-    suspend fun loadMessagesIfNeeded(chatId: String, force: Boolean = false) {
-        if (chatId.isBlank() || session.token == null || DemoMode.active) return
-        hydrateRoomMessagesFromCacheIfNeeded(chatId)
+    // Previous ambient owner was re-captured separately by hydration and loadMessages after awaits.
+    suspend fun loadMessagesIfNeeded(chatId: String, force: Boolean = false, expected: ApiAccountScope = authSnapshot()) {
+        if (chatId.isBlank() || expected.token.isNullOrBlank() || authSnapshot() !== expected || DemoMode.active) return
+        hydrateRoomMessagesFromCacheIfNeeded(chatId, expected)
+        if (authSnapshot() !== expected) return
         val needsFetch = if (force) {
             true
         } else {
@@ -1896,7 +1937,7 @@ class ApiBackendService(
             )
         }
         if (!needsFetch) return
-        loadMessages(chatId)
+        loadMessages(chatId, expected)
     }
 
     /** startDirectChat: POST /chat/rooms/direct (no fallback), upsert at
@@ -1972,10 +2013,29 @@ class ApiBackendService(
     /** deleteUser: local-first removal (user + their direct conversations),
      *  notify, then the backend DELETE with errors swallowed. Deleting
      *  oneself signs out (Dart). */
-    suspend fun deleteUser(userId: String, expectedScope: ApiAccountScope? = null) {
+    private val deletionReceipts = ApiDeletionReceiptClient(OkHttpApiTransport(allowRedirects = false))
+    suspend fun prepareAccountDeletion(owner: ApiAccountScope): ApiDeletionReceiptClient.Prepared = withContext(Dispatchers.IO) {
+        deletionReceipts.prepare(owner) { authSnapshot() === owner }
+    }
+    suspend fun recoverAccountDeletionReceipt(base: String, receipt: ApiDeletionReceiptClient.Prepared) = withContext(Dispatchers.IO) {
+        deletionReceipts.recover(base, receipt)
+    }
+    suspend fun deleteUser(userId: String, expectedScope: ApiAccountScope? = null,
+        onServerConfirmed: suspend () -> Unit = {}, password: String? = null,
+        prepared: ApiDeletionReceiptClient.Prepared? = null) {
         val expected = expectedScope ?: authSnapshot()
         if (authSnapshot() !== expected) throw ApiScopeChangedException()
-        withContext(Dispatchers.IO) { accountDeletion.delete(expected, { authSnapshot() === expected }, userId) }
+        withContext(Dispatchers.IO) {
+            if (expected.userId == userId) {
+                check(password != null && prepared != null) { "Deletion requires password verification and a saved recovery receipt." }
+                deletionReceipts.delete(expected, prepared, password) { authSnapshot() === expected }
+                withContext(kotlinx.coroutines.NonCancellable) { onServerConfirmed() }
+            } else {
+                // Non-self contact-management path remains separate from account recovery.
+                check(authSnapshot() === expected) { "Account changed before contact removal." }
+                contactsPlane(expected).removeContact(userId)
+            }
+        }
         check(withAuthScope(expected) {
             synchronized(chatLock) {
                 _users.removeAll { it.id == userId }
@@ -2085,6 +2145,7 @@ class ApiBackendService(
     }
 
     suspend fun toggleServerReaction(roomId: String, messageId: String, emoji: String, owner: ApiAccountScope) {
+        check(!com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) { "Use the encrypted reaction envelope." }
         require(emoji.isNotBlank() && emoji.length <= 64) { "Invalid reaction" }
         val key = "${owner.generation}:$roomId:$messageId"
         reactionLocks.getOrPut(key) { kotlinx.coroutines.sync.Mutex() }.withLock {
@@ -2201,10 +2262,13 @@ class ApiBackendService(
         if (!conversationId.isNullOrEmpty()) {
             realtime.connect()
             startBackgroundSync()
+            val readOwner = authSnapshot()
             chatScope.launch {
                 try {
-                    loadMessagesIfNeeded(conversationId)
-                    markConversationRead(conversationId)
+                    if (authSnapshot() !== readOwner) return@launch
+                    loadMessagesIfNeeded(conversationId, expected = readOwner)
+                    // Previous ambient dispatch: markConversationRead(conversationId)
+                    markConversationRead(conversationId, readOwner)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -2428,7 +2492,11 @@ class ApiBackendService(
     suspend fun sendMessageForScope(expected: ApiAccountScope, conversationId: String, text: String): Boolean {
         if (authSnapshot() !== expected || conversationId.isBlank() || text.isBlank()) return false
         var queuedId: String? = null
-        val confirmed = sendMessage(conversationId, text, expectedScope = expected, onDurablyQueued = { queuedId = it })
+        val confirmed = try {
+            sendMessage(conversationId, text, expectedScope = expected, onDurablyQueued = { queuedId = it })
+        } catch (pending: com.example.chat.data.messaging.SecureSendPendingException) {
+            return authSnapshot() === expected
+        }
         if (authSnapshot() !== expected) return false
         if (confirmed != null) return true
         return synchronized(outboxLock) {
@@ -2471,6 +2539,11 @@ class ApiBackendService(
 
     /** sendMessage: optimistic temp message, POST, confirm replaces temp and
      *  bumps the conversation to the top; failure leaves the temp sending. */
+    /** All ordinary producers enter this captured-owner MLS router when gate ON.
+     * Missing router is a hard failure, never REST fallback. */
+    var encryptedMessageRouter: (suspend (ApiAccountScope, String, String, MessageType,
+        com.example.chat.domain.models.MessageAttachment?, Map<String, Any?>?) -> ChatMessage)? = null
+
     suspend fun sendMessage(
         conversationId: String,
         text: String,
@@ -2483,9 +2556,19 @@ class ApiBackendService(
         onDurablyQueued: ((String) -> Unit)? = null,
     ): ChatMessage? {
         val expected = expectedScope ?: authSnapshot()
-        if (expected.userId.isNullOrBlank() || expected.token.isNullOrBlank() || authSnapshot() !== expected) {
-            throw IllegalStateException("Account changed or signed out; message not sent.")
+        check(authSnapshot() === expected && !expected.userId.isNullOrBlank() && !expected.token.isNullOrBlank()) { "Account changed or signed out." }
+        if (com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING && !DemoMode.isDemoUser(expected.userId)) {
+            check(attachment == null || attachment.encryptedFile != null) { "Plaintext media cannot be sent in an encrypted chat." }
+            val router = encryptedMessageRouter ?: error("Encrypted routing is not initialized. Nothing was sent.")
+            val encrypted = try { router(expected, conversationId, text, type, attachment, extraMetadata) }
+            catch (pending: com.example.chat.data.messaging.SecureSendPendingException) {
+                if (authSnapshot() === expected) pending.queuedClientId?.let { onDurablyQueued?.invoke(it) }
+                throw pending
+            }
+            if (encrypted.deliveryState == DeliveryState.queued) onDurablyQueued?.invoke(encrypted.id)
+            return encrypted
         }
+        check(attachment?.encryptedFile == null) { "Encrypted attachment descriptors may only travel inside MLS." }
         // Quarantined conversation (moved to the encrypted plane): refuse
         // BEFORE the optimistic row so nothing plaintext is queued or shown
         // as sending. Catches unrouted callers during the toggle window.
@@ -3156,6 +3239,9 @@ class ApiBackendService(
 
     /** Drain different conversations independently, FIFO within each one. */
     suspend fun flushOutbox() {
+        // Legacy REST rows remain on disk for explicit reconciliation, never replay
+        // plaintext once default encryption is requested.
+        if (com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) return
         val expected = authSnapshot()
         if (expected.token.isNullOrBlank()) return
         ensureOutboxLoaded(expected)
@@ -3319,6 +3405,7 @@ class ApiBackendService(
     ): Map<String, Any> {
         val expected = authSnapshot()
         return withContext(Dispatchers.IO) {
+            check(!com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) { "Use encrypted attachment upload; regular chat media is blocked." }
             mediaUpload.uploadMedia(expected, { authSnapshot() === expected }, file, onProgress)
         }
     }
@@ -3332,6 +3419,7 @@ class ApiBackendService(
         file: java.io.File,
         onProgress: (transferred: Long, total: Long) -> Unit,
     ): Map<String, Any> = withContext(Dispatchers.IO) {
+        check(!com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) { "Use encrypted attachment upload; regular chat media is blocked." }
         mediaUpload.uploadMedia(expected, { authSnapshot() === expected }, file, onProgress)
     }
 
@@ -3346,6 +3434,7 @@ class ApiBackendService(
     ): Map<String, Any> {
         val expected = expectedScope ?: authSnapshot()      // captured ONCE: primary, 404 retry and result check share it
         return withContext(Dispatchers.IO) {
+            check(!com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) { "Use encrypted attachment upload; regular chat media is blocked." }
             mediaUpload.uploadMedia(expected, { authSnapshot() === expected }, filename, bytes, onProgress)
         }
     }
@@ -4403,3 +4492,42 @@ class ApiBackendService(
 // Prior source:                 if (fetched == null || !applyLoadedMessages(conv.id, fetched, owner)) continue
 // Prior source:     suspend fun loadConversations() = loadConversationsForScope(authSnapshot(), chat)
 // Prior source:     private suspend fun loadConversationsForScope(expected: ApiAccountScope, reader: ApiChatClient) {
+
+/* Previous regular-chat read dispatch (unconditional privacy bypass), inactive:
+    /** Marks the room read on the server and clears the local unread badge. */
+    fun markConversationRead(chatId: String) {
+        if (session.token == null || chatId.isEmpty()) return
+        try { onConversationRead(chatId) } catch (_: Exception) {}
+        var hadUnread = false
+        synchronized(chatLock) {
+            val idx = _conversations.indexOfFirst { it.id == chatId }
+            if (idx != -1 && _conversations[idx].unreadCount > 0) {
+                _conversations[idx] = _conversations[idx].copy(unreadCount = 0)
+                hadUnread = true
+            }
+        }
+        if (hadUnread) notifyChatListeners()
+        // Prior: chatScope.launch { chat.markRoomRead(chatId) }
+        // Owner captured before launch: a sign-out or account switch in between must not mark
+        // another account's room read.
+        val owner = authSnapshot()
+        // Prefer PR #3 scoped WS receipts. A queued frame is not server acceptance;
+        // REST remains the offline fallback. Do not update message ticks from this ack.
+        if (!realtime.sendRoomReceipt(chatId, "read", owner)) {
+            chatScope.launch { if (authSnapshot() === owner) ownerChatClient(owner).markRoomRead(chatId) }
+        }
+    }
+
+*/
+
+// Previous source retained inactive (v2):
+//         if (expected.userId.isNullOrBlank() || expected.token.isNullOrBlank() || authSnapshot() !== expected) {
+//             throw IllegalStateException("Account changed or signed out; message not sent.")
+//         }
+
+// Previous implementation retained inactive (unified v4):
+//     suspend fun deleteUser(userId: String, expectedScope: ApiAccountScope? = null) {
+//         withContext(Dispatchers.IO) { accountDeletion.delete(expected, { authSnapshot() === expected }, userId) }
+
+// Previous implementation retained inactive (v5 review):
+//         val confirmed = sendMessage(conversationId, text, expectedScope = expected, onDurablyQueued = { queuedId = it })

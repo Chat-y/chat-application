@@ -161,10 +161,16 @@ fun ConversationActionBarScreen(preferences: ChatyPreferencesController, onBack:
             // Previous inline warning: if (p.hideProfilePicture && p.hideContactName) Text(strings.getString(com.example.chat.R.string.conv_ui_you_will_not_see_who_you_are_3ef955), color = primaryText, fontSize = 14.sp)
             ConversationHeaderIdentityWarning(p.hideProfilePicture, p.hideContactName)
             Text(strings.getString(com.example.chat.R.string.conv_proposal_header_size_choice), color = secondaryText, /* Previous caption size:12.sp */ style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
-            androidx.compose.material3.TextButton(onClick = { previewOtherMode = !previewOtherMode }) {
-                Text(strings.getString(if (previewOtherMode) com.example.chat.R.string.conv_proposal_use_app_mode
-                    else com.example.chat.R.string.conv_proposal_other_mode))
-            }
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = { previewOtherMode = !previewOtherMode }) {
+            //                 Text(strings.getString(if (previewOtherMode) com.example.chat.R.string.conv_proposal_use_app_mode
+            //                     else com.example.chat.R.string.conv_proposal_other_mode))
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(if (previewOtherMode) com.example.chat.R.string.conv_proposal_use_app_mode
+                    else com.example.chat.R.string.conv_proposal_other_mode),
+                onClick = { previewOtherMode = !previewOtherMode },
+            )
             com.example.chat.ui.theme.ChatyTheme(conversationAlternatePreviewTheme(config, previewOtherMode)) {
             ConversationHeaderPreview(hideProfilePicture = p.hideProfilePicture,
                 hideContactName = p.hideContactName, hideCallButton = p.hideCallButton,
@@ -251,16 +257,32 @@ fun ConversationActionBarScreen(preferences: ChatyPreferencesController, onBack:
             }
             */
             */
-            androidx.compose.material3.TextButton(onClick = { samplePresence = (samplePresence + 1) % 4 }) {
-                Text(strings.getString(com.example.chat.R.string.conv_proposal_cycle_presence))
-            }
-            androidx.compose.material3.TextButton(onClick = { sampleIndicators = !sampleIndicators }) {
-                Text(strings.getString(if (sampleIndicators) com.example.chat.R.string.conv_proposal_hide_sample_indicators
-                    else com.example.chat.R.string.conv_proposal_show_sample_indicators))
-            }
-            if (com.example.chat.BuildConfig.DEBUG) androidx.compose.material3.TextButton(onClick = { longSampleName = !longSampleName }) {
-                Text(if (longSampleName) strings.getString(com.example.chat.R.string.conv_proposal_short_name) else strings.getString(com.example.chat.R.string.conv_proposal_use_long_name))
-            }
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = { samplePresence = (samplePresence + 1) % 4 }) {
+            //                 Text(strings.getString(com.example.chat.R.string.conv_proposal_cycle_presence))
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(com.example.chat.R.string.conv_proposal_cycle_presence),
+                onClick = { samplePresence = (samplePresence + 1) % 4 },
+            )
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = { sampleIndicators = !sampleIndicators }) {
+            //                 Text(strings.getString(if (sampleIndicators) com.example.chat.R.string.conv_proposal_hide_sample_indicators
+            //                     else com.example.chat.R.string.conv_proposal_show_sample_indicators))
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(if (sampleIndicators) com.example.chat.R.string.conv_proposal_hide_sample_indicators
+                    else com.example.chat.R.string.conv_proposal_show_sample_indicators),
+                onClick = { sampleIndicators = !sampleIndicators },
+            )
+            if (com.example.chat.BuildConfig.DEBUG) // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = { longSampleName = !longSampleName }) {
+            //                 Text(if (longSampleName) strings.getString(com.example.chat.R.string.conv_proposal_short_name) else strings.getString(com.example.chat.R.string.conv_proposal_use_long_name))
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = if (longSampleName) strings.getString(com.example.chat.R.string.conv_proposal_short_name) else strings.getString(com.example.chat.R.string.conv_proposal_use_long_name),
+                onClick = { longSampleName = !longSampleName },
+            )
             Spacer(Modifier.height(ConversationPreviewLayout.sectionGapDp.dp))
             },
             controls = {
@@ -370,7 +392,12 @@ fun ConversationActionBarScreen(preferences: ChatyPreferencesController, onBack:
             }
             */
             // Previous inline reset: same model Reset then reset header-map defaults.
-            androidx.compose.material3.TextButton(onClick = headerCallbacks.resetAll) { Text(strings.getString(com.example.chat.R.string.conv_ui_classic_header_preset_bec9e1)) }
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = headerCallbacks.resetAll) { Text(strings.getString(com.example.chat.R.string.conv_ui_classic_header_preset_bec9e1)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(com.example.chat.R.string.conv_ui_classic_header_preset_bec9e1),
+                onClick = headerCallbacks.resetAll,
+            )
             Text(strings.getString(com.example.chat.R.string.conv_ui_header_appearance_is_include_e9b259), color = secondaryText, /* Previous caption size:12.sp */ style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
             ConversationSupportCopy(actionBarSupportValues(p))
             ConversationHeaderLookExport(com.example.chat.domain.models.ConversationPreferences(
@@ -438,3 +465,6 @@ GbSwitchTile(com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.
                     model.onEvent(ActionBarEvent.ToggleStatus(it))
                 }, strings.getString(com.example.chat.R.string.conv_ui_hide_the_line_below_the_chat_c2bc9e))
 */
+
+// Complete original-line retention for review (inactive).
+            //             if (com.example.chat.BuildConfig.DEBUG) androidx.compose.material3.TextButton(onClick = { longSampleName = !longSampleName }) {

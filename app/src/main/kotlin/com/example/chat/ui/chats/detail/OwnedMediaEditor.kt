@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats.detail
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -85,17 +87,19 @@ internal fun OwnedMediaEditor(
             }
         }
     }
-    androidx.activity.compose.BackHandler(onBack = ::cancel)
+    val editorBack = com.example.chat.ui.kit.rememberChatyBackPresentation(ref to expectedSession)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(onBack = ::cancel)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = editorBack, onBack = ::cancel)
     val current = edit
     when {
-        busy -> Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding().padding(24.dp)) {
+        busy -> Surface(Modifier.chatyPredictiveBack(editorBack).fillMaxSize()) { Column(Modifier.safeDrawingPadding().padding(24.dp)) {
             CircularProgressIndicator(); Text("Verifying edited copy")
             TextButton(::cancel) { Text("Cancel") }
         } }
-        error != null -> Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding().padding(24.dp)) {
+        error != null -> Surface(Modifier.chatyPredictiveBack(editorBack).fillMaxSize()) { Column(Modifier.safeDrawingPadding().padding(24.dp)) {
             Text(error!!); TextButton(::cancel) { Text("Close") }
         } }
-        current == null -> Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding().padding(24.dp)) {
+        current == null -> Surface(Modifier.chatyPredictiveBack(editorBack).fillMaxSize()) { Column(Modifier.safeDrawingPadding().padding(24.dp)) {
             CircularProgressIndicator(); TextButton(::cancel) { Text("Cancel") }
         } }
         kind == EditKind.IMAGE_JPEG -> ImageEditorScreen(current.inputUri, ::cancel,

@@ -1,0 +1,1214 @@
+{
+  "scope": "151 literal direct stock Icon calls only, not exhaustive app inventory",
+  "held_count": 0,
+  "sites": [
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "line": 87,
+      "stock_vector": "Icons.Rounded.RemoveCircleOutline",
+      "purpose_id": "minusCircle",
+      "context": "Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = \"Remove option\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "line": 94,
+      "stock_vector": "Icons.Rounded.AddCircleOutline",
+      "purpose_id": "addCircle",
+      "context": "Icon(Icons.Rounded.AddCircleOutline, \"Add option\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "line": 142,
+      "stock_vector": "Icons.Rounded.Poll",
+      "purpose_id": "poll",
+      "context": "Icon(Icons.Rounded.Poll, contentDescription = null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "line": 165,
+      "stock_vector": "Icons.Rounded.CheckCircle",
+      "purpose_id": "checkCircle",
+      "context": "if (option.votedByMe) Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(19.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatVoiceBinding.kt",
+      "line": 441,
+      "stock_vector": "Icons.Rounded.LooksOne",
+      "purpose_id": "numberOne",
+      "context": "Icon(Icons.Rounded.LooksOne,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "line": 223,
+      "stock_vector": "Icons.Rounded.Apartment",
+      "purpose_id": "organization",
+      "context": "Icon(Icons.Rounded.Apartment, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "line": 235,
+      "stock_vector": "Icons.Rounded.Business",
+      "purpose_id": "organization",
+      "context": "prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Business, null, tint = it, modifier = Modifier.size(20.dp)) } },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "line": 248,
+      "stock_vector": "Icons.Rounded.Link",
+      "purpose_id": "link",
+      "context": "prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Link, null, tint = it, modifier = Modifier.size(20.dp)) } },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "line": 259,
+      "stock_vector": "Icons.Rounded.AdminPanelSettings",
+      "purpose_id": "permissions",
+      "context": "Icon(Icons.Rounded.AdminPanelSettings, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "line": 271,
+      "stock_vector": "Icons.Rounded.Badge",
+      "purpose_id": "badge",
+      "context": "prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Badge, null, tint = it, modifier = Modifier.size(20.dp)) } },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "line": 283,
+      "stock_vector": "Icons.Rounded.AlternateEmail",
+      "purpose_id": "atSign",
+      "context": "prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.AlternateEmail, null, tint = it, modifier = Modifier.size(20.dp)) } },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "line": 436,
+      "stock_vector": "Icons.Rounded.GroupAdd",
+      "purpose_id": "groupAdd",
+      "context": "Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = Color(activeColor), modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterScreen.kt",
+      "line": 805,
+      "stock_vector": "Icons.Rounded.CheckCircle",
+      "purpose_id": "checkCircle",
+      "context": "Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(theme.successColor), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/AutoReplyRulesScreen.kt",
+      "line": 191,
+      "stock_vector": "Icons.AutoMirrored.Rounded.ReplyAll",
+      "purpose_id": "replyAll",
+      "context": "Icon(Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/AutoReplyRulesScreen.kt",
+      "line": 411,
+      "stock_vector": "Icons.AutoMirrored.Rounded.ReplyAll",
+      "purpose_id": "replyAll",
+      "context": "Icon(Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null, tint = primary)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/ScheduleMessageSheet.kt",
+      "line": 193,
+      "stock_vector": "Icons.Rounded.CalendarToday",
+      "purpose_id": "calendar",
+      "context": "Icon(Icons.Rounded.CalendarToday, contentDescription = null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/ScheduledMessagesScreen.kt",
+      "line": 131,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = \"Refresh scheduled messages\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallContactPickerScreen.kt",
+      "line": 348,
+      "stock_vector": "Icons.Rounded.Dialpad",
+      "purpose_id": "dialpad",
+      "context": "Icon(Icons.Rounded.Dialpad, contentDescription = context.getString(com.example.chat.R.string.calls_ui_26), modifier = Modifier.size(28.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallsScreen.kt",
+      "line": 270,
+      "stock_vector": "Icons.Rounded.Dialpad",
+      "purpose_id": "dialpad",
+      "context": ") { Icon(Icons.Rounded.Dialpad, contentDescription = null) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt",
+      "line": 460,
+      "stock_vector": "Icons.Rounded.ScreenShare",
+      "purpose_id": "screenShare",
+      "context": "Icon(Icons.Rounded.ScreenShare, contentDescription = null, tint = callAccent(), modifier = Modifier.size(16.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleGroupMeetingView.kt",
+      "line": 103,
+      "stock_vector": "Icons.Rounded.PersonAdd",
+      "purpose_id": "personAdd",
+      "context": "Icon(Icons.Rounded.PersonAdd, \"Invite People\", tint = tokens.primaryAccent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleOngoingCallView.kt",
+      "line": 126,
+      "stock_vector": "Icons.Rounded.KeyboardArrowDown",
+      "purpose_id": "pictureInPicture",
+      "context": "Icon(Icons.Rounded.KeyboardArrowDown, \"Minimize\", tint = Color.White)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleOngoingCallView.kt",
+      "line": 142,
+      "stock_vector": "Icons.Rounded.PersonAdd",
+      "purpose_id": "personAdd",
+      "context": "Icon(Icons.Rounded.PersonAdd, \"Invite\", tint = Color.White)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt",
+      "line": 62,
+      "stock_vector": "Icons.Rounded.VerifiedUser",
+      "purpose_id": "permissions",
+      "context": "Icon(Icons.Rounded.VerifiedUser, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt",
+      "line": 73,
+      "stock_vector": "Icons.Rounded.CloudOff",
+      "purpose_id": "cloudOff",
+      "context": "Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt",
+      "line": 80,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/NewChatScreen.kt",
+      "line": 919,
+      "stock_vector": "Icons.Rounded.GroupAdd",
+      "purpose_id": "groupAdd",
+      "context": "Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/NewChatScreen.kt",
+      "line": 933,
+      "stock_vector": "Icons.Rounded.Cast",
+      "purpose_id": "cast",
+      "context": "Icon(Icons.Rounded.Cast, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt",
+      "line": 415,
+      "stock_vector": "Icons.Rounded.Link",
+      "purpose_id": "link",
+      "context": "Icon(Icons.Rounded.Link, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt",
+      "line": 436,
+      "stock_vector": "Icons.Outlined.Description",
+      "purpose_id": "document",
+      "context": "Icon(Icons.Outlined.Description, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt",
+      "line": 548,
+      "stock_vector": "Icons.Rounded.PersonRemove",
+      "purpose_id": "personRemove",
+      "context": "icon = { Icon(Icons.Rounded.PersonRemove, contentDescription = null, tint = colors.error) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/AttachmentSheet.kt",
+      "line": 145,
+      "stock_vector": "Icons.Rounded.Science",
+      "purpose_id": "science",
+      "context": "Icon(Icons.Rounded.Science, contentDescription = null, tint = Color(theme.onAccentColor),",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/ChatyEmojiPicker.kt",
+      "line": 214,
+      "stock_vector": "Icons.Rounded.Keyboard",
+      "purpose_id": "keyboard",
+      "context": "Icon(Icons.Rounded.Keyboard, contentDescription = \"Return to keyboard\",",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/ConnectionDetailSheet.kt",
+      "line": 277,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = null,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "line": 168,
+      "stock_vector": "Icons.Rounded.CloudOff",
+      "purpose_id": "cloudOff",
+      "context": "Icon(Icons.Rounded.CloudOff, contentDescription = \"Waiting for network\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "line": 173,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = \"Retry download\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "line": 188,
+      "stock_vector": "Icons.Rounded.BrokenImage",
+      "purpose_id": "mediaError",
+      "context": "Icon(Icons.Rounded.BrokenImage, contentDescription = \"Preview unavailable\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "line": 215,
+      "stock_vector": "Icons.Rounded.BrokenImage",
+      "purpose_id": "mediaError",
+      "context": "error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.BrokenImage, \"Preview unavailable. Tap to open\") } },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "line": 645,
+      "stock_vector": "Icons.Rounded.MoreVert",
+      "purpose_id": "moreOptions",
+      "context": "IconButton(onClick = { overflow = true }, modifier = Modifier.size(48.dp).reviewHeaderFocusRing()) { Icon(Icons.Rounded.MoreVert, stringResource(com.example.chat.R.string.media_released_review_more)) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "line": 661,
+      "stock_vector": "Icons.Rounded.KeyboardArrowUp",
+      "purpose_id": "chevronUp",
+      "context": "leadingIcon = { Icon(Icons.Rounded.KeyboardArrowUp, null) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "line": 686,
+      "stock_vector": "Icons.Rounded.KeyboardArrowUp",
+      "purpose_id": "arrowUp",
+      "context": "IconButton(onClick = { moveItem(position, position - 1) }, enabled = position > 0) { Icon(Icons.Rounded.KeyboardArrowUp, stringResource(com.example.chat.R.string.media_released_review_move_earlier, media.file.name)) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "line": 688,
+      "stock_vector": "Icons.Rounded.KeyboardArrowDown",
+      "purpose_id": "moveDown",
+      "context": "IconButton(onClick = { moveItem(position, position + 1) }, enabled = position < current.size - 1) { Icon(Icons.Rounded.KeyboardArrowDown, stringResource(com.example.chat.R.string.media_released_review_move_later, media.file.name)) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaViewerScreen.kt",
+      "line": 834,
+      "stock_vector": "Icons.Rounded.MoreVert",
+      "purpose_id": "moreOptions",
+      "context": "Icon(Icons.Rounded.MoreVert, contentDescription = \"More media actions\", tint = foreground)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "line": 180,
+      "stock_vector": "Icons.Outlined.Timer",
+      "purpose_id": "timer",
+      "context": "icon = { Icon(Icons.Outlined.Timer, contentDescription = null, tint = colors.warning) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "line": 188,
+      "stock_vector": "Icons.Outlined.VerifiedUser",
+      "purpose_id": "permissions",
+      "context": "icon = { Icon(Icons.Outlined.VerifiedUser, contentDescription = null, tint = colors.success) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "line": 205,
+      "stock_vector": "Icons.Rounded.PersonAdd",
+      "purpose_id": "personAdd",
+      "context": "Icon(Icons.Rounded.PersonAdd, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "line": 280,
+      "stock_vector": "Icons.AutoMirrored.Rounded.ExitToApp",
+      "purpose_id": "logout",
+      "context": "Icon(Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, tint = colors.error)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt",
+      "line": 387,
+      "stock_vector": "Icons.Outlined.PersonAddAlt1",
+      "purpose_id": "profile",
+      "context": "Icon(Icons.Outlined.PersonAddAlt1, contentDescription = \"Account settings\", tint = Color(theme.primaryTextColor))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt",
+      "line": 530,
+      "stock_vector": "Icons.Outlined.GroupAdd",
+      "purpose_id": "groupAdd",
+      "context": "if (menuPreferences.menuShowNewActions) Triple({ Icon(Icons.Outlined.GroupAdd, null, tint = Color(theme.secondaryTextColor), modifier = Modifier.size(20.dp)) }, \"New Group\") { nav.onOpenNewChat(true, false) } else null,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/linked_devices/LinkedDevicesQrScreen.kt",
+      "line": 272,
+      "stock_vector": "Icons.Rounded.QrCode2",
+      "purpose_id": "qrCode",
+      "context": "icon = { Icon(Icons.Rounded.QrCode2, contentDescription = null) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/linked_devices/LinkedDevicesQrScreen.kt",
+      "line": 280,
+      "stock_vector": "Icons.Rounded.QrCodeScanner",
+      "purpose_id": "qrCode",
+      "context": "icon = { Icon(Icons.Rounded.QrCodeScanner, contentDescription = null) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/FriendMapScreen.kt",
+      "line": 351,
+      "stock_vector": "Icons.Rounded.MyLocation",
+      "purpose_id": "locate",
+      "context": "else Icon(Icons.Rounded.MyLocation, contentDescription = null, tint = tint)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "line": 313,
+      "stock_vector": "Icons.Rounded.Remove",
+      "purpose_id": "minus",
+      "context": "FilledIconButton(onClick = { mapView?.control(\"zoomOut\") }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = \"Zoom out\" }, shape = androidx.compose.foundation.shape.CircleShape) { Icon(Icons.Rounded.Remove, contentDescription = null) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "line": 318,
+      "stock_vector": "Icons.Rounded.Layers",
+      "purpose_id": "layers",
+      "context": "Icon(Icons.Rounded.Layers, contentDescription = null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "line": 335,
+      "stock_vector": "Icons.Rounded.Place",
+      "purpose_id": "location",
+      "context": "FilledIconButton(onClick = { mapView?.dropPinAtCenter() }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = \"Drop pin at map center\" }, shape = androidx.compose.foundation.shape.CircleShape) { Icon(Icons.Rounded.Place, contentDescription = null) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "line": 345,
+      "stock_vector": "Icons.Rounded.MyLocation",
+      "purpose_id": "locate",
+      "context": "else Icon(Icons.Rounded.MyLocation, contentDescription = null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/locked_chats/LockedChatsScreen.kt",
+      "line": 298,
+      "stock_vector": "Icons.Rounded.Key",
+      "purpose_id": "key",
+      "context": "Icon(Icons.Rounded.Key, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/starred/StarredMessagesScreen.kt",
+      "line": 404,
+      "stock_vector": "Icons.Rounded.ArrowUpward",
+      "purpose_id": "arrowUp",
+      "context": "Icon(Icons.Rounded.ArrowUpward,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/ChatyVideoPlayerWidget.kt",
+      "line": 458,
+      "stock_vector": "Icons.Rounded.Speed",
+      "purpose_id": "speed",
+      "context": "Icon(Icons.Rounded.Speed, contentDescription = \"Playback Speed\", tint = Color.White, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "line": 430,
+      "stock_vector": "Icons.Rounded.AddToPhotos",
+      "purpose_id": "fileOpen",
+      "context": "Icon(Icons.Rounded.AddToPhotos, contentDescription = \"Browse device files\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "line": 1066,
+      "stock_vector": "Icons.Rounded.InsertDriveFile",
+      "purpose_id": "document",
+      "context": "MediaCategory.other -> Icon(Icons.Rounded.InsertDriveFile, contentDescription = null,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "line": 1099,
+      "stock_vector": "Icons.Rounded.ArrowUpward",
+      "purpose_id": "arrowUp",
+      "context": "Icon(Icons.Rounded.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "line": 1118,
+      "stock_vector": "Icons.Rounded.FolderOpen",
+      "purpose_id": "folder",
+      "context": ") { Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp)) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "line": 1129,
+      "stock_vector": "Icons.Rounded.FileOpen",
+      "purpose_id": "fileOpen",
+      "context": "Icon(Icons.Rounded.FileOpen, contentDescription = null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "line": 409,
+      "stock_vector": "Icons.Rounded.KeyboardArrowUp",
+      "purpose_id": "chevronUp",
+      "context": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = \"Previous match\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "line": 412,
+      "stock_vector": "Icons.Rounded.KeyboardArrowDown",
+      "purpose_id": "chevronDown",
+      "context": "Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = \"Next match\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "line": 498,
+      "stock_vector": "Icons.Rounded.KeyboardArrowUp",
+      "purpose_id": "chevronUp",
+      "context": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = \"Previous match\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "line": 501,
+      "stock_vector": "Icons.Rounded.KeyboardArrowDown",
+      "purpose_id": "chevronDown",
+      "context": "Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = \"Next match\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/MediaWorkspaceScreen.kt",
+      "line": 160,
+      "stock_vector": "Icons.Rounded.CleaningServices",
+      "purpose_id": "clean",
+      "context": "Icon(Icons.Rounded.CleaningServices, contentDescription = \"Clean temporary cache\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/MediaWorkspaceScreen.kt",
+      "line": 164,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) \"Refreshing library\" else \"Refresh library\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/PdfWorkspaceScreen.kt",
+      "line": 339,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) \"Refreshing library\" else \"Refresh library\", modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/PdfWorkspaceScreen.kt",
+      "line": 449,
+      "stock_vector": "Icons.Rounded.CheckCircle",
+      "purpose_id": "checkCircle",
+      "context": ") { Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = colors.success, modifier = Modifier.size(32.dp)) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationFab.kt",
+      "line": 657,
+      "stock_vector": "Icons.Rounded.PersonSearch",
+      "purpose_id": "personSearch",
+      "context": "leadingIcon = { Icon(Icons.Rounded.PersonSearch, contentDescription = null) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells.kt",
+      "line": 181,
+      "stock_vector": "Icons.Rounded.Bolt",
+      "purpose_id": "bolt",
+      "context": "Icon(Icons.Rounded.Bolt, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells.kt",
+      "line": 271,
+      "stock_vector": "Icons.Rounded.Menu",
+      "purpose_id": "menu",
+      "context": "Icon(Icons.Rounded.Menu, contentDescription = \"Open menu\", tint = colors.foreground)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells3.kt",
+      "line": 604,
+      "stock_vector": "Icons.Rounded.Bolt",
+      "purpose_id": "bolt",
+      "context": "Icon(Icons.Rounded.Bolt, contentDescription = \"Quick action\", tint = accent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells3.kt",
+      "line": 912,
+      "stock_vector": "Icons.Rounded.GridView",
+      "purpose_id": "grid",
+      "context": "Icon(Icons.Rounded.GridView, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt",
+      "line": 153,
+      "stock_vector": "Icons.Outlined.DeleteSweep",
+      "purpose_id": "deleteSweep",
+      "context": "Icon(Icons.Outlined.DeleteSweep, contentDescription = stringResource(R.string.social_activity_clear_action))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt",
+      "line": 173,
+      "stock_vector": "Icons.Outlined.NotificationsNone",
+      "purpose_id": "notifications",
+      "context": "Icon(Icons.Outlined.NotificationsNone,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt",
+      "line": 266,
+      "stock_vector": "Icons.Outlined.NotificationsNone",
+      "purpose_id": "notifications",
+      "context": "Icon(Icons.Outlined.NotificationsNone,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/onboarding/NotificationPermissionSheet.kt",
+      "line": 194,
+      "stock_vector": "Icons.Rounded.NotificationsActive",
+      "purpose_id": "notifications",
+      "context": "Icon(Icons.Rounded.NotificationsActive,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/onboarding/PermissionOnboarding.kt",
+      "line": 226,
+      "stock_vector": "Icons.Rounded.CheckCircleOutline",
+      "purpose_id": "checkCircle",
+      "context": "Icon(Icons.Rounded.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/profile/ProfileEditScreen.kt",
+      "line": 558,
+      "stock_vector": "Icons.Outlined.AlternateEmail",
+      "purpose_id": "atSign",
+      "context": "leadingIcon = { Icon(Icons.Outlined.AlternateEmail, contentDescription = null) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/profile/ProfileEditorSheet.kt",
+      "line": 181,
+      "stock_vector": "Icons.Rounded.Photo",
+      "purpose_id": "gallery",
+      "context": "Icon(Icons.Rounded.Photo, contentDescription = null, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/search/GlobalSearchScreen.kt",
+      "line": 616,
+      "stock_vector": "Icons.Rounded.Verified",
+      "purpose_id": "verified",
+      "context": "Icon(Icons.Rounded.Verified, contentDescription = stringResource(R.string.social_search_verified), tint = colors.primary, modifier = Modifier.size(15.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/AudioSettingsScreen.kt",
+      "line": 423,
+      "stock_vector": "Icons.Rounded.SpeakerGroup",
+      "purpose_id": "speakerGroup",
+      "context": "Icon(Icons.Rounded.SpeakerGroup, null, Modifier.size(26.dp), tint = colors.accent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/AudioSettingsScreen.kt",
+      "line": 852,
+      "stock_vector": "Icons.Rounded.Info",
+      "purpose_id": "info",
+      "context": "Icon(Icons.Rounded.Info, null, Modifier.size(24.dp), tint = colors.foregroundSecondary)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/HideMediaScreen.kt",
+      "line": 323,
+      "stock_vector": "Icons.Rounded.RestartAlt",
+      "purpose_id": "reset",
+      "context": "Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = accent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/HideMediaScreen.kt",
+      "line": 373,
+      "stock_vector": "Icons.Rounded.Check",
+      "purpose_id": "check",
+      "context": "{ Icon(Icons.Rounded.Check, null, Modifier.size(SwitchDefaults.IconSize)) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt",
+      "line": 330,
+      "stock_vector": "Icons.Rounded.QrCode2",
+      "purpose_id": "qrCode",
+      "context": "IconButton(onClick = { onNavigate(SettingsDestination.QrCode) }) { Icon(Icons.Rounded.QrCode2, \"QR code\", Modifier.size(25.dp), tint = colors.foreground) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt",
+      "line": 436,
+      "stock_vector": "Icons.Outlined.Shield",
+      "purpose_id": "shield",
+      "context": "Icon(Icons.Outlined.Shield, null, tint = colors.accent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt",
+      "line": 606,
+      "stock_vector": "Icons.Rounded.ChevronRight",
+      "purpose_id": "chevronRight",
+      "context": "Icon(Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt",
+      "line": 295,
+      "stock_vector": "Icons.Rounded.IosShare",
+      "purpose_id": "share",
+      "context": "IconButton(onClick = { sheet = SettingsSheet.Export }) { Icon(Icons.Rounded.IosShare, \"Export chats\", Modifier.size(22.dp), tint = primaryText) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt",
+      "line": 311,
+      "stock_vector": "Icons.Rounded.Mood",
+      "purpose_id": "emoji",
+      "context": "Icon(Icons.Rounded.Mood, null, Modifier.size(16.dp), tint = accent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt",
+      "line": 341,
+      "stock_vector": "Icons.Rounded.KeyboardArrowDown",
+      "purpose_id": "chevronDown",
+      "context": "Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(22.dp), tint = secondaryText)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/appearance/ComponentStylesScreen.kt",
+      "line": 203,
+      "stock_vector": "Icons.Rounded.Undo",
+      "purpose_id": "undo",
+      "context": "Icon(Icons.Rounded.Undo, contentDescription = \"Undo last change\", tint = colors.foreground)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/appicon/AppIconSettingsScreen.kt",
+      "line": 532,
+      "stock_vector": "Icons.Outlined.BrokenImage",
+      "purpose_id": "mediaError",
+      "context": "Icon(Icons.Outlined.BrokenImage, contentDescription = null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbSettingsScreen.kt",
+      "line": 403,
+      "stock_vector": "Icons.Rounded.ContentPaste",
+      "purpose_id": "clipboard",
+      "context": "Icon(Icons.Rounded.ContentPaste, null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt",
+      "line": 72,
+      "stock_vector": "Icons.Rounded.CleaningServices",
+      "purpose_id": "clean",
+      "context": "Icon(Icons.Rounded.CleaningServices, null, tint = accent, modifier = Modifier.size(28.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt",
+      "line": 92,
+      "stock_vector": "Icons.Rounded.DeleteSweep",
+      "purpose_id": "deleteSweep",
+      "context": "Icon(Icons.Rounded.DeleteSweep, null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt",
+      "line": 109,
+      "stock_vector": "Icons.Rounded.DashboardCustomize",
+      "purpose_id": "layout",
+      "context": "Icon(Icons.Rounded.DashboardCustomize, null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/home/HeaderSettingsScreen.kt",
+      "line": 516,
+      "stock_vector": "Icons.AutoMirrored.Rounded.KeyboardArrowRight",
+      "purpose_id": "chevronRight",
+      "context": "Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/home/HomeRowsSettingsScreen.kt",
+      "line": 135,
+      "stock_vector": "Icons.Rounded.AlternateEmail",
+      "purpose_id": "atSign",
+      "context": "Icon(Icons.Rounded.AlternateEmail, null, tint = colorOr(p.mentionIconColor, accent), modifier = Modifier.size(11.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/navigation/NavigationDestinationsSettingsScreen.kt",
+      "line": 455,
+      "stock_vector": "Icons.Rounded.KeyboardArrowUp",
+      "purpose_id": "arrowUp",
+      "context": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = \"Move up\", tint = colors.foreground)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/navigation/NavigationDestinationsSettingsScreen.kt",
+      "line": 462,
+      "stock_vector": "Icons.Rounded.KeyboardArrowDown",
+      "purpose_id": "moveDown",
+      "context": "Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = \"Move down\", tint = colors.foreground)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationSettingsPage.kt",
+      "line": 357,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationSettingsPage.kt",
+      "line": 364,
+      "stock_vector": "Icons.Rounded.PlayCircleOutline",
+      "purpose_id": "playCircle",
+      "context": "Icon(Icons.Rounded.PlayCircleOutline, null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationToastSettingsScreen.kt",
+      "line": 303,
+      "stock_vector": "Icons.AutoMirrored.Rounded.KeyboardArrowRight",
+      "purpose_id": "chevronRight",
+      "context": "Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = colors.foregroundSecondary.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/permissions/SystemPermissionsScreen.kt",
+      "line": 663,
+      "stock_vector": "Icons.Rounded.LocationOn",
+      "purpose_id": "location",
+      "context": "Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = colors.primary)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/permissions/SystemPermissionsScreen.kt",
+      "line": 722,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = \"Re-check permissions\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "line": 463,
+      "stock_vector": "Icons.Rounded.Check",
+      "purpose_id": "check",
+      "context": "Icon(Icons.Rounded.Check, null, tint = style.accent, modifier = Modifier.size(24.dp).clearAndSetSemantics { })",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "line": 775,
+      "stock_vector": "Icons.Rounded.WarningAmber",
+      "purpose_id": "warning",
+      "context": "Icon(Icons.Rounded.WarningAmber, null, tint = appColors.error, modifier = Modifier.size(24.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "line": 793,
+      "stock_vector": "Icons.Rounded.WarningAmber",
+      "purpose_id": "warning",
+      "context": "Icon(Icons.Rounded.WarningAmber, null, tint = accent, modifier = Modifier.size(24.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "line": 815,
+      "stock_vector": "Icons.Rounded.Close",
+      "purpose_id": "close",
+      "context": "IconButton(onClick = { tipDismissed = true }) { Icon(Icons.Rounded.Close, androidx.compose.ui.res.stringResource(com.example.chat.R.string.privacy_dismiss_tip), tint = secondaryText, modifier = Modifier.size(18.dp)) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "line": 1558,
+      "stock_vector": "Icons.Rounded.Block",
+      "purpose_id": "block",
+      "context": "Icon(Icons.Rounded.Block, contentDescription = null,",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/security/SecurityCenterScreen.kt",
+      "line": 602,
+      "stock_vector": "Icons.Rounded.Key",
+      "purpose_id": "key",
+      "context": "Icon(Icons.Rounded.Key, null, tint = colors.accent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt",
+      "line": 235,
+      "stock_vector": "Icons.Rounded.FileUpload",
+      "purpose_id": "upload",
+      "context": "Icon(Icons.Rounded.FileUpload, contentDescription = \"Export Theme JSON\", tint = Color(theme.primaryTextColor))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt",
+      "line": 238,
+      "stock_vector": "Icons.Rounded.FileDownload",
+      "purpose_id": "download",
+      "context": "Icon(Icons.Rounded.FileDownload, contentDescription = \"Import Theme JSON\", tint = Color(theme.primaryTextColor))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt",
+      "line": 422,
+      "stock_vector": "Icons.Rounded.RoundedCorner",
+      "purpose_id": "corner",
+      "context": "headerLeading = { Icon(Icons.Rounded.RoundedCorner, contentDescription = null) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatePreviewWidget.kt",
+      "line": 253,
+      "stock_vector": "Icons.Rounded.FilterList",
+      "purpose_id": "filter",
+      "context": "Icon(Icons.Rounded.FilterList, contentDescription = null, modifier = Modifier.size(14.dp), tint = colors.foregroundSecondary)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatePreviewWidget.kt",
+      "line": 439,
+      "stock_vector": "Icons.Rounded.AddCircleOutline",
+      "purpose_id": "addCircle",
+      "context": "Icon(Icons.Rounded.AddCircleOutline, contentDescription = null, modifier = Modifier.size(10.dp), tint = accent)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "line": 105,
+      "stock_vector": "Icons.Rounded.Dock",
+      "purpose_id": "dock",
+      "context": "Icon(Icons.Rounded.Dock, contentDescription = null, tint = tint, modifier = modifier)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "line": 107,
+      "stock_vector": "Icons.Outlined.Home",
+      "purpose_id": "home",
+      "context": "Icon(Icons.Outlined.Home, contentDescription = null, tint = tint, modifier = modifier)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "line": 109,
+      "stock_vector": "Icons.AutoMirrored.Rounded.FormatListBulleted",
+      "purpose_id": "list",
+      "context": "Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = null, tint = tint, modifier = modifier)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "line": 192,
+      "stock_vector": "Icons.Rounded.Upload",
+      "purpose_id": "upload",
+      "context": "Icon(Icons.Rounded.Upload, contentDescription = \"Export template profile\", tint = colors.foreground, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "line": 195,
+      "stock_vector": "Icons.Rounded.Download",
+      "purpose_id": "download",
+      "context": "Icon(Icons.Rounded.Download, contentDescription = \"Import template profile\", tint = colors.foreground, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "line": 199,
+      "stock_vector": "Icons.Rounded.RestartAlt",
+      "purpose_id": "reset",
+      "context": "Icon(Icons.Rounded.RestartAlt, contentDescription = \"Reset All Templates\", tint = colors.foreground, modifier = Modifier.size(20.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "line": 446,
+      "stock_vector": "Icons.Rounded.SearchOff",
+      "purpose_id": "searchOff",
+      "context": "Icon(Icons.Rounded.SearchOff, contentDescription = null, modifier = Modifier.size(34.dp), tint = colors.foregroundSecondary)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 270,
+      "stock_vector": "Icons.Outlined.CloudDownload",
+      "purpose_id": "cloudDownload",
+      "context": "IconButton(onClick = { guideOpen = true }) { Icon(Icons.Outlined.CloudDownload, \"Theme Packs & Download Guide\", tint = colors.foreground) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 271,
+      "stock_vector": "Icons.Outlined.FileDownload",
+      "purpose_id": "download",
+      "context": "IconButton(onClick = { importTheme() }) { Icon(Icons.Outlined.FileDownload, \"Import Theme JSON\", tint = colors.foreground) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 272,
+      "stock_vector": "Icons.Outlined.FileUpload",
+      "purpose_id": "upload",
+      "context": "IconButton(onClick = { exportTheme() }) { Icon(Icons.Outlined.FileUpload, \"Export Theme JSON\", tint = colors.foreground) }",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 285,
+      "stock_vector": "Icons.Rounded.RestartAlt",
+      "purpose_id": "reset",
+      "context": "leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(20.dp), tint = colors.error) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 397,
+      "stock_vector": "Icons.Rounded.Check",
+      "purpose_id": "check",
+      "context": "Icon(Icons.Rounded.Check, null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 407,
+      "stock_vector": "Icons.Rounded.RestartAlt",
+      "purpose_id": "reset",
+      "context": "Icon(Icons.Rounded.RestartAlt, null)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 465,
+      "stock_vector": "Icons.Rounded.RestartAlt",
+      "purpose_id": "reset",
+      "context": "Icon(Icons.Rounded.RestartAlt, null, tint = colors.error)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 506,
+      "stock_vector": "Icons.Rounded.CloudDownload",
+      "purpose_id": "cloudDownload",
+      "context": "Icon(Icons.Rounded.CloudDownload, null, Modifier.size(28.dp), tint = colors.primary)",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "line": 519,
+      "stock_vector": "Icons.Outlined.FileDownload",
+      "purpose_id": "download",
+      "context": "Icon(Icons.Outlined.FileDownload, null); Spacer(Modifier.width(8.dp)); Text(\"Import JSON\")",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/universal/UniversalChatyIconsScreen.kt",
+      "line": 156,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/universal/UniversalChatyIconsScreen.kt",
+      "line": 336,
+      "stock_vector": "Icons.Rounded.CheckCircle",
+      "purpose_id": "checkCircle",
+      "context": "Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/subscription/PlanSubscriptionScreen.kt",
+      "line": 637,
+      "stock_vector": "Icons.Rounded.Refresh",
+      "purpose_id": "refresh",
+      "context": "Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskCreateEditModal.kt",
+      "line": 281,
+      "stock_vector": "Icons.Rounded.Notes",
+      "purpose_id": "document",
+      "context": "leadingIcon = { Icon(Icons.Rounded.Notes, contentDescription = null, modifier = Modifier.size(20.dp)) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "line": 237,
+      "stock_vector": "Icons.Rounded.ArrowDropDown",
+      "purpose_id": "checklist",
+      "context": "Icon(Icons.Rounded.ArrowDropDown, contentDescription = \"Change Status\", tint = colors.primary, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "line": 310,
+      "stock_vector": "Icons.Rounded.Fingerprint",
+      "purpose_id": "fingerprint",
+      "context": "icon = { Icon(Icons.Rounded.Fingerprint, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp)) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "line": 325,
+      "stock_vector": "Icons.Rounded.CalendarToday",
+      "purpose_id": "calendar",
+      "context": "icon = { Icon(Icons.Rounded.CalendarToday, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp)) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "line": 333,
+      "stock_vector": "Icons.Rounded.Alarm",
+      "purpose_id": "alarm",
+      "context": "icon = { Icon(Icons.Rounded.Alarm, contentDescription = null, tint = colors.warning, modifier = Modifier.size(20.dp)) },",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "line": 246,
+      "stock_vector": "Icons.Rounded.ListAlt",
+      "purpose_id": "list",
+      "context": "Icon(Icons.Rounded.ListAlt, contentDescription = null, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "line": 261,
+      "stock_vector": "Icons.Rounded.ViewKanban",
+      "purpose_id": "kanban",
+      "context": "Icon(Icons.Rounded.ViewKanban, contentDescription = null, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "line": 910,
+      "stock_vector": "Icons.Rounded.History",
+      "purpose_id": "history",
+      "context": "Icon(Icons.Rounded.History, contentDescription = \"History\", tint = colors.primary, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "line": 960,
+      "stock_vector": "Icons.Rounded.History",
+      "purpose_id": "history",
+      "context": "Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(18.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/updates/UpdatesScreenParts.kt",
+      "line": 669,
+      "stock_vector": "Icons.Rounded.KeyboardArrowUp",
+      "purpose_id": "chevronUp",
+      "context": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))",
+      "status": "explicit_semantic_binding"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/updates/UpdatesScreenParts.kt",
+      "line": 1081,
+      "stock_vector": "Icons.Rounded.GraphicEq",
+      "purpose_id": "waveform",
+      "context": "Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = colors.primary, modifier = Modifier.size(30.dp))",
+      "status": "explicit_semantic_binding"
+    }
+  ]
+}

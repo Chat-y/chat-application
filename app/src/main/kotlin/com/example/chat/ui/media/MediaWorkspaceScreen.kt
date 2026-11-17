@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.example.chat.ui.effects.iosItemEntrance
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -157,11 +158,15 @@ fun MediaWorkspaceScreen(
                         cleanupConfirm = true
                         scope.launch { cleanupEstimate = sanitizer.estimateExpiredTempBytes() }
                     }) {
-                        Icon(Icons.Rounded.CleaningServices, contentDescription = "Clean temporary cache")
+
+//Icon(Icons.Rounded.CleaningServices, contentDescription = "Clean temporary cache")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.clean, Icons.Rounded.CleaningServices, contentDescription = "Clean temporary cache")
                     }
                     // DOC-R4-187: refresh exposes its updating state instead of allowing redundant scans.
                     IconButton(onClick = { scope.launch { refreshing = true; try { library.refreshLibrary() } finally { refreshing = false } } }, enabled = !refreshing) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library")
+
+//Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library")
                     }
                     Spacer(Modifier.width(6.dp))
                 },
@@ -269,7 +274,9 @@ fun MediaWorkspaceScreen(
                         // DOC-R4-188: the row names its action - Play for audio, Open otherwise.
                         val rowAction = if (file.category == MediaCategory.audio) "Play ${file.name}" else "Open ${file.name}"
                         Box(
+// Previous implementation retained:                             Modifier
                             Modifier
+                                .iosItemEntrance(idx, file.id)
                                 .springInteractiveScale(0.98f)
                                 .semantics(mergeDescendants = true) { contentDescription = rowAction }
                                 .clickable {

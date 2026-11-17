@@ -10,6 +10,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.example.chat.ui.effects.iosItemEntrance
+import com.example.chat.ui.effects.rememberIosEntrancePlayed
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -333,26 +335,52 @@ fun UpdatesScreen(
         }
 
         // Screen-local only: this query is never passed to the feed, directory or publish service.
-        OutlinedTextField(
+        // Previous stock field:
+        // OutlinedTextField(
+        //             value = localQuery,
+        //             onValueChange = { localQuery = it },
+        //             label = { Text(stringResource(R.string.social_updates_search_label)) },
+        //             singleLine = true,
+        //             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        //             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+        //                 focusedTextColor = colors.foreground,
+        //                 unfocusedTextColor = colors.foreground,
+        //                 focusedBorderColor = colors.primary,
+        //                 unfocusedBorderColor = colors.borderSubtle,
+        //                 focusedLabelColor = colors.primary,
+        //                 unfocusedLabelColor = colors.foregroundSecondary,
+        //                 cursorColor = colors.primary,
+        //             ),
+        //             trailingIcon = {
+        //                 if (localQuery.isNotEmpty()) // Previous stock text action:
+        //                 // androidx.compose.material3.TextButton(onClick = { localQuery = "" }) {
+        //                 //                     Text(stringResource(R.string.social_updates_search_clear))
+        //                 //                 }
+        //                 com.example.chat.ui.kit.ChatyTextButton(
+        //                     label = stringResource(R.string.social_updates_search_clear),
+        //                     onClick = { localQuery = "" },
+        //                 )
+        //             },
+        //         )
+        com.example.chat.ui.kit.ChatyTaskField(
             value = localQuery,
             onValueChange = { localQuery = it },
-            label = { Text(stringResource(R.string.social_updates_search_label)) },
+            label = stringResource(R.string.social_updates_search_label),
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                focusedTextColor = colors.foreground,
-                unfocusedTextColor = colors.foreground,
-                focusedBorderColor = colors.primary,
-                unfocusedBorderColor = colors.borderSubtle,
-                focusedLabelColor = colors.primary,
-                unfocusedLabelColor = colors.foregroundSecondary,
-                cursorColor = colors.primary,
-            ),
             trailingIcon = {
-                if (localQuery.isNotEmpty()) androidx.compose.material3.TextButton(onClick = { localQuery = "" }) {
-                    Text(stringResource(R.string.social_updates_search_clear))
-                }
+                if (localQuery.isNotEmpty())
+
+
+
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = stringResource(R.string.social_updates_search_clear),
+                    onClick = { localQuery = "" },
+                )
             },
+            minLines = 1,
+            maxLines = 1,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
         )
 
         // RECENT UPDATES header
@@ -388,7 +416,12 @@ fun UpdatesScreen(
         } else if (feedError) {
             Column(Modifier.padding(24.dp)) {
                 Text(stringResource(R.string.social_updates_feed_failure), color = colors.foregroundSecondary)
-                androidx.compose.material3.TextButton(onClick = { feedAttempt++ }) { Text(stringResource(R.string.social_updates_retry_feed)) }
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = { feedAttempt++ }) { Text(stringResource(R.string.social_updates_retry_feed)) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = stringResource(R.string.social_updates_retry_feed),
+                    onClick = { feedAttempt++ },
+                )
             }
         } else if (list == null) {
             Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
@@ -407,9 +440,14 @@ fun UpdatesScreen(
             Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(stringResource(R.string.social_updates_search_no_matches), color = colors.foregroundSecondary,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                androidx.compose.material3.TextButton(onClick = { localQuery = "" }) {
-                    Text(stringResource(R.string.social_updates_search_clear))
-                }
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = { localQuery = "" }) {
+                //                     Text(stringResource(R.string.social_updates_search_clear))
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = stringResource(R.string.social_updates_search_clear),
+                    onClick = { localQuery = "" },
+                )
             }
         } else {
             StatusList(
@@ -485,6 +523,9 @@ private fun StatusList(
     contactNameColor: () -> Long?,
     onOpen: (StatusRecord) -> Unit,
 ) {
+    // Row 9: entrance-played identities hoisted above the unkeyed layouts, so a
+    // status moving across rows/parents settles instead of replaying (P2 review).
+    val entrancePlayed = rememberIosEntrancePlayed()
     when (template.layoutMode) {
         UpdatesLayoutMode.circularRail -> LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -494,7 +535,11 @@ private fun StatusList(
                 .padding(vertical = 5.dp),
         ) {
             items(statuses.size, key = { statuses[it].id }) { index ->
+                // Row 9 (iOS-style content motion): staggered entrance per status card.
+// Previous implementation retained:                 CircularStatusCard(statuses[index], colors, currentUser, getUser, contactNameColor, onOpen)
+                Box(Modifier.iosItemEntrance(index, statuses[index].id)) {
                 CircularStatusCard(statuses[index], colors, currentUser, getUser, contactNameColor, onOpen)
+                }
             }
         }
         UpdatesLayoutMode.gridTiles -> {
@@ -509,8 +554,14 @@ private fun StatusList(
                 }
                 if (columns == 1) {
                     Column {
-                        statuses.forEach { status ->
+// Previous implementation retained:                         statuses.forEach { status ->
+// Previous implementation retained:                             SquircleStatusCard(status, template, colors, currentUser, getUser, contactNameColor, onOpen)
+// Previous implementation retained:                             Spacer(Modifier.height(9.dp))
+// Previous implementation retained:                         }
+                        statuses.forEachIndexed { index, status ->
+                            Box(Modifier.iosItemEntrance(index, status.id, entrancePlayed)) {
                             SquircleStatusCard(status, template, colors, currentUser, getUser, contactNameColor, onOpen)
+                            }
                             Spacer(Modifier.height(9.dp))
                         }
                     }
@@ -518,10 +569,13 @@ private fun StatusList(
                     // The screen already scrolls. Content-sized rows avoid a second
                     // fixed-height viewport clipping cards at larger text scales.
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        statuses.chunked(columns).forEach { row ->
+// Previous implementation retained:                         statuses.chunked(columns).forEach { row ->
+// Previous implementation retained:                                 row.forEach { status ->
+// Previous implementation retained:                                     Box(Modifier.weight(1f)) {
+                        statuses.chunked(columns).forEachIndexed { rowIndex, row ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                row.forEach { status ->
-                                    Box(Modifier.weight(1f)) {
+                                row.forEachIndexed { colIndex, status ->
+                                    Box(Modifier.weight(1f).iosItemEntrance(rowIndex * columns + colIndex, status.id, entrancePlayed)) {
                                         GridStatusCard(status, template, colors, currentUser, getUser, contactNameColor, onOpen)
                                     }
                                 }
@@ -799,3 +853,6 @@ private fun MinimalStatusTile(
         StatusTimeLabel(status.createdAt, colors.foregroundTertiary)
     }
 }
+
+// Complete original-line retention for review (inactive).
+                //                 if (localQuery.isNotEmpty()) androidx.compose.material3.TextButton(onClick = { localQuery = "" }) {

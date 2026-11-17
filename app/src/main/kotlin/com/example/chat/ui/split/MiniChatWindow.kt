@@ -1,5 +1,6 @@
 package com.example.chat.ui.split
 
+import com.example.chat.ui.kit.chatyDepth
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
@@ -171,7 +172,8 @@ fun MiniChatWindow(
                         }
                     }
                     .size(pillWidthDp, pillHeightDp)
-                    .shadow(12.dp, CircleShape)
+                    // Previous (default black shadow): .shadow(12.dp, CircleShape)
+                    .chatyDepth(12.dp, CircleShape)
                     .clip(CircleShape)
                     .background(colors.surfaceElevated)
                     .border(1.dp, colors.borderSubtle, CircleShape)
@@ -200,7 +202,8 @@ fun MiniChatWindow(
                 Modifier
                     .offset { IntOffset(clampedOffset.first.roundToInt(), clampedOffset.second.roundToInt()) }
                     .size(width = miniWidthDp, height = miniHeightDp)
-                    .shadow(16.dp, windowShape)
+                    // Previous (default black shadow): .shadow(16.dp, windowShape)
+                    .chatyDepth(16.dp, windowShape)
                     .clip(windowShape)
                     .background(colors.surfaceElevated)
                     // .border(1.dp, colors.borderSubtle, windowShape), // SPL-49: replaced, focused window gets an accent border

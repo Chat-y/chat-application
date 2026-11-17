@@ -101,6 +101,8 @@ class ApiRealtimeClient(
          *  onSecureMessage plus edited_at; the repository re-decrypts and
          *  updates the local copy. */
         fun onSecureMessageEdited(data: Map<String, Any?>) {}
+        /** Timer fan-out is a retention invalidation hint, never proof OFF. */
+        fun onRoomRetentionChanged(roomId: String, capturedScope: Any?) {}
         /** config_changed: server configuration was republished; revalidate. */
         fun onConfigChanged() {}
         fun onScopedCallSignal(data: Map<String, Any?>, capturedScope: Any?) { onCallSignal(data) }
@@ -236,7 +238,26 @@ class ApiRealtimeClient(
                 queued = try { expectedSocket.send(frame.toString()) } catch (_: Exception) { false }
             }
         }
+        // Previous behavior retained inactive: return accepted && queued
+        // Rejected enqueue is not delivery. Keep false so the existing caller owns retry.
+        if (accepted && !queued) recoverRejectedSocket(expectedSocket, expectedScope)
         return accepted && queued
+    }
+
+    /** A rejected send must not leave connect() stuck behind the same non-null socket.
+     * Scheduler-only eviction is fenced to the exact session and socket. No frame is replayed:
+     * old SDP/ICE, message content and receipt effects must not cross a call/account change. */
+    private fun recoverRejectedSocket(expectedSocket: Socket, expectedScope: Any?) = post {
+        connectionScopeGuard(expectedScope) {
+            if (expectedSocket === socket && expectedScope === socketScope &&
+                expectedScope === connectionScopeIdentity() && socketToken == token() &&
+                socketUrl == webSocketUrl()
+            ) {
+                cleanupLocked()
+                try { listener?.onDisconnected() }
+                finally { scheduleReconnectLocked() }
+            }
+        }
     }
 
     /** Message fallback sends only on the socket still owned by this account. */
@@ -262,16 +283,19 @@ class ApiRealtimeClient(
     }
 
     private data class RoomReceiptRequest(val roomId: String, val kind: String,
-        val socket: Socket, val scope: Any?)
+        val socket: Socket, val scope: Any?, val mayContinue: () -> Boolean)
     private val pendingRoomReceipts = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, RoomReceiptRequest>()
 
     /** Queueing a receipt is not proof that any message was delivered/read. */
-    fun sendRoomReceipt(roomId: String, kind: String, expectedScope: Any? = connectionScopeIdentity()): Boolean {
+    // Previous signature lacked a privacy recheck for later server continuation pages.
+    fun sendRoomReceipt(roomId: String, kind: String, expectedScope: Any? = connectionScopeIdentity(),
+        mayContinue: () -> Boolean = { true }): Boolean {
         if (kind !in setOf("read", "delivered")) return false
         val safeRoomId = ApiPathSegments.safe(roomId) ?: return false
         val currentSocket = socket ?: return false
         if (expectedScope !== socketScope) return false
-        val pending = RoomReceiptRequest(safeRoomId, kind, currentSocket, expectedScope)
+        // Previous: RoomReceiptRequest(safeRoomId, kind, currentSocket, expectedScope)
+        val pending = RoomReceiptRequest(safeRoomId, kind, currentSocket, expectedScope, mayContinue)
         val key = safeRoomId to kind
         if (pendingRoomReceipts.size >= 128 && !pendingRoomReceipts.containsKey(key)) return false
         pendingRoomReceipts[key] = pending
@@ -279,9 +303,12 @@ class ApiRealtimeClient(
         if (!queued) pendingRoomReceipts.remove(key, pending)
         return queued
     }
-    private fun sendRoomReceiptFrame(request: RoomReceiptRequest): Boolean = sendScopedFrame(
-        request.socket, request.scope, JSONObject().put("type", "receipt").put("data",
+    // Previous direct sendScopedFrame call had no privacy gate on paged continuation.
+    private fun sendRoomReceiptFrame(request: RoomReceiptRequest): Boolean {
+        if (!runCatching { request.mayContinue() }.getOrDefault(false)) return false
+        return sendScopedFrame(request.socket, request.scope, JSONObject().put("type", "receipt").put("data",
             JSONObject().put("room_id", request.roomId).put("kind", request.kind)))
+    }
 
     /** Message-level seam uses the same typed envelope; return means queued only. */
     fun sendMessageReceipt(messageId: String, kind: String, expectedScope: Any? = connectionScopeIdentity()): Boolean {
@@ -347,6 +374,8 @@ class ApiRealtimeClient(
                 } catch (_: Exception) { false }
             }
         }
+        // Previous behavior retained inactive: return accepted && queued
+        if (accepted && !queued) recoverRejectedSocket(s, expectedScope)
         return accepted && queued
     }
 
@@ -364,7 +393,9 @@ class ApiRealtimeClient(
                 } catch (_: Exception) { false }
             }
         }
-        if (!accepted || !queued) connect()
+        // Previous no-op recovery retained inactive: if (!accepted || !queued) connect()
+        if (accepted && !queued) recoverRejectedSocket(s, expectedScope)
+        else if (!accepted) connect()
         return queued
     }
 
@@ -506,6 +537,10 @@ class ApiRealtimeClient(
                     } else {
                         listener?.onNewMessage(ChatMessage.fromApi(mapped))
                     }
+                }
+                "disappear_changed" -> {
+                    val raw = dataOrMessage(payload) ?: return
+                    listener?.onRoomRetentionChanged(str(raw, "room_id") ?: return, socketScope)
                 }
                 "config_changed" -> {
                     listener?.onConfigChanged()

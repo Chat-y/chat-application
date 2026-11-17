@@ -132,7 +132,9 @@ fun HomeRowsSettingsScreen(preferences: ChatyPreferencesController, onBack: () -
                                     }
                                     Spacer(Modifier.width(5.dp))
                                     Box(Modifier.size(18.dp).background(colorOr(p.mentionIndicatorBgColor, accent.copy(alpha = 0.14f)), CircleShape), contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Rounded.AlternateEmail, null, tint = colorOr(p.mentionIconColor, accent), modifier = Modifier.size(11.dp))
+
+//Icon(Icons.Rounded.AlternateEmail, null, tint = colorOr(p.mentionIconColor, accent), modifier = Modifier.size(11.dp))
+                                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.atSign, Icons.Rounded.AlternateEmail, null, tint = colorOr(p.mentionIconColor, accent), modifier = Modifier.size(11.dp))
                                     }
                                 }
                             }

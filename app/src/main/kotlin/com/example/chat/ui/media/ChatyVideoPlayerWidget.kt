@@ -455,7 +455,9 @@ fun ChatyVideoPlayerWidget(
                 var speedMenuOpen by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { speedMenuOpen = true }) {
-                        Icon(Icons.Rounded.Speed, contentDescription = "Playback Speed", tint = Color.White, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.Speed, contentDescription = "Playback Speed", tint = Color.White, modifier = Modifier.size(20.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.speed, Icons.Rounded.Speed, contentDescription = "Playback Speed", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                     DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = speedMenuOpen, onDismissRequest = { speedMenuOpen = false }) {
                         listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { s ->

@@ -16,4 +16,22 @@ object SnapshotScopeNames {
             .filter { ALLOWED.matches(it) }
             .distinct().sorted().toList()
     }
+    /** Recovery-only allowlist, deliberately separate from backup/export. */
+    fun ownOperationsFor(safeUser: String, fileNames: List<String>): List<String> {
+        val prefix = "chaty_snapshot_${safeUser}_"
+        val allowed = Regex("^own_(binding|mls)_[A-Za-z0-9_-]{1,128}$")
+        return fileNames.asSequence().filter { it.startsWith(prefix) && it.endsWith(".bin") }
+            .map { it.removePrefix(prefix).removeSuffix(".bin") }.filter { allowed.matches(it) }
+            .distinct().sorted().toList()
+    }
+
+    /** Plaintext-bearing authored revision scopes only, never exported. This
+     * includes unindexed orphans from a crash between the two journal writes. */
+    fun revisionPayloadsFor(safeUser: String, fileNames: List<String>): List<String> {
+        val prefix = "chaty_snapshot_${safeUser}_"
+        val allowed = Regex("^(own_revision_[A-Za-z0-9_-]{1,100}|revision_pending_[0-9a-fA-F-]{36})$")
+        return fileNames.asSequence().filter { it.startsWith(prefix) && it.endsWith(".bin") }
+            .map { it.removePrefix(prefix).removeSuffix(".bin") }.filter { allowed.matches(it) }.distinct().sorted().toList()
+    }
+
 }

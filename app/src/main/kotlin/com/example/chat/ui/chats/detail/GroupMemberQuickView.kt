@@ -111,7 +111,12 @@ fun GroupMemberQuickViewDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        confirmButton = { // Previous stock text action:
+        // TextButton(onClick = onDismiss) { Text("Close") }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = "Close",
+            onClick = onDismiss,
+        ) },
     )
 }
 
@@ -137,3 +142,6 @@ private fun QuickViewAction(label: String, icon: ImageVector, onClick: () -> Uni
         Text(label, color = colors.foregroundSecondary, fontSize = 12.sp)
     }
 }
+
+// Complete original-line retention for review (inactive).
+        //         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

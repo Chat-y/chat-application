@@ -1,5 +1,9 @@
 package com.example.chat.ui.chats
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
+import kotlinx.coroutines.flow.filterNotNull
+
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -182,6 +186,8 @@ fun ChatsHomeScreen(
     currentUserId: String = "",
     /** Opaque auth generation, not merely uid: resets pending selection/dialog state across account transitions. */
     accountSessionIdentity: Any? = currentUserId,
+    homeToolRequest: com.example.chat.ui.chats.home.HomeToolRequest? = null,
+    onHomeToolConsumed: (com.example.chat.ui.chats.home.HomeToolRequest) -> Unit = {},
     folderAccountKey: String = "",
     identity: HomeIdentity = HomeIdentity(),
     contacts: List<UserProfile> = emptyList(),
@@ -251,39 +257,43 @@ fun ChatsHomeScreen(
     val listState = rememberLazyListState()
     val searchFocus = remember { FocusRequester() }
 
-    var searchQuery by remember(accountSessionIdentity) { mutableStateOf("") }
-    var isSearchOpen by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var selectedIds by remember(accountSessionIdentity) { mutableStateOf(setOf<String>()) }
-    var selectedFilter by remember(accountSessionIdentity) { mutableStateOf("All") }
-    var overflowOpen by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var showDeleteConfirm by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var showMessageNumber by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var messageNumberText by remember(accountSessionIdentity) { mutableStateOf("") }
-    var showWhoCanCallMe by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var showLockedSetup by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var showArchived by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var showEffects by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var showScratchpad by remember(accountSessionIdentity) {mutableStateOf(false)}
-    var scratchText by remember(accountSessionIdentity) {mutableStateOf("")}
-    var confirmClearScratch by remember(accountSessionIdentity) {mutableStateOf(false)}
-    var showViewOptions by remember(accountSessionIdentity) {mutableStateOf(false)}
-    var quickView by remember(accountSessionIdentity) {mutableStateOf(com.example.chat.ui.chats.home.HomeQuickView.All)}
-    var localOrder by remember(accountSessionIdentity) {mutableStateOf(com.example.chat.ui.chats.home.HomeLocalOrder.Existing)}
-    var savedViews by remember(accountSessionIdentity) { mutableStateOf(emptyList<com.example.chat.ui.chats.home.HomeSavedView>()) }
-    var viewHistory by remember(accountSessionIdentity) { mutableStateOf(emptyList<com.example.chat.ui.chats.home.HomeViewState>()) }
-    var showSavedViews by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var showViewHistory by remember(accountSessionIdentity) { mutableStateOf(false) }
-    var previewView by remember(accountSessionIdentity) { mutableStateOf<com.example.chat.ui.chats.home.HomeSavedView?>(null) }
-    var saveAfterPreview by remember(accountSessionIdentity) { mutableStateOf(false) }
+    val shellHeaderController = com.example.chat.ui.navigation.LocalHomeHeaderController.current
+    val shellHeaderId = if (forcedType == ConversationType.group) "groups" else "chats"
+    val headerEntry = shellHeaderController?.entry(shellHeaderId)
+        ?: remember(accountSessionIdentity) { com.example.chat.ui.navigation.HomeHeaderEntry() }
+    var searchQuery by headerEntry::query
+    var isSearchOpen by headerEntry::searchOpen
+    var selectedIds by headerEntry::selectedIds
+    var selectedFilter by headerEntry::selectedFilter
+    var overflowOpen by headerEntry::overflowOpen
+    var showDeleteConfirm by headerEntry::showDeleteConfirm
+    var showMessageNumber by headerEntry::showMessageNumber
+    var messageNumberText by headerEntry::messageNumberText
+    var showWhoCanCallMe by headerEntry::showWhoCanCallMe
+    var showLockedSetup by headerEntry::showLockedSetup
+    var showArchived by headerEntry::showArchived
+    var showEffects by headerEntry::showEffects
+    var showScratchpad by headerEntry::showScratchpad
+    var scratchText by headerEntry::scratchText
+    var confirmClearScratch by headerEntry::confirmClearScratch
+    var showViewOptions by headerEntry::showViewOptions
+    var quickView by headerEntry::quickView
+    var localOrder by headerEntry::localOrder
+    var savedViews by headerEntry::savedViews
+    var viewHistory by headerEntry::viewHistory
+    var showSavedViews by headerEntry::showSavedViews
+    var showViewHistory by headerEntry::showViewHistory
+    var previewView by headerEntry::previewView
+    var saveAfterPreview by headerEntry::saveAfterPreview
     // R2-18: in-memory only, account-scoped; never saved, synced or sent.
     var lastOpenedConversationId by remember(accountSessionIdentity) {mutableStateOf<String?>(null)}
     // R2-23: offered only after deep scrolling.
     val showJumpToTop by remember(listState) {derivedStateOf {listState.firstVisibleItemIndex >= 8}}
     // R2-21: shortcut help only ever displays; it never mutates Home state.
-    var showShortcutHelp by remember(accountSessionIdentity) {mutableStateOf(false)}
+    var showShortcutHelp by headerEntry::showShortcutHelp
     // R2-31: session-only presentation curtain. A display aid - not a lock, not
     // encryption, not a screenshot guarantee.
-    var privacyCurtainOn by remember(accountSessionIdentity) {mutableStateOf(false)}
+    var privacyCurtainOn by headerEntry::privacyCurtainOn
     val curtainFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
     LaunchedEffect(privacyCurtainOn) {
         if (privacyCurtainOn) curtainFocusManager.clearFocus(force = true)
@@ -291,18 +301,20 @@ fun ChatsHomeScreen(
     // R2-32: one reminder per share session; re-arms when the signal drops.
     var screenShareReminderDismissed by remember(accountSessionIdentity) {mutableStateOf(false)}
     // R4-14/R4-19: read-only selection inspector.
-    var showSelectionInspector by remember(accountSessionIdentity) {mutableStateOf(false)}
+    var showSelectionInspector by headerEntry::showSelectionInspector
     // R4-13: stable anchor chat ID for range selection; never a list index.
-    var selectionAnchorId by remember(accountSessionIdentity) {mutableStateOf<String?>(null)}
+    var selectionAnchorId by headerEntry::selectionAnchorId
     // R4-41/42/45: session-only grouping mode; None reproduces the stock list exactly.
-    var homeGroupMode by remember(accountSessionIdentity) {mutableStateOf<HomeGroupMode>(HomeGroupMode.None)}
+    // Grouping stores only a stable key; function-bearing modes are rebuilt below.
     // R4-43: session-only pinned collapse; chats stay pinned and unread totals are kept.
-    var pinnedCollapsed by remember(accountSessionIdentity) {mutableStateOf(false)}
+    var pinnedCollapsed by headerEntry::pinnedCollapsed
     // R2-17: not saveable; account change or leaving this composition ends the session.
     var triageSnapshot by remember(accountSessionIdentity, folderAccountKey) {
         mutableStateOf<com.example.chat.ui.chats.home.HomeTriageSnapshot?>(null)
     }
-    var showAppearanceResetPreview by remember(accountSessionIdentity) { mutableStateOf(false) }
+    var showAppearanceResetPreview by headerEntry::showAppearanceResetPreview
+    var showCatchUpGuide by remember(accountSessionIdentity) { mutableStateOf(false) }
+    if (showCatchUpGuide) com.example.chat.ui.chats.home.HomeCatchUpGuide(theme) { showCatchUpGuide = false }
 
     // R4-21..23: session-only pane layout. Persisting the width needs an explicit
     // preference choice first (R4-21), so nothing is stored.
@@ -321,6 +333,27 @@ fun ChatsHomeScreen(
     } else {
         nav
     }).copy(onOpenCameraEffects = { nav.onOpenCameraEffects(); showEffects = true })
+    LaunchedEffect(homeToolRequest, accountSessionIdentity) {
+        val request = homeToolRequest ?: return@LaunchedEffect
+        if (request.owner !== accountSessionIdentity) return@LaunchedEffect
+        // Consume before navigation, so another composition cannot replay a shortcut.
+        onHomeToolConsumed(request)
+        when (request.destination) {
+            "HomeViewOptions" -> showViewOptions = true
+            "HomeScratchpad" -> showScratchpad = true
+            "HomeSavedViews" -> showSavedViews = true
+            "HomeRecentViews" -> showViewHistory = true
+            "HomeKeyboardShortcuts" -> showShortcutHelp = true
+            "HomeAppearanceCheck" -> showAppearanceResetPreview = true
+            "HomeCatchUpGuide" -> showCatchUpGuide = true
+            "HomeNewGroup" -> effectiveNav.onOpenNewChat(true, false)
+            "HomeCameraEffects" -> effectiveNav.onOpenCameraEffects()
+            "HomeQrScan" -> effectiveNav.onOpenQr()
+            "HomeAccountSettings" -> effectiveNav.onOpenProfile()
+            "HomeToggleBrightness" -> effectiveNav.onToggleBrightness()
+        }
+    }
+
     // Connection health is available in the overflow, not the header signal lane.
     // Preserve explicit non-connection host slots.
     val effectiveConnectionBanner: (@Composable () -> Unit)? = connectionBanner
@@ -333,16 +366,21 @@ fun ChatsHomeScreen(
     LaunchedEffect(Unit) { onShowNotificationPermissionIfNeeded() }
 
     // PopScope(canPop: !selectionMode): back clears the selection first.
-    BackHandler(enabled = isSearchOpen) { isSearchOpen = false; searchQuery = "" }
-    BackHandler(enabled = isSelectionMode) { selectedIds = emptySet(); selectionAnchorId = null }
+    val homeBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Triple(isSearchOpen, isSelectionMode, homePaneState.maximized))
+    // Previous registration retained inactive: BackHandler(enabled = isSearchOpen) { isSearchOpen = false; searchQuery = "" }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = homeBack, enabled = isSearchOpen) { isSearchOpen = false; searchQuery = "" }
+    // Previous registration retained inactive: BackHandler(enabled = isSelectionMode) { selectedIds = emptySet(); selectionAnchorId = null }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = homeBack, enabled = isSelectionMode) { selectedIds = emptySet(); selectionAnchorId = null }
     // R4-37: one layer per dismissal, in a defined order. Destructive confirmations
     // and the dialogs below consume Back inside their own windows first; then the
     // overflow menu, a maximized pane (R4-28: the one detail-pane Back step Home
     // owns - restoring the split; route-level Back stays with the host navigation
     // graph, no second hidden history stack), then (existing handlers above)
     // selection and search. A single event never clears two layers.
-    BackHandler(enabled = overflowOpen) { overflowOpen = false }
-    BackHandler(enabled = homePaneState.maximized != HomePaneMax.None) {
+    // Previous registration retained inactive: BackHandler(enabled = overflowOpen) { overflowOpen = false }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = homeBack, enabled = overflowOpen) { overflowOpen = false }
+    // Previous registration retained inactive: BackHandler(enabled = homePaneState.maximized != HomePaneMax.None) {
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = homeBack, enabled = homePaneState.maximized != HomePaneMax.None) {
         homePaneState = homePaneState.copy(maximized = HomePaneMax.None)
     }
 
@@ -384,7 +422,14 @@ fun ChatsHomeScreen(
         com.example.chat.data.local.ChatFolderStore(folderStoreContext, folderAccountKey.ifBlank { "unavailable" })
     }
     val chatFolderRevision by chatFolderStore.revision.collectAsState()
-    var selectedFolderId by remember(accountSessionIdentity, folderAccountKey) { mutableStateOf<String?>(null) }
+    var selectedFolderId by headerEntry::selectedFolderId
+    LaunchedEffect(chatFolderRevision, selectedFolderId) {
+        if (selectedFolderId != null && chatFolderStore.folders().none { it.id == selectedFolderId }) {
+            selectedFolderId = null
+            selectedIds = emptySet()
+            selectionAnchorId = null
+        }
+    }
 
     val homeKnownContactIds=remember(contacts) {contacts.map {it.id}.toSet()}
     val homeDisplayTitles=remember(conversations,homePrefs.hideUnsavedNumbers,currentUserId,homeKnownContactIds) {
@@ -417,7 +462,7 @@ fun ChatsHomeScreen(
     }
     // A real account-local preference, OFF by default. Old saved-view modes remain readable,
     // but Date headings only show when the explicit Home settings switch is enabled.
-    val legacyGroupMode = currentGroupMode(com.example.chat.ui.chats.home.homeGroupModeKey(homeGroupMode))
+    val legacyGroupMode = currentGroupMode(headerEntry.groupingKey)
     val effectiveGroupMode = when {
         dateGroupingEnabled -> currentGroupMode("date")
         legacyGroupMode is HomeGroupMode.Date -> HomeGroupMode.None
@@ -446,8 +491,7 @@ fun ChatsHomeScreen(
         localOrder = state.order
         // Eligibility is checked again next composition using the applied scope.
         pinnedCollapsed = false
-        homeGroupMode = com.example.chat.ui.chats.home.homeGroupModeForKey(
-            state.groupingKey, { homeDisplayTitles[it.id] ?: it.title }, lockedConversationIds::contains, homeSortLocale)
+        headerEntry.groupingKey = state.groupingKey
     }
     if (showSavedViews) com.example.chat.ui.chats.home.HomeSavedViewsDialog(
         saved = savedViews,
@@ -570,7 +614,7 @@ fun ChatsHomeScreen(
     // HomeGroupMode.None returns the entries unchanged and collapsing is disabled
     // while searching. Date mode uses the shared clock and date context, including
     // same-minute timezone/configuration changes and fresh privacy predicates.
-    val groupedEntries = remember(entries, dateGroupingEnabled, homeGroupMode, pinnedCollapsed, isSearchOpen,
+    val groupedEntries = remember(entries, dateGroupingEnabled, headerEntry.groupingKey, pinnedCollapsed, isSearchOpen,
         homeClockMinute, homeDateContext, lockedConversationIds, homeDisplayTitles, homeSortLocale,
         localOrder, selectedFolderId, triageSnapshot) {
         if (triageSnapshot != null) entries
@@ -647,13 +691,15 @@ fun ChatsHomeScreen(
     }
     */
     val filters = homeFilters(forcedType)
-    var selectionScope by remember(accountSessionIdentity) { mutableStateOf(currentViewState to searchQuery) }
+    androidx.compose.runtime.SideEffect {
+        if (headerEntry.selectionScope == null) headerEntry.selectionScope = currentViewState to searchQuery
+    }
     LaunchedEffect(renderedConversationOrder, currentViewState, searchQuery, isSearchOpen) {
         val scopeKey = currentViewState to searchQuery
-        if (selectionScope != scopeKey) {
+        if (headerEntry.selectionScope != null && headerEntry.selectionScope != scopeKey) {
             selectedIds = emptySet()
             selectionAnchorId = null
-            selectionScope = scopeKey
+            headerEntry.selectionScope = scopeKey
         }
         val eligible = renderedConversationOrder.map { it.id }.toSet()
         selectedIds = selectedIds.intersect(eligible)
@@ -691,7 +737,7 @@ fun ChatsHomeScreen(
     // Focus only after the search field has been composed and attached; requesting it inside the
     // click handler threw "FocusRequester is not initialized" (field not composed yet) and killed the app.
     LaunchedEffect(isSearchOpen) {
-        if (isSearchOpen) {
+        if (isSearchOpen && shellHeaderController == null) {
             androidx.compose.runtime.withFrameNanos { }
             runCatching { searchFocus.requestFocus() }
         }
@@ -1015,8 +1061,151 @@ fun ChatsHomeScreen(
         )
     }
 
-    Scaffold(containerColor = Color(theme.backgroundColor)) { padding ->
+    if (shellHeaderController != null) {
+        // Re-publish current capabilities after a receiver restart, not a retained failed snapshot.
+        val receiverMount = headerEntry.mountGeneration
+        val selected = renderedConversationOrder.filter { selectedIds.contains(it.id) }
+        androidx.compose.runtime.SideEffect {
+            if (receiverMount == headerEntry.mountGeneration) headerEntry.model = com.example.chat.ui.navigation.HomeHeaderModel(
+                theme, homePrefs, headerStyle, homeStyle,
+                if (forcedType != null) pageTitle ?: barTitle else barTitle, identity, forcedType != null,
+                requiresSubscription, subscriptionMessage, validBulkActions,
+                HomeSelectionPolicy.inspectorOrder(renderedConversationOrder, selectedIds).size,
+                selected.any { !it.isPinned }, selected.any { !it.isMuted }, selectedIds.any { !isConversationLocked(it) },
+                searchEnabled, searchPlacement,
+                if (forcedType == ConversationType.group) "Search groups…" else "Search chat names and latest messages…",
+                connectionHealthState != null, effectiveNav.onOpenSplitChat != null, effectiveNav.showTasksEntry, effectiveNav.showUpdatesEntry,
+            )
+        }
+        // Publish read-only Home-tool facts at the page root (independent of list content) for the chats FAB menu.
+        // Cleared by HomeHeaderEntry.detach() together with the receiver.
+        androidx.compose.runtime.SideEffect {
+            headerEntry.canRefresh = onRefreshHome != null
+            headerEntry.refreshing = homeRefreshing
+            // Same predicate as the branch that renders the old curtain chip: the list shows entries.
+            headerEntry.hasVisibleChats = entries.isNotEmpty()
+        }
+        val dispatchHeaderEvent by androidx.compose.runtime.rememberUpdatedState<(com.example.chat.ui.navigation.HeaderEvent) -> Unit>({ event ->
+            val selected = renderedConversationOrder.filter { selectedIds.contains(it.id) }
+            when (event.action) {
+                com.example.chat.ui.navigation.HeaderAction.ClearSelection -> { selectedIds = emptySet(); selectionAnchorId = null }
+                com.example.chat.ui.navigation.HeaderAction.TogglePin -> { runBulkAction(if (selected.any { !it.isPinned }) HomeBulkAction.PIN else HomeBulkAction.UNPIN) { togglePinSelected() } }
+                com.example.chat.ui.navigation.HeaderAction.Delete -> { runBulkAction(HomeBulkAction.DELETE) { showDeleteConfirm = true } }
+                com.example.chat.ui.navigation.HeaderAction.ToggleMute -> { runBulkAction(if (selected.any { !it.isMuted }) HomeBulkAction.MUTE else HomeBulkAction.UNMUTE) { toggleMuteSelected() } }
+                com.example.chat.ui.navigation.HeaderAction.ToggleArchive -> { runBulkAction(if (selected.any { !it.isArchived }) HomeBulkAction.ARCHIVE else HomeBulkAction.UNARCHIVE) {
+                                selectedIds.toList().forEach(onToggleArchive)
+                                selectedIds = emptySet()
+                                selectionAnchorId = null
+                            } }
+                com.example.chat.ui.navigation.HeaderAction.ToggleLock -> { val ids = selectedIds.toList()
+                            val lock = ids.any { !isConversationLocked(it) }
+                            ids.forEach { onToggleLockConversation(it, lock) }
+                            selectedIds = emptySet() }
+                com.example.chat.ui.navigation.HeaderAction.MarkUnread -> { runBulkAction(HomeBulkAction.MARK_UNREAD) {
+                                selectedIds.forEach(onMarkUnread)
+                                selectedIds = emptySet()
+                                selectionAnchorId = null
+                            } }
+                com.example.chat.ui.navigation.HeaderAction.MarkRead -> { runBulkAction(HomeBulkAction.MARK_READ) {
+                                selectedIds.forEach(onMarkRead)
+                                selectedIds = emptySet()
+                                selectionAnchorId = null
+                            } }
+                com.example.chat.ui.navigation.HeaderAction.SelectAll -> { selectedIds = HomeSelectionPolicy.selectAll(renderedConversationOrder) }
+                com.example.chat.ui.navigation.HeaderAction.Invert -> { selectedIds = HomeSelectionPolicy.invert(renderedConversationOrder, selectedIds) }
+                com.example.chat.ui.navigation.HeaderAction.Inspect -> { showSelectionInspector = true }
+                com.example.chat.ui.navigation.HeaderAction.ExitSelection -> { selectedIds = emptySet(); selectionAnchorId = null }
+                com.example.chat.ui.navigation.HeaderAction.SplitChat -> { nav.onOpenSplitChat?.invoke(selectedIds.toList())
+                            selectedIds = emptySet() }
+                com.example.chat.ui.navigation.HeaderAction.ToggleSearch -> { toggleSearch() }
+                com.example.chat.ui.navigation.HeaderAction.IdentityTap -> { if (lockedChatsConfigured) {
+                                    onRequestVaultAuth { nav.onOpenLockedVault() }
+                                } else {
+                                    showLockedSetup = true
+                                } }
+                com.example.chat.ui.navigation.HeaderAction.IdentityLongPress -> { onRequestVaultAuth { nav.onOpenLockedVault() } }
+                com.example.chat.ui.navigation.HeaderAction.OpenOverflowMenu -> { overflowOpen = true }
+                com.example.chat.ui.navigation.HeaderAction.CheckHomeAppearance -> { showAppearanceResetPreview = true }
+                com.example.chat.ui.navigation.HeaderAction.Dismiss -> { overflowOpen = false }
+                com.example.chat.ui.navigation.HeaderAction.OpenViewOptions -> { showViewOptions=true }
+                com.example.chat.ui.navigation.HeaderAction.OpenScratchpad -> { showScratchpad=true }
+                com.example.chat.ui.navigation.HeaderAction.OpenSavedViews -> { showSavedViews = true }
+                com.example.chat.ui.navigation.HeaderAction.OpenViewHistory -> { showViewHistory = true }
+                com.example.chat.ui.navigation.HeaderAction.OpenShortcutHelp -> { showShortcutHelp = true }
+                com.example.chat.ui.navigation.HeaderAction.MarkAllAsRead -> { val targets = conversations.filter { !isConversationHidden(it.id) }.map { it.id }
+                                    authorizeAction(targets) { onMarkAllRead(targets) }
+                                    // Completion feedback belongs to the host, not the click handler.
+                }
+                com.example.chat.ui.navigation.HeaderAction.MessageANumber -> { showMessageNumber = true }
+                com.example.chat.ui.navigation.HeaderAction.OpenArchived -> { showArchived = true }
+                com.example.chat.ui.navigation.HeaderAction.ChangeQuery -> { searchQuery = event.text
+                        // Ordinary search must never verify a secret or consume lock attempts.
+                }
+                com.example.chat.ui.navigation.HeaderAction.SetGhostMode -> { onToggleGhostMode(event.flag) }
+                com.example.chat.ui.navigation.HeaderAction.ShowNotice -> { onSnack(event.text) }
+                com.example.chat.ui.navigation.HeaderAction.OpenPlan -> { nav.onSelectPlan() }
+                com.example.chat.ui.navigation.HeaderAction.OpenConnectionDetail -> { onOpenConnectionDetail() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenProfile -> { effectiveNav.onOpenProfile() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenAccountSwitcher -> { effectiveNav.onOpenAccountSwitcher() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenSettings -> { effectiveNav.onOpenSettings() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenNotifications -> { effectiveNav.onOpenNotifications() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenSecuritySettings -> { effectiveNav.onOpenSecuritySettings() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenGlobalSearch -> { effectiveNav.onOpenGlobalSearch() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenQr -> { effectiveNav.onOpenQr() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenLinkedDevices -> { effectiveNav.onOpenLinkedDevices() }
+                com.example.chat.ui.navigation.HeaderAction.NavNewCall -> { effectiveNav.onNewCall() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenStarredMessages -> { effectiveNav.onOpenStarredMessages() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenMessageManagement -> { effectiveNav.onOpenMessageManagement() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenLockedVault -> { effectiveNav.onOpenLockedVault() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenCameraEffects -> { effectiveNav.onOpenCameraEffects() }
+                com.example.chat.ui.navigation.HeaderAction.NavWhoCanCallMe -> { effectiveNav.onWhoCanCallMe() }
+                com.example.chat.ui.navigation.HeaderAction.NavShareApp -> { effectiveNav.onShareApp() }
+                com.example.chat.ui.navigation.HeaderAction.NavRestartApp -> { effectiveNav.onRestartApp() }
+                com.example.chat.ui.navigation.HeaderAction.NavToggleBrightness -> { effectiveNav.onToggleBrightness() }
+                com.example.chat.ui.navigation.HeaderAction.NavSelectPlan -> { effectiveNav.onSelectPlan() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenTasks -> { effectiveNav.onOpenTasks() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenUpdates -> { effectiveNav.onOpenUpdates() }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenSplitChat -> { effectiveNav.onOpenSplitChat?.invoke(event.ids) }
+                com.example.chat.ui.navigation.HeaderAction.NavOpenNewChat -> { effectiveNav.onOpenNewChat(event.flag, event.secondFlag) }
+                // Same guards as the old Refresh chip: not while selecting, only when wired, never while a refresh runs.
+                com.example.chat.ui.navigation.HeaderAction.RefreshHome -> { if (selectedIds.isEmpty() && !homeRefreshing) onRefreshHome?.invoke() }
+                // Same toggle as the old chip. A curtain can always be turned off; turning it on needs displayed entries and no selection.
+                com.example.chat.ui.navigation.HeaderAction.TogglePrivacyCurtain -> {
+                    if (privacyCurtainOn || (selectedIds.isEmpty() && entries.isNotEmpty())) privacyCurtainOn = !privacyCurtainOn
+                }
+                com.example.chat.ui.navigation.HeaderAction.NavMessageNumber -> { effectiveNav.onMessageNumber(event.text) }
+            }
+        })
+        DisposableEffect(headerEntry) {
+            headerEntry.attach()
+            onDispose { headerEntry.detach() }
+        }
+        LaunchedEffect(headerEntry) {
+            androidx.compose.runtime.snapshotFlow { headerEntry.events.firstOrNull() }
+                .filterNotNull().collect { event ->
+                    // Non-suspending dispatch is atomic with its acknowledgement on the UI thread.
+                    // Existing async authorizations retain their own page/account liveness guards.
+                    try { if (headerEntry.accepts(event)) dispatchHeaderEvent(event.event) }
+                    catch (failure: Exception) {
+                        // A callback may throw CancellationException without cancelling this receiver.
+                        // Only structural coroutine cancellation terminates collection.
+                        if (failure is kotlinx.coroutines.CancellationException &&
+                            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive != true) {
+                            throw failure
+                        }
+                        android.util.Log.e("HomeHeader", "Header action failed; receiver reset", failure)
+                        headerEntry.recoverReceiverAfterFailure()
+                        runCatching { onSnack("That header action could not finish. Please try again.") }
+                    }
+                    finally { headerEntry.events.removeAll { it.sequence == event.sequence } }
+                }
+        }
+    }
+
+    Scaffold(modifier = Modifier.chatyPredictiveBack(homeBack), containerColor = Color(theme.backgroundColor)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // Inline header retained for layouts without the persistent account-owned shell.
+            if (shellHeaderController == null) {
             effectiveConnectionBanner?.invoke()
             if (requiresSubscription) {
                 SubscriptionRequiredBanner(theme, subscriptionMessage, nav.onSelectPlan)
@@ -1178,9 +1367,19 @@ fun ChatsHomeScreen(
                     focusRequester = searchFocus,
                 )
             }
+            }
+            // Legacy page-owned connectionBanner/headerExtras render only in the inline header above.
+            // Top-tab layouts use MainNavigationShell.rootHeaderExtension, owned above the pager.
+            /* Previous page-local top-shell placement, retained:
+            if (shellHeaderController != null) {
+                // Extension slots remain supported, page-local and never stored by the controller.
+                effectiveConnectionBanner?.invoke()
+                effectiveHeaderExtras?.invoke()
+            }
+            */
             // The supplied Default / OLD / iOS headers already own their single title.
             // Preserve the large-title treatment only for other Home presentations.
-            if (!isSelectionMode && pageTitle != null &&
+            if (shellHeaderController == null && !isSelectionMode && pageTitle != null &&
                 !com.example.chat.core.preferences.HomePresentationPolicy.isDefault(homePrefs.homeStyle) &&
                 rawHomeUiStyle !in setOf("ios style", "whatsapp old ui")) {
                 Box(
@@ -1247,7 +1446,7 @@ fun ChatsHomeScreen(
             }
             val listColumnContent: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
                 if (!isSelectionMode) {
-                    if (searchEnabled && searchPlacement == "Header action" && isSearchOpen) {
+                    if (shellHeaderController == null && searchEnabled && searchPlacement == "Header action" && isSearchOpen) {
                         HomeSearchField(
                             theme = theme,
                             value = searchQuery,
@@ -1275,7 +1474,7 @@ fun ChatsHomeScreen(
                             isOnline = isOnline,
                         )
                     }
-                    if (searchEnabled && searchPlacement == "Above chat filters") {
+                    if (shellHeaderController == null && searchEnabled && searchPlacement == "Above chat filters") {
                         HomeSearchField(
                             theme = theme,
                             value = searchQuery,
@@ -1605,7 +1804,9 @@ fun ChatsHomeScreen(
                         // R2-29: bounded manual refresh affordance. The host owns the
                         // sync call, its bounds and its completion; this is only the
                         // visible trigger plus in-progress cue. Hidden when unwired.
-                        if (!isSelectionMode && onRefreshHome != null) {
+                        // was: if (!isSelectionMode && onRefreshHome != null) {
+                        // Hidden only while the chats FAB menu hosts Refresh (see HomeHeaderEntry.fabHostsHomeTools).
+                        if (!isSelectionMode && onRefreshHome != null && !headerEntry.fabHostsHomeTools) {
                             // b117: previous Text-only target retained below; explicit 48dp clickable box.
                             Box(
                                 modifier = Modifier
@@ -1638,7 +1839,8 @@ fun ChatsHomeScreen(
                         // R2-31: the curtain's explicit user trigger; stays reachable
                         // while the curtain is up so content can be shown again.
                         // Previously: if (!isSelectionMode)
-                        if (privacyCurtainOn || !isSelectionMode) {
+                        // was: if (privacyCurtainOn || !isSelectionMode) {
+                        if ((privacyCurtainOn || !isSelectionMode) && !headerEntry.fabHostsHomeTools) {
                             // b117: 12dp + 48dp refresh target + 12dp gap = 72dp bottom offset.
                             Box(
                                 modifier = Modifier
@@ -1939,6 +2141,7 @@ private fun HomeConversationList(
             runCatching { focusRequesterFor(id).requestFocus() }
         }
     }
+    val listReduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion()
     // The shared clock is supplied as a changing value, including across strong-skipped rows.
     LazyColumn(
         // R4-35: short-lived typeahead over displayed names, cleared on idle by the
@@ -1975,7 +2178,9 @@ private fun HomeConversationList(
             key = { index -> keyedEntries[index] },
         ) { index ->
             val entranceKey = keyedEntries[index].toString()
-            Box(Modifier.listEntrance(listAnimation, entranceKey)) {
+            // was: Box(Modifier.listEntrance(listAnimation, entranceKey)) {
+            // Rows glide to new positions on pin/archive/reorder (spring placement); off with reduce-motion.
+            Box((if (listReduceMotion) Modifier else Modifier.animateItem()).listEntrance(listAnimation, entranceKey)) {
             when (val entry = entries[index]) {
                 is HomeEntry.Archived -> {
                     // _archivedTile

@@ -129,43 +129,82 @@ fun AutoReplyRulesScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         ) {
             item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    shape = RoundedCornerShape(16.dp),
+                // Card(
+                // colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                // shape = RoundedCornerShape(16.dp),
+                // ) {
+                com.example.chat.ui.kit.GbCardContainer(
+                    padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                    margin = androidx.compose.foundation.layout.PaddingValues(0.dp),
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Surface(
-                            color = (if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.15f),
-                            shape = CircleShape,
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.ReplyAll,
-                                contentDescription = null,
-                                tint = if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(8.dp),
+                    // Row(
+                    // modifier = Modifier
+                    // .fillMaxWidth()
+                    // .padding(horizontal = 16.dp, vertical = 12.dp),
+                    // verticalAlignment = Alignment.CenterVertically,
+                    // ) {
+                    // Surface(
+                    // color = (if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.15f),
+                    // shape = CircleShape,
+                    // ) {
+                    // Icon(
+                    // Icons.AutoMirrored.Rounded.ReplyAll,
+                    // contentDescription = null,
+                    // tint = if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    // modifier = Modifier.padding(8.dp),
+                    // )
+                    // }
+                    // Spacer(Modifier.width(12.dp))
+                    // Column(Modifier.weight(1f)) {
+                    // Text("Auto-Reply Engine", fontWeight = FontWeight.Bold)
+                    // Text(
+                    // if (isMasterEnabled)
+                    // "Active — incoming messages will trigger configured responses"
+                    // else
+                    // "Disabled — incoming messages are ignored by auto-reply",
+                    // style = MaterialTheme.typography.bodySmall,
+                    // )
+                    // }
+                    // // Switch(
+                    // // checked = isMasterEnabled,
+                    // // onCheckedChange = { engine.setMasterEnabled(it) },
+                    // // )
+                    // com.example.chat.ui.settings.ChatySwitch(
+                    // value = isMasterEnabled,
+                    // onChanged = { engine.setMasterEnabled(it) },
+                    // label = "Auto-Reply Engine",
+                    // modifier = Modifier.height(48.dp),
+                    // )
+                    // }
+                    com.example.chat.ui.settings.ChatySettingsTile(
+                        title = "Auto-Reply Engine",
+                        subtitle = if (isMasterEnabled)
+                            "Active — incoming messages will trigger configured responses"
+                            else "Disabled — incoming messages are ignored by auto-reply",
+                        // Only the trailing switch activates; the surrounding row is not clickable.
+                        onTap = null,
+                        leading = {
+                            Surface(
+                                color = (if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.15f),
+                                shape = CircleShape,
+                            ) {
+
+//Icon(Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null,
+//                                    tint = if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+//                                    modifier = Modifier.padding(8.dp))
+                                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.replyAll, Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null,
+                                    tint = if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(8.dp))
+                            }
+                        },
+                        trailing = {
+                            com.example.chat.ui.settings.ChatySwitch(
+                                value = isMasterEnabled,
+                                onChanged = { engine.setMasterEnabled(it) },
+                                label = "Auto-Reply Engine", modifier = Modifier.height(48.dp),
                             )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Auto-Reply Engine", fontWeight = FontWeight.Bold)
-                            Text(
-                                if (isMasterEnabled)
-                                    "Active — incoming messages will trigger configured responses"
-                                else
-                                    "Disabled — incoming messages are ignored by auto-reply",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        Switch(
-                            checked = isMasterEnabled,
-                            onCheckedChange = { engine.setMasterEnabled(it) },
-                        )
-                    }
+                        },
+                    )
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(
@@ -192,11 +231,16 @@ fun AutoReplyRulesScreen(
 
             if (rules.isEmpty()) {
                 item {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        ),
-                        shape = RoundedCornerShape(16.dp),
+                    // Card(
+                    // colors = CardDefaults.cardColors(
+                    // containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    // ),
+                    // shape = RoundedCornerShape(16.dp),
+                    // ) {
+                    com.example.chat.ui.kit.GbCardContainer(
+                        containerColor = com.example.chat.ui.theme.LocalAppColors.current.surface.copy(alpha = 0.5f),
+                        padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        margin = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     ) {
                         Column(
                             modifier = Modifier
@@ -204,8 +248,14 @@ fun AutoReplyRulesScreen(
                                 .padding(vertical = 40.dp, horizontal = 24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Icon(
-                                Icons.Rounded.RuleFolder,
+
+//Icon(
+//                                Icons.Rounded.RuleFolder,
+//                                contentDescription = null,
+//                                modifier = Modifier.size(48.dp),
+//                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.fileRules, Icons.Rounded.RuleFolder,
                                 contentDescription = null,
                                 modifier = Modifier.size(48.dp),
                                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
@@ -227,10 +277,15 @@ fun AutoReplyRulesScreen(
                 }
             } else {
                 itemsIndexed(rules, key = { _, rule -> rule.id }) { index, rule ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(16.dp),
+                    // Card(
+                    // colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    // shape = RoundedCornerShape(16.dp),
+                    // modifier = Modifier.padding(bottom = 12.dp),
+                    // ) {
+                    com.example.chat.ui.kit.GbCardContainer(
                         modifier = Modifier.padding(bottom = 12.dp),
+                        padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        margin = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     ) {
                         Column(Modifier.padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -261,10 +316,16 @@ fun AutoReplyRulesScreen(
                                     )
                                 }
                                 Spacer(Modifier.weight(1f))
-                                Switch(
-                                    checked = rule.enabled,
-                                    // onCheckedChange = { engine.toggleRule(index, it) }, // AUT-061: by ID
-                                    onCheckedChange = { engine.toggleRuleById(rule.id, it) },
+                                // Switch(
+                                // checked = rule.enabled,
+                                // // onCheckedChange = { engine.toggleRule(index, it) }, // AUT-061: by ID
+                                // onCheckedChange = { engine.toggleRuleById(rule.id, it) },
+                                // )
+                                com.example.chat.ui.settings.ChatySwitch(
+                                    value = rule.enabled,
+                                    onChanged = { engine.toggleRuleById(rule.id, it) },
+                                    label = rule.keyword,
+                                    modifier = Modifier.height(48.dp),
                                 )
                                 // IconButton(onClick = { engine.deleteRule(index) }) { // AUT-061: by ID
                                 IconButton(onClick = { engine.deleteRuleById(rule.id) }) {
@@ -357,7 +418,9 @@ private fun AddRuleSheet(
                 .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 24.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null, tint = primary)
+
+//Icon(Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null, tint = primary)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.replyAll, Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null, tint = primary)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     "Add Auto-Reply Rule",

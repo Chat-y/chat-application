@@ -33,7 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import com.example.chat.ui.kit.chatyDepth
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -158,7 +158,8 @@ fun ChatyOverlayHost(controller: ChatyOverlayController, modifier: Modifier = Mo
         LaunchedEffect(controller.toastToken) { delay(2000); controller.toastMessage = null }
         Box(modifier.fillMaxSize().navigationBarsPadding().padding(12.dp), contentAlignment = Alignment.BottomCenter) {
             Box(
-                Modifier.widthIn(max = 560.dp).shadow(6.dp, RoundedCornerShape(4.dp))
+                // Modifier.widthIn(max = 560.dp).shadow(6.dp, RoundedCornerShape(4.dp))
+                Modifier.widthIn(max = 560.dp).chatyDepth(6.dp, RoundedCornerShape(4.dp))
                     .background(controller.toastBackground ?: colors.foreground.copy(alpha = 0.92f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             ) { Text(msg, color = if (controller.toastBackground != null) Color.White else colors.background, fontSize = 14.sp) }
@@ -171,13 +172,22 @@ fun ChatyOverlayHost(controller: ChatyOverlayController, modifier: Modifier = Mo
             containerColor = colors.surface,
             title = { Text(o.title, color = colors.foreground) },
             text = { Text(o.message, color = colors.foregroundSecondary) },
-            dismissButton = { TextButton(onClick = { o.result.complete(false) }) { Text(o.cancelLabel) } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { o.result.complete(false) }) { Text(o.cancelLabel) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = o.cancelLabel,
+                onClick = { o.result.complete(false) },
+            ) },
             confirmButton = {
-                Button(
-                    onClick = { o.result.complete(true) },
-                    colors = if (o.destructive) ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = Color.White)
-                    else ButtonDefaults.buttonColors(),
-                ) { Text(o.confirmLabel) }
+                // Previous: Button(
+                // Previous: onClick = { o.result.complete(true) },
+                // Previous: colors = if (o.destructive) ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = Color.White)
+                // Previous: else ButtonDefaults.buttonColors(),
+                // Previous: ) { Text(o.confirmLabel) }
+                com.example.chat.ui.kit.ChatyActionButton(
+                    onClick = { o.result.complete(true) }, label = o.confirmLabel,
+                    tone = if (o.destructive) com.example.chat.ui.kit.ChatyButtonTone.Destructive else com.example.chat.ui.kit.ChatyButtonTone.Default,
+                )
             },
         )
         is Overlay.Modal -> ChatyModalDialog(o.maxWidthDp, o.barrierDismissible, { o.done.complete(Unit) }, o.header, o.content, o.footer)
@@ -227,12 +237,14 @@ private fun ChatyModalDialog(
 ) {
     val colors = LocalAppColors.current
     val screenH = LocalConfiguration.current.screenHeightDp
-    val border = if (colors.surface.luminanceApprox() < 0.5f) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+    // Previous: val border = if (colors.surface.luminanceApprox() < 0.5f) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+    val border = colors.borderSubtle
     Dialog(onDismissRequest = { if (dismissible) onDismiss() }, properties = DialogProperties(dismissOnBackPress = dismissible, dismissOnClickOutside = dismissible, usePlatformDefaultWidth = false)) {
         Column(
             Modifier.padding(horizontal = 20.dp, vertical = 24.dp)
                 .widthIn(max = maxWidthDp.dp).heightIn(max = (screenH * 0.82f).dp)
-                .shadow(28.dp, RoundedCornerShape(10.dp))
+                // .shadow(28.dp, RoundedCornerShape(10.dp))
+                .chatyDepth(28.dp, RoundedCornerShape(10.dp))
                 .clip(RoundedCornerShape(10.dp)).background(colors.surface)
                 .border(1.dp, border, RoundedCornerShape(10.dp)),
         ) {
@@ -244,3 +256,6 @@ private fun ChatyModalDialog(
 }
 
 private fun Color.luminanceApprox(): Float = 0.2126f * red + 0.7152f * green + 0.0722f * blue
+
+// Complete original-line retention for review (inactive).
+            //             dismissButton = { TextButton(onClick = { o.result.complete(false) }) { Text(o.cancelLabel) } },

@@ -1,5 +1,6 @@
 package com.example.chat.ui.navigation
 
+import com.example.chat.ui.kit.chatyDepth
 import com.example.chat.core.templates.ChatyNavigationDestinationIds
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,7 +39,10 @@ import androidx.compose.material.icons.rounded.PersonSearch
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.ReplyAll
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.ScheduleSend
 import androidx.compose.material.icons.rounded.Settings
 import com.example.chat.ui.kit.ChatyActionButton
@@ -62,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -216,7 +222,8 @@ fun ContextualNavigationFab(
             contentAlignment = Alignment.Center,
             modifier = modifier
                 .graphicsLayer { scaleX = fabScale; scaleY = fabScale }
-                .shadow(4.5.dp, mainFabShape)
+                // Previous (default black shadow): .shadow(4.5.dp, mainFabShape)
+                .chatyDepth(4.5.dp, mainFabShape)
                 .clip(mainFabShape)
                 .background(effectiveFabColor)
                 // A11Y: the icon is decorative, so name the control for TalkBack; focusable by default for keyboard.
@@ -238,6 +245,30 @@ fun ContextualNavigationFab(
             quickActions.add(DialActionLike("home-command-palette", "Home commands", Icons.Rounded.GridView) {
                 openPalette()
             })
+        }
+        // Refresh and Privacy curtain moved here from the Home bottom chips (those stay as a fallback when no FAB hosts them).
+        // Actions go through the scoped header event queue, which drops them if the Home page is not mounted.
+        val homeToolsController = LocalHomeHeaderController.current
+        val homeToolsEntry = homeToolsController?.entry("chats")
+        androidx.compose.runtime.DisposableEffect(homeToolsEntry) {
+            homeToolsEntry?.fabHostsHomeTools = true
+            onDispose { homeToolsEntry?.fabHostsHomeTools = false }
+        }
+        if (homeToolsController != null && homeToolsEntry != null) {
+            val homeSelecting = homeToolsEntry.selectedIds.isNotEmpty()
+            if (!homeSelecting && homeToolsEntry.canRefresh) {
+                quickActions.add(DialActionLike("home-refresh", if (homeToolsEntry.refreshing) "Refreshing…" else "Refresh", Icons.Rounded.Refresh,
+                    enabled = !homeToolsEntry.refreshing) {
+                    homeToolsController.emit("chats", HeaderEvent(HeaderAction.RefreshHome))
+                })
+            }
+            // The curtain only has an effect over displayed entries; offer it then, or to turn an active curtain off.
+            if (homeToolsEntry.privacyCurtainOn || (!homeSelecting && homeToolsEntry.hasVisibleChats)) {
+                quickActions.add(DialActionLike("home-privacy-curtain", if (homeToolsEntry.privacyCurtainOn) "Show content" else "Privacy curtain",
+                    if (homeToolsEntry.privacyCurtainOn) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff) {
+                    homeToolsController.emit("chats", HeaderEvent(HeaderAction.TogglePrivacyCurtain))
+                })
+            }
         }
         if (!prefs.hideNewMessageFab) {
             quickActions.add(DialActionLike("new-message", "New message", Icons.Rounded.MarkChatUnread) { spec.action() })
@@ -331,8 +362,8 @@ fun ContextualNavigationFab(
     }
 }
 
-/** Exact port of _ChatyHomeSpeedDialFab: expanding label + mini-FAB rows
- *  above the main FAB, close icon swap. */
+/** Compact shared action control and anchored menu; action inventory is unchanged. */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 private fun HomeSpeedDialFab(
     mainFabShape: androidx.compose.ui.graphics.Shape = CircleShape,
@@ -346,96 +377,185 @@ private fun HomeSpeedDialFab(
     leftHandedCompose: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    androidx.activity.compose.BackHandler(expanded) {expanded=false}
-    Column(modifier = modifier, horizontalAlignment = Alignment.End) {
-        if (expanded) {
-            actions.forEach { action ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 9.dp).heightIn(min=48.dp)
-                        .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
-                        .semantics(mergeDescendants=true) {contentDescription=action.label}
-                        .clickable(role=Role.Button) {expanded=false;action.onPressed()},
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .shadow(3.dp, RoundedCornerShape(14.dp))
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(surfaceColor)
-                            .padding(horizontal = 11.dp, vertical = 8.dp),
-                    ) {
-                        Text(action.label, color = textColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                    Spacer(Modifier.width(9.dp))
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(normalColor),
-                            // The whole labeled row now owns this click, rather than the icon alone.
-                            // .clickable { expanded=false;action.onPressed() }
-                    ) {
-                        Icon(action.icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(19.dp))
-                    }
-                }
-            }
-        }
-        Box(
-            contentAlignment = Alignment.Center,
+    val themeColors = com.example.chat.ui.theme.LocalAppColors.current
+    val typography = androidx.compose.material3.MaterialTheme.typography
+    val buttonShape = com.example.chat.ui.kit.ChatyActionShape
+    // The shared popup is anchored to this control, not to the full screen.
+    Box(modifier = modifier) {
+        ChatyActionButton(
+            onClick = { expanded = !expanded },
+            containerColor = normalColor,
+            contentColor = iconColor,
             modifier = Modifier
-                .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
-                .shadow(4.5.dp, mainFabShape)
-                .clip(mainFabShape)
-                .background(normalColor)
-                .clickable(role = Role.Button, onClickLabel = if (expanded) "Close quick actions" else "Open quick actions") { expanded = !expanded }
-                .padding(16.dp),
+                .align(if (leftHandedCompose) androidx.compose.ui.AbsoluteAlignment.TopLeft else Alignment.TopEnd)
+                .heightIn(min = ReferenceQuickActionMetrics.quickActionsMinHeightDp.dp)
+                .shadow(
+                    ReferenceQuickActionMetrics.quickActionsElevationDp.dp, buttonShape,
+                    ambientColor = themeColors.shadow, spotColor = themeColors.shadow,
+                )
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "Quick actions"
+                    stateDescription = if (expanded) "Expanded" else "Collapsed"
+                },
         ) {
             if (expanded) {
-                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close quick actions", color = iconColor, modifier = Modifier.size(24.dp))
+                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close,
+                    semanticLabel = null, color = iconColor,
+                    modifier = Modifier.size(ReferenceQuickActionMetrics.quickActionsIconSizeDp.dp))
             } else {
                 Box {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chats, semanticLabel = "Open quick actions", color = iconColor, modifier = Modifier.size(24.dp))
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chats,
+                        semanticLabel = null, color = iconColor,
+                        modifier = Modifier.size(ReferenceQuickActionMetrics.quickActionsIconSizeDp.dp))
                     if (showMetaAiIcon) {
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .offset(5.dp, (-5).dp)
-                                .size(16.dp)
+                                .offset(ReferenceQuickActionMetrics.quickActionsBadgeOffsetDp.dp, (-ReferenceQuickActionMetrics.quickActionsBadgeOffsetDp).dp)
+                                .size(ReferenceQuickActionMetrics.quickActionsBadgeSizeDp.dp)
                                 .clip(CircleShape)
                                 .background(normalColor)
-                                .border(1.dp, iconColor.copy(alpha = 0.95f), CircleShape),
+                                .border(ReferenceQuickActionMetrics.quickActionsBadgeBorderDp.dp, iconColor.copy(alpha = 0.95f), CircleShape),
                         ) {
-                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.autoAwesome, semanticLabel = null, color = iconColor, modifier = Modifier.size(10.dp))
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.autoAwesome, semanticLabel = null, color = iconColor, modifier = Modifier.size(ReferenceQuickActionMetrics.quickActionsBadgeIconSizeDp.dp))
                         }
                     }
                 }
             }
+            Spacer(Modifier.width(ReferenceQuickActionMetrics.quickActionsLabelGapDp.dp))
+            Text("Quick actions", color = iconColor, style = typography.labelLarge)
         }
-        // This FAB opens a mixed speed dial, not the new-conversation screen.
-        // Keep its purpose visible rather than relying on the chat icon alone.
-        Text(
-            "Quick actions",
-            color = textColor,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
+        com.example.chat.ui.kit.ChatyDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            preferBelow = false,
+            containerColor = surfaceColor,
+            shadowColor = themeColors.shadow,
             modifier = Modifier
-                .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
-                .padding(top = 6.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(surfaceColor)
-                .clickable(role = Role.Button, onClickLabel = if (expanded) "Close quick actions" else "Open quick actions") { expanded = !expanded }
-                .heightIn(min = 48.dp)
-                .padding(horizontal = 11.dp, vertical = 8.dp),
-        )
+                .widthIn(max = ReferenceQuickActionMetrics.quickActionsMenuMaxWidthDp.dp)
+                .heightIn(max = ReferenceQuickActionMetrics.quickActionsMenuMaxHeightDp.dp),
+        ) {
+            actions.forEach { action ->
+                com.example.chat.ui.kit.ChatyDropdownMenuItem(
+                    text = { Text(action.label, color = textColor, style = typography.labelLarge) },
+                    onClick = { expanded = false; action.onPressed() },
+                    enabled = action.enabled,
+                    leadingIcon = {
+                        Icon(action.icon, contentDescription = null, tint = textColor,
+                            modifier = Modifier.size(ReferenceQuickActionMetrics.quickActionsMenuIconSizeDp.dp))
+                    },
+                )
+            }
+        }
     }
 }
+
+// Previous stacked speed-dial presentation retained inactive for review:
+// @Composable
+// private fun HomeSpeedDialFab(
+//     mainFabShape: androidx.compose.ui.graphics.Shape = CircleShape,
+//     actions: List<DialActionLike>,
+//     normalColor: Color,
+//     iconColor: Color,
+//     surfaceColor: Color,
+//     textColor: Color,
+//     showMetaAiIcon: Boolean,
+//     modifier: Modifier = Modifier,
+//     leftHandedCompose: Boolean = false,
+// ) {
+//     var expanded by remember { mutableStateOf(false) }
+//     androidx.activity.compose.BackHandler(expanded) {expanded=false}
+//     Column(modifier = modifier, horizontalAlignment = Alignment.End) {
+//         if (expanded) {
+//             actions.forEach { action ->
+//                 Row(
+//                     verticalAlignment = Alignment.CenterVertically,
+//                     modifier = Modifier.padding(bottom = 9.dp).heightIn(min=48.dp)
+//                         .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
+//                         .semantics(mergeDescendants=true) {contentDescription=action.label}
+//                         .clickable(role=Role.Button) {expanded=false;action.onPressed()},
+//                 ) {
+//                     Box(
+//                         modifier = Modifier
+//                             .shadow(3.dp, RoundedCornerShape(14.dp))
+//                             .clip(RoundedCornerShape(14.dp))
+//                             .background(surfaceColor)
+//                             .padding(horizontal = 11.dp, vertical = 8.dp),
+//                     ) {
+//                         Text(action.label, color = textColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+//                     }
+//                     Spacer(Modifier.width(9.dp))
+//                     Box(
+//                         contentAlignment = Alignment.Center,
+//                         modifier = Modifier
+//                             .size(48.dp)
+//                             .clip(CircleShape)
+//                             .background(normalColor),
+//                             // The whole labeled row now owns this click, rather than the icon alone.
+//                             // .clickable { expanded=false;action.onPressed() }
+//                     ) {
+//                         Icon(action.icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(19.dp))
+//                     }
+//                 }
+//             }
+//         }
+//         Box(
+//             contentAlignment = Alignment.Center,
+//             modifier = Modifier
+//                 .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
+//                 .shadow(4.5.dp, mainFabShape)
+//                 .clip(mainFabShape)
+//                 .background(normalColor)
+//                 .clickable(role = Role.Button, onClickLabel = if (expanded) "Close quick actions" else "Open quick actions") { expanded = !expanded }
+//                 .padding(16.dp),
+//         ) {
+//             if (expanded) {
+//                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close quick actions", color = iconColor, modifier = Modifier.size(24.dp))
+//             } else {
+//                 Box {
+//                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chats, semanticLabel = "Open quick actions", color = iconColor, modifier = Modifier.size(24.dp))
+//                     if (showMetaAiIcon) {
+//                         Box(
+//                             contentAlignment = Alignment.Center,
+//                             modifier = Modifier
+//                                 .align(Alignment.TopEnd)
+//                                 .offset(5.dp, (-5).dp)
+//                                 .size(16.dp)
+//                                 .clip(CircleShape)
+//                                 .background(normalColor)
+//                                 .border(1.dp, iconColor.copy(alpha = 0.95f), CircleShape),
+//                         ) {
+//                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.autoAwesome, semanticLabel = null, color = iconColor, modifier = Modifier.size(10.dp))
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//         // This FAB opens a mixed speed dial, not the new-conversation screen.
+//         // Keep its purpose visible rather than relying on the chat icon alone.
+//         Text(
+//             "Quick actions",
+//             color = textColor,
+//             fontSize = 12.sp,
+//             fontWeight = FontWeight.SemiBold,
+//             modifier = Modifier
+//                 .then(if (leftHandedCompose) Modifier.align(androidx.compose.ui.AbsoluteAlignment.Left) else Modifier)
+//                 .padding(top = 6.dp)
+//                 .clip(RoundedCornerShape(14.dp))
+//                 .background(surfaceColor)
+//                 .clickable(role = Role.Button, onClickLabel = if (expanded) "Close quick actions" else "Open quick actions") { expanded = !expanded }
+//                 .heightIn(min = 48.dp)
+//                 .padding(horizontal = 11.dp, vertical = 8.dp),
+//         )
+//     }
+// }
 
 private data class DialActionLike(
     val id: String,
     val label: String,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val enabled: Boolean = true,
     val onPressed: () -> Unit,
 )
 
@@ -536,7 +656,9 @@ private fun DirectNumberDialog(
                     onValueChange = { input = it },
                     label = { Text("Phone or Username") },
                     placeholder = { Text("+1234567890 or @user") },
-                    leadingIcon = { Icon(Icons.Rounded.PersonSearch, contentDescription = null) },
+                    leadingIcon = {
+//Icon(Icons.Rounded.PersonSearch, contentDescription = null)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.personSearch, Icons.Rounded.PersonSearch, contentDescription = null) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )

@@ -25,7 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.shadow
+import com.example.chat.ui.kit.chatyDepth
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,12 +90,16 @@ fun ChatyHeaderRenderer(
         return
     }
     if (data.isCallActive) {
-        HeaderBar(modifier, colors.success, Color.White, 2.dp, 56.dp,
-            leading = leadingFor(data, Color.White, canNavigateBack),
+        // Previous: HeaderBar(modifier, colors.success, Color.White, 2.dp, 56.dp,
+        HeaderBar(modifier, colors.success, colors.onSuccess, 2.dp, 56.dp,
+            // Previous: leading = leadingFor(data, Color.White, canNavigateBack),
+            leading = leadingFor(data, colors.onSuccess, canNavigateBack),
             title = {
                 Column(verticalArrangement = Arrangement.Center) {
-                    Text(data.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.W700)
-                    Text(data.callDurationLabel ?: "Call in progress", color = Color.White.copy(alpha = 0.85f),
+                    // Previous: Text(data.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.W700)
+                    Text(data.title, color = colors.onSuccess, fontSize = 15.sp, fontWeight = FontWeight.W700)
+                    // Previous: Text(data.callDurationLabel ?: "Call in progress", color = Color.White.copy(alpha = 0.85f),
+                    Text(data.callDurationLabel ?: "Call in progress", color = colors.onSuccess.copy(alpha = 0.85f),
                         fontSize = 12.sp, fontWeight = FontWeight.W500)
                 }
             },
@@ -182,7 +187,8 @@ private fun HeaderBar(
     leadingWidth: Dp = 56.dp,
 ) {
     Row(
-        modifier.fillMaxWidth().shadow(elevation).background(bg).height(height),
+        // modifier.fillMaxWidth().shadow(elevation).background(bg).height(height),
+        modifier.fillMaxWidth().chatyDepth(elevation, RectangleShape).background(bg).height(height),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) Box(Modifier.width(leadingWidth), contentAlignment = Alignment.Center) { leading() }

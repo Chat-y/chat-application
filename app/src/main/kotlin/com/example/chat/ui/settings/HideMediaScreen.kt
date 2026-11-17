@@ -320,7 +320,9 @@ fun HideMediaScreen(
                             colors = ButtonDefaults.textButtonColors(contentColor = accent),
                             contentPadding = ButtonDefaults.TextButtonWithIconContentPadding,
                         ) {
-                            Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = accent)
+
+//Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = accent)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.reset, Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = accent)
                             Spacer(Modifier.width(8.dp))
                             Text("Reset gallery settings", color = accent, fontWeight = FontWeight.SemiBold)
                         }
@@ -370,7 +372,9 @@ internal fun MediaVisibilitySwitch(icon: androidx.compose.ui.graphics.vector.Ima
             checked = value, onCheckedChange = null, enabled = enabled,
             // Thumb icon so ON/OFF is not colour-only (HM1-55).
             thumbContent = if (value) {
-                { Icon(Icons.Rounded.Check, null, Modifier.size(SwitchDefaults.IconSize)) }
+                {
+//Icon(Icons.Rounded.Check, null, Modifier.size(SwitchDefaults.IconSize))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.check, Icons.Rounded.Check, null, Modifier.size(SwitchDefaults.IconSize)) }
             } else {
                 null
             },

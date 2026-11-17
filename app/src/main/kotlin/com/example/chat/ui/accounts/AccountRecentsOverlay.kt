@@ -1,5 +1,8 @@
 package com.example.chat.ui.accounts
 
+import com.example.chat.ui.kit.chatyDepth
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -85,9 +88,11 @@ fun AccountRecentsOverlay(
 
     // Previous handler let Back fall through to underlying navigation during a switch.
     // BackHandler(enabled = !isSwitching) { onDismiss() }
-    BackHandler { if (!isSwitching) onDismiss() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Unit)
+    // Previous registration retained inactive: BackHandler { if (!isSwitching) onDismiss() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) { if (!isSwitching) onDismiss() }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.chatyPredictiveBack(predictiveBack, enabled = !isSwitching).fillMaxSize()) {
         val screenW = maxWidth
         val screenH = maxHeight
         // Reference proportions measured from the approved preview
@@ -142,7 +147,8 @@ fun AccountRecentsOverlay(
                         Modifier
                             .height(cardHeight)
                             .fillMaxWidth()
-                            .shadow(10.dp, cardShape, clip = false)
+                            // Previous (default black shadow): .shadow(10.dp, cardShape, clip = false)
+                            .chatyDepth(10.dp, cardShape, clip = false)
                             .clip(cardShape)
                             .background(colors.surfaceElevated)
                             .border(1.dp, colors.border, cardShape)
@@ -188,7 +194,8 @@ fun AccountRecentsOverlay(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = screenW * 0.092f)
-                    .shadow(8.dp, CircleShape, clip = false)
+                    // Previous (default black shadow): .shadow(8.dp, CircleShape, clip = false)
+                    .chatyDepth(8.dp, CircleShape, clip = false)
                     .clip(CircleShape)
                     .background(colors.input)
                     .clickable(enabled = !isSwitching, onClick = onManageAccounts)

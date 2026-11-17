@@ -13,7 +13,7 @@ import java.time.Instant
 import java.util.UUID
 
 /** Thrown when an MLS group is still being set up; the message stays queued. */
-class SecureSendPendingException(code: String) : Exception(code)
+class SecureSendPendingException(code: String, val queuedClientId: String? = null) : Exception(code)
 
 /** RPC seam over the Supabase PostgREST client (exact function names/params
  *  preserved; wiring lands with the PostgREST client slice). */
@@ -72,6 +72,7 @@ class SecureMessageTransport(
                 "size" to it.size,
                 "url" to it.url,
                 "duration_seconds" to it.durationSeconds,
+                "encrypted_file" to it.encryptedFile,
             )
         }
         val metadata = buildMap<String, Any?> {
@@ -103,12 +104,34 @@ class SecureMessageTransport(
         send: PendingSecureSend,
         expectedScope: Any? = null,
         requireCurrent: () -> Unit = {},
+        previousCipher: com.example.chat.core.crypto.MlsEncryptedPayload? = null,
+        beforeDispatch: suspend (com.example.chat.core.crypto.MlsEncryptedPayload, String) -> Unit = { _, _ -> },
+        onCanonicalId: suspend (String) -> Unit = {},
+        onStoredCipherHeld: suspend () -> Unit = {},
+        reconcileAccepted: suspend () -> String? = { null },
     ): String {
         requireCurrent()
         val requestRpc = rpc.forScope(expectedScope)
         val mls = encryptor()
             ?: throw IllegalStateException("Encrypted message transport is unavailable.")
-        val encrypted = mls.encryptPayload(
+        if (previousCipher != null) {
+            val accepted = reconcileAccepted()
+            requireCurrent()
+            if (accepted != null) { onCanonicalId(accepted); return accepted }
+            try {
+                mls.assertStoredCipherReady(send.conversationId, previousCipher)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (drift: com.example.chat.core.crypto.StoredCipherMembershipDrift) {
+                // Read-only reconciliation must succeed before this becomes a hold.
+                // A transient lookup failure propagates and leaves the operation retryable.
+                val accepted = reconcileAccepted()
+                if (accepted != null) { onCanonicalId(accepted); return accepted }
+                onStoredCipherHeld()
+                throw IllegalStateException("Stored encrypted send is held after membership changed. Nothing was dispatched. Review or discard it.", drift)
+            }
+        }
+        val encrypted = previousCipher ?: mls.encryptPayload(
             conversationId = send.conversationId,
             payload = mapOf(
                 "type" to send.type,
@@ -119,6 +142,8 @@ class SecureMessageTransport(
         requireCurrent() // Encryption may suspend while an account is switched.
         val deviceId = mls.currentDeviceId
             ?: throw IllegalStateException("Encrypted device identity is unavailable.")
+        requireCurrent()
+        beforeDispatch(encrypted, deviceId)
         requireCurrent()
         // Previous ambient request: val raw = rpc.rpc(...)
         val raw = requestRpc.rpc(
@@ -133,7 +158,14 @@ class SecureMessageTransport(
             ),
         )
         requireCurrent()
-        return raw?.toString() ?: ""
+        val canonical = when (raw) {
+            is String -> raw
+            is Map<*, *> -> (raw["id"] ?: raw["message_id"] ?: raw["uid"]) as? String
+            else -> null
+        }
+        check(!canonical.isNullOrBlank() && canonical.matches(Regex("[A-Za-z0-9_-]{1,128}"))) { "Encrypted send did not return a valid message ID." }
+        onCanonicalId(canonical)
+        return canonical
     }
 
     /** Whether [error] means MLS encryption cannot happen yet because the
@@ -179,6 +211,10 @@ class SecureMessageTransport(
             conversationId = row["conversation_id"]?.toString() ?: "",
             senderId = senderId,
             metadata = metadata,
+            authenticatedMlsSender = (row["_verified_mls_sender"] as? com.example.chat.domain.models.AuthenticatedMlsSender)
+                ?.takeIf { it.userId == senderId },
+            authenticatedMlsRevision = (row["_verified_mls_revision"] as? com.example.chat.domain.models.AuthenticatedMlsRevision)
+                ?.takeIf { it.messageId == row["id"] && it.conversationId == row["conversation_id"] },
             type = messageTypeFromDatabase(row["type"]?.toString()),
             text = if (deletedAt == null) row["body"]?.toString() ?: "" else "This message was deleted",
             attachment = if (attachmentJson.isEmpty()) null else MessageAttachment(
@@ -189,6 +225,7 @@ class SecureMessageTransport(
                 url = attachmentJson["url"]?.toString(),
                 durationSeconds = (attachmentJson["duration_seconds"] as? Number)?.toInt()
                     ?: attachmentJson["duration_seconds"]?.toString()?.toIntOrNull() ?: 0,
+                encryptedFile = attachmentJson["encrypted_file"] as? Map<String, Any?>,
             ),
             replyToMessageId = metadata["reply_to_message_id"]?.toString(),
             replyToPreviewText = metadata["reply_to_preview_text"]?.toString(),

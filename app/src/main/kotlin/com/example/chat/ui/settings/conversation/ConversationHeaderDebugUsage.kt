@@ -29,9 +29,14 @@ internal fun ConversationHeaderDebugUsage(usage: Map<String, Int>) {
     var expanded by remember { mutableStateOf(false) }
     val resources = androidx.compose.ui.platform.LocalContext.current.resources
     Column {
-        TextButton(onClick = { expanded = !expanded }) {
-            Text(resources.getString(com.example.chat.R.string.conv_proposal_debug_usage))
-        }
+        // Previous stock text action:
+        // TextButton(onClick = { expanded = !expanded }) {
+        //             Text(resources.getString(com.example.chat.R.string.conv_proposal_debug_usage))
+        //         }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = resources.getString(com.example.chat.R.string.conv_proposal_debug_usage),
+            onClick = { expanded = !expanded },
+        )
         if (expanded) {
             Text(resources.getString(com.example.chat.R.string.conv_proposal_debug_usage_scope))
             usage.toSortedMap().forEach { (key, count) ->

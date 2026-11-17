@@ -9,7 +9,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** App-level opt-in, off until a stored choice was read. System/ringer rules remain separate gates. */
+/** App-level keypad-sound choice, ON unless a stored choice turned it off
+ *  (Bandi 2026-11-17: dialpad keys sound on by default). System/ringer rules remain separate gates. */
 class KeypadSoundPreferences(
     scope: CoroutineScope,
     private val read: suspend () -> Boolean,
@@ -60,8 +61,10 @@ class KeypadSoundPreferences(
             val app = context.applicationContext
             return KeypadSoundPreferences(scope,
                 read = { withContext(Dispatchers.IO) {
+                    // Unset means ON (Bandi 2026-11-17); any saved choice still wins.
+                    // Prior opt-in default: .all["keypad_sounds"] == true
                     app.getSharedPreferences("chaty_audio_preferences", Context.MODE_PRIVATE)
-                        .all["keypad_sounds"] == true
+                        .all["keypad_sounds"] != false
                 } },
                 write = { value -> withContext(Dispatchers.IO) {
                     check(app.getSharedPreferences("chaty_audio_preferences", Context.MODE_PRIVATE)

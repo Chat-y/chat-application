@@ -1,14 +1,18 @@
 package com.example.chat.ui.profile
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import com.example.chat.ui.navigation.ReferenceLayoutMetrics as ProfileMetrics
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -187,12 +191,15 @@ fun ProfileEditScreen(
         if (isSaving) return
         if (!isDirty && !isSaving) onBack() else showDiscardDialog = true
     }
-    BackHandler { attemptBack() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(user.id)
+    // Previous registration retained inactive: BackHandler { attemptBack() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) { attemptBack() }
 
     val activeAvatarUrl = avatarDraftPath ?: newAvatarUrl ?: user.avatarUrl
     val activeBannerUrl = newBannerUrl ?: user.bannerUrl
-    val screenWidth = LocalConfiguration.current.screenWidthDp
-    val bannerHeight = (screenWidth - 32) * 9 / 16
+    // Previous screen-wide geometry, incorrect for narrow panes:
+    // val screenWidth = LocalConfiguration.current.screenWidthDp
+    // val bannerHeight = (screenWidth - 32) * 9 / 16
 
     fun pick(source: ProfileMediaSource) {
         // Previous guard: if (isSaving) return
@@ -295,6 +302,7 @@ fun ProfileEditScreen(
     }
 
     Scaffold(
+        modifier = Modifier.chatyPredictiveBack(predictiveBack, enabled = !isSaving),
         containerColor = Color(theme.backgroundColor),
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -358,18 +366,21 @@ fun ProfileEditScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            // Banner & overlapping avatar (Dart Rule 20 layout).
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height((bannerHeight + 72).dp),
-            ) {
+            // Match Settings: use measured banner width, with the avatar at its lower edge.
+            // Previous parent: Box(Modifier.fillMaxWidth().height((bannerHeight + 72).dp))
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = ProfileMetrics.profileHeaderHorizontalDp.dp, vertical = ProfileMetrics.profileHeaderVerticalDp.dp)) {
+            val bannerWidth = maxWidth.coerceAtLeast(0.dp)
+            // Previous height: if (bannerWidth > 480.dp) 180.dp else bannerWidth * 9f / 16f
+            val bannerHeight = profileBannerHeight(bannerWidth)
+            Box(Modifier.fillMaxWidth().padding(bottom = ProfileMetrics.profileAvatarOverlapDp.dp)) {
+            Box(Modifier.fillMaxWidth().height(bannerHeight)) {
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(bannerHeight.dp)
-                        .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        // Previous: .height(bannerHeight.dp).padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                        .height(bannerHeight)
+                        // Previous corner: .clip(RoundedCornerShape(20.dp))
+                        .clip(profileBannerShape())
                         .background(Color(theme.cardColor)),
                 ) {
                     val bannerPlaceholder: @Composable () -> Unit = {
@@ -386,7 +397,8 @@ fun ProfileEditScreen(
                                 ),
                         )
                     }
-                    ProfileSizedImage(
+                    // Previous banner renderer: ProfileSizedImage
+                    ProfileBannerMedia(
                         url = activeBannerUrl,
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
@@ -416,12 +428,16 @@ fun ProfileEditScreen(
                 Box(
                     Modifier
                         .align(Alignment.BottomCenter)
-                        .offset(y = 10.dp),
+                        // Previous: .offset(y = 10.dp) below the oversized parent.
+                        .offset(y = ProfileMetrics.profileAvatarOverlapDp.dp),
                 ) {
                     Box(
                         Modifier
-                            .size(96.dp)
-                            .border(3.5.dp, Color(theme.surfaceColor), CircleShape)
+                            // Previous: .size(96.dp).border(3.5.dp, Color(theme.surfaceColor), CircleShape)
+                            .size(ProfileMetrics.profileAvatarOuterDp.dp)
+                            .border(ProfileMetrics.profileAvatarRingDp.dp, com.example.chat.ui.theme.LocalAppColors.current.background, CircleShape)
+                            // Match Settings: 92dp OUTER, 4dp ring, 84dp actual photo.
+                            .padding(ProfileMetrics.profileAvatarRingDp.dp)
                             .clip(CircleShape)
                             .background(Color(theme.accentColor).copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center,
@@ -478,6 +494,8 @@ fun ProfileEditScreen(
                 }
             }
 
+            } // Measured banner/overlap host.
+            } // Reserve the same 40dp avatar extension as Settings.
             Spacer(Modifier.height(12.dp))
 
             Column(
@@ -537,7 +555,9 @@ fun ProfileEditScreen(
                     label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_username)) },  // was: "Username"
                     placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_username_hint)) },  // was: "Choose a unique username"
                     prefix = { Text("@") },
-                    leadingIcon = { Icon(Icons.Outlined.AlternateEmail, contentDescription = null) },
+                    leadingIcon = {
+//Icon(Icons.Outlined.AlternateEmail, contentDescription = null)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.atSign, Icons.Outlined.AlternateEmail, contentDescription = null) },
                     isError = usernameTaken,
                     supportingText = {
                         Text(

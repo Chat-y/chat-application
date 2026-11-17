@@ -427,8 +427,14 @@ fun PlanSubscriptionScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.width(8.dp))
-                        Icon(
-                            Icons.AutoMirrored.Rounded.ArrowForward,
+
+//Icon(
+//                            Icons.AutoMirrored.Rounded.ArrowForward,
+//                            contentDescription = null,
+//                            tint = Color(theme.onAccentColor),
+//                            modifier = Modifier.size(18.dp),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.arrowRight, Icons.AutoMirrored.Rounded.ArrowForward,
                             contentDescription = null,
                             tint = Color(theme.onAccentColor),
                             modifier = Modifier.size(18.dp),
@@ -521,8 +527,14 @@ fun PlanSubscriptionScreen(
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        Icons.Rounded.WorkspacePremium,
+
+//Icon(
+//                        Icons.Rounded.WorkspacePremium,
+//                        contentDescription = null,
+//                        tint = Color(theme.accentColor),
+//                        modifier = Modifier.size(16.dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.premium, Icons.Rounded.WorkspacePremium,
                         contentDescription = null,
                         tint = Color(theme.accentColor),
                         modifier = Modifier.size(16.dp),
@@ -611,8 +623,14 @@ fun PlanSubscriptionScreen(
                             .padding(horizontal = 24.dp, vertical = 36.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Icon(
-                            Icons.Rounded.LayersClear,
+
+//Icon(
+//                            Icons.Rounded.LayersClear,
+//                            contentDescription = null,
+//                            tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.7)),
+//                            modifier = Modifier.size(44.dp),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.layersOff, Icons.Rounded.LayersClear,
                             contentDescription = null,
                             tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.7)),
                             modifier = Modifier.size(44.dp),
@@ -634,7 +652,9 @@ fun PlanSubscriptionScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         OutlinedButton(onClick = { loadPlansNow() }, enabled = !isLoadingPlans) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(stringResource(R.string.sub_retry_plans))
                         }
@@ -913,8 +933,17 @@ private fun PlanCard(
                         // SUB-R1-044: say what the icon means.
                         .semantics(mergeDescendants = true) { contentDescription = "Included: $feature" },
                 ) {
-                    Icon(
-                        Icons.Rounded.CheckCircle,
+
+//Icon(
+//                        Icons.Rounded.CheckCircle,
+//                        contentDescription = null,
+//                        // SUB-R1-044: darker tint for 3:1 non-text contrast.
+//                        // tint = SuccessGreenAccessible,
+//                        tint = Color(theme.successColor),
+//                        // SUB-R3-045: was 16dp.
+//                        modifier = Modifier.size(18.dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircle,
                         contentDescription = null,
                         // SUB-R1-044: darker tint for 3:1 non-text contrast.
                         // tint = SuccessGreenAccessible,

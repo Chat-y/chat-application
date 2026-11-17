@@ -19,6 +19,9 @@ object ChatyLicenseData {
     private const val ANIMATED_EMOJI_BSD_3 = CHATY_ANIMATED_EMOJI_BSD_3
 
     val entries: List<ChatyLicenseEntry> = listOf(
+        ChatyLicenseEntry("OpenMoji emoji artwork", listOf(
+            "OpenMoji by HfG Schwäbisch Gmünd and contributors. Source: https://openmoji.org/ and https://github.com/hfg-gmuend/openmoji/releases/tag/16.0.0 . Licensed under Creative Commons Attribution-ShareAlike 4.0 International: https://creativecommons.org/licenses/by-sa/4.0/ . Existing 50 PNGs resized to 256px; eight quick-reaction additions use unchanged 72px PNGs. Artwork and adaptations remain CC BY-SA 4.0. Full license is bundled at assets/emoji/LICENSE-CC-BY-SA-4.0.txt."
+        )),
         ChatyLicenseEntry("androidx.compose.ui:ui", listOf("Maven coordinate androidx.compose.ui:ui:1.7.6\nLicense declared in the artifact POM:\nThe Apache Software License, Version 2.0 <http://www.apache.org/licenses/LICENSE-2.0.txt>", APACHE_2_0)),
         ChatyLicenseEntry("androidx.compose.ui:ui-tooling-preview", listOf("Maven coordinate androidx.compose.ui:ui-tooling-preview:1.7.6\nLicense declared in the artifact POM:\nThe Apache Software License, Version 2.0 <http://www.apache.org/licenses/LICENSE-2.0.txt>", APACHE_2_0)),
         ChatyLicenseEntry("androidx.compose.material3:material3", listOf("Maven coordinate androidx.compose.material3:material3:1.3.1\nLicense declared in the artifact POM:\nThe Apache Software License, Version 2.0 <http://www.apache.org/licenses/LICENSE-2.0.txt>", APACHE_2_0)),

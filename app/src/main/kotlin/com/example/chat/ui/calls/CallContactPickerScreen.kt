@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.mandatorySystemGestures
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -323,7 +324,14 @@ fun CallContactPickerScreen(
 
     Scaffold(
         modifier = Modifier.windowInsetsPadding(
-            WindowInsets.safeDrawing.union(WindowInsets.mandatorySystemGestures.only(WindowInsetsSides.Bottom)),
+            // One root owner reserves the real bottom navigation/gesture region for
+            // both expanded keypad controls and the collapsed-keypad FAB. Union
+            // takes the maximum inset, never sums two copies or guesses a dp gap.
+            // Previous: WindowInsets.safeDrawing.union(WindowInsets.mandatorySystemGestures.only(WindowInsetsSides.Bottom)),
+            WindowInsets.safeDrawing.union(
+                WindowInsets.navigationBars.union(WindowInsets.mandatorySystemGestures)
+                    .only(WindowInsetsSides.Bottom),
+            ),
         ),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = Color(theme.backgroundColor),
@@ -337,7 +345,9 @@ fun CallContactPickerScreen(
                     contentColor = Color.White,
                 ) {
 // Previous implementation retained:                     Icon(Icons.Rounded.Dialpad, contentDescription = "Show dialpad", modifier = Modifier.size(28.dp))
-                    Icon(Icons.Rounded.Dialpad, contentDescription = context.getString(com.example.chat.R.string.calls_ui_26), modifier = Modifier.size(28.dp))
+
+//Icon(Icons.Rounded.Dialpad, contentDescription = context.getString(com.example.chat.R.string.calls_ui_26), modifier = Modifier.size(28.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.dialpad, Icons.Rounded.Dialpad, contentDescription = context.getString(com.example.chat.R.string.calls_ui_26), modifier = Modifier.size(28.dp))
                 }
             }
         },
@@ -671,7 +681,12 @@ fun CallContactPickerScreen(
                             com.example.chat.ui.kit.ChatyModalShape,
                         )
                         .navigationBarsPadding()
-                        .padding(start = 28.dp, top = 16.dp, end = 28.dp, bottom = 16.dp),
+                        // Keep a visible comfort gap above the already-consumed system navigation inset.
+                        // Previous bottom padding:16.dp. Only the expanded dialpad sheet changes.
+                        .padding(start = 28.dp, top = 16.dp, end = 28.dp,
+// Previous implementation retained: bottom = com.example.chat.ui.core.components.auth.ChatyUiTokens.space24),
+                            bottom = com.example.chat.ui.core.components.auth.ChatyUiTokens.space24 +
+                                com.example.chat.ui.core.components.auth.ChatyUiTokens.space8),
                 ) {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
@@ -748,8 +763,14 @@ fun CallContactPickerScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
 // Previous implementation retained:                         IconButton(onClick = { isKeypadCollapsed = true }, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Hide dialpad" }) {
                         IconButton(onClick = { isKeypadCollapsed = true }, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = context.getString(com.example.chat.R.string.calls_ui_44) }) {
-                            Icon(
-                                Icons.Rounded.KeyboardArrowDown,
+
+//Icon(
+//                                Icons.Rounded.KeyboardArrowDown,
+//                                contentDescription = null,
+//                                tint = Color(theme.secondaryTextColor),
+//                                modifier = Modifier.size(28.dp),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronDown, Icons.Rounded.KeyboardArrowDown,
                                 contentDescription = null,
                                 tint = Color(theme.secondaryTextColor),
                                 modifier = Modifier.size(28.dp),
@@ -810,8 +831,18 @@ fun CallContactPickerScreen(
                                     )
                                 },
                         ) {
-                            Icon(
-                                Icons.Rounded.Backspace,
+
+//Icon(
+//                                Icons.Rounded.Backspace,
+//                                contentDescription = null,
+//                                tint = if (query.isEmpty()) {
+//                                    Color(argbWithAlpha(theme.secondaryTextColor, 0.5))
+//                                } else {
+//                                    Color(theme.secondaryTextColor)
+//                                },
+//                                modifier = Modifier.size(24.dp),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.backspace, Icons.Rounded.Backspace,
                                 contentDescription = null,
                                 tint = if (query.isEmpty()) {
                                     Color(argbWithAlpha(theme.secondaryTextColor, 0.5))

@@ -1,5 +1,7 @@
 package com.example.chat.ui.notifications
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -116,9 +118,11 @@ fun NotificationsInboxScreen(
     val timeFormatter = remember(configuration, calendarRevision) { android.text.format.DateFormat.getTimeFormat(context) }
     val unavailableDate = stringResource(R.string.social_activity_time_unavailable)
 
-    BackHandler(onBack = onBack)
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Unit)
+    // Previous registration retained inactive: BackHandler(onBack = onBack)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, onBack = onBack)
     Column(
-        modifier = Modifier
+        modifier = Modifier.chatyPredictiveBack(predictiveBack)
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background).semantics { paneTitle = paneLabel },
     ) {
@@ -146,7 +150,9 @@ fun NotificationsInboxScreen(
                 // Previous source retained (superseded below):
                 // IconButton(onClick = { clearCandidates = entries.map { it.id } }) {
                 IconButton(modifier = Modifier.size(48.dp), onClick = { clearCandidates = entries.map { it.id } }) {
-                    Icon(Icons.Outlined.DeleteSweep, contentDescription = stringResource(R.string.social_activity_clear_action))
+
+//Icon(Icons.Outlined.DeleteSweep, contentDescription = stringResource(R.string.social_activity_clear_action))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.deleteSweep, Icons.Outlined.DeleteSweep, contentDescription = stringResource(R.string.social_activity_clear_action))
                 }
             }
             IconButton(onClick = onOpenSettings) {
@@ -166,7 +172,13 @@ fun NotificationsInboxScreen(
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Outlined.NotificationsNone,
+
+//Icon(Icons.Outlined.NotificationsNone,
+//                            contentDescription = null,
+//                            modifier = Modifier.size(30.dp),
+//                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.notifications, Icons.Outlined.NotificationsNone,
                             contentDescription = null,
                             modifier = Modifier.size(30.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -259,7 +271,12 @@ private fun NotificationActivityRow(
                 .background(MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Outlined.NotificationsNone,
+
+//Icon(Icons.Outlined.NotificationsNone,
+//                contentDescription = null,
+//                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+//            )
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.notifications, Icons.Outlined.NotificationsNone,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
             )

@@ -124,7 +124,7 @@ object ChatyNotificationPoster {
 
     /** Incoming call. The only action OPENS the app (accept happens in-app after auth/lock/permissions).
      *  [tag] is the lane's canonical c:<generation>:<callId> tag (null for the fixture/direct calls). */
-    internal fun postIncomingCall(context: Context, style: ChatyNotificationStyle, callerName: String, isVideo: Boolean, declineNonce: String?, tag: String? = null, quiet: Boolean = false) {
+    internal fun postIncomingCall(context: Context, style: ChatyNotificationStyle, callerName: String, isVideo: Boolean, declineNonce: String?, tag: String? = null, quiet: Boolean = false, acceptNonce: String? = null) {
         if (!canPost(context)) return
         ensureChannels(context)
         val open = openApp(context, ChatyNotificationPolicy.INCOMING_CALL_ID)
@@ -146,7 +146,19 @@ object ChatyNotificationPoster {
             b.setFullScreenIntent(open, true)
         }
         if (declineNonce != null) b.addAction(R.drawable.ic_notif_hangup, "Decline", broadcast(context, ChatyNotificationPolicy.ACTION_DECLINE, declineNonce))
-        if (open != null) b.addAction(R.drawable.ic_notif_call, "Open to answer", open)
+// Prior source:         if (open != null) b.addAction(R.drawable.ic_notif_call, "Open to answer", open)
+        val accept = acceptNonce?.let { nonce ->
+            context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                action = ChatyNotificationPolicy.ACTION_ACCEPT
+                data = android.net.Uri.Builder().scheme("chaty").authority("notification-accept").appendPath(nonce).build()
+                putExtra(ChatyNotificationPolicy.EXTRA_NONCE, nonce)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }?.let { intent -> PendingIntent.getActivity(context, nonce.hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
+        }
+        if (accept != null) b.addAction(NotificationCompat.Action.Builder(R.drawable.ic_notif_call, "Accept", accept)
+            .setShowsUserInterface(true).setAuthenticationRequired(true).build())
+        else if (open != null) b.addAction(R.drawable.ic_notif_call, "Open to answer", open)
         try { NotificationManagerCompat.from(context).notify(tag, ChatyNotificationPolicy.INCOMING_CALL_ID, b.build()) } catch (_: SecurityException) {}
     }
 

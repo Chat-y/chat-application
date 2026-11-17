@@ -36,9 +36,13 @@ class ChatyNotificationCoordinator(
     private val channelManager: NotificationChannelManager,
     private val isChatVaultLocked: (String) -> Boolean,
     private val callPresentation: com.example.chat.ui.calls.CallPresentationPreferencesStore? = null,
+    /** False unless sent or durably queued under the exact notification owner.
+     * The nonce is also the stable MLS idempotency key for duplicate action deliveries. */
+    private val replySender: suspend (ApiAccountScope, String, String, String) -> Boolean = { _, _, _, _ -> false },
 ) : ChatyNotificationBridge, ChatyNotificationSink {
 
     private val registry = ChatyActionRegistry<ApiAccountScope>()
+    private val repliesInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     @Volatile private var lastScope: ApiAccountScope? = null
     @Volatile private var lastIncomingCallId: String? = null
     private val reportedMissed = linkedSetOf<String>()
@@ -137,7 +141,16 @@ class ChatyNotificationCoordinator(
         val admission = alertAdmission
         val quiet = admission?.takeIf { it.owner === api.authSnapshot() && tag == "c:${it.owner.generation}:${it.callId}" }?.quiet
             ?: (callPresentation != null) // Unknown admission must not leak a ring before preferences restore.
-        ChatyNotificationPoster.postIncomingCall(context, style, callerName, isVideo, declineNonce, tag, quiet = quiet)
+// Prior source:         ChatyNotificationPoster.postIncomingCall(context, style, callerName, isVideo, declineNonce, tag, quiet = quiet)
+        // Accept uses an Activity PendingIntent, never a background receiver that starts camera/microphone.
+        val entry = registry.resolve(declineNonce)
+        val accept = entry?.takeIf { it.action == ChatyNotificationPolicy.ACTION_DECLINE &&
+            it.scope === api.authSnapshot() && it.callId == calls.currentSession?.callId &&
+            tag == "c:${it.scope.generation}:${it.callId}" }?.let {
+            registry.register(it.scope, ChatyNotificationPolicy.ACTION_ACCEPT, callId = it.callId)
+        }
+        ChatyNotificationPoster.postIncomingCall(context, style, callerName, isVideo, declineNonce, tag, quiet = quiet,
+            acceptNonce = accept)
     }
 
     override fun cancelIncomingCall(tag: String) = ChatyNotificationPoster.cancelIncomingCall(context, tag)
@@ -306,6 +319,19 @@ class ChatyNotificationCoordinator(
         )
     }
 
+    /** Activity-only action: reuse the existing in-app permission/accept path after exact-owner validation. */
+    fun requestNotificationAccept(nonce: String?): Boolean {
+        val entry = registry.resolve(nonce) ?: return false
+        val id = entry.callId ?: return false
+        if (entry.action != ChatyNotificationPolicy.ACTION_ACCEPT || api.authSnapshot() !== entry.scope ||
+            !callOk(id) || calls.currentSession?.state != com.example.chat.data.services.CallSessionState.incoming) return false
+        // Opening the app is allowed when locked; queuing automatic acceptance is not.
+        if (appLock.lockRequired.value || prefs.security.isAppLockEnabled) return false
+        registry.dropNonce(nonce)
+        ChatyNotifications.requestCallAction(ChatyNotifications.PendingCallAction(id, answer = true, owner = entry.scope))
+        return true
+    }
+
     private fun callOk(id: String) = ChatyNotificationPolicy.callActionAllowed(id, calls.currentSession?.callId, calls.hasActiveSession)
 
     override suspend fun dispatch(nonce: String?, action: String, replyText: CharSequence?) {
@@ -321,7 +347,18 @@ class ChatyNotificationCoordinator(
                 val chatLocked = isChatVaultLocked(id) || prefs.security.lockedConversationIds.contains(id)
                 if (!ChatyNotificationPolicy.mayReply(appLock.lockRequired.value, prefs.security.isAppLockEnabled, chatLocked)) return
                 // Scope-bound send: token/base URL come from the ORIGINAL scope, request cancelled on any auth transition.
-                if (api.sendMessageForScope(account, id, text)) lane.cancelMessageFor(account, id)
+                // Prior source: if (api.sendMessageForScope(account, id, text)) lane.cancelMessageFor(account, id)
+                val replyNonce = nonce ?: return
+                if (!repliesInFlight.add(replyNonce)) return
+                try {
+                    // Another delivery may have captured e before the first send retired its nonce.
+                    if (!registry.isCurrent(replyNonce, e)) return
+                    // Previous regular-only call retained: if (api.sendMessageForScope(account, id, text)) {
+                    if (replySender(account, id, text, replyNonce)) {
+                        registry.dropNonce(replyNonce)
+                        lane.cancelMessageFor(account, id)
+                    }
+                } finally { repliesInFlight.remove(replyNonce) }
             }
             // Previous implementation retained:
             // ChatyNotificationPolicy.ACTION_DISMISS -> e.conversationId?.let { cancelFor(it) }

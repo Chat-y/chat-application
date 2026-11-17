@@ -128,6 +128,14 @@ class VoiceSessionController(
     /** Dart _finishVoice(): stop + upload + send; on success track + scroll. */
     fun finishVoice() {
         if (!state.recording || state.busy || voice.callInterrupted) return
+        try {
+            // Stop accepting new PCM reads in this tap, not after the coroutine is dispatched.
+            voice.requestSendStop()
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            showError("Could not stop voice recording. ${describeError(error)}")
+            return
+        }
         // After a Pause and Resume there are several parts: join them in review, then send from there.
         if (voice.hasSegments) { sendAfterReview = true; beginReview(); return }
         update { it.copy(busy = true) }

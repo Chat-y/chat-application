@@ -250,7 +250,12 @@ fun CameraCaptureViewfinder(
                 fontSize = 12.sp,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 118.dp)
+                    // Centering/stack fix (measured): both video notices can be visible at
+                    // once (face lens + null-matrix effect). The lens notice at top=96 with
+                    // 12.sp text + 4dp vertical padding is ~26dp tall, so 118 left a ~6dp
+                    // overlap. 132 = 96 + 26 chip + 10 gap (4dp grid). Looks-only.
+                    // Previous: .padding(top = 118.dp)
+                    .padding(top = 132.dp)
                     // Previous value: Color.Black.copy(alpha = 0.55f)
                     .background(rememberCameraOverlayColors().scrimStrong, RoundedCornerShape(10.dp))
                     // CAM-R4-030 previous spacing: .padding(horizontal = 10.dp, vertical = 4.dp),

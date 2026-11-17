@@ -160,7 +160,16 @@ private fun OverlayContent() {
     val mode by IslandController.mode.collectAsState()
     val idle by IslandSettings.idlePill.collectAsState()
     // Privacy removes the content immediately; it is never left in an exit animation.
-    if (privateScreen || !enabled || (mode == IslandMode.Idle && !idle)) return
+    // Previous implementation retained:
+    // if (privateScreen || !enabled || (mode == IslandMode.Idle && !idle)) return
+    if (privateScreen || !enabled) return
+    // Idle dismissal now fades the island out as its last live payload instead of
+    // vanishing mid-frame (Bandi 2026-11-14: "the island glitching").
+    val islandVisible = mode != IslandMode.Idle || idle
+    val lastLive = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(mode) }
+    androidx.compose.runtime.SideEffect { if (mode != IslandMode.Idle) lastLive.value = mode }
+    // Reduce-motion is honored here as well: no fade, no scale, instant swap.
+    val reduceMotionIsland = com.example.chat.ui.kit.rememberChatyReduceMotion()
     val notificationFrame by IslandController.displayedNotificationFrame.collectAsState()
     val view = LocalView.current
     val acknowledged = androidx.compose.runtime.remember(view) { arrayOfNulls<IslandController.NotificationFrame>(1) }
@@ -178,6 +187,15 @@ private fun OverlayContent() {
     val editor by IslandController.replying.collectAsState()
     val waiting by IslandController.queued.collectAsState()
     val music by IslandController.secondary.collectAsState()
+    androidx.compose.animation.AnimatedVisibility(
+        visible = islandVisible,
+        enter = if (reduceMotionIsland) androidx.compose.animation.EnterTransition.None
+            else androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(140)) +
+            androidx.compose.animation.scaleIn(initialScale = .8f, animationSpec = androidx.compose.animation.core.tween(140)),
+        exit = if (reduceMotionIsland) androidx.compose.animation.ExitTransition.None
+            else androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) +
+            androidx.compose.animation.scaleOut(targetScale = .8f, animationSpec = androidx.compose.animation.core.tween(160)),
+    ) {
     DynamicIslandUi(modifier = Modifier.drawWithContent {
         drawContent()
         // Posting runs after this draw pass. Revalidate at callback time: a
@@ -194,7 +212,9 @@ private fun OverlayContent() {
                 }
             }
         }
-    }, mode = mode, level = level, scale = scale, widthScale = width, heightScale = height,
+    // Previous implementation retained:
+    // }, mode = mode, level = level, scale = scale, widthScale = width, heightScale = height,
+    }, mode = if (islandVisible) mode else lastLive.value, level = level, scale = scale, widthScale = width, heightScale = height,
         cornerFactor = corner, animSpeed = speed, glow = glow, haptics = haptics,
         onClick = { IslandController.toggle() }, onLongPress = { IslandController.large() },
         onDismiss = { IslandController.dismiss() }, onOpenNotification = { IslandController.openNotification() }, onPrev = { IslandController.prev() },
@@ -206,6 +226,7 @@ private fun OverlayContent() {
         onCancelReply = { IslandController.cancelReply() }, replying = editor,
         secondary = music, queued = waiting, onOpenMedia = { IslandController.openMedia() },
         onSwipe = { IslandController.swipe(it) }, appAccent = if (appAccent) Color(seed) else null)
+    }
 }
 
 private class WindowTree : SavedStateRegistryOwner, ViewModelStoreOwner {

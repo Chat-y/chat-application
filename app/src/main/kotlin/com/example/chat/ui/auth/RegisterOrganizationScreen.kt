@@ -220,7 +220,9 @@ fun RegisterOrganizationScreen(
                 Spacer(Modifier.height(ChatyUiTokens.space24))
 
                 SectionHeader(theme, authCopy("1. Organization Details")) {
-                    Icon(Icons.Rounded.Apartment, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.Apartment, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.organization, Icons.Rounded.Apartment, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
@@ -232,7 +234,9 @@ fun RegisterOrganizationScreen(
                     value = orgName,
                     onValueChange = { onOrgNameChanged(it) },
                     error = orgNameError,
-                    prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Business, null, tint = it, modifier = Modifier.size(20.dp)) } },
+                    prefixIcon = { PrefixIcon(theme) {
+//Icon(Icons.Rounded.Business, null, tint = it, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.organization, Icons.Rounded.Business, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
@@ -245,7 +249,9 @@ fun RegisterOrganizationScreen(
                     // Previous: onValueChange = { tenantId = it; hasManuallyEditedSlug = true },
                     onValueChange = { tenantId = it; hasManuallyEditedSlug = true; tenantIdError = null; errorMessage = null },
                     error = tenantIdError,
-                    prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Link, null, tint = it, modifier = Modifier.size(20.dp)) } },
+                    prefixIcon = { PrefixIcon(theme) {
+//Icon(Icons.Rounded.Link, null, tint = it, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.link, Icons.Rounded.Link, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
                 Text(
                     authCopy("Your team members will use this Workspace ID to sign into your organization."),
@@ -256,7 +262,9 @@ fun RegisterOrganizationScreen(
                 Spacer(Modifier.height(ChatyUiTokens.space32))
 
                 SectionHeader(theme, authCopy("2. Admin Account")) {
-                    Icon(Icons.Rounded.AdminPanelSettings, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.AdminPanelSettings, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.permissions, Icons.Rounded.AdminPanelSettings, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
@@ -268,7 +276,9 @@ fun RegisterOrganizationScreen(
                     value = adminFullName,
                     onValueChange = { adminFullName = it;fullNameError=null;errorMessage=null },
                     error = fullNameError,
-                    prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.Badge, null, tint = it, modifier = Modifier.size(20.dp)) } },
+                    prefixIcon = { PrefixIcon(theme) {
+//Icon(Icons.Rounded.Badge, null, tint = it, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.badge, Icons.Rounded.Badge, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
@@ -280,7 +290,9 @@ fun RegisterOrganizationScreen(
                     value = adminUsername,
                     onValueChange = { adminUsername = it;usernameError=null;errorMessage=null },
                     error = usernameError,
-                    prefixIcon = { PrefixIcon(theme) { Icon(Icons.Rounded.AlternateEmail, null, tint = it, modifier = Modifier.size(20.dp)) } },
+                    prefixIcon = { PrefixIcon(theme) {
+//Icon(Icons.Rounded.AlternateEmail, null, tint = it, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.atSign, Icons.Rounded.AlternateEmail, null, tint = it, modifier = Modifier.size(20.dp)) } },
                 )
                 Spacer(Modifier.height(ChatyUiTokens.space16))
                 AuthTextField(
@@ -433,7 +445,9 @@ private fun AllowRegistrationCard(theme: ThemeConfig, allow: Boolean, onChange: 
                 .background(Color(argbWithAlpha(activeColor, 0.12)), ChatyUiTokens.cardShape)
                 .padding(ChatyUiTokens.space8),
         ) {
-            Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = Color(activeColor), modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = Color(activeColor), modifier = Modifier.size(20.dp))
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.groupAdd, Icons.Rounded.GroupAdd, contentDescription = null, tint = Color(activeColor), modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(ChatyUiTokens.space16))
         Column(Modifier.weight(1f)) {

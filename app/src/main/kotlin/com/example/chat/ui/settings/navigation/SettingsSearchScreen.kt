@@ -97,12 +97,39 @@ fun <T> SettingsSearchScreen(
                 IconButton(onClick = onBack) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Close search", color = colors.foreground)
                 }
-                TextField(
+                // Previous stock field:
+                // TextField(
+                //                     value = query,
+                //                     onValueChange = { query = it },
+                //                     modifier = Modifier.weight(1f).semantics { contentDescription = "Search settings" }, // SET-R1-047
+                //                     singleLine = true,
+                //                     placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_search_settings), color = colors.foregroundTertiary) }, // was: "Search settings..."
+                //                     trailingIcon = {
+                //                         if (query.isNotEmpty()) {
+                //                             IconButton(onClick = { query = "" }) {
+                //                                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.clear, semanticLabel = "Clear", color = colors.foreground)
+                //                             }
+                //                         }
+                //                     },
+                //                     // SET-R3-048: visible field boundary
+                //                     shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                //                     colors = TextFieldDefaults.colors(
+                //                         focusedContainerColor = colors.surfaceSecondary,
+                //                         unfocusedContainerColor = colors.surfaceSecondary,
+                //                         disabledContainerColor = colors.surfaceSecondary,
+                //                         focusedIndicatorColor = Color.Transparent,
+                //                         unfocusedIndicatorColor = Color.Transparent,
+                //                         cursorColor = colors.primary,
+                //                         focusedTextColor = colors.foreground,
+                //                         unfocusedTextColor = colors.foreground,
+                //                     ),
+                //                 )
+                com.example.chat.ui.kit.ChatyTaskField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.weight(1f).semantics { contentDescription = "Search settings" }, // SET-R1-047
+                    modifier = Modifier.weight(1f).semantics { contentDescription = "Search settings" },
                     singleLine = true,
-                    placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_search_settings), color = colors.foregroundTertiary) }, // was: "Search settings..."
+                    placeholder = androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_search_settings),
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { query = "" }) {
@@ -110,18 +137,11 @@ fun <T> SettingsSearchScreen(
                             }
                         }
                     },
-                    // SET-R3-048: visible field boundary
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = colors.surfaceSecondary,
-                        unfocusedContainerColor = colors.surfaceSecondary,
-                        disabledContainerColor = colors.surfaceSecondary,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        cursorColor = colors.primary,
-                        focusedTextColor = colors.foreground,
-                        unfocusedTextColor = colors.foreground,
-                    ),
+                    minLines = 1,
+                    maxLines = 1,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+                    accessibilityLabel = "Search settings",
+                    density = com.example.chat.ui.kit.ChatyFieldDensity.CompactHeader,
                 )
             }
         },
@@ -129,8 +149,14 @@ fun <T> SettingsSearchScreen(
         if (results.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Rounded.SearchOff,
+
+//Icon(
+//                        Icons.Rounded.SearchOff,
+//                        contentDescription = null,
+//                        tint = colors.foregroundTertiary,
+//                        modifier = Modifier.size(48.dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.searchOff, Icons.Rounded.SearchOff,
                         contentDescription = null,
                         tint = colors.foregroundTertiary,
                         modifier = Modifier.size(48.dp),
@@ -142,7 +168,13 @@ fun <T> SettingsSearchScreen(
                         fontSize = 14.sp,
                     )
                     // SET-R2-047: recovery from an empty result
-                    androidx.compose.material3.TextButton(onClick = { query = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_clear_search), color = colors.primary) } // was: "Clear search"
+                    // Previous stock text action:
+                    // androidx.compose.material3.TextButton(onClick = { query = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_clear_search), color = colors.primary) }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_clear_search),
+                        onClick = { query = "" },
+                        color = colors.primary,
+                    ) // was: "Clear search"
                 }
             }
         } else {
@@ -218,3 +250,6 @@ fun SettingsSearchScreen(
     onBack = onBack,
     initialQuery = initialQuery,
 )
+
+// Complete original-line retention for review (inactive).
+                    //                     androidx.compose.material3.TextButton(onClick = { query = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_search_clear_search), color = colors.primary) } // was: "Clear search"

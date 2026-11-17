@@ -134,6 +134,23 @@ pub struct GroupConfigurationResult {
 // MLS ENGINE
 // ═══════════════════════════════════════════════════════════════
 
+/// Validate the prospective snapshot before the only durable commit. Returning an
+/// error drops OpSession and all staged storage changes, including Welcome secrets.
+fn assert_snapshot_group_pins(group: &MlsGroup, identities: &[Vec<u8>], keys: &[Vec<u8>]) -> Result<(), String> {
+    if identities.is_empty() || identities.len() != keys.len() { return Err("Invalid approved pin set".to_string()); }
+    // Subsets of the approved set are intentional (valid removals). Duplicate
+    // leaf identities are never intentional, even with the same signing key.
+    let mut seen = std::collections::HashSet::new();
+    for member in group.members() {
+        let basic = BasicCredential::try_from(member.credential.clone()).map_err(|_| "Unsupported member credential".to_string())?;
+        if !seen.insert(basic.identity().to_vec()) { return Err("Duplicate member identity".to_string()); }
+        let mut matches = identities.iter().zip(keys).filter(|(identity, key)|
+            identity.as_slice() == basic.identity() && key.as_slice() == member.signature_key.as_slice());
+        if matches.next().is_none() || matches.next().is_some() { return Err("Incoming membership does not match approved device pins".to_string()); }
+    }
+    Ok(())
+}
+
 pub struct MlsEngine {
     db: parking_lot::RwLock<Option<std::sync::Arc<crate::encrypted_db::EncryptedDb>>>,
     /// Serializes the load → operate → save sequence of every operation.
@@ -523,6 +540,54 @@ impl MlsEngine {
 
         let gid = mls_group.group_id().as_slice().to_vec();
 
+        self.commit(provider, Some(&gid)).await?;
+
+        Ok(JoinGroupResult { group_id: gid })
+    }
+
+    pub async fn join_group_from_welcome_pinned(
+        &self,
+        config: MlsGroupConfig,
+        welcome_bytes: Vec<u8>,
+        ratchet_tree_bytes: Option<Vec<u8>>,
+        signer_bytes: Vec<u8>,
+        pin_identities: Vec<Vec<u8>>, pin_keys: Vec<Vec<u8>>,
+        expected_group_id: Vec<u8>, expected_epoch: u64,
+    ) -> Result<JoinGroupResult, String> {
+        let signer = signer_from_bytes(signer_bytes)?;
+        let provider = self.load_global().await?;
+
+        signer
+            .store(provider.storage())
+            .map_err(|e| format!("Failed to store signer: {}", e))?;
+
+        let welcome_msg = from_exact_bytes::<MlsMessageIn>(&welcome_bytes)
+            .map_err(|e| format!("Failed to deserialize welcome: {}", e))?;
+        let welcome = match welcome_msg.extract() {
+            MlsMessageBodyIn::Welcome(w) => w,
+            _ => return Err("Message is not a Welcome".to_string()),
+        };
+
+        let join_config = config.to_join_config();
+        let ratchet_tree: Option<RatchetTreeIn> = ratchet_tree_bytes
+            .map(|rt_bytes| {
+                from_exact_bytes::<RatchetTreeIn>(&rt_bytes)
+                    .map_err(|e| format!("Failed to deserialize ratchet tree: {}", e))
+            })
+            .transpose()?;
+
+        let staged = StagedWelcome::new_from_welcome(&provider, &join_config, welcome, ratchet_tree)
+            .map_err(|e| format!("Failed to process welcome: {}", e))?;
+        let mls_group = staged
+            .into_group(&provider)
+            .map_err(|e| format!("Failed to join group from welcome: {}", e))?;
+
+        let gid = mls_group.group_id().as_slice().to_vec();
+
+        if gid != expected_group_id || mls_group.epoch().as_u64() != expected_epoch {
+            return Err("Welcome context mismatch before persistence".to_string());
+        }
+        assert_snapshot_group_pins(&mls_group, &pin_identities, &pin_keys)?;
         self.commit(provider, Some(&gid)).await?;
 
         Ok(JoinGroupResult { group_id: gid })
@@ -1048,6 +1113,16 @@ impl MlsEngine {
     // ═══════════════════════════════════════════════════════════
     // MEMBER MANAGEMENT (mutating)
     // ═══════════════════════════════════════════════════════════
+
+    /// Validate signatures and expose the actual leaf identity/key before mutation.
+    pub async fn inspect_key_package_pin(&self, bytes: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), String> {
+        let provider = self.load_global().await?;
+        let input = from_exact_bytes::<KeyPackageIn>(&bytes).map_err(|e| format!("Invalid KeyPackage: {}", e))?;
+        let package = input.validate(provider.crypto(), ProtocolVersion::Mls10).map_err(|e| format!("Invalid KeyPackage signature: {}", e))?;
+        let leaf = package.leaf_node();
+        let credential = leaf.credential().tls_serialize_detached().map_err(|e| format!("Invalid credential: {}", e))?;
+        Ok((credential, leaf.signature_key().as_slice().to_vec()))
+    }
 
     pub async fn add_members(
         &self,
@@ -1620,10 +1695,16 @@ impl MlsEngine {
     }
 
     pub async fn process_message(
+        &self, group_id_bytes: Vec<u8>, message_bytes: Vec<u8>,
+    ) -> Result<ProcessedMessageResult, String> {
+        self.process_message_with_identity(group_id_bytes, message_bytes).await.map(|(result, _)| result)
+    }
+
+    pub async fn process_message_with_identity(
         &self,
         group_id_bytes: Vec<u8>,
         message_bytes: Vec<u8>,
-    ) -> Result<ProcessedMessageResult, String> {
+    ) -> Result<(ProcessedMessageResult, Vec<u8>), String> {
         let provider = self.load_for_group(&group_id_bytes).await?;
         let mut group = load_group(&group_id_bytes, &provider)?;
 
@@ -1635,11 +1716,18 @@ impl MlsEngine {
         let processed = group.process_message(&provider, protocol_msg)
             .map_err(|e| format!("Failed to process message: {}", e))?;
 
+        // This entry point is for application slots. Never store a proposal or
+        // merge a commit supplied through an application/control-row confusion.
+        if !matches!(processed.content(), ProcessedMessageContent::ApplicationMessage(_)) {
+            return Err("Non-application MLS message rejected before persistence".to_string());
+        }
+        let authenticated_identity = super::credential::MlsCredential::from_native(processed.credential().clone()).identity()?;
         let sender_index = match processed.sender() {
             Sender::Member(idx) => Some(idx.u32()),
             _ => None,
         };
-        let epoch = group.epoch().as_u64();
+        // Use the authenticated message epoch, not current mutable group state.
+        let epoch = processed.epoch().as_u64();
 
         let (message_type, application_message, has_staged_commit, has_proposal, proposal_type) =
             match processed.into_content() {
@@ -1669,6 +1757,77 @@ impl MlsEngine {
                 _ => return Err("Unknown processed message content type".to_string()),
             };
 
+        self.commit(provider, Some(&group_id_bytes)).await?;
+
+        Ok((ProcessedMessageResult {
+            message_type, sender_index, epoch, application_message, has_staged_commit, has_proposal, proposal_type,
+        }, authenticated_identity))
+    }
+
+    pub async fn process_membership_commit_pinned(
+        &self,
+        group_id_bytes: Vec<u8>,
+        message_bytes: Vec<u8>,
+        pin_identities: Vec<Vec<u8>>, pin_keys: Vec<Vec<u8>>, expected_epoch: u64,
+    ) -> Result<ProcessedMessageResult, String> {
+        let provider = self.load_for_group(&group_id_bytes).await?;
+        let mut group = load_group(&group_id_bytes, &provider)?;
+
+        let msg_in = from_exact_bytes::<MlsMessageIn>(&message_bytes)
+            .map_err(|e| format!("Failed to deserialize message: {}", e))?;
+        let protocol_msg = msg_in.try_into_protocol_message()
+            .map_err(|e| format!("Not a protocol message: {}", e))?;
+
+        let processed = group.process_message(&provider, protocol_msg)
+            .map_err(|e| format!("Failed to process message: {}", e))?;
+
+        // This entry point is for application slots. Never store a proposal or
+        // merge a commit supplied through an application/control-row confusion.
+        if !matches!(processed.content(), ProcessedMessageContent::StagedCommitMessage(_)) {
+            return Err("Non-commit MLS membership input rejected before persistence".to_string());
+        }
+        let sender_index = match processed.sender() {
+            Sender::Member(idx) => Some(idx.u32()),
+            _ => None,
+        };
+        // Use the authenticated message epoch, not current mutable group state.
+        let epoch = processed.epoch().as_u64();
+
+        let (message_type, application_message, has_staged_commit, has_proposal, proposal_type) =
+            match processed.into_content() {
+                ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                    (ProcessedMessageType::Application, Some(app_msg.into_bytes()), false, false, None)
+                }
+                ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                    group.merge_staged_commit(&provider, *staged_commit)
+                        .map_err(|e| format!("Failed to merge staged commit: {}", e))?;
+                    (ProcessedMessageType::StagedCommit, None, true, false, None)
+                }
+                ProcessedMessageContent::ProposalMessage(queued_proposal) => {
+                    let prop_type = match queued_proposal.proposal() {
+                        Proposal::Add(_) => MlsProposalType::Add,
+                        Proposal::Remove(_) => MlsProposalType::Remove,
+                        Proposal::Update(_) => MlsProposalType::Update,
+                        Proposal::PreSharedKey(_) => MlsProposalType::PreSharedKey,
+                        Proposal::ReInit(_) => MlsProposalType::Reinit,
+                        Proposal::ExternalInit(_) => MlsProposalType::ExternalInit,
+                        Proposal::GroupContextExtensions(_) => MlsProposalType::GroupContextExtensions,
+                        _ => MlsProposalType::Custom,
+                    };
+                    group.store_pending_proposal(provider.storage(), *queued_proposal)
+                        .map_err(|e| format!("Failed to store pending proposal: {}", e))?;
+                    (ProcessedMessageType::Proposal, None, false, true, Some(prop_type))
+                }
+                _ => return Err("Unknown processed message content type".to_string()),
+            };
+
+        // OpSession is an isolated in-memory snapshot. No database mutation occurs
+        // until commit below. Reject the complete prospective tree first, including
+        // path updates, inline/referenced proposals and every unchanged member.
+        if group.group_id().as_slice() != group_id_bytes.as_slice() || group.epoch().as_u64() != expected_epoch {
+            return Err("Commit context mismatch before persistence".to_string());
+        }
+        assert_snapshot_group_pins(&group, &pin_identities, &pin_keys)?;
         self.commit(provider, Some(&group_id_bytes)).await?;
 
         Ok(ProcessedMessageResult {

@@ -23,6 +23,10 @@ interface MlsEncryptor {
      *  ciphertext for the given JSON payload. */
     suspend fun encryptPayload(conversationId: String, payload: Map<String, Any?>): MlsEncryptedPayload
 
+    /** Reused ciphertext needs the same final active-tree gate as fresh encryption. */
+    suspend fun assertStoredCipherReady(conversationId: String, cipher: MlsEncryptedPayload): Unit =
+        throw IllegalStateException("Stored encrypted retry verification is unavailable.")
+
     /** Mirrors MlsE2eeService.decryptPayload for incoming row hydration. */
     suspend fun decryptPayload(conversationId: String, ciphertext: String): Map<String, Any?>
 
@@ -30,6 +34,9 @@ interface MlsEncryptor {
      *  same payload shape as encryptPayload, plus the edited flag. */
     suspend fun encryptEditedPayload(conversationId: String, payload: Map<String, Any?>): MlsEncryptedPayload
 }
+
+/** Definitive local membership/epoch drift, distinct from network/review errors. */
+class StoredCipherMembershipDrift(message: String) : IllegalStateException(message)
 
 data class MlsEncryptedPayload(
     val groupId: String,

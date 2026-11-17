@@ -1,5 +1,8 @@
 package com.example.chat.ui.accounts
 
+import com.example.chat.ui.kit.chatyDepth
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -132,10 +135,12 @@ fun AccountSwitcherOverlay(
 
     // Previous handler let Back fall through to underlying navigation during a switch.
     // BackHandler(enabled = !isSwitching) { onDismiss() }
-    BackHandler { if (!isSwitching) onDismiss() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Unit)
+    // Previous registration retained inactive: BackHandler { if (!isSwitching) onDismiss() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) { if (!isSwitching) onDismiss() }
 
     BoxWithConstraints(
-        modifier = Modifier
+        modifier = Modifier.chatyPredictiveBack(predictiveBack, enabled = !isSwitching)
             .fillMaxSize()
             .background(colors.foreground.copy(alpha = 0.42f))
             .clickable(
@@ -163,6 +168,7 @@ fun AccountSwitcherOverlay(
                     .widthIn(max = maxDialogWidth)
                     .fillMaxWidth()
                     .heightIn(max = maxDialogHeight)
+                    .chatyDepth(16.dp, RoundedCornerShape(24.dp))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -171,7 +177,8 @@ fun AccountSwitcherOverlay(
                     .semantics { paneTitle = "Account switcher" },
                 shape = RoundedCornerShape(24.dp),
                 color = surfaceColor,
-                shadowElevation = 16.dp,
+                // Previous (default black shadow): shadowElevation = 16.dp,
+                shadowElevation = 0.dp,
                 border = BorderStroke(1.dp, colors.border),
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
@@ -202,8 +209,13 @@ fun AccountSwitcherOverlay(
                             enabled = !isSwitching,
                             modifier = Modifier.size(48.dp),
                         ) {
-                            Icon(
-                                Icons.Outlined.Settings,
+
+//Icon(
+//                                Icons.Outlined.Settings,
+//                                contentDescription = "Settings",
+//                                tint = colors.foreground,
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.settings, Icons.Outlined.Settings,
                                 contentDescription = "Settings",
                                 tint = colors.foreground,
                             )
@@ -213,8 +225,13 @@ fun AccountSwitcherOverlay(
                             enabled = !isSwitching,
                             modifier = Modifier.size(48.dp),
                         ) {
-                            Icon(
-                                Icons.Outlined.Close,
+
+//Icon(
+//                                Icons.Outlined.Close,
+//                                contentDescription = "Close account switcher",
+//                                tint = colors.foreground,
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.close, Icons.Outlined.Close,
                                 contentDescription = "Close account switcher",
                                 tint = colors.foreground,
                             )
@@ -260,8 +277,14 @@ fun AccountSwitcherOverlay(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(
-                                    Icons.Outlined.WarningAmber,
+
+//Icon(
+//                                    Icons.Outlined.WarningAmber,
+//                                    contentDescription = null,
+//                                    tint = Color(theme.dangerColor),
+//                                    modifier = Modifier.size(18.dp),
+//                                )
+                                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.warning, Icons.Outlined.WarningAmber,
                                     contentDescription = null,
                                     tint = Color(theme.dangerColor),
                                     modifier = Modifier.size(18.dp),
@@ -588,8 +611,14 @@ private fun AccountCard(
                     enabled = !busy,
                     modifier = Modifier.size(48.dp),
                 ) {
-                    Icon(
-                        Icons.Outlined.Logout,
+
+//Icon(
+//                        Icons.Outlined.Logout,
+//                        contentDescription = "Sign out ${meta.displayName}",
+//                        tint = colors.foregroundSecondary,
+//                        modifier = Modifier.size(18.dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.logout, Icons.Outlined.Logout,
                         contentDescription = "Sign out ${meta.displayName}",
                         tint = colors.foregroundSecondary,
                         modifier = Modifier.size(18.dp),
@@ -629,8 +658,14 @@ private fun AccountCard(
                             .background(Color(argbWithAlpha(theme.accentColor, 0.16)), RoundedCornerShape(6.dp))
                             .padding(horizontal = 7.dp, vertical = 3.dp),
                     ) {
-                        Icon(
-                            Icons.Outlined.CheckCircle,
+
+//Icon(
+//                            Icons.Outlined.CheckCircle,
+//                            contentDescription = null,
+//                            tint = Color(theme.accentColor),
+//                            modifier = Modifier.size(12.dp),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Outlined.CheckCircle,
                             contentDescription = null,
                             tint = Color(theme.accentColor),
                             modifier = Modifier.size(12.dp),
@@ -716,8 +751,14 @@ private fun AddAccountCard(
                     .background(Color(argbWithAlpha(theme.accentColor, 0.15)), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    Icons.Outlined.Add,
+
+//Icon(
+//                    Icons.Outlined.Add,
+//                    contentDescription = null,
+//                    tint = Color(theme.accentColor),
+//                    modifier = Modifier.size(22.dp),
+//                )
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.add, Icons.Outlined.Add,
                     contentDescription = null,
                     tint = Color(theme.accentColor),
                     modifier = Modifier.size(22.dp),

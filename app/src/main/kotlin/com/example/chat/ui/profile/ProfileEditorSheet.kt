@@ -178,7 +178,9 @@ fun ProfileEditorSheet(
                         onClick = { uploadPhoto(ProfileMediaSource.gallery) },
                         enabled = !photoBusy,
                     ) {
-                        Icon(Icons.Rounded.Photo, contentDescription = null, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.Photo, contentDescription = null, modifier = Modifier.size(18.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.gallery, Icons.Rounded.Photo, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(context.getString(com.example.chat.R.string.profile_sheet_gallery))
                     }

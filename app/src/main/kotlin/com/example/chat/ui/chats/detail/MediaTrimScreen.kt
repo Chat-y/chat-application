@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats.detail
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -127,7 +129,9 @@ internal fun MediaTrimScreen(
         catch (_: Exception) { error = "Cannot read this media. Check access and try a supported local file." }
         finally { staging = false }
     }
-    androidx.activity.compose.BackHandler(onBack = ::cancelTrim)
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(source)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(onBack = ::cancelTrim)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, onBack = ::cancelTrim)
 
     // MR-R1-056 / MR-R2-025 / MR-R2-027: one lazily extracted, bounded, path-cached filmstrip.
     // Two retrievers split the timestamps so a long clip does not seek end-to-end on one parser.
@@ -183,7 +187,7 @@ internal fun MediaTrimScreen(
         catch (_: Exception) { emptyList() }
     }
 
-    Surface(Modifier.fillMaxSize()) {
+    Surface(Modifier.chatyPredictiveBack(predictiveBack).fillMaxSize()) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 // MR-R4-043 prior: TextButton(::cancelTrim, modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") }

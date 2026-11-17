@@ -128,7 +128,9 @@ fun ScheduledMessagesScreen(
                 },
                 actions = {
                     IconButton(onClick = { scope.launch { service.refresh() } }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh scheduled messages")
+
+//Icon(Icons.Rounded.Refresh, contentDescription = "Refresh scheduled messages")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = "Refresh scheduled messages")
                     }
                 },
             )
@@ -174,7 +176,12 @@ fun ScheduledMessagesScreen(
                     color = MaterialTheme.colorScheme.error,
                 )
                 Spacer(Modifier.height(12.dp))
-                TextButton(onClick = { scope.launch { service.refresh() } }) { Text("Retry") }
+                // Previous stock text action:
+                // TextButton(onClick = { scope.launch { service.refresh() } }) { Text("Retry") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Retry",
+                    onClick = { scope.launch { service.refresh() } },
+                )
             }
         } else if (service.messages.isEmpty()) {
             Column(

@@ -23,7 +23,7 @@ internal fun CallToolsDialog(
                 TextButton(onClick = {
                     if (canHold) onHold() else detail = "Local hold is unavailable on this call's audio provider. Audio has not been changed."
                 }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (held) "Resume audio" else "Hold audio") }
-                Text(if (canNotifyHold) "Pause your microphone and what you hear. The other person sees a hold notice." else "Local pause only: pauses your microphone and what you hear. The other person will not receive a hold notice until server and peer support is verified.")
+                Text(if (canNotifyHold) "Pause your microphone, camera and what you hear. A hold notice is attempted; sending does not confirm the other person received it." else "Local pause only: pauses your microphone, camera and what you hear. The other person will not receive a hold notice until server and peer support is verified.")
                 TextButton(onClick = { detail = "Add call is pending multi-call support. The current call stays connected. Starting the existing new-call flow would replace this call, so it is not used here." }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Add call - pending") }
                 TextButton(onClick = { detail = "Recording needs both people's agreement, a visible recording indicator and a verified capture of both sides. Ask to record will be available only when those checks and server/peer support are ready. Nothing is recording now. A microphone-only voice recorder is not call recording." }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Record - consent and capture pending") }
                 Text("Reactions")

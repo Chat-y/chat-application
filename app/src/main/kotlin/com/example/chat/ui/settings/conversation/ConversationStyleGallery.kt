@@ -72,9 +72,14 @@ internal fun <T> ConversationStyleGallery(
                         }) { previewOf(option) }
                 }
             }
-            TextButton(onClick = { draftKey = keyOf(selected); query = ""; family = ""; choicesOpen = true }) {
-                Text(strings.getString(com.example.chat.R.string.conv_proposal_see_all))
-            }
+            // Previous stock text action:
+            // TextButton(onClick = { draftKey = keyOf(selected); query = ""; family = ""; choicesOpen = true }) {
+            //                 Text(strings.getString(com.example.chat.R.string.conv_proposal_see_all))
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(com.example.chat.R.string.conv_proposal_see_all),
+                onClick = { draftKey = keyOf(selected); query = ""; family = ""; choicesOpen = true },
+            )
         }
     }
     if (choicesOpen && !enhanced) ChatySelectionModal(
@@ -99,15 +104,33 @@ internal fun <T> ConversationStyleGallery(
         },
     ) {
         Column {
-            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
-                label = { Text(strings.getString(com.example.chat.R.string.conv_helper_search_styles)) }, modifier = Modifier.fillMaxWidth().padding(16.dp))
+            // Previous stock field:
+            // OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+            //                 label = { Text(strings.getString(com.example.chat.R.string.conv_helper_search_styles)) }, modifier = Modifier.fillMaxWidth().padding(16.dp))
+            com.example.chat.ui.kit.ChatyTaskField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                label = strings.getString(com.example.chat.R.string.conv_helper_search_styles),
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                minLines = 1,
+                maxLines = 1,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+            )
             val families = listOf("") + values.map(familyOf).filter { it.isNotEmpty() }.distinct()
             LazyRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(families, key = { it }) { name ->
-                    TextButton(onClick = { family = name }, modifier = Modifier.semantics { this.selected = family == name }) {
-                        val familyLabel = if (name.isEmpty()) strings.getString(com.example.chat.R.string.conv_helper_all) else name
-                        Text(if (family == name) "✓ $familyLabel" else familyLabel)
-                    }
+                    // Previous: TextButton(onClick = { family = name }, modifier = Modifier.semantics { this.selected = family == name }) {
+                    // Previous: val familyLabel = if (name.isEmpty()) strings.getString(com.example.chat.R.string.conv_helper_all) else name
+                    // Previous: Text(if (family == name) "✓ $familyLabel" else familyLabel)
+                    // Previous: }
+                    val familyLabel = if (name.isEmpty()) strings.getString(com.example.chat.R.string.conv_helper_all) else name
+                    com.example.chat.ui.kit.ChatyChoiceTile(
+                        label = if (family == name) "✓ $familyLabel" else familyLabel,
+                        onClick = { family = name }, selected = family == name,
+                        modifier = Modifier.semantics { this.selected = family == name },
+                        compact = true,
+                    )
                 }
             }
             val matching = values.filter {

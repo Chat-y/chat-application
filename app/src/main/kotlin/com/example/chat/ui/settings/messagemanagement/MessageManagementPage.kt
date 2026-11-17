@@ -471,22 +471,39 @@ fun MessageManagementPage(
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { autoReplyDialogOpen = false },
             title = { Text("Add auto-reply rule") },
+            accessibilityLabel = "Add auto-reply rule",
             text = {
                 // Previous unbounded body: Column {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                    OutlinedTextField(
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         value = keyword,
                         onValueChange = { keyword = it },
-                        label = { Text("Keyword trigger") },
-                        placeholder = { Text("busy, help, pricing") },
+                        label = "Keyword trigger",
+                        placeholder = "busy, help, pricing",
+                        singleLine = false, minLines = 1, textArea = false,
                     )
+                    // OutlinedTextField(
+                    // value = keyword,
+                    // onValueChange = { keyword = it },
+                    // label = { Text("Keyword trigger") },
+                    // placeholder = { Text("busy, help, pricing") },
+                    // )
                     Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         value = message,
                         onValueChange = { message = it },
-                        label = { Text("Automatic response") },
+                        label = "Automatic response",
                         maxLines = 3,
+                        singleLine = false, minLines = 1, textArea = true,
                     )
+                    // OutlinedTextField(
+                    // value = message,
+                    // onValueChange = { message = it },
+                    // label = { Text("Automatic response") },
+                    // maxLines = 3,
+                    // )
                     Spacer(Modifier.height(12.dp))
                     ScopeDropdown(
                         value = scopeChoice,
@@ -501,17 +518,26 @@ fun MessageManagementPage(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                com.example.chat.ui.kit.ChatyActionButton(onClick = {
                     val k = keyword.trim()
                     val r = message.trim()
                     if (k.isNotEmpty() && r.isNotEmpty()) {
                         autoReplyDialogOpen = false
                         addAutoReplyRule(AutoReplyDraft(k, r, scopeChoice))
                     }
-                }) { Text("Add rule") }
+                }, label = "Add rule")
+                // Button(onClick = {
+                // val k = keyword.trim()
+                // val r = message.trim()
+                // if (k.isNotEmpty() && r.isNotEmpty()) {
+                // autoReplyDialogOpen = false
+                // addAutoReplyRule(AutoReplyDraft(k, r, scopeChoice))
+                // }
+                // }) { Text("Add rule") }
             },
             dismissButton = {
-                TextButton(onClick = { autoReplyDialogOpen = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { autoReplyDialogOpen = false }, label = "Cancel")
+                // TextButton(onClick = { autoReplyDialogOpen = false }) { Text("Cancel") }
             },
         )
     }
@@ -525,6 +551,7 @@ fun MessageManagementPage(
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { scheduleDialogOpen = false },
             title = { Text("Schedule message") },
+            accessibilityLabel = "Schedule message",
             text = {
                 // Previous unbounded body: Column {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
@@ -535,16 +562,24 @@ fun MessageManagementPage(
                         label = "Conversation",
                     )
                     Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         value = body,
                         onValueChange = { body = it },
-                        label = { Text("Message") },
+                        label = "Message",
                         maxLines = 4,
+                        singleLine = false, minLines = 1, textArea = true,
                     )
+                    // OutlinedTextField(
+                    // value = body,
+                    // onValueChange = { body = it },
+                    // label = { Text("Message") },
+                    // maxLines = 4,
+                    // )
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                com.example.chat.ui.kit.ChatyActionButton(onClick = {
                     val b = body.trim()
                     // A conversation may disappear while this dialog is open.
                     if (b.isNotEmpty() && conversationSource.conversations.any { it.id == conversationId }) {
@@ -552,10 +587,20 @@ fun MessageManagementPage(
                         pendingScheduleDraft = ScheduleDraft(conversationId, b)
                         datePickerOpen = true
                     }
-                }) { Text("Choose time") }
+                }, label = "Choose time")
+                // Button(onClick = {
+                // val b = body.trim()
+                // // A conversation may disappear while this dialog is open.
+                // if (b.isNotEmpty() && conversationSource.conversations.any { it.id == conversationId }) {
+                // scheduleDialogOpen = false
+                // pendingScheduleDraft = ScheduleDraft(conversationId, b)
+                // datePickerOpen = true
+                // }
+                // }) { Text("Choose time") }
             },
             dismissButton = {
-                TextButton(onClick = { scheduleDialogOpen = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { scheduleDialogOpen = false }, label = "Cancel")
+                // TextButton(onClick = { scheduleDialogOpen = false }) { Text("Cancel") }
             },
         )
     }
@@ -571,17 +616,26 @@ fun MessageManagementPage(
         DatePickerDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { datePickerOpen = false },
             confirmButton = {
-                TextButton(onClick = {
+                com.example.chat.ui.kit.ChatyTextButton(onClick = {
                     val millis = dateState.selectedDateMillis
                     if (millis != null) {
                         datePickerOpen = false
                         pendingDateMillis = millis
                         timePickerOpen = true
                     }
-                }) { Text("OK") }
+                }, label = "OK")
+                // TextButton(onClick = {
+                // val millis = dateState.selectedDateMillis
+                // if (millis != null) {
+                // datePickerOpen = false
+                // pendingDateMillis = millis
+                // timePickerOpen = true
+                // }
+                // }) { Text("OK") }
             },
             dismissButton = {
-                TextButton(onClick = { datePickerOpen = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { datePickerOpen = false }, label = "Cancel")
+                // TextButton(onClick = { datePickerOpen = false }) { Text("Cancel") }
             },
         ) {
             androidx.compose.material3.DatePicker(state = dateState)
@@ -621,32 +675,56 @@ fun MessageManagementPage(
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { quickReplyDialogOpen = false },
             title = { Text("Add quick reply") },
+            accessibilityLabel = "Add quick reply",
             text = {
                 // Previous unbounded body: Column {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                    OutlinedTextField(
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         value = shortcut,
                         onValueChange = { shortcut = it },
-                        label = { Text("Shortcut") },
-                        placeholder = { Text("#thanks") },
+                        label = "Shortcut",
+                        placeholder = "#thanks",
+                        singleLine = false, minLines = 1, textArea = false,
                     )
+                    // OutlinedTextField(
+                    // value = shortcut,
+                    // onValueChange = { shortcut = it },
+                    // label = { Text("Shortcut") },
+                    // placeholder = { Text("#thanks") },
+                    // )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         value = title,
                         onValueChange = { title = it },
-                        label = { Text("Title") },
+                        label = "Title",
+                        singleLine = false, minLines = 1, textArea = false,
                     )
+                    // OutlinedTextField(
+                    // value = title,
+                    // onValueChange = { title = it },
+                    // label = { Text("Title") },
+                    // )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         value = content,
                         onValueChange = { content = it },
-                        label = { Text("Template content") },
+                        label = "Template content",
                         maxLines = 3,
+                        singleLine = false, minLines = 1, textArea = true,
                     )
+                    // OutlinedTextField(
+                    // value = content,
+                    // onValueChange = { content = it },
+                    // label = { Text("Template content") },
+                    // maxLines = 3,
+                    // )
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                com.example.chat.ui.kit.ChatyActionButton(onClick = {
                     val sc = shortcut.trim()
                     val ct = content.trim()
                     if (sc.isNotEmpty() && ct.isNotEmpty()) {
@@ -659,10 +737,25 @@ fun MessageManagementPage(
                             ),
                         )
                     }
-                }) { Text("Save") }
+                }, label = "Save")
+                // Button(onClick = {
+                // val sc = shortcut.trim()
+                // val ct = content.trim()
+                // if (sc.isNotEmpty() && ct.isNotEmpty()) {
+                // quickReplyDialogOpen = false
+                // addQuickReply(
+                // QuickReplyTemplate(
+                // shortcut = sc,
+                // title = quickReplyTitle(sc, title.trim()),
+                // content = ct,
+                // ),
+                // )
+                // }
+                // }) { Text("Save") }
             },
             dismissButton = {
-                TextButton(onClick = { quickReplyDialogOpen = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { quickReplyDialogOpen = false }, label = "Cancel")
+                // TextButton(onClick = { quickReplyDialogOpen = false }) { Text("Cancel") }
             },
         )
     }
@@ -673,15 +766,24 @@ fun MessageManagementPage(
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { massSendDialogOpen = false },
             title = { Text("Mass sender") },
+            accessibilityLabel = "Mass sender",
             text = {
                 // Previous unbounded body: Column {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                    OutlinedTextField(
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         value = body,
                         onValueChange = { body = it },
-                        label = { Text("Message") },
+                        label = "Message",
                         maxLines = 3,
+                        singleLine = false, minLines = 1, textArea = true,
                     )
+                    // OutlinedTextField(
+                    // value = body,
+                    // onValueChange = { body = it },
+                    // label = { Text("Message") },
+                    // maxLines = 3,
+                    // )
                     Spacer(Modifier.height(10.dp))
                     // Preserve reviewed bounded inner scroll in the confirmation body.
                     Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
@@ -708,7 +810,7 @@ fun MessageManagementPage(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                com.example.chat.ui.kit.ChatyActionButton(onClick = {
                     val b = body.trim()
                     if (selected.value.isNotEmpty() && b.isNotEmpty()) {
                         massSendDialogOpen = false
@@ -717,10 +819,21 @@ fun MessageManagementPage(
                         if (selected.value.all { it in available }) massSend(MassSendDraft(selected.value.toList(), b))
                         else showToast(context.getString(com.example.chat.R.string.message_management_conversation_unavailable))
                     }
-                }) { Text("Send") }
+                }, label = "Send")
+                // Button(onClick = {
+                // val b = body.trim()
+                // if (selected.value.isNotEmpty() && b.isNotEmpty()) {
+                // massSendDialogOpen = false
+                // // Previous: massSend(MassSendDraft(selected.value.toList(), b))
+                // val available = conversationSource.conversations.map { it.id }.toSet()
+                // if (selected.value.all { it in available }) massSend(MassSendDraft(selected.value.toList(), b))
+                // else showToast(context.getString(com.example.chat.R.string.message_management_conversation_unavailable))
+                // }
+                // }) { Text("Send") }
             },
             dismissButton = {
-                TextButton(onClick = { massSendDialogOpen = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { massSendDialogOpen = false }, label = "Cancel")
+                // TextButton(onClick = { massSendDialogOpen = false }) { Text("Cancel") }
             },
         )
     }
@@ -752,11 +865,21 @@ private fun ScopeDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-        OutlinedTextField(
+        // OutlinedTextField(
+        // value = options.firstOrNull { it.first == value }?.second ?: value,
+        // onValueChange = {},
+        // readOnly = true,
+        // label = { Text(label) },
+        // trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+        // modifier = Modifier.menuAnchor().fillMaxWidth(),
+        // )
+        com.example.chat.ui.kit.ChatyTaskField(
             value = options.firstOrNull { it.first == value }?.second ?: value,
             onValueChange = {},
             readOnly = true,
-            label = { Text(label) },
+            label = label,
+            singleLine = false, minLines = 1, textArea = false,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.menuAnchor().fillMaxWidth(),
         )
@@ -791,8 +914,10 @@ private fun TimePickerDialogCompat(
         title = { Text("Select time") },
         text = { androidx.compose.material3.TimePicker(state = state) },
         confirmButton = {
-            TextButton(onClick = { onConfirm(state.hour, state.minute) }) { Text("OK") }
+            com.example.chat.ui.kit.ChatyTextButton(onClick = { onConfirm(state.hour, state.minute) }, label = "OK")
+            // TextButton(onClick = { onConfirm(state.hour, state.minute) }) { Text("OK") }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+        // Prior dismissButton: TextButton(onClick = onCancel) { Text("Cancel") }
+        dismissButton = { com.example.chat.ui.kit.ChatyTextButton(onClick = onCancel, label = "Cancel") },
     )
 }

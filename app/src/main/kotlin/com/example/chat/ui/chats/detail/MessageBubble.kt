@@ -185,7 +185,10 @@ fun ChatMessageBubble(
     isSenderAdmin: Boolean = false,
     makeTextSelectable: Boolean = true,
     enableAnimatedEmojis: Boolean = true,
-    emojiStyle: String = "Chaty Motion",
+    /** Screen-owned accessibility policy. Previews default to no reaction motion. */
+    reduceReactionMotion: Boolean = true,
+    // Previous default: "Chaty Motion". Explicit saved custom styles remain supported.
+    emojiStyle: String = "Android system",
     groupAdminIcon: String = "Default",
     hideAdminNameIcon: Boolean = false,
     voicePlayButtonColor: Color? = null,
@@ -933,10 +936,12 @@ fun ChatMessageBubble(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         message.reactions.forEach { reaction ->
+                            androidx.compose.runtime.key(message.id, reaction.emoji) {
                             ReactionBadge(
                                 emoji = reaction.emoji,
                                 count = reaction.userIds.size,
                                 isSelected = !currentUserId.isNullOrBlank() && currentUserId in reaction.userIds,
+                                reduceMotion = reduceReactionMotion,
                                 backgroundColor = Color(theme.cardColor),
                                 activeBorderColor = Color(theme.accentColor),
                                 textColor = Color(theme.primaryTextColor),
@@ -945,6 +950,7 @@ fun ChatMessageBubble(
                                     else onReactionTap?.invoke(reaction.emoji)
                                 },
                             )
+                            } // Stable badge identity: a different reaction cannot inherit feedback state.
                         }
                     }
                 }
@@ -1113,8 +1119,14 @@ private fun TaskCardChip(
                 )
                 if (task.checklistItems.isNotEmpty()) {
                     Spacer(Modifier.width(8.dp))
-                    Icon(
-                        Icons.Rounded.Checklist,
+
+//Icon(
+//                        Icons.Rounded.Checklist,
+//                        contentDescription = null,
+//                        tint = textColor.copy(alpha = 0.65f),
+//                        modifier = Modifier.size(13.dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checklist, Icons.Rounded.Checklist,
                         contentDescription = null,
                         tint = textColor.copy(alpha = 0.65f),
                         modifier = Modifier.size(13.dp),
@@ -1232,20 +1244,29 @@ private fun ReactionBadge(
     emoji: String,
     count: Int,
     isSelected: Boolean,
+    reduceMotion: Boolean,
     backgroundColor: Color,
     activeBorderColor: Color,
     textColor: Color,
     onTap: () -> Unit,
 ) {
     val tapNow by androidx.compose.runtime.rememberUpdatedState(onTap)
+    // Previous per-badge observer: val reduceMotion = rememberChatyReduceMotion()
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) activeBorderColor else activeBorderColor.copy(alpha = 0.25f),
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else
+            androidx.compose.animation.core.tween(com.example.chat.ui.kit.ChatyMotion.fastMs),
+        label = "reactionBorder",
+    )
     Row(
         Modifier
+            .reactionFeedback(count, isSelected, reduceMotion)
             .clip(RoundedCornerShape(14.dp))
             .background(backgroundColor)
             .border(
                 width = if (isSelected) 1.5.dp else 1.dp,
-                color = if (isSelected) activeBorderColor
-                else activeBorderColor.copy(alpha = 0.25f),
+                // Previous immediate border: if (isSelected) activeBorderColor else activeBorderColor.copy(alpha = 0.25f)
+                color = borderColor,
                 shape = RoundedCornerShape(14.dp),
             )
             .clickable(role = androidx.compose.ui.semantics.Role.Button) { tapNow() }
@@ -1253,7 +1274,8 @@ private fun ReactionBadge(
             .padding(horizontal = 7.dp, vertical = 3.5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(emoji, fontSize = 19.sp)
+        // Previous: Text(emoji, fontSize = 19.sp)
+        AnimatedEmojiView(unicode = emoji, size = 19f, animate = false, mode = EmojiDisplayMode.reaction)
         if (count > 0) {
             Box(Modifier.width(4.dp))
             Text("$count", color = textColor, fontSize = 11.sp, fontWeight = FontWeight.W700)
@@ -1614,8 +1636,14 @@ private fun DocumentPreview(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                Icons.Rounded.Description,
+
+//Icon(
+//                Icons.Rounded.Description,
+//                contentDescription = null,
+//                tint = accentColor,
+//                modifier = Modifier.size(22.dp),
+//            )
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.document, Icons.Rounded.Description,
                 contentDescription = null,
                 tint = accentColor,
                 modifier = Modifier.size(22.dp),
@@ -1669,8 +1697,14 @@ private fun LocationCard(message: ChatMessage, textColor: Color, accentColor: Co
             Modifier.fillMaxWidth().height(142.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Rounded.LocationOn,
+
+//Icon(
+//                Icons.Rounded.LocationOn,
+//                contentDescription = null,
+//                tint = accentColor,
+//                modifier = Modifier.size(46.dp),
+//            )
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.location, Icons.Rounded.LocationOn,
                 contentDescription = null,
                 tint = accentColor,
                 modifier = Modifier.size(46.dp),
@@ -1680,8 +1714,14 @@ private fun LocationCard(message: ChatMessage, textColor: Color, accentColor: Co
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Rounded.LocationOn,
+
+//Icon(
+//                Icons.Rounded.LocationOn,
+//                contentDescription = null,
+//                tint = accentColor,
+//                modifier = Modifier.size(20.dp),
+//            )
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.location, Icons.Rounded.LocationOn,
                 contentDescription = null,
                 tint = accentColor,
                 modifier = Modifier.size(20.dp),

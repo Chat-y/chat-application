@@ -1,6 +1,7 @@
 @file:OptIn(ExperimentalFoundationApi::class)
 package com.example.chat.ui.chats.home
 
+import com.example.chat.ui.kit.chatyDepth
 import androidx.compose.foundation.horizontalScroll
 
 import androidx.compose.foundation.background
@@ -71,6 +72,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.focus.onFocusChanged
@@ -229,8 +232,15 @@ fun StandardHomeAppBar(
      *  ReferenceLayoutMetrics.homeCompact* constants; false keeps the reference
      *  identity block unchanged for existing callers. */
     compactIdentity: Boolean = false,
+    // The account-owned root shell measures identity/actions independently.
+    rootCompactHeader: Boolean = false,
+    renderIdentity: Boolean = true,
+    renderActions: Boolean = true,
+    identityDestinationId: String? = null,
+    identityEnabled: Boolean = true,
+    onSearchIconPosition: (androidx.compose.ui.geometry.Offset) -> Unit = {},
 ) {
-    val titleFontSize = when (headerStyle) {
+    val titleFontSize = if (rootCompactHeader) com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeCompactIdentityTextSizeSp.toDouble() else when (headerStyle) {
         HomeHeaderStyle.compact -> 19.0
         HomeHeaderStyle.prominentIdentity -> 24.0
         HomeHeaderStyle.searchForward -> 19.0
@@ -239,22 +249,24 @@ fun StandardHomeAppBar(
     val effectiveShowSearch = homePrefs.showSearchBar && !homePrefs.disableSearchBar &&
         homePrefs.searchPlacement.trim().lowercase() == "header action"
     val userAbout = if (identity.about.isNotEmpty()) identity.about else "Available"
-    val showStatus = !homePrefs.disableStatusUnderName && userAbout.isNotEmpty()
+    val showStatus = !rootCompactHeader && !homePrefs.disableStatusUnderName && userAbout.isNotEmpty()
 
-    val largeDefault = com.example.chat.core.preferences.HomePresentationPolicy.isDefault(homePrefs.homeStyle)
+    val largeDefault = !rootCompactHeader && com.example.chat.core.preferences.HomePresentationPolicy.isDefault(homePrefs.homeStyle)
     val headerCollapse = if (largeDefault) com.example.chat.ui.navigation.LocalReferenceHeaderCollapse.current else 0f
     Column(Modifier.fillMaxWidth()) {
-    if (largeDefault) {
+    if (largeDefault && renderIdentity) {
         // R1-47: the compact treatment only swaps the geometry constants; the
         // collapse animation, font scaling and personalization stay identical.
         val identityHeightDp = if (compactIdentity) com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeCompactIdentityMinHeightDp else com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactIdentityHeightDp
         Column(
             modifier = Modifier.fillMaxWidth()
-                .height(with(LocalDensity.current) { (identityHeightDp.toFloat() * theme.fontScale.toFloat()).sp.toDp() } * (1f - headerCollapse))
+                // Previously a fixed height; minimum allows actual identity text measurement at large type.
+                .heightIn(min = with(LocalDensity.current) { (identityHeightDp.toFloat() * theme.fontScale.toFloat()).sp.toDp() } * (1f - headerCollapse))
                 .clipToBounds()
                 .alpha(1f - headerCollapse)
                 .padding(horizontal = 24.dp)
                 .combinedClickable(
+                    enabled = identityEnabled,
                     onClick = { if (homePrefs.nameTapOpensLocked) onIdentityTap() },
                     onLongClick = onIdentityLongPress,
                 ),
@@ -267,7 +279,7 @@ fun StandardHomeAppBar(
                 horizontalArrangement = Arrangement.Center,
             ) {
                 com.example.chat.ui.navigation.NavDestinationIcon(
-                    if (forcedTypeIsSet) "groups" else "chats",
+                    identityDestinationId ?: if (forcedTypeIsSet) "groups" else "chats",
                     size = if (compactIdentity) com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeCompactIdentityIconSizeDp else com.example.chat.ui.navigation.ReferenceLayoutMetrics.identityIconSizeDp,
                     tint = Color(theme.primaryTextColor),
                 )
@@ -291,18 +303,19 @@ fun StandardHomeAppBar(
             )
         }
     }
-    Row(
+    if (renderActions) Row(
         modifier = Modifier
             .then(if (largeDefault) Modifier.height(com.example.chat.ui.navigation.ReferenceLayoutMetrics.actionBarHeightDp.dp) else Modifier)
-            .padding(start = 16.dp, top = if (largeDefault) 0.dp else 8.dp, end = 4.dp, bottom = if (largeDefault) 0.dp else 6.dp),
+            .padding(start = 16.dp, top = if (largeDefault || rootCompactHeader) 0.dp else 8.dp, end = 4.dp,
+                bottom = if (largeDefault || rootCompactHeader) 0.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             Column(
                 modifier = Modifier
                     .weight(1f, fill = false)
-                    .combinedClickable(onClick = { if (homePrefs.nameTapOpensLocked) onIdentityTap() }, onLongClick = onIdentityLongPress)
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                    .combinedClickable(enabled = identityEnabled, onClick = { if (homePrefs.nameTapOpensLocked) onIdentityTap() }, onLongClick = onIdentityLongPress)
+                    .padding(horizontal = if (rootCompactHeader) 0.dp else 4.dp, vertical = 2.dp),
             ) {
                 if (!largeDefault || headerCollapse > 0f) Text(
                     title,
@@ -335,7 +348,7 @@ fun StandardHomeAppBar(
         val (adaptiveWidthDp, _) = com.example.chat.ui.kit.rememberAdaptiveWindowSize()
         val useCompactActions = adaptiveWidthDp < 600f || LocalDensity.current.fontScale > 1.3f
         if (useCompactActions) {
-            CompactHomeHeaderActions(theme, identity, effectiveShowSearch, isSearchOpen, forcedTypeIsSet, nav, onToggleSearch)
+            CompactHomeHeaderActions(theme, identity, effectiveShowSearch, isSearchOpen, forcedTypeIsSet, nav, onToggleSearch, onSearchIconPosition, rootCompactHeader)
         } else {
         Row(
             Modifier.widthIn(max = (adaptiveWidthDp * 0.65f - 48f).coerceAtLeast(0f).dp)
@@ -358,7 +371,9 @@ fun StandardHomeAppBar(
         }
         if (effectiveShowSearch) {
             HomeActionTooltip(label = if (isSearchOpen) "Close search" else "Search chats") {
-            IconButton(onClick = onToggleSearch) {
+            IconButton(onClick = onToggleSearch, modifier = Modifier.onGloballyPositioned {
+                onSearchIconPosition(it.boundsInRoot().center)
+            }) {
                 com.example.chat.ui.icons.ChatyIcon(
                     if (isSearchOpen) com.example.chat.ui.icons.ChatyIconId.close else com.example.chat.ui.icons.ChatyIconId.search,
                     semanticLabel = if (isSearchOpen) "Close search" else "Search chats",
@@ -370,13 +385,15 @@ fun StandardHomeAppBar(
         if (homePrefs.showIconAddAccount) {
             HomeActionTooltip(label = "Account settings") {
             IconButton(onClick = nav.onOpenProfile) {
-                Icon(Icons.Outlined.PersonAddAlt1, contentDescription = "Account settings", tint = Color(theme.primaryTextColor))
+
+//Icon(Icons.Outlined.PersonAddAlt1, contentDescription = "Account settings", tint = Color(theme.primaryTextColor))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.profile, Icons.Outlined.PersonAddAlt1, contentDescription = "Account settings", tint = Color(theme.primaryTextColor))
             }
             }
         }
         // Small profile avatar -> Account Switcher (real photo when uploaded, via
         // the shared ChatyAsyncImage wrapper).
-        if (!forcedTypeIsSet) {
+        if (!forcedTypeIsSet || rootCompactHeader) {
             // 48dp touch target and TalkBack semantics around the unchanged ringed 28dp avatar.
             HomeActionTooltip(label = "Account switcher") {
             Box(
@@ -440,11 +457,15 @@ private fun CompactHomeHeaderActions(
     forcedTypeIsSet: Boolean,
     nav: ChatsHomeNav,
     onToggleSearch: () -> Unit,
+    onSearchIconPosition: (androidx.compose.ui.geometry.Offset) -> Unit,
+    showAccountOnForced: Boolean = false,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (showSearch) {
             HomeActionTooltip(label = if (isSearchOpen) "Close search" else "Search chats") {
-            IconButton(onClick = onToggleSearch, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = onToggleSearch, modifier = Modifier.size(48.dp).onGloballyPositioned {
+                onSearchIconPosition(it.boundsInRoot().center)
+            }) {
                 com.example.chat.ui.icons.ChatyIcon(
                     if (isSearchOpen) com.example.chat.ui.icons.ChatyIconId.close else com.example.chat.ui.icons.ChatyIconId.search,
                     semanticLabel = if (isSearchOpen) "Close search" else "Search chats",
@@ -453,7 +474,8 @@ private fun CompactHomeHeaderActions(
             }
             }
         }
-        if (!forcedTypeIsSet) {
+        // No currency action in the root header.
+        if (!forcedTypeIsSet || showAccountOnForced) {
             HomeActionTooltip(label = "Account switcher") {
             Box(
                 modifier = Modifier.size(48.dp)
@@ -505,9 +527,12 @@ fun HomeOverflowMenu(
     }
     // Linked Devices / Scheduler / Auto Reply are deferred to the next release (ReleaseFeatures).
     val items: List<Triple<@Composable () -> Unit, String, () -> Unit>> = listOfNotNull(
-        if (ReleaseFeatures.MESSAGE_AUTOMATION) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.scheduleSend, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Message Scheduler") { nav.onOpenMessageManagement() } else null,
-        if (ReleaseFeatures.MESSAGE_AUTOMATION) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.reply, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Auto Reply") { nav.onOpenMessageManagement() } else null,
-        if (menuPreferences.menuShowNewActions) Triple({ Icon(Icons.Outlined.GroupAdd, null, tint = Color(theme.secondaryTextColor), modifier = Modifier.size(20.dp)) }, "New Group") { nav.onOpenNewChat(true, false) } else null,
+        // Moved to Settings: if (ReleaseFeatures.MESSAGE_AUTOMATION) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.scheduleSend, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Message Scheduler") { nav.onOpenMessageManagement() } else null,
+        // Moved to Settings: if (ReleaseFeatures.MESSAGE_AUTOMATION) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.reply, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Auto Reply") { nav.onOpenMessageManagement() } else null,
+        // Previous move retained inactive: New Group belongs in the Home overflow.
+        if (menuPreferences.menuShowNewActions) Triple({
+//Icon(Icons.Outlined.GroupAdd, null, tint = Color(theme.secondaryTextColor), modifier = Modifier.size(20.dp))
+        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.groupAdd, Icons.Outlined.GroupAdd, null, tint = Color(theme.secondaryTextColor), modifier = Modifier.size(20.dp)) }, "New Group") { nav.onOpenNewChat(true, false) } else null,
         if (menuPreferences.menuShowNewActions) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chats, color = Color(theme.secondaryTextColor), size = 20.dp) }, "New Chat") { nav.onOpenNewChat(false, false) } else null,
         if (menuPreferences.menuShowNewActions) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = Color(theme.secondaryTextColor), size = 20.dp) }, "New Call") { nav.onNewCall() } else null,
         if (nav.showUpdatesEntry) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.updates, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Updates") { nav.onOpenUpdates() } else null,
@@ -516,7 +541,8 @@ fun HomeOverflowMenu(
         if (menuPreferences.menuShowSavedChats) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Starred Messages") { nav.onOpenStarredMessages() } else null,
         if (menuPreferences.menuShowSavedChats) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.archive, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Archived Chats") { onOpenArchived() } else null,
         if (menuPreferences.menuShowMarkRead) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.markRead, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Mark All as Read") { onMarkAllAsRead() } else null,
-        Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Who can call me?") { nav.onWhoCanCallMe() },
+        // Previous call-audio binding retained: callAudio for Who can call me.
+        Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callPrivacy, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Who can call me?") { nav.onWhoCanCallMe() },
         if (menuPreferences.menuShowShare) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Share Chaty") { nav.onShareApp() } else null,
         if (menuPreferences.menuShowMessageNumber) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.phone, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Message a number", onMessageANumber) else null,
         onOpenConnectionDetail?.let { openDetails -> Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.signal, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Connection health", openDetails) },
@@ -528,50 +554,60 @@ fun HomeOverflowMenu(
         containerColor = Color(theme.cardColor),
         border = androidx.compose.foundation.BorderStroke(1.1.dp, Color(argbWithAlpha(theme.secondaryTextColor, 0.2))),
     ) {
-        // Match the compact header policy; all secondary actions remain in the
-        // existing, always-visible Home menu instead of a second overflow button.
-        if (useCompactActions) {
-            if (menuPreferences.showCameraIcon) {
-                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_camera_effects)) }, onClick = { onDismiss(); nav.onOpenCameraEffects() })  // was: "Camera Effects"
-            }
-            if (menuPreferences.showDesktopIcon) {
-                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.qrCode, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_qr_scan)) }, onClick = { onDismiss(); nav.onOpenQr() })  // was: "QR / Scan"
-            }
-            if (menuPreferences.showIconAddAccount) {
-                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_account_settings)) }, onClick = { onDismiss(); nav.onOpenProfile() })  // was: "Account settings"
-            }
-            if (menuPreferences.themesEnabled) {
-                DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.palette, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_toggle_light_dark)) }, onClick = { onDismiss(); nav.onToggleBrightness() })  // was: "Toggle light / dark"
-            }
-        }
+        // Appearance review stays in the Home three-dot menu; Settings is an extra route.
         onCheckHomeAppearance?.let { checkAppearance ->
-            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text("Check Home appearance") },
-                onClick = { onDismiss(); checkAppearance() })
-        }
-        DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.help, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_how_to_catch_up)) }, onClick = { onDismiss(); catchUpGuideOpen = true })  // was: "How to catch up"
-        DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.tune, color = Color(theme.secondaryTextColor), size = 20.dp) }, text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_home_view_options))},onClick={onDismiss();onOpenViewOptions()})  // was: "Home view options"
-        DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, color = Color(theme.secondaryTextColor), size = 20.dp) }, text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_temporary_scratchpad))},onClick={onDismiss();onOpenScratchpad()})  // was: "Temporary scratchpad"
-        // S13: session saved views and the view back-history appear only when the
-        // Home owner supplies the routes; unwired callers keep the current menu.
-        onOpenSavedViews?.let { openSavedViews ->
-            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, color = Color(theme.secondaryTextColor), size = 20.dp) },
-                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_saved_home_views)) },  // was: "Saved Home views"
-                onClick = { onDismiss(); openSavedViews() },
+            DropdownMenuItem(
+                leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye,
+                    color = Color(theme.secondaryTextColor), size = 20.dp) },
+                text = { Text("Check Home appearance") },
+                onClick = { onDismiss(); checkAppearance() },
             )
         }
-        onOpenViewHistory?.let { openViewHistory ->
-            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.history, color = Color(theme.secondaryTextColor), size = 20.dp) },
-                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_recent_home_views)) },  // was: "Recent Home views"
-                onClick = { onDismiss(); openViewHistory() },
-            )
-        }
-        // No inert entries: the active Home owner supplies only supported routes.
-        onOpenShortcutHelp?.let { openHelp ->
-            DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.keyboard, color = Color(theme.secondaryTextColor), size = 20.dp) },
-                text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_keyboard_shortcuts)) },  // was: "Keyboard shortcuts"
-                onClick = { onDismiss(); openHelp() },
-            )
-        }
+        // Moved Home tools, original menu presentation retained inactive:
+//         // Match the compact header policy; all secondary actions remain in the
+//         // existing, always-visible Home menu instead of a second overflow button.
+//         if (useCompactActions) {
+//             if (menuPreferences.showCameraIcon) {
+//                 DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.camera, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_camera_effects)) }, onClick = { onDismiss(); nav.onOpenCameraEffects() })  // was: "Camera Effects"
+//             }
+//             if (menuPreferences.showDesktopIcon) {
+//                 DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.qrCode, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_qr_scan)) }, onClick = { onDismiss(); nav.onOpenQr() })  // was: "QR / Scan"
+//             }
+//             if (menuPreferences.showIconAddAccount) {
+//                 DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_account_settings)) }, onClick = { onDismiss(); nav.onOpenProfile() })  // was: "Account settings"
+//             }
+//             if (menuPreferences.themesEnabled) {
+//                 DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.palette, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_toggle_light_dark)) }, onClick = { onDismiss(); nav.onToggleBrightness() })  // was: "Toggle light / dark"
+//             }
+//         }
+//         onCheckHomeAppearance?.let { checkAppearance ->
+//             DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text("Check Home appearance") },
+//                 onClick = { onDismiss(); checkAppearance() })
+//         }
+//         DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.help, color = Color(theme.secondaryTextColor), size = 20.dp) }, text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_how_to_catch_up)) }, onClick = { onDismiss(); catchUpGuideOpen = true })  // was: "How to catch up"
+//         DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.tune, color = Color(theme.secondaryTextColor), size = 20.dp) }, text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_home_view_options))},onClick={onDismiss();onOpenViewOptions()})  // was: "Home view options"
+//         DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, color = Color(theme.secondaryTextColor), size = 20.dp) }, text={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_temporary_scratchpad))},onClick={onDismiss();onOpenScratchpad()})  // was: "Temporary scratchpad"
+//         // S13: session saved views and the view back-history appear only when the
+//         // Home owner supplies the routes; unwired callers keep the current menu.
+//         onOpenSavedViews?.let { openSavedViews ->
+//             DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, color = Color(theme.secondaryTextColor), size = 20.dp) },
+//                 text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_saved_home_views)) },  // was: "Saved Home views"
+//                 onClick = { onDismiss(); openSavedViews() },
+//             )
+//         }
+//         onOpenViewHistory?.let { openViewHistory ->
+//             DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.history, color = Color(theme.secondaryTextColor), size = 20.dp) },
+//                 text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_recent_home_views)) },  // was: "Recent Home views"
+//                 onClick = { onDismiss(); openViewHistory() },
+//             )
+//         }
+//         // No inert entries: the active Home owner supplies only supported routes.
+//         onOpenShortcutHelp?.let { openHelp ->
+//             DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.keyboard, color = Color(theme.secondaryTextColor), size = 20.dp) },
+//                 text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_keyboard_shortcuts)) },  // was: "Keyboard shortcuts"
+//                 onClick = { onDismiss(); openHelp() },
+//             )
+//         }
         onOpenCommandPalette?.let { openPalette ->
             DropdownMenuItem(leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, color = Color(theme.secondaryTextColor), size = 20.dp) },
                 text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_command_palette)) },  // was: "Command palette"
@@ -599,7 +635,8 @@ fun HomeOverflowMenu(
 /** Examples are explanatory text only: no conversations, searches or messages
  *  are created, retained or read to show this dismissible guide. */
 @Composable
-private fun HomeCatchUpGuide(theme: ThemeConfig, onDismiss: () -> Unit) {
+// Previous visibility: private fun HomeCatchUpGuide(theme: ThemeConfig, onDismiss: () -> Unit)
+internal fun HomeCatchUpGuide(theme: ThemeConfig, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_how_to_catch_up), fontWeight = FontWeight.W700) },  // was: "How to catch up"
@@ -832,14 +869,56 @@ fun HomeSearchField(
     onValueChange: (String) -> Unit,
     hint: String,
     focusRequester: FocusRequester,
+    onClose: (() -> Unit)? = null,
+    inlineHeader: Boolean = false,
 ) {
+    val tokens = com.example.chat.ui.core.components.auth.ChatyUiTokens
+    com.example.chat.ui.kit.ChatyTaskField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = hint,
+        density = if (inlineHeader) com.example.chat.ui.kit.ChatyFieldDensity.CompactHeader else com.example.chat.ui.kit.ChatyFieldDensity.Standard,
+        accessibilityLabel = androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_search_chats),
+        label = if (inlineHeader) null else androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_search_chats),
+        modifier = Modifier.padding(start = tokens.space16, end = tokens.space16,
+            top = if (inlineHeader) tokens.space0 else tokens.space2,
+            bottom = if (inlineHeader) tokens.space0 else tokens.space8)
+            .focusRequester(focusRequester),
+        leadingIcon = {
+            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search,
+                semanticLabel = null, color = Color(theme.secondaryTextColor))
+        },
+        trailingIcon = {
+            Row {
+                if (value.isNotEmpty()) {
+                    HomeActionTooltip(label = "Clear search") {
+                        IconButton(onClick = { onValueChange("") }) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Clear search")
+                        }
+                    }
+                }
+                if (onClose != null) {
+                    HomeActionTooltip(label = "Close search") {
+                        IconButton(onClick = onClose) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Close search")
+                        }
+                    }
+                }
+            }
+        },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+        singleLine = true,
+    )
+    /* Previous stock field retained inactive for review:
     TextField(
         value = value,
         onValueChange = onValueChange,
         modifier = Modifier
-            .padding(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 8.dp)
+            .padding(start = 16.dp, top = if (inlineHeader) 0.dp else 2.dp,
+                end = 16.dp, bottom = if (inlineHeader) 0.dp else 8.dp)
             .fillMaxWidth()
-            .shadow(3.dp, RoundedCornerShape(28.dp), clip = false)
+            // Previous (default black shadow): .shadow(3.dp, RoundedCornerShape(28.dp), clip = false)
+            .chatyDepth(3.dp, RoundedCornerShape(28.dp), clip = false)
             .focusRequester(focusRequester),
         textStyle = androidx.compose.ui.text.TextStyle(color = Color(theme.primaryTextColor)),
         placeholder = { Text(hint, color = Color(theme.secondaryTextColor)) },
@@ -847,15 +926,24 @@ fun HomeSearchField(
             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = null, color = Color(theme.secondaryTextColor))
         },
         trailingIcon = {
-            if (value.isNotEmpty()) {
-                HomeActionTooltip(label = "Clear search") {
-                IconButton(onClick = { onValueChange("") }) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Clear search")
+            Row {
+                if (value.isNotEmpty()) {
+                    HomeActionTooltip(label = "Clear search") {
+                        IconButton(onClick = { onValueChange("") }) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Clear search")
+                        }
+                    }
                 }
+                if (onClose != null) {
+                    HomeActionTooltip(label = "Close search") {
+                        IconButton(onClick = onClose) {
+                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Close search")
+                        }
+                    }
                 }
             }
         },
-        label={Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_search_chats))},  // was: "Search chats"
+        label = if (inlineHeader) null else ({ Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.home_ui_search_chats)) }),  // was: "Search chats"
         keyboardOptions=androidx.compose.foundation.text.KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Search),
         singleLine = true,
         shape = RoundedCornerShape(28.dp),
@@ -867,6 +955,7 @@ fun HomeSearchField(
             cursorColor = Color(theme.accentColor),
         ),
     )
+    */
 }
 
 /** Filter chip row (build(): tabBubbleStyle corner mapping, selected chip in
@@ -974,8 +1063,14 @@ fun SubscriptionRequiredBanner(
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Rounded.WorkspacePremium,
+
+//Icon(
+//            Icons.Rounded.WorkspacePremium,
+//            contentDescription = null,
+//            tint = Color(0xFFD97706),
+//            modifier = Modifier.size(22.dp),
+//        )
+        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.premium, Icons.Rounded.WorkspacePremium,
             contentDescription = null,
             tint = Color(0xFFD97706),
             modifier = Modifier.size(22.dp),
@@ -1266,7 +1361,8 @@ fun HomeOverflowMenu(
         if (menuPreferences.menuShowSavedChats) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.star, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Starred Messages") { nav.onOpenStarredMessages() } else null,
         if (menuPreferences.menuShowSavedChats) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.archive, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Archived Chats") { onOpenArchived() } else null,
         if (menuPreferences.menuShowMarkRead) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.markRead, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Mark All as Read") { onMarkAllAsRead() } else null,
-        Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callAudio, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Who can call me?") { nav.onWhoCanCallMe() },
+        // Previous call-audio binding retained: callAudio for Who can call me.
+        Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.callPrivacy, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Who can call me?") { nav.onWhoCanCallMe() },
         if (menuPreferences.menuShowShare) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Share Chaty") { nav.onShareApp() } else null,
         if (menuPreferences.menuShowMessageNumber) Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.phone, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Message a number", onMessageANumber) else null,
         onOpenConnectionDetail?.let { openDetails -> Triple({ com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.signal, color = Color(theme.secondaryTextColor), size = 20.dp) }, "Connection health", openDetails) },

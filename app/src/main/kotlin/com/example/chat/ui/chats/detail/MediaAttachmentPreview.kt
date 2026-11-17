@@ -46,7 +46,13 @@ internal fun MediaAttachmentPreview(
     binding: AttachmentConsumerBinding? = null,
     fixedRatio: Float? = null,
     onTapWithBounds: ((Rect) -> Unit)? = null,
+    /** Display-only measurement from the image already decoded for this preview. Never fetches metadata. */
+    onImageAspectRatio: ((Float) -> Unit)? = null,
+    /** Album parent owns the rectangle; decoded artwork crops within it instead of sizing twice. */
+    fillAllocatedBounds: Boolean = false,
 ) {
+    val decodeGeneration = remember(attachment.id, attachment.url, binding?.session) { Any() }
+    val currentDecodeGeneration by rememberUpdatedState(decodeGeneration)
     var ownedSource by remember(attachment.id, binding?.session) { mutableStateOf<com.example.chat.data.media.ResolvedSource?>(null) }
     var url by remember(attachment.url) { mutableStateOf<String?>(null) }
     var failed by remember(attachment.url) { mutableStateOf(false) }
@@ -65,9 +71,10 @@ internal fun MediaAttachmentPreview(
     }
     var thumbnail by remember(attachment.url) { mutableStateOf<Bitmap?>(null) }
     var videoDurationMs by remember(attachment.url) { mutableStateOf<Long?>(null) }
-    var ratio by remember(attachment.url) { mutableStateOf(1.35f) }
+    var ratio by remember(attachment.id, attachment.url, binding?.session) { mutableStateOf(1.35f) }
     val context = LocalContext.current
     val motionDisabled = com.example.chat.ui.kit.rememberChatyReduceMotion()
+    val aspectRatioNow by rememberUpdatedState(onImageAspectRatio)
     var tileBounds by remember { mutableStateOf<Rect?>(null) }
     fun open() { val bounds = tileBounds; if (bounds != null && onTapWithBounds != null) onTapWithBounds(bounds) else onTap?.invoke() }
     fun retry() { unavailableReason = null; failed = false; retryNonce++ }
@@ -76,7 +83,8 @@ internal fun MediaAttachmentPreview(
         unavailableReason == com.example.chat.data.media.ResolvedSource.Reason.CORRUPT
     LaunchedEffect(attachment.url, binding?.session, retryNonce) {
         try {
-            val path = attachment.url?.takeIf { it.isNotBlank() } ?: error("No media path")
+            val path = attachment.url?.takeIf { it.isNotBlank() }
+            check(path != null || (attachment.encryptedFile != null && binding != null && message != null)) { "No media source" }
             if (binding != null && message != null) {
                 val result = binding.resolve(message, retryNonce > 0)
                 if (retryNonce == 0 && result is com.example.chat.data.media.ResolvedSource.Remote) {
@@ -109,7 +117,11 @@ internal fun MediaAttachmentPreview(
                     return@LaunchedEffect
                 }
                 url = result.consumerUri()
-            } else url = resolveUrl?.invoke(path) ?: path
+            } else {
+                check(attachment.encryptedFile == null) { "Encrypted media requires an authenticated binding." }
+                val ordinaryPath = checkNotNull(path)
+                url = resolveUrl?.invoke(ordinaryPath) ?: ordinaryPath
+            }
             if (video) {
                 thumbnail = withContext(Dispatchers.IO) {
                     val retriever = MediaMetadataRetriever()
@@ -139,7 +151,8 @@ internal fun MediaAttachmentPreview(
     val sticker = message?.let { com.example.chat.core.stickers.StickerMessagePolicy.isSticker(it.type.name, it.metadata) } == true && !video
     val previewActionable = (onTap != null || onTapWithBounds != null || (failed && retryable)) && dlReq == null
     Box(
-        Modifier.widthIn(max = 300.dp).fillMaxWidth().aspectRatio(if (sticker) 1f else fixedRatio ?: ratio)
+        Modifier.then(if (fillAllocatedBounds) Modifier.fillMaxSize()
+            else Modifier.widthIn(max = 300.dp).fillMaxWidth().aspectRatio(if (sticker) 1f else fixedRatio ?: ratio))
             .clip(RoundedCornerShape(9.dp)).background(if (sticker) Color.Transparent else Color.Black.copy(alpha = 0.12f))
             .onGloballyPositioned { tileBounds = it.boundsInWindow() }
             .then(if (previewActionable) Modifier.clickable {
@@ -157,12 +170,16 @@ internal fun MediaAttachmentPreview(
             failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 when (unavailableReason) {
                     com.example.chat.data.media.ResolvedSource.Reason.OFFLINE -> {
-                        Icon(Icons.Rounded.CloudOff, contentDescription = "Waiting for network")
+
+//Icon(Icons.Rounded.CloudOff, contentDescription = "Waiting for network")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.cloudOff, Icons.Rounded.CloudOff, contentDescription = "Waiting for network")
                         Text("Waiting for network", style = MaterialTheme.typography.labelSmall)
                     }
                     com.example.chat.data.media.ResolvedSource.Reason.DOWNLOAD_FAILED,
                     com.example.chat.data.media.ResolvedSource.Reason.CORRUPT -> {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Retry download")
+
+//Icon(Icons.Rounded.Refresh, contentDescription = "Retry download")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = "Retry download")
                         Text(
                             if (video) "Couldn't download video. Tap to retry" else "Couldn't download. Tap to retry",
                             style = MaterialTheme.typography.labelSmall,
@@ -177,7 +194,9 @@ internal fun MediaAttachmentPreview(
                         Text("Sign in to view", style = MaterialTheme.typography.labelSmall)
                     }
                     null -> {
-                        Icon(Icons.Rounded.BrokenImage, contentDescription = "Preview unavailable")
+
+//Icon(Icons.Rounded.BrokenImage, contentDescription = "Preview unavailable")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.mediaError, Icons.Rounded.BrokenImage, contentDescription = "Preview unavailable")
                         Text(if (video) "Tap to play video" else "Preview unavailable. Tap to open", style = MaterialTheme.typography.labelSmall)
                     }
                 }
@@ -193,11 +212,20 @@ internal fun MediaAttachmentPreview(
                 contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
                 onSuccess = { state ->
                     val image = state.result.drawable
-                    if (image.intrinsicWidth > 0 && image.intrinsicHeight > 0)
+                    // Previous: only updated this tile's ratio, leaving album parents forced square.
+                    if (currentDecodeGeneration === decodeGeneration &&
+                        (binding == null || binding.currentSession() == binding.session) &&
+                        image.intrinsicWidth > 0 && image.intrinsicHeight > 0) {
                         ratio = (image.intrinsicWidth.toFloat() / image.intrinsicHeight).coerceIn(0.65f, 1.8f)
+                        // Retired account/session results must not resize a replacement album.
+                        if (!video && !sticker && (binding == null || binding.currentSession() == binding.session))
+                            aspectRatioNow?.invoke(ratio)
+                    }
                 },
                 loading = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) } },
-                error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.BrokenImage, "Preview unavailable. Tap to open") } },
+                error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+//Icon(Icons.Rounded.BrokenImage, "Preview unavailable. Tap to open")
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.mediaError, Icons.Rounded.BrokenImage, "Preview unavailable. Tap to open") } },
             )
         }
         if (video) FilledIconButton(onClick = { open() }, modifier = Modifier.align(Alignment.Center)) {
@@ -224,3 +252,7 @@ private fun formatMediaBadgeDuration(ms: Long): String {
     val seconds = totalSeconds % 60L
     return "%d:%02d".format(minutes, seconds)
 }
+
+// Previous E2EE media wiring retained inactive:
+//             val path = attachment.url?.takeIf { it.isNotBlank() } ?: error("No media path")
+//             } else url = resolveUrl?.invoke(path) ?: path

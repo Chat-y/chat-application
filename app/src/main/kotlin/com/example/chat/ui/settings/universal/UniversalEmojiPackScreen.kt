@@ -49,6 +49,18 @@ fun UniversalEmojiPackScreen(
     onBack: () -> Unit,
     onMessage: (String) -> Unit = {},
 ) {
+    // Custom chooser and download controls removed from display; assets are retained, not deleted.
+    val config = LocalThemeConfig.current
+    UniversalScaffold(title = "Emoji", onBack = onBack) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Android system emoji", color = Color(config.primaryTextColor), fontSize = 16.sp)
+            Text("Only this device's Android emoji are displayed. Typed, pasted and inserted emoji remain Unicode text.",
+                color = Color(config.secondaryTextColor), fontSize = 12.sp)
+        }
+    }
+}
+
+/* Removed custom pack chooser retained for rollback.
     rememberPreferencesVersion(preferences)
     val config = LocalThemeConfig.current
     val view = LocalView.current
@@ -87,9 +99,10 @@ fun UniversalEmojiPackScreen(
 
     class Entry(val id: String, val title: String, val subtitle: String, val enabled: Boolean)
     val entries = listOf(
+        Entry(ChatyEmojiPack.SYSTEM, "Android system", "Default Android emoji from this device. No custom pack or download.", true),
         Entry(
             ChatyEmojiPack.CHATY, "Chaty",
-            "Light default: 50 bundled static OpenMoji glyphs; all other emojis use the device's Unicode glyphs. No network download.", true,
+            "Optional custom style: 50 bundled static OpenMoji glyphs; all other emojis use the device's Unicode glyphs. No network download.", true,
         ),
         Entry(
             ChatyEmojiPack.IOS, "iOS - supplied 50",
@@ -124,7 +137,7 @@ fun UniversalEmojiPackScreen(
             else -> "19 supplied animations. Other emojis keep their normal glyphs. Yawn is enlarged from a small GIF and is softer."
         }, sdkOk && telegramBundled == 19),
     )
-    val effective = entries.firstOrNull { it.id == active && it.enabled }?.id ?: ChatyEmojiPack.CHATY
+    val effective = entries.firstOrNull { it.id == active && it.enabled }?.id ?: ChatyEmojiPack.SYSTEM
 
     fun choose(entry: Entry) {
         if (entry.id == active || !entry.enabled) return
@@ -138,9 +151,10 @@ fun UniversalEmojiPackScreen(
 
     UniversalScaffold(title = "Emoji pack", onBack = onBack) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (com.example.chat.data.packs.ChatyPackServer.DOWNLOADABLE_PACKS_ENABLED) androidx.compose.material3.TextButton(onClick = { downloadsOpen = true }) { Text("Download or manage extra packs") }
+            // Previous: if (com.example.chat.data.packs.ChatyPackServer.DOWNLOADABLE_PACKS_ENABLED) androidx.compose.material3.TextButton(onClick = { downloadsOpen = true }) { Text("Download or manage extra packs") }
+            if (com.example.chat.data.packs.ChatyPackServer.DOWNLOADABLE_PACKS_ENABLED) com.example.chat.ui.kit.ChatyTextButton(onClick = { downloadsOpen = true }, label = "Download or manage extra packs")
             // Extra entries are paused, not deleted; saved style preferences are not rewritten.
-            for (e in entries.filter { com.example.chat.data.packs.ChatyPackServer.DOWNLOADABLE_PACKS_ENABLED || it.id == ChatyEmojiPack.CHATY }) {
+            for (e in entries.filter { com.example.chat.data.packs.ChatyPackServer.DOWNLOADABLE_PACKS_ENABLED || it.id == ChatyEmojiPack.CHATY || it.id == ChatyEmojiPack.SYSTEM }) {
                 PackCard(
                     title = e.title, subtitle = e.subtitle, enabled = e.enabled,
                     pack = e.id, selected = effective == e.id,
@@ -150,14 +164,16 @@ fun UniversalEmojiPackScreen(
             }
             Text(
                 if (active != effective)
-                    "$active is saved as your choice but is not available here, so Chaty emojis are shown."
+                    "$active is saved as your choice but is not available here, so Android system emojis are shown."
                 else
-                    if (active == ChatyEmojiPack.DRIVE_MOV) "User-supplied third-party shared Drive MOV source. Converted from the source animations, not an official or complete Unicode pack. Missing artwork uses normal glyphs." else if (active == ChatyEmojiPack.TELEGRAM_LOTTIE) "TheSub on LottieFiles, LottieFiles License. Telegram-style recreations, not official Telegram art. Other emojis use normal glyphs." else if (active == ChatyEmojiPack.TELEGRAM) "Telegram emoji designs; meii pack on emoji.gg. Higher-quality variants from supplied files; not an official or complete Telegram pack. Other emojis use normal glyphs, not substitute artwork." else "Emojis a pack does not include are shown in the Chaty style. Animated emojis loop continuously. OpenMoji is a static pack.",
+                    if (active == ChatyEmojiPack.SYSTEM) "Uses this device's Android emoji. Typed, pasted and inserted emojis stay Unicode text." else if (active == ChatyEmojiPack.DRIVE_MOV) "User-supplied third-party shared Drive MOV source. Converted from the source animations, not an official or complete Unicode pack. Missing artwork uses normal glyphs." else if (active == ChatyEmojiPack.TELEGRAM_LOTTIE) "TheSub on LottieFiles, LottieFiles License. Telegram-style recreations, not official Telegram art. Other emojis use normal glyphs." else if (active == ChatyEmojiPack.TELEGRAM) "Telegram emoji designs; meii pack on emoji.gg. Higher-quality variants from supplied files; not an official or complete Telegram pack. Other emojis use normal glyphs, not substitute artwork." else "Emojis a pack does not include are shown in the Chaty style. Animated emojis loop continuously. OpenMoji is a static pack.",
                 color = secondaryText, fontSize = 12.sp,
             )
         }
     }
 }
+
+*/
 
 @Composable
 private fun PackCard(

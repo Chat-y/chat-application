@@ -45,7 +45,12 @@ fun EmojiPackManagerSheet(
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Emoji packs", color = foreground, fontWeight = FontWeight.W800, fontSize = 20.sp,
                 modifier = Modifier.weight(1f))
-            TextButton(onClick = onClose) { Text("Close") }
+            // Previous stock text action:
+            // TextButton(onClick = onClose) { Text("Close") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Close",
+                onClick = onClose,
+            )
         }
 
         if (store == null) {
@@ -115,23 +120,52 @@ fun EmojiPackManagerSheet(
                         }
                         when {
                             progress != null -> Text("Downloading…", color = secondary, fontSize = 13.sp)
-                            update != null -> TextButton(onClick = {
+                            update != null -> // Previous stock text action:
+                            // TextButton(onClick = {
+                            //                                 scope.launch {
+                            //                                     try { if (!store.downloadPack(pack.id)) failure = "Pack download failed. Your current emoji fallback is unchanged." }
+                            //                                     catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                            //                                     catch (_: Exception) { failure = "Pack download failed. Try again later." }
+                            //                                 }
+                            //                             }) { Text("Update") }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = "Update",
+                                onClick = {
                                 scope.launch {
                                     try { if (!store.downloadPack(pack.id)) failure = "Pack download failed. Your current emoji fallback is unchanged." }
                                     catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
                                     catch (_: Exception) { failure = "Pack download failed. Try again later." }
                                 }
-                            }) { Text("Update") }
-                            installed != null -> TextButton(onClick = {
+                            },
+                            )
+                            installed != null -> // Previous stock text action:
+                            // TextButton(onClick = {
+                            //                                 scope.launch { store.removePack(pack.id) }
+                            //                             }) { Text("Remove") }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = "Remove",
+                                onClick = {
                                 scope.launch { store.removePack(pack.id) }
-                            }) { Text("Remove") }
-                            else -> TextButton(onClick = {
+                            },
+                            )
+                            else -> // Previous stock text action:
+                            // TextButton(onClick = {
+                            //                                 scope.launch {
+                            //                                     try { if (!store.downloadPack(pack.id)) failure = "Pack download failed. Your current emoji fallback is unchanged." }
+                            //                                     catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                            //                                     catch (_: Exception) { failure = "Pack download failed. Try again later." }
+                            //                                 }
+                            //                             }) { Text("Download") }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = "Download",
+                                onClick = {
                                 scope.launch {
                                     try { if (!store.downloadPack(pack.id)) failure = "Pack download failed. Your current emoji fallback is unchanged." }
                                     catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
                                     catch (_: Exception) { failure = "Pack download failed. Try again later." }
                                 }
-                            }) { Text("Download") }
+                            },
+                            )
                         }
                     }
                     if (progress != null) {
@@ -163,3 +197,8 @@ private fun formatPackBytes(bytes: Long): String = when {
     bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
     else -> "$bytes B"
 }
+
+// Complete original-line retention for review (inactive).
+                            //                             update != null -> TextButton(onClick = {
+                            //                             installed != null -> TextButton(onClick = {
+                            //                             else -> TextButton(onClick = {

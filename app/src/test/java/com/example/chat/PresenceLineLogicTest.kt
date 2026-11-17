@@ -66,4 +66,24 @@ class PresenceLineLogicTest {
     fun `nothing visible yields no line`() {
         assertNull(PresenceLineLogic.headerText(false, null, null, now, zone))
     }
+
+    @Test
+    fun `header can request exact 24 hour today yesterday and older time`() {
+        for ((instant, expected) in listOf(
+            "2026-11-08T06:30:00Z" to "last seen today at 12:00",
+            "2026-11-07T06:30:00Z" to "last seen yesterday at 12:00",
+            "2026-11-01T15:35:00Z" to "last seen 01/11/2026 at 21:05",
+        )) {
+            assertEquals(expected, PresenceLineLogic.headerText(false, Instant.parse(instant), null,
+                now, zone, is24Hour = true))
+        }
+    }
+
+    @Test
+    fun `24 hour choice never invents time from a privacy bucket or missing timestamp`() {
+        assertEquals("last seen recently", PresenceLineLogic.headerText(false, now, "recently",
+            now, zone, is24Hour = true))
+        assertNull(PresenceLineLogic.headerText(false, null, null, now, zone, is24Hour = true))
+    }
+
 }

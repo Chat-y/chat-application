@@ -223,7 +223,9 @@ fun PermissionOnboardingScreen(
                     contentColor = Color.White,
                 ),
             ) {
-                Icon(Icons.Rounded.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(
                     if (isRequesting) "Requesting…" else "Allow Permission",

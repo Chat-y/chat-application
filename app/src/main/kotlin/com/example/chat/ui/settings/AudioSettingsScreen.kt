@@ -420,7 +420,9 @@ fun AudioSettingsScreen(
             SpecularGlassCard(Modifier.fillMaxWidth(), blur = 12f, borderRadius = 12.dp, padding = PaddingValues(18.dp)) {
               Column(Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.SpeakerGroup, null, Modifier.size(26.dp), tint = colors.accent)
+
+//Icon(Icons.Rounded.SpeakerGroup, null, Modifier.size(26.dp), tint = colors.accent)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.speakerGroup, Icons.Rounded.SpeakerGroup, null, Modifier.size(26.dp), tint = colors.accent)
                     Spacer(Modifier.width(10.dp))
                     // AU4-19: plain words (was: "Dual-Speaker Engine").
                     Text("Dual-speaker mode", color = colors.foreground, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
@@ -849,7 +851,9 @@ internal fun AudioRadioRow(title: String, subtitle: String, selected: Boolean, e
 // Previous implementation retained:             tint = if (selected) colors.accent else colors.foregroundSecondary.copy(alpha = 0.4f),
 // Previous implementation retained:         )
         if (!enabled) {
-            Icon(Icons.Rounded.Info, null, Modifier.size(24.dp), tint = colors.foregroundSecondary)
+
+//Icon(Icons.Rounded.Info, null, Modifier.size(24.dp), tint = colors.foregroundSecondary)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.info, Icons.Rounded.Info, null, Modifier.size(24.dp), tint = colors.foregroundSecondary)
             Spacer(Modifier.width(8.dp))
         }
         RadioButton(selected = selected, onClick = null, enabled = enabled)

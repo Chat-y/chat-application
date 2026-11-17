@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -83,8 +84,55 @@ private class AuthNavigationState {
     }
 }
 
+// TAS-ENTRY-1 (Bandi 2026-11-17): process-lifetime marker for the create-sheet
+// entry guard below. rememberSaveable cannot tell a configuration change from a
+// process death - both restore from a Bundle - so the cold-start sanitize uses a
+// plain process-scoped var: false only until the first AppRoot composition of a
+// process. Rotation/branch swaps keep the flag and skip the sanitize.
+private var tasksCreateRestoreSanitized = false
+
 @Composable
 fun AppRoot() {
+    // Device-local recovery is available before login and after remote deletion.
+    var savedDeletionOperations by remember { mutableStateOf<List<String>>(emptyList()) }
+    var deletionRecoveryNotice by remember { mutableStateOf<String?>(null) }
+    var deletionReceiptBusy by remember { mutableStateOf(false) }
+    val deletionRecoveryScope = androidx.compose.runtime.rememberCoroutineScope()
+    val deletionRecoveryWarning by ServiceLocator.deletionRecoveryState.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(deletionRecoveryWarning) {
+        deletionRecoveryWarning?.let { deletionRecoveryNotice = it }
+    }
+    androidx.compose.runtime.LaunchedEffect(ServiceLocator.apiBackend.isAuthenticated) {
+        savedDeletionOperations = runCatching { ServiceLocator.savedDeletionRecoveryNamespaces() }.getOrDefault(emptyList())
+    }
+    if (savedDeletionOperations.isNotEmpty() || deletionRecoveryNotice != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { if (!deletionReceiptBusy) { savedDeletionOperations = emptyList(); deletionRecoveryNotice = null } },
+            title = { androidx.compose.material3.Text("Saved account deletion recovery") },
+            text = { androidx.compose.foundation.layout.Column {
+                androidx.compose.material3.Text(deletionRecoveryNotice ?: "A deletion outcome needs verification on this device. No sign-in is needed. Local data is kept unless deletion is confirmed.")
+                savedDeletionOperations.forEachIndexed { index, namespace ->
+                    androidx.compose.material3.TextButton(enabled = !deletionReceiptBusy, onClick = {
+                        savedDeletionOperations = listOf(namespace) + savedDeletionOperations.filterNot { it == namespace }
+                        deletionRecoveryNotice = "Saved operation ${index + 1} selected. Tap Check saved receipt."
+                    }) { androidx.compose.material3.Text("Select saved operation ${index + 1}") }
+                }
+            } },
+            confirmButton = { androidx.compose.material3.TextButton(enabled = !deletionReceiptBusy && savedDeletionOperations.isNotEmpty(), onClick = {
+                val namespace = savedDeletionOperations.first()
+                deletionReceiptBusy = true
+                deletionRecoveryScope.launch {
+                    try {
+                        deletionRecoveryNotice = ServiceLocator.recoverAccountDeletionByNamespace(namespace)
+                        savedDeletionOperations = ServiceLocator.savedDeletionRecoveryNamespaces()
+                    }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { deletionRecoveryNotice = "Outcome indeterminate. Local data is retained. Retry recovery later." }
+                    finally { deletionReceiptBusy = false }
+                }
+            }) { androidx.compose.material3.Text(if (deletionReceiptBusy) "Checking..." else "Check saved receipt") } },
+            dismissButton = { androidx.compose.material3.TextButton(enabled = !deletionReceiptBusy, onClick = { savedDeletionOperations = emptyList(); deletionRecoveryNotice = null }) { androidx.compose.material3.Text("Later") } })
+    }
     val themeController = remember { ServiceLocator.themeController }
     var rootAccountRevision by remember { mutableIntStateOf(0) }
     androidx.compose.runtime.DisposableEffect(Unit) {
@@ -172,6 +220,8 @@ fun AppRoot() {
         // it at auth/reset-password.
         var otpEmail by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
         var otpDeliveryMessage by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+        // A successful password reset requests an explicit login, not session adoption.
+        var passwordResetNeedsLogin by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         var otpPurposeVerify by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
         var otpOrigin by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(AuthRoute.ForgotPassword) }
         // Only nonsecret routing context is saved. A reset code is always requested again after death.
@@ -195,6 +245,8 @@ fun AppRoot() {
         var reauthRoom by remember {mutableStateOf<String?>(null)}
         var reauthNotice by remember {mutableStateOf(false)}
         fun afterAuthentication() {
+            // Covers password, email-code and V2 completion routes alike.
+            passwordResetNeedsLogin = false
             val api=ServiceLocator.apiBackend
             val origin=api.reauthenticationOrigin
             val sameOwner=com.example.chat.ui.auth.AuthNavigationPolicy.mayResume(origin?.userId,origin?.tenantId,origin?.baseUrl,api.currentUser?.id,api.config.tenantId,api.config.restApiBaseUrl)
@@ -218,22 +270,78 @@ fun AppRoot() {
             mutableStateOf<com.example.chat.ui.settings.SettingsDestination?>(null)
         }
         val lockRequired by ServiceLocator.appLock.lockRequired.collectAsState()
-        androidx.compose.runtime.LaunchedEffect(route) {
+        com.example.chat.ui.profile.BannerPlaybackRecovery()
+        androidx.compose.runtime.LaunchedEffect(route, passwordResetNeedsLogin) {
             val api=ServiceLocator.apiBackend
-            if(route in listOf(AuthRoute.Login,AuthRoute.Register,AuthRoute.Welcome) &&
+            if(!passwordResetNeedsLogin && route in listOf(AuthRoute.Login,AuthRoute.Register,AuthRoute.Welcome) &&
                 com.example.chat.ui.auth.AuthNavigationPolicy.shouldLeaveAuth(api.isAuthenticated,
                     pendingRegisterEmail.isNotBlank() && route==AuthRoute.Register, api.reauthenticationOrigin!=null)) route=AuthRoute.Home
         }
-        androidx.compose.runtime.LaunchedEffect(
-            route,
-            ServiceLocator.apiBackend.isAuthenticated,
-            ServiceLocator.preferencesController.security.isAppLockEnabled,
-            ServiceLocator.preferencesController.security.lockMethod,
-        ) {
-            // Re-run when restored authentication or persisted lock preferences become available.
-            // A route-only effect could run before either value was restored and never show the lock.
-            if (route == AuthRoute.Home) ServiceLocator.appLock.scheduleInitialIfNeeded()
+        val preferencesReady = ServiceLocator.preferencesController.preferencesReady
+        val lockEnabled = ServiceLocator.preferencesController.security.isAppLockEnabled
+        val lockMethod = ServiceLocator.preferencesController.security.lockMethod
+        val protectedRoute = route in setOf(AuthRoute.Home, AuthRoute.ChatDetail, AuthRoute.Security,
+            AuthRoute.LockedChats, AuthRoute.HiddenVault, AuthRoute.MessageManagement, AuthRoute.LinkedDevices,
+            AuthRoute.Starred, AuthRoute.NewChat, AuthRoute.GlobalSearch, AuthRoute.Notifications)
+        var initialLockChecked by remember(rootAccount, preferencesReady, lockEnabled, lockMethod) { mutableStateOf(false) }
+        var initialLockCheckFailed by remember(rootAccount, preferencesReady, lockEnabled, lockMethod) { mutableStateOf(false) }
+        var initialLockRetry by remember { mutableIntStateOf(0) }
+        androidx.compose.runtime.LaunchedEffect(route, rootAccount, preferencesReady, lockEnabled, lockMethod, initialLockRetry) {
+            if (!preferencesReady || !protectedRoute || !ServiceLocator.apiBackend.isAuthenticated) return@LaunchedEffect
+            initialLockCheckFailed = false
+            try {
+                val access = ServiceLocator.appLock.checkInitialRouteAccess()
+                if (ServiceLocator.apiBackend.authSnapshot() === rootAccount) {
+                    initialLockChecked = access != com.example.chat.data.services.AppLockCoordinator.InitialRouteAccess.Unavailable
+                    initialLockCheckFailed = !initialLockChecked
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (ServiceLocator.apiBackend.authSnapshot() === rootAccount) initialLockCheckFailed = true
+            }
         }
+        // No protected subtree is mounted before the restored-session lock check,
+        // or while locked. Keep the destination in navigation rather than replace it.
+        val initialAccessPending = !preferencesReady ||
+            (ServiceLocator.apiBackend.isAuthenticated && lockEnabled && !initialLockChecked)
+        val concealProtectedRoute = protectedRoute && ServiceLocator.apiBackend.isAuthenticated &&
+            (initialAccessPending || (lockEnabled && lockRequired))
+    val heldSendRevision by ServiceLocator.heldSendRevision.collectAsState()
+    var heldSendIds by remember(rootAccount) { mutableStateOf<List<String>>(emptyList()) }
+    var heldSendBusy by remember(rootAccount) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(heldSendRevision, rootAccount, initialAccessPending, lockRequired, protectedRoute) {
+        if (!protectedRoute || initialAccessPending || lockRequired || !ServiceLocator.apiBackend.isAuthenticated) {
+            heldSendIds = emptyList(); return@LaunchedEffect
+        }
+        val loaded = runCatching { ServiceLocator.heldSecureSendIds() }.getOrDefault(emptyList())
+        if (ServiceLocator.apiBackend.authSnapshot() === rootAccount) heldSendIds = loaded
+    }
+    if (protectedRoute && !initialAccessPending && !lockRequired && ServiceLocator.apiBackend.isAuthenticated && heldSendIds.isNotEmpty()) {
+        androidx.compose.material3.AlertDialog(onDismissRequest = { heldSendIds = emptyList() },
+            title = { androidx.compose.material3.Text("Encrypted send needs review") },
+            text = { androidx.compose.material3.Text("Membership changed before this queued send was confirmed. It has not been resent. Discard removes this local queued operation so later messages can continue; it does not delete any message already accepted by the server. You can write a fresh message afterward.") },
+            confirmButton = { androidx.compose.material3.TextButton(enabled = !heldSendBusy, onClick = {
+                val client = heldSendIds.first(); heldSendBusy = true
+                deletionRecoveryScope.launch {
+                    try { ServiceLocator.discardHeldSecureSend(client, rootAccount); heldSendIds = ServiceLocator.heldSecureSendIds() }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { deletionRecoveryNotice = "Queued operation could not be discarded. It remains held; reopen the original account and retry." }
+                    finally { heldSendBusy = false }
+                }
+            }) { androidx.compose.material3.Text("Discard queued operation") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { heldSendIds = emptyList() }) { androidx.compose.material3.Text("Keep for later") } })
+    }
+
+        // Previous: androidx.compose.runtime.LaunchedEffect(
+        // Previous: route,
+        // Previous: ServiceLocator.apiBackend.isAuthenticated,
+        // Previous: ServiceLocator.preferencesController.security.isAppLockEnabled,
+        // Previous: ServiceLocator.preferencesController.security.lockMethod,
+        // Previous: ) {
+        // Previous: // Re-run when restored authentication or persisted lock preferences become available.
+        // Previous: // A route-only effect could run before either value was restored and never show the lock.
+        // Previous: if (route == AuthRoute.Home) ServiceLocator.appLock.scheduleInitialIfNeeded()
+        // Previous: }
         // Call media permissions (Dart: flutter_webrtc getUserMedia prompts RECORD_AUDIO/CAMERA itself).
         run {
             val pendingCall = androidx.compose.runtime.remember {
@@ -301,7 +409,7 @@ fun AppRoot() {
         //     }
         // }
         //
-        androidx.compose.runtime.LaunchedEffect(notificationRoomOpen, rootAccount, lockRequired, route) {
+        androidx.compose.runtime.LaunchedEffect(notificationRoomOpen, rootAccount, initialAccessPending, lockRequired, route) {
             val request = notificationRoomOpen ?: return@LaunchedEffect
             val roomId = request.roomId
             val api = ServiceLocator.apiBackend
@@ -312,6 +420,7 @@ fun AppRoot() {
             }
             val routeAtStart = route
             fun mayOpen() = api.authSnapshot() === owner && api.isAuthenticated &&
+                !initialAccessPending && ServiceLocator.preferencesController.preferencesReady &&
                 !ServiceLocator.appLock.lockRequired.value && route == routeAtStart &&
                 route in listOf(AuthRoute.Home, AuthRoute.ChatDetail) &&
                 com.example.chat.notifications.ChatyNotifications.pendingRoomOpen.value === request
@@ -350,8 +459,9 @@ fun AppRoot() {
         // only once the authenticated shell is visible and the app lock is satisfied; the
         // session/TTL/lock matrix lives in LauncherShortcutPolicy (JVM-tested).
         val pendingShortcut by com.example.chat.LauncherShortcutRouter.pending.collectAsState()
-        androidx.compose.runtime.LaunchedEffect(pendingShortcut, ServiceLocator.apiBackend.isAuthenticated, lockRequired, route) {
+        androidx.compose.runtime.LaunchedEffect(pendingShortcut, rootAccount, initialAccessPending, lockRequired, route) {
             val p = pendingShortcut ?: return@LaunchedEffect
+            if (initialAccessPending) return@LaunchedEffect
             val api = ServiceLocator.apiBackend
             val scope = api.authSnapshot()
             val shellVisible = api.isAuthenticated && when (route) {
@@ -488,12 +598,16 @@ fun AppRoot() {
         androidx.compose.runtime.CompositionLocalProvider(
             com.example.chat.ui.kit.LocalChatFontScale provides com.example.chat.ServiceLocator.chatFontScale.value,
         ) {
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(
+            resetKey = rootAccount to route, rootBackdrop = true,
+        ) {
         Box(Modifier.fillMaxSize().windowInsetsPadding(
             WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         )) {
         // Dart Navigator.pop for the pre-auth stack (Welcome > Login/Register > Forgot/RegisterOrganization);
         // system Back must follow the same targets as each screen's on-screen back arrow.
-        androidx.activity.compose.BackHandler(
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler(
             enabled = route == AuthRoute.Login || route == AuthRoute.Register ||
                 route == AuthRoute.ForgotPassword || route == AuthRoute.RegisterOrganization ||
                 route == AuthRoute.OtpVerification || route == AuthRoute.CreateNewPassword,
@@ -511,7 +625,8 @@ fun AppRoot() {
         }
         // A page without its own BackHandler still returns to the route that opened
         // it. Nested handlers (sheets, info, settings) below take precedence.
-        androidx.activity.compose.BackHandler(
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler(
             enabled = route !in listOf(AuthRoute.Home, AuthRoute.Splash, AuthRoute.Welcome,
                 AuthRoute.Login, AuthRoute.Register, AuthRoute.ForgotPassword, AuthRoute.RegisterOrganization,
                 AuthRoute.OtpVerification, AuthRoute.CreateNewPassword),
@@ -529,9 +644,9 @@ fun AppRoot() {
         val v2Flow = remember(v2Owner,v2Workspace,useLegacyAuth) { if(com.example.chat.ReleaseFeatures.AUTH_V2_CONTRACTS && !useLegacyAuth) ServiceLocator.apiBackend.authV2Flow(v2Owner,v2Workspace) else null }
         val authV2Link by com.example.chat.ui.auth.v2.AuthV2LinkRouter.links.collectAsState()
         var authLinkNotice by remember { mutableStateOf<String?>(null) }
-        androidx.compose.runtime.LaunchedEffect(authV2Link, v2Flow, lockRequired) {
+        androidx.compose.runtime.LaunchedEffect(authV2Link, v2Flow, initialAccessPending, lockRequired) {
             val link = authV2Link ?: return@LaunchedEffect
-            if (v2Flow == null || lockRequired) return@LaunchedEffect
+            if (v2Flow == null || initialAccessPending || lockRequired) return@LaunchedEffect
             try {
                 if(link.invite) {
                     com.example.chat.ui.auth.v2.AuthV2LinkRouter.clearVerified()
@@ -575,6 +690,7 @@ fun AppRoot() {
                 },
                 onBack = { emailCodeRoutePending=false;route = AuthRoute.Welcome },
                 onLoggedIn = { userId ->
+                    passwordResetNeedsLogin = false
                     ServiceLocator.appLock.onSignedIn()
                     promptPending = true
                     // Mirrors login_screen.dart: setStoredUserId, then
@@ -723,23 +839,30 @@ fun AppRoot() {
                 onBack = { resetCode = ""; route = AuthRoute.OtpVerification },
                 submitNewPassword = { newPassword ->
                     ServiceLocator.apiBackend.resetPasswordWithCode(otpEmail, resetCode, newPassword)
-                    // Research 4a.6: sign straight back in with the new password
-                    // instead of dropping the user on the login form. The reset
-                    // revoked every session, so this fresh login is also what
-                    // restores the app to a working authenticated state.
-                    // (null, false): keep the tenant the user already signed in
-                    // with — the reset must not clobber a custom workspace.
-                    val user = ServiceLocator.apiBackend.login(otpEmail, newPassword, null, false)
-                    ServiceLocator.appLock.onSignedIn()
-                    promptPending = true
-                    ServiceLocator.appScope.launch {
-                        ServiceLocator.preferencesStorage.setStoredUserId(user.id)
-                    }
+                    // Reset is complete. Never reuse the new password for an implicit login,
+                    // switch workspace, or remove an unrelated saved account here.
+                    passwordResetNeedsLogin = true
+                    // Previous: // Research 4a.6: sign straight back in with the new password
+                    // Previous: // instead of dropping the user on the login form. The reset
+                    // Previous: // revoked every session, so this fresh login is also what
+                    // Previous: // restores the app to a working authenticated state.
+                    // Previous: // (null, false): keep the tenant the user already signed in
+                    // Previous: // with — the reset must not clobber a custom workspace.
+                    // Previous: val user = ServiceLocator.apiBackend.login(otpEmail, newPassword, null, false)
+                    // Previous: ServiceLocator.appLock.onSignedIn()
+                    // Previous: promptPending = true
+                    // Previous: ServiceLocator.appScope.launch {
+                    // Previous: ServiceLocator.preferencesStorage.setStoredUserId(user.id)
+                    // Previous: }
                 },
                 showSuccess = { msg ->
                     android.widget.Toast.makeText(resetCtx, msg, android.widget.Toast.LENGTH_SHORT).show()
                 },
-                onPasswordUpdated = { resetCode = ""; otpResumePending = false; route = AuthRoute.Home },
+                // Previous completion destination: AuthRoute.Home (after automatic login).
+                onPasswordUpdated = {
+                    resetCode = ""; otpResumePending = false; pendingRegisterEmail = ""
+                    emailCodeRoutePending = false; passwordResetNeedsLogin = true; route = AuthRoute.Login
+                },
             )
         }
         val orgScreen: @Composable () -> Unit = {
@@ -790,12 +913,37 @@ fun AppRoot() {
         // Typed unsaved drafts, quarantined per account+task: returning to account A restores
         // A's in-progress text, B never sees it. Bundle-safe string maps only. Keyed "<account>|<taskId|new>".
         var editorDrafts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
+        // TAS-ENTRY-1 (Bandi 2026-11-17): the Create Task sheet opens only from an
+        // explicit add action; entry always shows the list. editorOpenByAccount is
+        // rememberSaveable, so a create-open flag (open, no task id) survived process
+        // death and re-opened the blank sheet on the next cold start. Once per
+        // process, drop restored CREATE-open flags for every account; typed drafts
+        // stay in editorDrafts and are still offered on the next explicit add.
+        // Edit sessions (task id present) and all in-process restores (rotation,
+        // rail branch swaps - capture 40760917570) are untouched.
+        // Prior behavior, retained for reference: a create-open flag restored from
+        // a dead process re-opened the blank Create Task sheet on entry.
+        remember {
+            if (!tasksCreateRestoreSanitized) {
+                tasksCreateRestoreSanitized = true
+                editorOpenByAccount.keys
+                    .filter { key -> editorOpenByAccount[key] == true && editorTaskIds[key] == null }
+                    .forEach { key -> editorOpenByAccount = editorOpenByAccount - key }
+            }
+            true
+        }
         GlobalRouteLayers {
         // Keep the Starred concealment decision across route exits for this exact auth owner.
         // No token is copied or credential/session state mutated here.
         val starredSessionOwner = ServiceLocator.apiBackend.authSnapshot()
         var starAuthenticationRequired by remember(starredSessionOwner) { mutableStateOf(false) }
-        when (route) {
+        if (concealProtectedRoute) {
+            Box(Modifier.fillMaxSize().background(Color(resolvedTheme.backgroundColor)), contentAlignment = Alignment.Center) {
+                if (initialLockCheckFailed) androidx.compose.material3.TextButton(onClick = { initialLockRetry++ }) {
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.startup_retry))
+                }
+            }
+        } else when (route) {
             AuthRoute.Splash -> SplashScreen(
                 routeToHome = {
                     // Mirrors splash_screen.dart: backend.initialize() best-effort,
@@ -844,7 +992,7 @@ fun AppRoot() {
                         otpResumeBase, api.config.restApiBaseUrl, otpPurposeVerify, isAuthed,
                         otpResumeUser, api.currentUser?.id)
                     // Always return to empty-code OTP, never directly to a reset form with a saved code.
-                    route = if (resumeOtp) AuthRoute.OtpVerification else if (isAuthed) AuthRoute.Home else if(emailCodeRoutePending) AuthRoute.Login else AuthRoute.Welcome
+                    route = if (passwordResetNeedsLogin) AuthRoute.Login else if (resumeOtp) AuthRoute.OtpVerification else if (isAuthed) AuthRoute.Home else if(emailCodeRoutePending) AuthRoute.Login else AuthRoute.Welcome
                     if (!resumeOtp) otpResumePending = false
                 },
             )
@@ -925,6 +1073,9 @@ fun AppRoot() {
                 }
                 var showCenterEffects by remember { mutableStateOf(false) }
                 var createTaskTick by remember { mutableIntStateOf(0) }
+                // TAS-SEARCH-1: top-bar search on the Tasks destination focuses the in-page task
+                // search instead of opening global chat search (Bandi 2026-11-17).
+                var taskSearchTick by remember { mutableIntStateOf(0) }
                 // Last FAB tick already consumed; stops a stale tick reopening the modal when Tasks is re-entered.
                 var handledCreateTaskTick by remember { mutableIntStateOf(0) }
                 var shellRev by remember { mutableIntStateOf(0) }
@@ -1055,8 +1206,54 @@ fun AppRoot() {
                 var splitChatState by androidx.compose.runtime.saveable.rememberSaveable(ServiceLocator.apiBackend.currentAccountKey(), stateSaver = com.example.chat.ui.split.SplitChatSessionState.Saver) {
                     mutableStateOf(com.example.chat.ui.split.SplitChatSessionState())
                 }
+                var homeToolRequest by remember(rootAccount) {
+                    mutableStateOf<com.example.chat.ui.chats.home.HomeToolRequest?>(null)
+                }
+                var homeToolDestinationReady by remember(rootAccount) { mutableStateOf(false) }
+                val availableHomeTools = buildSet {
+                    add(com.example.chat.ui.settings.SettingsDestination.HomeViewOptions)
+                    add(com.example.chat.ui.settings.SettingsDestination.HomeScratchpad)
+                    add(com.example.chat.ui.settings.SettingsDestination.HomeSavedViews)
+                    add(com.example.chat.ui.settings.SettingsDestination.HomeRecentViews)
+                    add(com.example.chat.ui.settings.SettingsDestination.HomeKeyboardShortcuts)
+                    add(com.example.chat.ui.settings.SettingsDestination.HomeAppearanceCheck)
+                    add(com.example.chat.ui.settings.SettingsDestination.HomeCatchUpGuide)
+                    val home = ServiceLocator.preferencesController.home
+                    if (home.menuShowNewActions) add(com.example.chat.ui.settings.SettingsDestination.HomeNewGroup)
+                    if (home.showCameraIcon) add(com.example.chat.ui.settings.SettingsDestination.HomeCameraEffects)
+                    if (home.showDesktopIcon) add(com.example.chat.ui.settings.SettingsDestination.HomeQrScan)
+                    if (home.showIconAddAccount) add(com.example.chat.ui.settings.SettingsDestination.HomeAccountSettings)
+                    if (home.themesEnabled) add(com.example.chat.ui.settings.SettingsDestination.HomeToggleBrightness)
+                }
+                val openHomeTool: (String) -> Unit = { destination ->
+                    if (ServiceLocator.apiBackend.authSnapshot() === rootAccount && availableHomeTools.any { it.name == destination }) {
+                        homeToolDestinationReady = false
+                        homeToolRequest = com.example.chat.ui.chats.home.HomeToolRequest(destination, rootAccount)
+                        settingsSub = null
+                        pushedSettings = false
+                        pushedSettingsSearch = false
+                        pushedProfile = false
+                    }
+                }
                 val settingsNavigate: (com.example.chat.ui.settings.SettingsDestination) -> Unit = { dest ->
-                    if (dest == com.example.chat.ui.settings.SettingsDestination.NetworkUsage) {
+                    // Receiver is supplied by the paired Home-tool patch. These dispatch to
+                    // existing Home actions, keeping their session/account owner intact.
+                    if (dest in setOf(
+                        com.example.chat.ui.settings.SettingsDestination.HomeViewOptions,
+                        com.example.chat.ui.settings.SettingsDestination.HomeScratchpad,
+                        com.example.chat.ui.settings.SettingsDestination.HomeSavedViews,
+                        com.example.chat.ui.settings.SettingsDestination.HomeRecentViews,
+                        com.example.chat.ui.settings.SettingsDestination.HomeKeyboardShortcuts,
+                        com.example.chat.ui.settings.SettingsDestination.HomeAppearanceCheck,
+                        com.example.chat.ui.settings.SettingsDestination.HomeCatchUpGuide,
+                        com.example.chat.ui.settings.SettingsDestination.HomeNewGroup,
+                        com.example.chat.ui.settings.SettingsDestination.HomeCameraEffects,
+                        com.example.chat.ui.settings.SettingsDestination.HomeQrScan,
+                        com.example.chat.ui.settings.SettingsDestination.HomeAccountSettings,
+                        com.example.chat.ui.settings.SettingsDestination.HomeToggleBrightness,
+                    )) {
+                        openHomeTool(dest.name)
+                    } else if (dest == com.example.chat.ui.settings.SettingsDestination.NetworkUsage) {
                         pushedNetworkUsage = true
                     } else if (dest == com.example.chat.ui.settings.SettingsDestination.DataUsage) {
                         pushedDataUsage = true
@@ -1163,7 +1360,8 @@ fun AppRoot() {
                     { id -> ServiceLocator.apiBackend.users.firstOrNull { it.id == id } }
                 val detail = detailTask
                 // System Back from a task detail returns to the task list, not out of the Tasks tab.
-                androidx.activity.compose.BackHandler(enabled = detail != null && !editorOpen) { setDetailTaskId(null) }
+                // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                com.example.chat.ui.kit.ChatyPredictiveBackHandler(enabled = detail != null && !editorOpen) { setDetailTaskId(null) }
                 if (taskUser != null && detail != null) {
                     com.example.chat.ui.tasks.TaskDetailScreen(
                         task = detail,
@@ -1183,6 +1381,8 @@ fun AppRoot() {
                         onOpenDetail = { setDetailTaskId(it.id) },
                         onEditTask = { setEditorState(true, it.id) },
                         onCreateTask = { setEditorState(true, null) },
+                        searchTick = taskSearchTick,
+                        onSearchTickConsumed = { taskSearchTick = 0 },
                     )
                 }
                 if (editorOpen && taskUser != null && (editorTaskId == null || editorTask != null)) {
@@ -1237,13 +1437,62 @@ fun AppRoot() {
                     )
                 }
                 }
+                val shellHeaderTemplates = com.example.chat.ui.chats.bundles.messageBundleHome(
+                    com.example.chat.ui.chats.home.resolveHomeTemplates(ServiceLocator.templateController.config,
+                        com.example.chat.core.preferences.HomePresentationPolicy.isDefault(shellHome.homeStyle),
+                        ServiceLocator.templateController.chatList))
+                val shellHeaderStyle = com.example.chat.ui.chats.home.effectiveHomeHeaderStyle(shellHome.homeStyle,
+                    com.example.chat.core.preferences.HomePresentationPolicy.listStyle(shellHome.homeStyle), shellHeaderTemplates.headerStyle)
+                val shellHeaderIdentity = com.example.chat.ui.chats.home.HomeIdentity(
+                    homeProfile?.displayName.orEmpty(), homeProfile?.username.orEmpty(), homeProfile?.about.orEmpty(),
+                    homeProfile?.avatarInitials ?: "C", homeProfile?.avatarColorHex, homeProfile?.avatarUrl)
+                val shellHeaderModel = com.example.chat.ui.navigation.HomeHeaderModel(
+                    com.example.chat.ui.chats.bundles.messageBundleTheme(resolvedTheme), shellHome, shellHeaderStyle,
+                    com.example.chat.core.preferences.HomePresentationPolicy.listStyle(shellHome.homeStyle),
+                    com.example.chat.ui.chats.home.compactBarTitle(
+                        com.example.chat.core.preferences.HomePresentationPolicy.listStyle(shellHome.homeStyle), shellHeaderStyle,
+                        null, shellHome.setMyName, shellHome.myNameOverride, shellHeaderIdentity.displayName,
+                        shellHeaderIdentity.username, true), shellHeaderIdentity, false,
+                    ServiceLocator.apiBackend.requiresSubscription, ServiceLocator.apiBackend.subscriptionErrorMessage,
+                    emptySet(), 0, false, false, false,
+                    shellHome.showSearchBar,
+                    com.example.chat.ui.chats.home.resolveSearchPlacement(shellHome.searchPlacement, shellHome.disableSearchBar),
+                    "Search chat names and latest messages…", false, false,
+                    shellPrefsCtl.gbBool("nav_hide_tasks", false),
+                    shellPrefsCtl.gbBool("nav_hide_updates", false) && ReleaseFeatures.STATUS_UPDATES)
+                val homeHeaderController = remember(rootAccount) {
+                    com.example.chat.ui.navigation.HomeHeaderController().also { it.baseModel = shellHeaderModel }
+                }
+                androidx.compose.runtime.SideEffect { homeHeaderController.baseModel = shellHeaderModel }
                 com.example.chat.ui.navigation.MainNavigationShell(
+                    homeHeaderController = homeHeaderController,
+                    accountSessionIdentity = rootAccount,
+                    bannerPlaybackSelected = !pushedProfile && !pushedSettings && !pushedEditProfile &&
+                    !lockRequired && settingsSub == null && !accountSwitcherOpen && !accountRecentsOpen &&
+                    !pushedSettingsSearch && !pushedMessageManagement && !pushedScheduled && !pushedAutoReply &&
+                    !pushedAccount && !pushedUniversalAppearance && !pushedComponentStyles && !pushedThemeStudio &&
+                    !pushedAppIcon && !pushedNetworkUsage && !pushedDataUsage && !pushedTasks && !pushedUpdates &&
+                    storyCapture == null && !showCenterEffects && !showCallPicker,
+                    homeToolRequest = homeToolRequest,
+                    onHomeToolDestinationCancelled = { request ->
+                        if (homeToolRequest === request && request.owner === ServiceLocator.apiBackend.authSnapshot()) {
+                            homeToolRequest = null
+                            homeToolDestinationReady = false
+                            android.widget.Toast.makeText(shellCtx, "Home tool navigation cancelled.", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onHomeToolDestinationReady = { request ->
+                        if (homeToolRequest === request && request.owner === ServiceLocator.apiBackend.authSnapshot()) homeToolDestinationReady = true
+                    },
                     unreadCounts = ServiceLocator.apiBackend.conversations.filter { !it.isArchived }.let { conversations ->
                         mapOf("chats" to conversations.filter { !shellHome.separateChatsAndGroups || !it.isGroup }.sumOf { it.unreadCount },
                             "groups" to conversations.filter { it.isGroup }.sumOf { it.unreadCount })
                     },
-                    rootHeaderActions = {
+                    // TAS-SEARCH-1: header actions receive the visible destination id.
+                    // Prior: rootHeaderActions took no destination parameter.
+                    rootHeaderActions = { headerDestinationId ->
                         com.example.chat.ui.navigation.ReferenceRootActions(
+                            showOverflow = true,
                             colors = shellColors, user = ServiceLocator.apiBackend.currentUser?.let { u ->
                                 com.example.chat.domain.models.UserProfile(
                                     id = u.id, displayName = u.displayName, username = u.username,
@@ -1251,9 +1500,20 @@ fun AppRoot() {
                                     about = u.about, lastSeenAt = java.time.Instant.now(),
                                 )
                             },
-                            onSearch = { route = AuthRoute.GlobalSearch },
+                            onSearch = {
+                            // Prior: onSearch = { route = AuthRoute.GlobalSearch },
+                            if (headerDestinationId == "tasks") {
+                                // A task detail covering the list returns to the list first; the
+                                // create/edit sheet is a modal dialog and cannot be behind a tap.
+                                val searchOwner = ServiceLocator.apiBackend.authSnapshot()
+                                val searchAccountKey = org.json.JSONArray(listOf(searchOwner.baseUrl.trimEnd('/'), searchOwner.tenantId, searchOwner.userId.orEmpty())).toString()
+                                if (detailTaskIds.containsKey(searchAccountKey)) detailTaskIds = detailTaskIds - searchAccountKey
+                                taskSearchTick++
+                            } else route = AuthRoute.GlobalSearch
+                        },
                             onSettings = { pushedSettings = true },
                             onAccountSwitcher = { accountRecentsOpen = true },
+                            searchLabel = if (headerDestinationId == "tasks") "Search tasks" else "Search chats and messages",
                         )
                     },
                     colors = shellColors,
@@ -1369,6 +1629,7 @@ fun AppRoot() {
                                 val destinationUser = homeProfile
                                 if (destinationUser != null) {
                                     com.example.chat.ui.settings.SettingsRootScreen(
+                                        availableHomeTools = availableHomeTools,
                                         preferences = ServiceLocator.preferencesController,
                                         themeController = themeController,
                                         // Previous conversion: user = toDomainUser(apiUser),
@@ -1386,6 +1647,8 @@ fun AppRoot() {
                             }
                             com.example.chat.core.templates.ChatyNavigationDestinationIds.chats -> {
                 com.example.chat.ui.ChatsHomeHost(
+                    homeToolRequest = homeToolRequest.takeIf { homeToolDestinationReady },
+                    onHomeToolConsumed = { request -> if (homeToolRequest === request) homeToolRequest = null },
                     forcedType = null, pageTitle = null, gate = gate,
                     onNewCall = { showCallPicker = true },
                     onOpenDestination = { id ->
@@ -1532,7 +1795,10 @@ fun AppRoot() {
                                         onDismissRequest = { showCallPicker = false },
                                         properties = androidx.compose.ui.window.DialogProperties(
                                             usePlatformDefaultWidth = false,
-                                            decorFitsSystemWindows = true,
+                                            // Picker owns system-bar padding. Do not also fit its dialog decor:
+                                            // the edge-to-edge window must deliver real bottom insets to Compose.
+                                            // Previous: decorFitsSystemWindows = true,
+                                            decorFitsSystemWindows = false,
                                         ),
                                     ) {
                                         val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -1620,11 +1886,13 @@ fun AppRoot() {
                 )
                 // Hidden Tasks/Updates pushed from the home header overflow menu.
                 ChatyPushedPage(pushedTasks) {
-                    androidx.activity.compose.BackHandler { pushedTasks = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedTasks = false }
                     tasksDestinationContent()
                 }
                 ChatyPushedPage(pushedUpdates) {
-                    androidx.activity.compose.BackHandler { pushedUpdates = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedUpdates = false }
                     updatesDestinationContent()
                 }
                 if (showCenterEffects) com.example.chat.ui.camera.EffectPickerHost(onDismiss = { showCenterEffects = false })
@@ -1652,8 +1920,13 @@ fun AppRoot() {
                         }
                     }
                 }
-                ChatyPushedPage(pushedProfile) {
-                    androidx.activity.compose.BackHandler(enabled = settingsSub == null && !pushedSettings) { pushedProfile = false }
+                ChatyPushedPage(pushedProfile, bannerPlaybackSelected = !pushedSettings && !pushedEditProfile && !lockRequired && settingsSub == null && !accountSwitcherOpen && !accountRecentsOpen &&
+                    !pushedSettingsSearch && !pushedMessageManagement && !pushedScheduled && !pushedAutoReply &&
+                    !pushedAccount && !pushedUniversalAppearance && !pushedComponentStyles && !pushedThemeStudio &&
+                    !pushedAppIcon && !pushedNetworkUsage && !pushedDataUsage && !pushedTasks && !pushedUpdates &&
+                    storyCapture == null && !showCenterEffects && !showCallPicker) {
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler(enabled = settingsSub == null && !pushedSettings) { pushedProfile = false }
                     // Previous non-observable read: val profUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
                     val profUser = homeProfile
                     if (profUser != null) {
@@ -1685,13 +1958,19 @@ fun AppRoot() {
                         com.example.chat.ui.profile.ProfileLoadingPlaceholder()
                     }
                 }
-                ChatyPushedPage(pushedSettings) {
-                    androidx.activity.compose.BackHandler(enabled = settingsSub == null) { pushedSettings = false }
+                ChatyPushedPage(pushedSettings, bannerPlaybackSelected = !pushedEditProfile && !lockRequired && settingsSub == null && !accountSwitcherOpen && !accountRecentsOpen &&
+                    !pushedSettingsSearch && !pushedMessageManagement && !pushedScheduled && !pushedAutoReply &&
+                    !pushedAccount && !pushedUniversalAppearance && !pushedComponentStyles && !pushedThemeStudio &&
+                    !pushedAppIcon && !pushedNetworkUsage && !pushedDataUsage && !pushedTasks && !pushedUpdates &&
+                    storyCapture == null && !showCenterEffects && !showCallPicker) {
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler(enabled = settingsSub == null) { pushedSettings = false }
                     // Previous non-observable read: val pushedUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
                     val pushedUser = homeProfile
                     if (pushedUser != null) {
                         Box(Modifier.fillMaxSize()) {
                             com.example.chat.ui.settings.SettingsRootScreen(
+                                        availableHomeTools = availableHomeTools,
                                 preferences = ServiceLocator.preferencesController,
                                 themeController = themeController,
                                 user = pushedUser,
@@ -1706,7 +1985,8 @@ fun AppRoot() {
                     }
                 }
                 ChatyPushedPage(pushedSettingsSearch) {
-                    androidx.activity.compose.BackHandler { pushedSettingsSearch = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedSettingsSearch = false }
                     Box(Modifier.fillMaxSize()) {
                         com.example.chat.ui.settings.navigation.SettingsSearchScreen(
                             allSettings = com.example.chat.ui.settings.registry.SettingsRegistry.allSettings,
@@ -1766,7 +2046,8 @@ fun AppRoot() {
                     }
                 }
                 ChatyPushedPage(pushedScheduled) {
-                    androidx.activity.compose.BackHandler { pushedScheduled = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedScheduled = false }
                     Box(Modifier.fillMaxSize()) {
                         com.example.chat.ui.automation.ScheduledMessagesScreen(
                             service = ServiceLocator.scheduledMessageService,
@@ -1776,7 +2057,8 @@ fun AppRoot() {
                     }
                 }
                 ChatyPushedPage(pushedAutoReply) {
-                    androidx.activity.compose.BackHandler { pushedAutoReply = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedAutoReply = false }
                     Box(Modifier.fillMaxSize()) {
                         com.example.chat.ui.automation.AutoReplyRulesScreen(
                             engine = ServiceLocator.autoReplyRuleEngine,
@@ -1786,11 +2068,13 @@ fun AppRoot() {
                 }
                 ChatyPushedPage(pushedMessageManagement) {
                     // Originating settings route stays under this overlay (Dart Navigator.push).
-                    androidx.activity.compose.BackHandler { pushedMessageManagement = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedMessageManagement = false }
                     Box(Modifier.fillMaxSize()) { MessageManagementHost(onBack = { pushedMessageManagement = false }) }
                 }
                 ChatyPushedPage(pushedAppIcon) {
-                    androidx.activity.compose.BackHandler { pushedAppIcon = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedAppIcon = false }
                     val iconController = ServiceLocator.appIconController
                     androidx.compose.runtime.LaunchedEffect(iconController) { iconController.initialize() }
                     Box(Modifier.fillMaxSize()) {
@@ -1802,20 +2086,23 @@ fun AppRoot() {
                     }
                 }
                 ChatyPushedPage(pushedNetworkUsage) {
-                    androidx.activity.compose.BackHandler { pushedNetworkUsage = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedNetworkUsage = false }
                     com.example.chat.ui.settings.NetworkStatusScreen(
                         onBack = { pushedNetworkUsage = false },
                     )
                 }
                 ChatyPushedPage(pushedDataUsage) {
-                    androidx.activity.compose.BackHandler { pushedDataUsage = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedDataUsage = false }
                     com.example.chat.ui.settings.DataUsageScreen(
                         onBack = { pushedDataUsage = false },
                     )
                 }
                 ChatyPushedPage(pushedThemeStudio) {
                     // Dart main_navigation_shell Quick Actions "Theme Studio" -> ThemeStudioScreen(prefs, ThemeController).
-                    androidx.activity.compose.BackHandler { pushedThemeStudio = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedThemeStudio = false }
                     val tsContext = androidx.compose.ui.platform.LocalContext.current
                     // var tsJsonWaiter by remember { mutableStateOf<kotlinx.coroutines.CompletableDeferred<String?>?>(null) }
                     // val tsJsonLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1905,7 +2192,8 @@ fun AppRoot() {
                     }
                 }
                 ChatyPushedPage(pushedComponentStyles) {
-                    androidx.activity.compose.BackHandler { pushedComponentStyles = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedComponentStyles = false }
                     val customization = com.example.chat.ui.core.customization.rememberLoadedCustomizationController()
                     val overlayController = com.example.chat.ui.core.components.overlays.rememberChatyOverlayController()
                     Box(Modifier.fillMaxSize()) {
@@ -1917,7 +2205,8 @@ fun AppRoot() {
                     }
                 }
                 ChatyPushedPage(pushedUniversalAppearance) {
-                    androidx.activity.compose.BackHandler { pushedUniversalAppearance = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedUniversalAppearance = false }
                     Box(Modifier.fillMaxSize()) {
                         com.example.chat.ui.settings.appearance.UniversalAppearanceScreen(
                             controller = ServiceLocator.appearanceVariantController,
@@ -1931,7 +2220,8 @@ fun AppRoot() {
                     val accountOwner = accountApi.authSnapshot()
                     val acct = accountApi.currentUser
                     fun requireAccountOwner() { check(accountApi.authSnapshot() === accountOwner) { "Account changed. Reopen account settings." } }
-                    androidx.activity.compose.BackHandler { pushedAccount = false }
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { pushedAccount = false }
                     if (acct != null) androidx.compose.runtime.key(accountOwner) { Box(Modifier.fillMaxSize()) {
                         com.example.chat.ui.settings.account.AccountSettingsScreen(
                             user = com.example.chat.ui.settings.account.AccountUserInfo(
@@ -1962,19 +2252,23 @@ fun AppRoot() {
                                 url
                             },
                             // Dart: api.deleteUser(id), then purgeLocalDataForDeletedAccount(id), then logout.
-                            deleteAccountData = { id ->
+                            recoverAccountDeletion = { ServiceLocator.recoverAccountDeletionExplicitly(accountOwner) },
+                            deleteAccountData = { id, password ->
                                 requireAccountOwner()
                                 check(id == accountOwner.userId) { "Account changed. Reopen account settings." }
-                                accountApi.deleteUser(id, expectedScope = accountOwner)
-                                requireAccountOwner()
-                                ServiceLocator.purgeLocalDataForDeletedAccount(id)
+                                var deletionNamespace: String? = null
+                                check(accountApi.withAuthScope(accountOwner) { deletionNamespace = accountApi.currentAccountHash() }) {
+                                    "Account changed before deletion namespace capture."
+                                }
+                                val capturedNamespace = checkNotNull(deletionNamespace)
+                                ServiceLocator.deleteAccountWithReceipt(accountOwner, capturedNamespace, password)
                                 requireAccountOwner()
                             },
                             logout = { requireAccountOwner();accountApi.signOut() },
                         )
                     } }
                 }
-                ChatyPushedPage(pushedEditProfile) {
+                ChatyPushedPage(pushedEditProfile, bannerPlaybackSelected = !lockRequired && !accountSwitcherOpen && !accountRecentsOpen && storyCapture == null && !showCenterEffects && !showCallPicker) {
                     val editApi = ServiceLocator.apiBackend
                     val editOwner = editApi.authSnapshot()
                     fun editIsCurrent() = editApi.authSnapshot() === editOwner
@@ -1982,13 +2276,23 @@ fun AppRoot() {
                     // Previous non-observable read: val editUser = editApi.currentUser?.let { toDomainUser(it) }
                     val editUser = homeProfile?.takeIf { it.id == editOwner.userId }
                     if (editUser != null) androidx.compose.runtime.key(editOwner) {
+                        // Dedicated profile transport: shared chat-media URL fallback semantics stay intact.
+                        val editProfileStorage = remember(editOwner) {
+                            com.example.chat.data.api.ApiMediaStorageClient(
+                                baseUrl = { requireEditOwner(); editOwner.baseUrl.trimEnd('/').replace(Regex("/api/v[0-9]+$"), "") },
+                                tenantId = { requireEditOwner(); editOwner.tenantId },
+                                token = { requireEditOwner(); editOwner.token },
+                                strictProfileUrls = true,
+                            )
+                        }
                         // Dart ProfileMediaService._pickCompressUpload: bounded pick -> crop dialog -> compress -> upload.
                         val editFlow = com.example.chat.ui.profile.rememberProfileMediaFlow(
                             isCurrent = ::editIsCurrent,
                             service = {
                                 requireEditOwner()
                                 com.example.chat.data.services.ProfileMediaService(
-                                    storage = ServiceLocator.storageClient,
+                                    // Previous shared transport: storage = ServiceLocator.storageClient,
+                                    storage = editProfileStorage,
                                     currentUserId = { requireEditOwner(); editOwner.userId },
                                     imageCompressor = { b, sq, q ->
                                         requireEditOwner()
@@ -2051,7 +2355,9 @@ fun AppRoot() {
                 }
                 val sub = settingsSub
                 if (sub != null) {
-                    androidx.activity.compose.BackHandler { settingsSub = null }
+                    com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = sub) {
+                    // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                    com.example.chat.ui.kit.ChatyPredictiveBackHandler { settingsSub = null }
                     Box(Modifier.fillMaxSize()) {
                         val prefsForSave = ServiceLocator.preferencesController
                         androidx.compose.runtime.CompositionLocalProvider(
@@ -2061,6 +2367,7 @@ fun AppRoot() {
                             com.example.chat.ui.settings.SettingsSubHost(sub, onBack = { settingsSub = null }, onSwitch = { settingsSub = it })
                         }
                     }
+                                    } // First-level Settings predictive presentation.
                 }
                 val notice = settingsNotice
                 if (notice != null) {
@@ -2571,7 +2878,8 @@ fun AppRoot() {
                     }
                     return failed
                 }
-                androidx.activity.compose.BackHandler { navigation.goBack() }
+                // Previous registration retained inactive: androidx.activity.compose.BackHandler
+                com.example.chat.ui.kit.ChatyPredictiveBackHandler { navigation.goBack() }
                 androidx.compose.runtime.key(starOwner) {
                 com.example.chat.ui.chats.starred.StarredMessagesScreen(
                     // Previous source retained (superseded below):
@@ -2661,6 +2969,7 @@ fun AppRoot() {
             }
         }
         } // Shared safe-area route container.
+        } // Predictive route presentation; app lock and overlays stay outside.
         } // ChatFontScale provider
         } // ChatyWindowMetricsProvider
         }
@@ -2687,7 +2996,9 @@ fun AppRoot() {
         } // Shared safe-area app overlays. Island owns its hardware anchor separately.
         com.example.chat.ui.calls.GlobalCallHost(isAuthenticated = ServiceLocator.apiBackend.isAuthenticated)
         // Dart shouldShowLock: authenticated && lock enabled && _appLockRequired.
-        if (releaseNotesFinished && lockRequired && ServiceLocator.apiBackend.isAuthenticated &&
+        // Previous Home-only prerequisite: releaseNotesFinished && lockRequired.
+        // Other protected destinations have no changelog and must not suppress the lock.
+        if ((route != AuthRoute.Home || releaseNotesFinished) && protectedRoute && lockRequired && ServiceLocator.apiBackend.isAuthenticated &&
             ServiceLocator.preferencesController.security.isAppLockEnabled
         ) {
             com.example.chat.ui.settings.security.AppLockOverlay(
@@ -2790,6 +3101,7 @@ private fun rememberRootProfilePhoto(): RootProfilePhoto {
             baseUrl = { requireOwner(); owner.baseUrl.trimEnd('/').replace(Regex("/api/v[0-9]+$"), "") },
             tenantId = { requireOwner(); owner.tenantId },
             token = { requireOwner(); owner.token },
+            strictProfileUrls = true,
         )
     }
     val flow = androidx.compose.runtime.key(owner) { com.example.chat.ui.profile.rememberProfileMediaFlow(
@@ -2884,16 +3196,28 @@ private fun PreAuthLayer(visible: Boolean, content: @Composable () -> Unit) {
  * is not reproduced; only the pushed page's own enter/pop animation is.
  */
 @Composable
-private fun ChatyPushedPage(visible: Boolean, content: @Composable () -> Unit) {
+private fun ChatyPushedPage(visible: Boolean, bannerPlaybackSelected: Boolean = false, content: @Composable () -> Unit) {
     val appearance = ServiceLocator.appearanceVariantController
     val entry = appearance.entryAnimation
+    val reduceMotion = !com.example.chat.ui.kit.rememberSystemAnimationsAllowed() ||
+        com.example.chat.ui.theme.LocalThemeConfig.current.animationLevel <= 0.0 ||
+        com.example.chat.ui.kit.LocalReferenceLayoutPresentation.current.animationsDisabled
     androidx.compose.animation.AnimatedVisibility(
         visible = visible,
-        enter = com.example.chat.ui.core.theme.ChatyTransitions.enterTransition(entry),
-        exit = com.example.chat.ui.core.theme.ChatyTransitions.popExitTransition(entry),
+        // Previous unconditional transitions retained inactive:
+        // enter = com.example.chat.ui.core.theme.ChatyTransitions.enterTransition(entry),
+        // exit = com.example.chat.ui.core.theme.ChatyTransitions.popExitTransition(entry),
+        enter = if (reduceMotion) androidx.compose.animation.EnterTransition.None
+            else com.example.chat.ui.core.theme.ChatyTransitions.enterTransition(entry),
+        exit = if (reduceMotion) androidx.compose.animation.ExitTransition.None
+            else com.example.chat.ui.core.theme.ChatyTransitions.popExitTransition(entry),
     ) {
-        // Pushed pages own their touches; see PushedPageTouchGuard.
-        com.example.chat.ui.kit.PushedPageTouchGuard { content() }
+        // Pushed pages own their touches; banner visibility predicates are unchanged.
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = visible) {
+            com.example.chat.ui.kit.PushedPageTouchGuard {
+                com.example.chat.ui.profile.ProfileBannerSelection(visible && bannerPlaybackSelected, content)
+            }
+        }
     }
 }
 
@@ -2981,3 +3305,8 @@ private class RootMainDelivery {
 //                     onOpenLockedChats = { if (searchApi.authSnapshot() === searchAccount) route = AuthRoute.HiddenVault },
 //                         searchApi.conversations.firstOrNull { it.id == id && searchApi.authSnapshot() === searchAccount }?.let { c ->
 //                         searchApi.conversations.firstOrNull { it.id == id && searchApi.authSnapshot() === searchAccount }?.let { c ->
+
+// Previous implementation retained inactive (unified v4):
+//                                 accountApi.deleteUser(id, expectedScope = accountOwner)
+//                                 requireAccountOwner()
+//                                 ServiceLocator.purgeLocalDataForDeletedAccount(id)

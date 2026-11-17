@@ -599,7 +599,9 @@ private fun SecretPhraseDialog(result: CompletableDeferred<String?>) {
         onDismissRequest = { result.complete(null) },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Key, null, tint = colors.accent)
+
+//Icon(Icons.Rounded.Key, null, tint = colors.accent)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.key, Icons.Rounded.Key, null, tint = colors.accent)
                 Spacer(Modifier.width(8.dp))
                 Text("Set Secret Search Word")
             }

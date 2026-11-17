@@ -1,5 +1,7 @@
 package com.example.chat.ui.tasks
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -89,7 +91,9 @@ fun TaskDetailScreen(
 ) {
     // Handle system Back here as well as the toolbar so every host returns
     // to its task list/conversation instead of leaving the destination.
-    androidx.activity.compose.BackHandler(onBack = onBack)
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(task.id)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(onBack = onBack)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, onBack = onBack)
     var currentTask by remember(task) { mutableStateOf(task) }
     var confirmDelete by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
@@ -143,6 +147,7 @@ fun TaskDetailScreen(
     }
 
     Scaffold(
+        modifier = Modifier.chatyPredictiveBack(predictiveBack),
         containerColor = colors.background,
         topBar = {
             TopAppBar(
@@ -229,7 +234,9 @@ fun TaskDetailScreen(
                         ) {
                             TaskStatusBadge(currentTask.status, colors)
                             Spacer(Modifier.width(4.dp))
-                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = "Change Status", tint = colors.primary, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.ArrowDropDown, contentDescription = "Change Status", tint = colors.primary, modifier = Modifier.size(18.dp))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checklist, Icons.Rounded.ArrowDropDown, contentDescription = "Change Status", tint = colors.primary, modifier = Modifier.size(18.dp))
                         }
                         DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = statusMenuOpen, onDismissRequest = { statusMenuOpen = false }) {
                             for (s in TaskStatus.entries) {
@@ -302,7 +309,9 @@ fun TaskDetailScreen(
                     .background(colors.surfaceElevated),
             ) {
                 TaskPropertyRow(
-                    icon = { Icon(Icons.Rounded.Fingerprint, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp)) },
+                    icon = {
+//Icon(Icons.Rounded.Fingerprint, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.fingerprint, Icons.Rounded.Fingerprint, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp)) },
                     title = "Task ID",
                     colors = colors,
                 ) {
@@ -317,7 +326,9 @@ fun TaskDetailScreen(
                     Text(userOf(currentTask.creatorId)?.displayName ?: currentTask.creatorId, color = colors.foreground.copy(alpha = 0.6f), fontSize = 12.sp)
                 }
                 TaskPropertyRow(
-                    icon = { Icon(Icons.Rounded.CalendarToday, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp)) },
+                    icon = {
+//Icon(Icons.Rounded.CalendarToday, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.calendar, Icons.Rounded.CalendarToday, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp)) },
                     title = "Created At",
                     colors = colors,
                     mergeDescendants = true,
@@ -325,7 +336,9 @@ fun TaskDetailScreen(
                     Text(formatDate(currentTask.createdAt), color = colors.foreground.copy(alpha = 0.6f), fontSize = 12.sp)
                 }
                 TaskPropertyRow(
-                    icon = { Icon(Icons.Rounded.Alarm, contentDescription = null, tint = colors.warning, modifier = Modifier.size(20.dp)) },
+                    icon = {
+//Icon(Icons.Rounded.Alarm, contentDescription = null, tint = colors.warning, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.alarm, Icons.Rounded.Alarm, contentDescription = null, tint = colors.warning, modifier = Modifier.size(20.dp)) },
                     title = "Due Date",
                     colors = colors,
                     mergeDescendants = true,

@@ -406,10 +406,14 @@ fun DocumentReaderScreen(
                                             fontSize = 12.sp, color = colors.foregroundSecondary,
                                         )
                                         IconButton(onClick = { prevMatch() }) {
-                                            Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Previous match")
+
+//Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Previous match")
+                                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronUp, Icons.Rounded.KeyboardArrowUp, contentDescription = "Previous match")
                                         }
                                         IconButton(onClick = { nextMatch() }) {
-                                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Next match")
+
+//Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Next match")
+                                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronDown, Icons.Rounded.KeyboardArrowDown, contentDescription = "Next match")
                                         }
                                     }
                                 }
@@ -495,10 +499,14 @@ fun DocumentReaderScreen(
                             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         IconButton(onClick = { prevMatch() }) {
-                            Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Previous match")
+
+//Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Previous match")
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronUp, Icons.Rounded.KeyboardArrowUp, contentDescription = "Previous match")
                         }
                         IconButton(onClick = { nextMatch() }) {
-                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Next match")
+
+//Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Next match")
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronDown, Icons.Rounded.KeyboardArrowDown, contentDescription = "Next match")
                         }
                     }
                 }

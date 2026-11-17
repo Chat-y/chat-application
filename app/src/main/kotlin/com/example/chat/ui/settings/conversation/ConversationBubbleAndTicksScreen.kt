@@ -407,9 +407,14 @@ private fun ScopedConversationBubbleAndTicksScreen(
 
         var groupedPreview by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
         var showPreview by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
-        androidx.compose.material3.TextButton(onClick = { showPreview = !showPreview }) {
-            Text(if (showPreview) strings.getString(com.example.chat.R.string.conv_ui_hide_preview_78cb0e) else strings.getString(com.example.chat.R.string.conv_ui_show_preview_0e7698))
-        }
+        // Previous stock text action:
+        // androidx.compose.material3.TextButton(onClick = { showPreview = !showPreview }) {
+        //             Text(if (showPreview) strings.getString(com.example.chat.R.string.conv_ui_hide_preview_78cb0e) else strings.getString(com.example.chat.R.string.conv_ui_show_preview_0e7698))
+        //         }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = if (showPreview) strings.getString(com.example.chat.R.string.conv_ui_hide_preview_78cb0e) else strings.getString(com.example.chat.R.string.conv_ui_show_preview_0e7698),
+            onClick = { showPreview = !showPreview },
+        )
         ConversationAdaptiveSettingsBody(
             modifier = Modifier.weight(1f).fillMaxWidth().navigationBarsPadding().imePadding()
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)),
@@ -757,16 +762,32 @@ private fun ScopedConversationBubbleAndTicksScreen(
                 }
             }
             // Previous writer: androidx.compose.material3.TextButton(onClick = { preferences.editConversation { latest -> latest.copy(messageTextSize = 16.0) } }) {
-            androidx.compose.material3.TextButton(onClick = { model.edit { latest -> latest.copy(messageTextSize = 16.0) } }) {
-                Text(strings.getString(com.example.chat.R.string.conv_ui_reset_text_size_343a72))
-            }
-            androidx.compose.material3.TextButton(onClick = {
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = { model.edit { latest -> latest.copy(messageTextSize = 16.0) } }) {
+            //                 Text(strings.getString(com.example.chat.R.string.conv_ui_reset_text_size_343a72))
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(com.example.chat.R.string.conv_ui_reset_text_size_343a72),
+                onClick = { model.edit { latest -> latest.copy(messageTextSize = 16.0) } },
+            )
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = {
+            //                 // Previous writer: preferences.editConversation { latest -> latest.copy(convBackgroundColor = null, rightBubbleColor = null,
+            //                 model.edit { latest -> latest.copy(convBackgroundColor = null, rightBubbleColor = null,
+            //                     rightChatBubbleTextColor = null, rightBubbleTimeColor = null, leftBubbleColor = null,
+            //                     leftChatBubbleTextColor = null, leftBubbleTimeColor = null, deletedMessageIconColor = null,
+            //                     quotedDividerColor = null, quotedNameColor = null, quotedMessageColor = null, quotedBackgroundColor = null) }
+            //             }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_bubble_colours_d8233c)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(com.example.chat.R.string.conv_ui_reset_all_bubble_colours_d8233c),
+                onClick = {
                 // Previous writer: preferences.editConversation { latest -> latest.copy(convBackgroundColor = null, rightBubbleColor = null,
                 model.edit { latest -> latest.copy(convBackgroundColor = null, rightBubbleColor = null,
                     rightChatBubbleTextColor = null, rightBubbleTimeColor = null, leftBubbleColor = null,
                     leftChatBubbleTextColor = null, leftBubbleTimeColor = null, deletedMessageIconColor = null,
                     quotedDividerColor = null, quotedNameColor = null, quotedMessageColor = null, quotedBackgroundColor = null) }
-            }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_bubble_colours_d8233c)) }
+            },
+            )
             },
         )
     }

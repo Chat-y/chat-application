@@ -51,4 +51,20 @@ class ChatListPoliciesTest {
         val m = MultiAccountPolicy(maxAccounts = 2)
         assertTrue(m.add("u1")); assertTrue(m.add("u2")); assertFalse(m.add("u3"))
     }
+
+    /** Source-only regression fixture; not a server/device enforcement proof. */
+    @Test fun `default account cap is two and existing accounts can still switch`() {
+        val m = MultiAccountPolicy()
+        assertTrue(m.add("u1"))
+        assertTrue(m.add("u2"))
+        assertFalse(m.add("u3"))
+        assertEquals("u2", m.active())
+        assertTrue(m.add("u1"))
+        assertEquals("u1", m.active())
+        assertFalse(m.add("u3"))
+        m.remove("u2")
+        assertTrue(m.add("u3"))
+        assertEquals("u3", m.active())
+    }
+
 }

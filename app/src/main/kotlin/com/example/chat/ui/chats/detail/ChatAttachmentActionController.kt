@@ -123,7 +123,23 @@ class ChatAttachmentActionController(
     /** gbBool('key_more_docs_send') preference seam. */
     private val moreDocsSend: () -> Boolean = { false },
     private val now: () -> Long = System::currentTimeMillis,
+    // audit-05 v1 seam doc (replaced in v3, kept inactive per standing rule):
+    // /** Notified with the local path whenever a captured final outlives its
+    //  *  send call (submitted or failed). Tracking only: the registry this feeds
+    //  *  (CameraRetainedFinals) never deletes files; the retention window and the
+    //  *  close-on-durable-ack signal remain open owner decisions. */
+    /** Notified once, at pipeline start, with the local path of every finalized
+     *  capture entering the send pipeline (OpenCode 612): registration at start
+     *  covers every exit - submitted, failed, stale-account bail-outs,
+     *  cancellation, and an account switch after send - using the owner key the
+     *  caller captured at attachment start. Tracking only: the registry this
+     *  feeds (CameraRetainedFinals) never sends, retries, or deletes; rows whose
+     *  file is later removed by the owner are dropped by the hygiene prune. */
+    private val onLocalFinalRetained: (path: String) -> Unit = {},
 ) {
+    private fun noteLocalFinalRetained(path: String) {
+        try { onLocalFinalRetained(path) } catch (_: Exception) { /* Tracking must never break a send. */ }
+    }
     // ------------------------------------------------------------------ media
 
     /** Dart shareMedia(). [pickFiles] plays the platform picker for the type
@@ -362,6 +378,10 @@ class ChatAttachmentActionController(
         onSent: suspend () -> Unit = {},
         isStillCurrent: () -> Boolean = { true },
     ): CapturedPhotoSubmission {
+        // Register-at-start (OpenCode 612): every finalized file entering this
+        // pipeline is journaled once, so stale-account exits and cancellation
+        // are covered by construction. Never authorizes send/retry/delete.
+        noteLocalFinalRetained(path)
         try {
             kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException("Photo submission cancelled") }
             if (!isStillCurrent()) return CapturedPhotoSubmission.Failed
@@ -377,12 +397,23 @@ class ChatAttachmentActionController(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
+            // audit-05 v1 exit-path registration (replaced in v3 by register-at-start):
+            // // Kept per the toast contract; now also tracked so "kept" is recoverable.
+            // noteLocalFinalRetained(path)
+            // Kept per the toast contract; the start-of-pipeline registration
+            // already journaled it, so "kept" is recoverable.
             if (isStillCurrent()) toast("Could not send photo. Local photo kept.")
             return CapturedPhotoSubmission.Failed
         }
         kotlinx.coroutines.currentCoroutineContext().let { context ->
             context[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException("Photo submission cancelled") }
         }
+        // audit-05 v1 exit-path registration (replaced in v3 by register-at-start):
+        // // Submitted is not delivered: the local final outlives this call and is
+        // // tracked until an owner-decided retention policy exists. Never deleted here.
+        // noteLocalFinalRetained(path)
+        // Submitted is not delivered: the local final outlives this call and was
+        // already journaled at pipeline start. Never deleted here.
         // UI observer failure cannot reclassify an already-submitted message as an upload failure.
         if (isStillCurrent()) {
             try { onSent() } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -404,6 +435,9 @@ class ChatAttachmentActionController(
     ): Boolean {
         require(path.isNotBlank()) { "Missing recorded video." }
         require(mimeType == "video/mp4" && durationMs > 0) { "Invalid finalized video." }
+        // Register-at-start (OpenCode 612): covers submitted, failed,
+        // stale-account and cancelled exits alike. Never send/retry/delete.
+        noteLocalFinalRetained(path)
         try {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (!isStillCurrent()) return false
@@ -421,10 +455,18 @@ class ChatAttachmentActionController(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
+            // audit-05 v1 exit-path registration (replaced in v3 by register-at-start):
+            // // Kept per the toast contract; now also tracked so "kept" is recoverable.
+            // noteLocalFinalRetained(path)
+            // Kept per the toast contract; already journaled at pipeline start.
             toast("Could not send video. Your local recording is kept.")
             return false
         }
         // Submission already happened. Observer/UI failure must not offer a duplicate retry.
+        // audit-05 v1 exit-path registration (replaced in v3 by register-at-start):
+        // // Local recording outlives the send call and is tracked, never deleted here.
+        // noteLocalFinalRetained(path)
+        // Local recording outlives the send call; already journaled at pipeline start.
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (isStillCurrent()) {
             try {

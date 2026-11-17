@@ -8,14 +8,18 @@ class ReferenceRowPolicyTest {
     @Test fun untouchedDefaultUsesReferenceMetrics() {
         val t = resolveHomeTemplates(UserTemplateConfiguration(), true, ChatyTemplateRegistry.messageFirst.chatList).chatList
         assertTrue(t.referenceDefault)
-        assertEquals(72.0, t.itemHeight, 0.0)
+        // Previous default expectation: 72.0
+        assertEquals(64.0, t.itemHeight, 0.0)
+        assertTrue(t.compactDefault)
         assertEquals(com.example.chat.ui.chats.home.ChatListDensity.regular, t.density)
         assertTrue(t.showDivider)
     }
     @Test fun otherPresentationKeepsLegacyBaseline() {
         val t = resolveHomeTemplates(UserTemplateConfiguration(), false, ChatyTemplateRegistry.messageFirst.chatList).chatList
         assertFalse(t.referenceDefault)
-        assertEquals(76.0, t.itemHeight, 0.0)
+        // Previous default expectation: 76.0
+        assertEquals(64.0, t.itemHeight, 0.0)
+        assertTrue(t.compactDefault)
         assertFalse(t.showDivider)
     }
     @Test fun everyExplicitRowComponentWins() {
@@ -25,6 +29,7 @@ class ReferenceRowPolicyTest {
             val row = ChatyTemplateRegistry.get(id).chatList
             val actual = resolveHomeTemplates(config, true, row).chatList
             assertFalse(actual.referenceDefault)
+            assertFalse(actual.compactDefault)
             assertEquals(row.itemHeight, actual.itemHeight, 0.0)
             assertEquals(row.showDivider, actual.showDivider)
             assertEquals(row.avatarShape, actual.avatarShape)

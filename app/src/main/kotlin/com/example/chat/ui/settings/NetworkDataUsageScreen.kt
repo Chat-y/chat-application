@@ -95,7 +95,23 @@ fun NetworkStatusScreen(onBack: () -> Unit) {
                 // Previous unknown label: "Measuring…"
                 // ND1-54: do not imply a metered connection automatically changes upload policy.
                 Text("Metered connections may count toward your provider's data allowance. Check Storage & Data before sending large files.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = {
+                // Previous stock text action:
+                // TextButton(onClick = {
+                //                     // Prior ACTION_DATA_SAVER_SETTINGS is hidden from the public Android SDK.
+                //                     // Data usage is public on API 28+; older supported devices use network settings.
+                //                     val action = if (android.os.Build.VERSION.SDK_INT >= 28)
+                //                         android.provider.Settings.ACTION_DATA_USAGE_SETTINGS
+                //                     else android.provider.Settings.ACTION_WIRELESS_SETTINGS
+                //                     val settings = android.content.Intent(action)
+                //                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                //                     try { networkContext.startActivity(settings) }
+                //                     catch (_: Exception) {
+                //                         android.widget.Toast.makeText(networkContext, "Open Android Settings > Network > Data usage.", android.widget.Toast.LENGTH_LONG).show()
+                //                     }
+                //                 }) { Text("Android data usage settings", color = LocalAppColors.current.primary) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Android data usage settings",
+                    onClick = {
                     // Prior ACTION_DATA_SAVER_SETTINGS is hidden from the public Android SDK.
                     // Data usage is public on API 28+; older supported devices use network settings.
                     val action = if (android.os.Build.VERSION.SDK_INT >= 28)
@@ -107,7 +123,9 @@ fun NetworkStatusScreen(onBack: () -> Unit) {
                     catch (_: Exception) {
                         android.widget.Toast.makeText(networkContext, "Open Android Settings > Network > Data usage.", android.widget.Toast.LENGTH_LONG).show()
                     }
-                }) { Text("Android data usage settings", color = LocalAppColors.current.primary) }
+                },
+                    color = LocalAppColors.current.primary,
+                )
                 Text("These are Android link estimates. Transfer speeds on the Data Usage page are measured from Chaty traffic.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -196,9 +214,15 @@ fun DataUsageScreen(onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 // ND1-02/41: confirm first; quiet text button instead of a full-width outlined button.
-                TextButton(onClick = { confirmResetTotals = true }) {
-                    Text("Reset usage totals", color = colors.error)
-                }
+                // Previous stock text action:
+                // TextButton(onClick = { confirmResetTotals = true }) {
+                //                     Text("Reset usage totals", color = colors.error)
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Reset usage totals",
+                    onClick = { confirmResetTotals = true },
+                    color = colors.error,
+                )
             }
         }
 
@@ -229,9 +253,15 @@ fun DataUsageScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(onClick = { confirmResetTraffic = true }) {
-                        Text("Reset total app traffic", color = colors.error)
-                    }
+                    // Previous stock text action:
+                    // TextButton(onClick = { confirmResetTraffic = true }) {
+                    //                         Text("Reset total app traffic", color = colors.error)
+                    //                     }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Reset total app traffic",
+                        onClick = { confirmResetTraffic = true },
+                        color = colors.error,
+                    )
                 }
             }
         }
@@ -253,9 +283,15 @@ fun DataUsageScreen(onBack: () -> Unit) {
             var showAllRecent by remember { mutableStateOf(false) }
             (if (showAllRecent) recent else recent.take(10)).forEach { item -> androidx.compose.runtime.key(item.id) { TransferCard(item) } }
             if (recent.size > 10) {
-                TextButton(onClick = { showAllRecent = !showAllRecent }) {
-                    Text(if (showAllRecent) "Show fewer" else "Show all ${recent.size}", color = colors.primary)
-                }
+                // Previous stock text action:
+                // TextButton(onClick = { showAllRecent = !showAllRecent }) {
+                //                     Text(if (showAllRecent) "Show fewer" else "Show all ${recent.size}", color = colors.primary)
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = if (showAllRecent) "Show fewer" else "Show all ${recent.size}",
+                    onClick = { showAllRecent = !showAllRecent },
+                    color = colors.primary,
+                )
             }
         }
         Spacer(Modifier.height(24.dp).navigationBarsPadding())
@@ -267,8 +303,20 @@ fun DataUsageScreen(onBack: () -> Unit) {
             onDismissRequest = { confirmResetTotals = false },
             title = { Text("Reset usage totals?") },
             text = { Text("The uploaded, downloaded and per-type totals go back to zero. This cannot be undone.") },
-            dismissButton = { TextButton(onClick = { confirmResetTotals = false }) { Text("Cancel", color = colors.primary) } },
-            confirmButton = { TextButton(onClick = { confirmResetTotals = false; monitor.resetTotals() }) { Text("Reset", color = colors.error) } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { confirmResetTotals = false }) { Text("Cancel", color = colors.primary) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = { confirmResetTotals = false },
+                color = colors.primary,
+            ) },
+            confirmButton = { // Previous stock text action:
+            // TextButton(onClick = { confirmResetTotals = false; monitor.resetTotals() }) { Text("Reset", color = colors.error) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Reset",
+                onClick = { confirmResetTotals = false; monitor.resetTotals() },
+                color = colors.error,
+            ) },
         )
     }
     if (confirmResetTraffic) {
@@ -276,8 +324,20 @@ fun DataUsageScreen(onBack: () -> Unit) {
             onDismissRequest = { confirmResetTraffic = false },
             title = { Text("Reset total app traffic?") },
             text = { Text("The total Chaty network traffic counters go back to zero. This cannot be undone.") },
-            dismissButton = { TextButton(onClick = { confirmResetTraffic = false }) { Text("Cancel", color = colors.primary) } },
-            confirmButton = { TextButton(onClick = { confirmResetTraffic = false; ServiceLocator.appTrafficMonitor.resetTotals() }) { Text("Reset", color = colors.error) } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { confirmResetTraffic = false }) { Text("Cancel", color = colors.primary) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = { confirmResetTraffic = false },
+                color = colors.primary,
+            ) },
+            confirmButton = { // Previous stock text action:
+            // TextButton(onClick = { confirmResetTraffic = false; ServiceLocator.appTrafficMonitor.resetTotals() }) { Text("Reset", color = colors.error) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Reset",
+                onClick = { confirmResetTraffic = false; ServiceLocator.appTrafficMonitor.resetTotals() },
+                color = colors.error,
+            ) },
         )
     }
 }
@@ -430,3 +490,9 @@ private fun statusLabel(status: TransferStatus): String = when (status) {
 
 private fun formatKbps(kbps: Long): String =
     if (kbps >= 1000) String.format(java.util.Locale.getDefault(), "%.1f Mbps", kbps / 1000.0) else "$kbps kbps"
+
+// Complete original-line retention for review (inactive).
+            //             dismissButton = { TextButton(onClick = { confirmResetTotals = false }) { Text("Cancel", color = colors.primary) } },
+            //             confirmButton = { TextButton(onClick = { confirmResetTotals = false; monitor.resetTotals() }) { Text("Reset", color = colors.error) } },
+            //             dismissButton = { TextButton(onClick = { confirmResetTraffic = false }) { Text("Cancel", color = colors.primary) } },
+            //             confirmButton = { TextButton(onClick = { confirmResetTraffic = false; ServiceLocator.appTrafficMonitor.resetTotals() }) { Text("Reset", color = colors.error) } },

@@ -1,5 +1,7 @@
 package com.example.chat.ui.profile
 
+import com.example.chat.ui.navigation.ReferenceLayoutMetrics as ProfileMetrics
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -248,6 +250,31 @@ fun rememberProfileMediaPicker(
             return
         }
         scope.launch {
+            // Inspect the signature, not just a provider MIME label, so GIF DP never flattens silently.
+            try {
+                if (BannerGifInput.isGif(context, uri)) {
+                    if (tagIsAvatar) {
+                        if (active()) onError("GIF profile photos are not supported. Choose a still image.")
+                    } else {
+                        val gif = BannerGifInput.copy(context, uri, files)
+                        if (active() && files.transfer(gif)) onResult(gif) else files.remove(gif)
+                    }
+                    return@launch
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                if (active()) onError(ProfileErrorMessages.friendly(context, failure, "Could not read GIF banner."))
+                return@launch
+            }
+            // Banner videos bypass bitmap decode/crop; avatars remain image-only.
+            if (!tagIsAvatar && context.contentResolver.getType(uri)?.startsWith("video/") == true) {
+                try {
+                    val video = BannerVideoInput.copy(context, uri, files)
+                    if (active() && files.transfer(video)) onResult(video) else files.remove(video)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) { if (active()) onError(ProfileErrorMessages.friendly(context, failure, "Could not read banner video. Choose a short H.264 MP4.")) }
+                return@launch
+            }
             val file = try {
                 copyPickToCache(context, uri, state.value?.pendingSquare ?: square, files)
             } catch (tooLarge: PickTooLargeException) {
@@ -275,7 +302,9 @@ fun rememberProfileMediaPicker(
         // One-time init; launchers are captured by reference and stable.
         state.value = ProfileMediaPickerState(
             launchGallery = { check(active()); galleryLauncher.launch(
-                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                // Previous: PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                androidx.activity.result.PickVisualMediaRequest(if (state.value?.pendingIsAvatar != false)
+                    ActivityResultContracts.PickVisualMedia.ImageOnly else ActivityResultContracts.PickVisualMedia.ImageAndVideo),
             ) },
             launchCamera = {
                 check(active())
@@ -700,22 +729,83 @@ private fun ProfileImageCropperOwnedDialog(
                 )
             }
             Spacer(Modifier.height(12.dp))
-            Row(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
-                OutlinedButton(
+            // Extra breathing room above the gesture area; existing safe/mandatory insets stay intact.
+            // Previous footer spacing: Row(Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
+            Row(Modifier.padding(start = ProfileMetrics.profileCropHorizontalDp.dp, end = ProfileMetrics.profileCropHorizontalDp.dp, top = ProfileMetrics.profileCropTopDp.dp, bottom = ProfileMetrics.profileCropBottomDp.dp)) {
+//                 OutlinedButton(
+//                     onClick = { if (!isProcessing) onDone(null) },
+//                     colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.foregroundSecondary),
+//                     border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderSubtle),
+//                     shape = RoundedCornerShape(14.dp),
+//                     modifier = Modifier
+//                         .weight(1f)
+//                         .height(50.dp),
+//                 ) {
+//                     Text(context.getString(com.example.chat.R.string.profile_crop_cancel), fontWeight = FontWeight.SemiBold)
+//                 }
+                com.example.chat.ui.kit.ChatyTextButton(
                     onClick = { if (!isProcessing) onDone(null) },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.foregroundSecondary),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderSubtle),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(50.dp),
-                ) {
-                    Text(context.getString(com.example.chat.R.string.profile_crop_cancel), fontWeight = FontWeight.SemiBold)
-                }
+                    label = context.getString(com.example.chat.R.string.profile_crop_cancel),
+                    color = colors.foregroundSecondary,
+                    enabled = !isProcessing,
+                    modifier = Modifier.weight(1f).height(ProfileMetrics.profileCropActionHeightDp.dp),
+                )
                 Spacer(Modifier.width(14.dp))
-                Button(
+//                 Button(
+//                     onClick = {
+//                         if (isProcessing || image == null) return@Button
+//                         isProcessing = true
+//                         scope.launch {
+//                             try {
+//                                 val out = captureCrop(
+//                                     context = context,
+//                                     sourceFile = sourceFile,
+//                                     isAvatar = isAvatar,
+//                                     quarterRotations = quarterRotations,
+//                                     userScale = userScale,
+//                                     userOffset = userOffset,
+//                                     cropWpx = cropWpx,
+//                                     cropHpx = cropHpx,
+//                                     files = files,
+//                                 )
+//                                 isProcessing = false
+//                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+//                                 if (isCurrent()) onDone(out) else files?.close()
+//                             } catch (e: kotlinx.coroutines.CancellationException) {
+//                                 throw e
+//                             } catch (e: Throwable) {
+//                                 if (isCurrent()) onError(context.getString(com.example.chat.R.string.profile_crop_failure, ProfileErrorMessages.friendly(context, e, context.getString(com.example.chat.R.string.profile_retry))))
+//                             } finally { isProcessing = false }
+//                         }
+//                     },
+//                     enabled = !isProcessing && image != null,
+//                     colors = ButtonDefaults.buttonColors(
+//                         containerColor = colors.primary,
+//                         contentColor = colors.onPrimary,
+//                     ),
+//                     shape = RoundedCornerShape(14.dp),
+//                     modifier = Modifier
+//                         .weight(1f)
+//                         .height(50.dp),
+//                 ) {
+//                     if (isProcessing) {
+//                         CircularProgressIndicator(
+//                             modifier = Modifier.size(18.dp),
+//                             strokeWidth = 2.dp,
+//                             color = colors.onPrimary,
+//                         )
+//                     } else {
+//                         com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.check, semanticLabel = null, modifier = Modifier.size(20.dp))
+//                     }
+//                     Spacer(Modifier.width(6.dp))
+//                     Text(
+//                         if (isProcessing) context.getString(com.example.chat.R.string.profile_crop_processing) else context.getString(com.example.chat.R.string.profile_crop_use),
+//                         fontWeight = FontWeight.Bold,
+//                     )
+//                 }
+                com.example.chat.ui.kit.ChatyActionButton(
                     onClick = {
-                        if (isProcessing || image == null) return@Button
+                        if (isProcessing || image == null) return@ChatyActionButton
                         isProcessing = true
                         scope.launch {
                             try {
@@ -741,14 +831,11 @@ private fun ProfileImageCropperOwnedDialog(
                         }
                     },
                     enabled = !isProcessing && image != null,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.primary,
-                        contentColor = colors.onPrimary,
-                    ),
-                    shape = RoundedCornerShape(14.dp),
+                    containerColor = colors.primary,
+                    contentColor = colors.onPrimary,
                     modifier = Modifier
                         .weight(1f)
-                        .height(50.dp),
+                        .height(ProfileMetrics.profileCropActionHeightDp.dp),
                 ) {
                     if (isProcessing) {
                         CircularProgressIndicator(
@@ -1101,6 +1188,15 @@ fun rememberProfileMediaPicker(
             return
         }
         scope.launch {
+            // Banner videos bypass bitmap decode/crop; avatars remain image-only.
+            if (!tagIsAvatar && context.contentResolver.getType(uri)?.startsWith("video/") == true) {
+                try {
+                    val video = BannerVideoInput.copy(context, uri, files)
+                    if (active() && files.transfer(video)) onResult(video) else files.remove(video)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) { if (active()) onError(ProfileErrorMessages.friendly(context, failure, "Could not read banner video. Choose a short H.264 MP4.")) }
+                return@launch
+            }
             val file = try {
                 copyPickToCache(context, uri, state.value?.pendingSquare ?: square, files)
             } catch (tooLarge: PickTooLargeException) {
@@ -1128,7 +1224,9 @@ fun rememberProfileMediaPicker(
         // One-time init; launchers are captured by reference and stable.
         state.value = ProfileMediaPickerState(
             launchGallery = { check(active()); galleryLauncher.launch(
-                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                // Previous: PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                androidx.activity.result.PickVisualMediaRequest(if (state.value?.pendingIsAvatar != false)
+                    ActivityResultContracts.PickVisualMedia.ImageOnly else ActivityResultContracts.PickVisualMedia.ImageAndVideo),
             ) },
             launchCamera = {
                 check(active())

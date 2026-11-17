@@ -17,6 +17,14 @@ class LeasedFile(val file: File, private val onRelease: () -> Unit) : AutoClosea
     override fun close() = release()
 }
 
+/** A live cache receipt, not a recovery guarantee. Eviction is pinned, while
+ * explicit clear/account deletion can revoke it and invalidate [isLive]. */
+class MediaRetentionPin(private val live: () -> Boolean, private val release: () -> Unit) : AutoCloseable {
+    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun isLive(): Boolean = !closed.get() && live()
+    override fun close() { if (closed.compareAndSet(false, true)) release() }
+}
+
 /** Outcome of reading the local store. Corrupt and Closed are NOT misses and must never fall back to plaintext/network. */
 sealed class StoreRead<out T> {
     data class Hit<T>(val value: T) : StoreRead<T>()
@@ -104,6 +112,17 @@ interface AttachmentStore {
 
     /** Fully verified decrypted copy in a private temp file. Deleted on release/clear/logout/start. */
     fun lease(ref: AttachmentRef): StoreRead<LeasedFile>
+
+    /** Bound consumer lease; defaults preserve older storage implementations. */
+    fun leaseForSession(ref: AttachmentRef, expectedSession: String): StoreRead<LeasedFile> {
+        if (session() != expectedSession) return StoreRead.Closed
+        val result = lease(ref)
+        if (session() != expectedSession) {
+            if (result is StoreRead.Hit) result.value.release()
+            return StoreRead.Closed
+        }
+        return result
+    }
 
     /** Decrypts to an owned export file. Denied when [expectedSession] != [session] (checked before decrypting and
      *  again after), or when view-once/restricted. [maxLifetimeMs] is an upper bound; no UX promise is implied. */

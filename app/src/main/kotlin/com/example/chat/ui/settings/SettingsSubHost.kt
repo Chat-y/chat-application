@@ -65,68 +65,82 @@ fun SettingsSubHost(
             unblockUser = { id -> withContext(Dispatchers.IO) { ServiceLocator.apiBackend.contactsPlane(screenAccountScope).unblock(id) } },
         )
         SettingsDestination.Effects -> NavigationEffectsScreen(preferences = prefs, onBack = onBack)
-        SettingsDestination.ToastNotifications -> NotificationToastSettingsScreen(
-            preferences = prefs, onBack = onBack,
-        )
-        // Dart settings_root_screen '/settings/notifications' => NotificationSettingsPage (the toast-only screen is not
-        // instantiated anywhere in Dart). Dynamic Island native bridge has no Kotlin implementation: bridge = null.
-// Previous implementation retained:         SettingsDestination.Notifications -> com.example.chat.ui.settings.notifications.NotificationSettingsPage(
-// Previous implementation retained:             preferences = prefs, onBack = onBack,
-// Previous implementation retained:             bridge = com.example.chat.ui.island.AndroidDynamicIslandBridge(androidx.compose.ui.platform.LocalContext.current),
-// Previous implementation retained:             // Dart _previewDynamicIsland fallback: notificationService.triggerEventNotification(chat_bubble_rounded icon).
-// Previous implementation retained:             triggerEventNotification = { title, body, accent ->
-// Previous implementation retained:                 ServiceLocator.notifications.triggerEventNotification(
-// Previous implementation retained:                     title = title, body = body,
-// Previous implementation retained:                     icon = com.example.chat.data.realtime.EventNotificationIcon.chatBubble, colorArgb = accent,
-// Previous implementation retained:                 )
-// Previous implementation retained:             },
-// Previous implementation retained:         )
-        SettingsDestination.Notifications -> {
-            // Dedicated toast customization remains separate; the existing Notifications page is unchanged.
-            var showToastSettings by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-            BackHandler(enabled = showToastSettings) { showToastSettings = false }
-            if (showToastSettings) {
-                NotificationToastSettingsScreen(preferences = prefs, onBack = { showToastSettings = false })
-            } else {
-                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
-                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.weight(1f)) {
-                        com.example.chat.ui.settings.notifications.NotificationSettingsPage(
-            preferences = prefs, onBack = onBack,
-            bridge = com.example.chat.ui.island.AndroidDynamicIslandBridge(androidx.compose.ui.platform.LocalContext.current),
-            // Dart _previewDynamicIsland fallback: notificationService.triggerEventNotification(chat_bubble_rounded icon).
-            triggerEventNotification = { title, body, accent ->
-                ServiceLocator.notifications.triggerEventNotification(
-                    title = title, body = body,
-                    icon = com.example.chat.data.realtime.EventNotificationIcon.chatBubble, colorArgb = accent,
-                )
-            },
-        )
-                    }
-                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.navigationBarsPadding()) {
-                    com.example.chat.ui.kit.GbSettingRow(
-                        title = context.getString(com.example.chat.R.string.call_toast_settings_entry),
-// Previous implementation retained:                         subtitle = context.getString(com.example.chat.R.string.call_toast_settings_subtitle),
-                        subtitle = buildList {
-                            val t = prefs.toasts
-                            if (t.onlineToastEnabled) add("Online")
-                            if (t.storyToastEnabled) add("Story")
-                            if (t.profileToastEnabled) add("Profile")
-                            if (t.typingToastEnabled) add("Typing")
-                        }.let { enabled -> if (enabled.isEmpty()) "All toast types off" else enabled.joinToString() + " on" },
-                        hasSubScreen = true,
-                        onTap = { showToastSettings = true },
+        SettingsDestination.ToastNotifications, SettingsDestination.Notifications ->
+            com.example.chat.ui.settings.notifications.UnifiedNotificationSettingsScreen(
+                preferences = prefs, onBack = onBack,
+                initialActivityTab = destination == SettingsDestination.ToastNotifications,
+                bridge = com.example.chat.ui.island.AndroidDynamicIslandBridge(context),
+                triggerEventNotification = { title, body, accent ->
+                    ServiceLocator.notifications.triggerEventNotification(
+                        title = title, body = body,
+                        icon = com.example.chat.data.realtime.EventNotificationIcon.chatBubble, colorArgb = accent,
                     )
-                    }
-                }
-            }
-        }
+                },
+            )
+// Prior separate notification routes:         SettingsDestination.ToastNotifications -> NotificationToastSettingsScreen(
+// Prior separate notification routes:             preferences = prefs, onBack = onBack,
+// Prior separate notification routes:         )
+// Prior separate notification routes:         // Dart settings_root_screen '/settings/notifications' => NotificationSettingsPage (the toast-only screen is not
+// Prior separate notification routes:         // instantiated anywhere in Dart). Dynamic Island native bridge has no Kotlin implementation: bridge = null.
+// Prior separate notification routes: // Previous implementation retained:         SettingsDestination.Notifications -> com.example.chat.ui.settings.notifications.NotificationSettingsPage(
+// Prior separate notification routes: // Previous implementation retained:             preferences = prefs, onBack = onBack,
+// Prior separate notification routes: // Previous implementation retained:             bridge = com.example.chat.ui.island.AndroidDynamicIslandBridge(androidx.compose.ui.platform.LocalContext.current),
+// Prior separate notification routes: // Previous implementation retained:             // Dart _previewDynamicIsland fallback: notificationService.triggerEventNotification(chat_bubble_rounded icon).
+// Prior separate notification routes: // Previous implementation retained:             triggerEventNotification = { title, body, accent ->
+// Prior separate notification routes: // Previous implementation retained:                 ServiceLocator.notifications.triggerEventNotification(
+// Prior separate notification routes: // Previous implementation retained:                     title = title, body = body,
+// Prior separate notification routes: // Previous implementation retained:                     icon = com.example.chat.data.realtime.EventNotificationIcon.chatBubble, colorArgb = accent,
+// Prior separate notification routes: // Previous implementation retained:                 )
+// Prior separate notification routes: // Previous implementation retained:             },
+// Prior separate notification routes: // Previous implementation retained:         )
+// Prior separate notification routes:         SettingsDestination.Notifications -> {
+// Prior separate notification routes:             // Dedicated toast customization remains separate; the existing Notifications page is unchanged.
+// Prior separate notification routes:             var showToastSettings by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+// Prior separate notification routes:             BackHandler(enabled = showToastSettings) { showToastSettings = false }
+// Prior separate notification routes:             if (showToastSettings) {
+// Prior separate notification routes:                 NotificationToastSettingsScreen(preferences = prefs, onBack = { showToastSettings = false })
+// Prior separate notification routes:             } else {
+// Prior separate notification routes:                 androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+// Prior separate notification routes:                     androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.weight(1f)) {
+// Prior separate notification routes:                         com.example.chat.ui.settings.notifications.NotificationSettingsPage(
+// Prior separate notification routes:             preferences = prefs, onBack = onBack,
+// Prior separate notification routes:             bridge = com.example.chat.ui.island.AndroidDynamicIslandBridge(androidx.compose.ui.platform.LocalContext.current),
+// Prior separate notification routes:             // Dart _previewDynamicIsland fallback: notificationService.triggerEventNotification(chat_bubble_rounded icon).
+// Prior separate notification routes:             triggerEventNotification = { title, body, accent ->
+// Prior separate notification routes:                 ServiceLocator.notifications.triggerEventNotification(
+// Prior separate notification routes:                     title = title, body = body,
+// Prior separate notification routes:                     icon = com.example.chat.data.realtime.EventNotificationIcon.chatBubble, colorArgb = accent,
+// Prior separate notification routes:                 )
+// Prior separate notification routes:             },
+// Prior separate notification routes:         )
+// Prior separate notification routes:                     }
+// Prior separate notification routes:                     androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.navigationBarsPadding()) {
+// Prior separate notification routes:                     com.example.chat.ui.kit.GbSettingRow(
+// Prior separate notification routes:                         title = context.getString(com.example.chat.R.string.call_toast_settings_entry),
+// Prior separate notification routes: // Previous implementation retained:                         subtitle = context.getString(com.example.chat.R.string.call_toast_settings_subtitle),
+// Prior separate notification routes:                         subtitle = buildList {
+// Prior separate notification routes:                             val t = prefs.toasts
+// Prior separate notification routes:                             if (t.onlineToastEnabled) add("Online")
+// Prior separate notification routes:                             if (t.storyToastEnabled) add("Story")
+// Prior separate notification routes:                             if (t.profileToastEnabled) add("Profile")
+// Prior separate notification routes:                             if (t.typingToastEnabled) add("Typing")
+// Prior separate notification routes:                         }.let { enabled -> if (enabled.isEmpty()) "All toast types off" else enabled.joinToString() + " on" },
+// Prior separate notification routes:                         hasSubScreen = true,
+// Prior separate notification routes:                         onTap = { showToastSettings = true },
+// Prior separate notification routes:                     )
+// Prior separate notification routes:                     }
+// Prior separate notification routes:                 }
+// Prior separate notification routes:             }
+// Prior separate notification routes:         }
         SettingsDestination.BackupRestore -> BackupAndRestoreScreen(
             preferences = prefs, onBack = onBack, onMessage = toast,
         )
         SettingsDestination.Universal -> {
+            com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = screenAccountScope to destination) {
             var sub by remember { mutableStateOf<UniversalSub?>(null) }
             val back = { if (sub == null) onBack() else sub = null }
-            BackHandler { back() }
+            // Previous registration retained inactive: BackHandler { back() }
+            com.example.chat.ui.kit.ChatyPredictiveBackHandler { back() }
             when (sub) {
                 null -> UniversalScreen(
                     preferences = prefs, onBack = onBack,
@@ -147,10 +161,13 @@ fun SettingsSubHost(
                 UniversalSub.Backup -> BackupAndRestoreScreen(preferences = prefs, onBack = { sub = null }, onMessage = toast)
                 UniversalSub.General -> UniversalGeneralSettingsScreen(preferences = prefs, themeController = theme, onBack = { sub = null })
             }
+                    } // Branch-local predictive presentation.
         }
         SettingsDestination.Conversation -> {
+            com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = screenAccountScope to destination) {
             var sub by remember { mutableStateOf<ConvSub?>(null) }
-            BackHandler(enabled = sub != null) { sub = null }
+            // Previous registration retained inactive: BackHandler(enabled = sub != null) { sub = null }
+            com.example.chat.ui.kit.ChatyPredictiveBackHandler(enabled = sub != null) { sub = null }
             when (sub) {
                 null -> ConversationSettingsPage(
                     preferences = prefs, onBack = onBack,
@@ -164,10 +181,13 @@ fun SettingsSubHost(
                 ConvSub.Entry -> ConversationEntryStyleScreen(preferences = prefs, onBack = { sub = null })
                 ConvSub.More -> ConversationMoreOptionsScreen(preferences = prefs, onBack = { sub = null })
             }
+                    } // Branch-local predictive presentation.
         }
         SettingsDestination.HomeScreen -> {
+            com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = screenAccountScope to destination) {
             var sub by remember { mutableStateOf<HomeSub?>(null) }
-            BackHandler(enabled = sub != null) { sub = null }
+            // Previous registration retained inactive: BackHandler(enabled = sub != null) { sub = null }
+            com.example.chat.ui.kit.ChatyPredictiveBackHandler(enabled = sub != null) { sub = null }
             when (sub) {
                 null -> HomeScreenSettingsPage(
                     preferences = prefs, onBack = onBack,
@@ -202,8 +222,10 @@ fun SettingsSubHost(
                 HomeSub.Fab -> HomeFabSettingsScreen(preferences = prefs, onBack = { sub = null })
                 HomeSub.Status -> StatusSettingsScreen(preferences = prefs, onBack = { sub = null })
             }
+                    } // Branch-local predictive presentation.
         }
         SettingsDestination.Calls -> {
+            com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = screenAccountScope to destination) {
             val store = ServiceLocator.callPresentationPrefs
             var rev by remember { androidx.compose.runtime.mutableIntStateOf(0) }
             androidx.compose.runtime.DisposableEffect(store) {
@@ -213,7 +235,8 @@ fun SettingsSubHost(
             }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
             var audio by remember { mutableStateOf(false) }
-            BackHandler(enabled = audio) { audio = false }
+            // Previous registration retained inactive: BackHandler(enabled = audio) { audio = false }
+            com.example.chat.ui.kit.ChatyPredictiveBackHandler(enabled = audio) { audio = false }
             @Suppress("UNUSED_EXPRESSION") rev
             var showBundles by remember { mutableStateOf(false) }
             if (audio) {
@@ -317,6 +340,7 @@ fun SettingsSubHost(
                     },
                 )
             }
+                    } // Branch-local predictive presentation.
         }
         SettingsDestination.Permissions -> com.example.chat.ui.settings.permissions.SystemPermissionsScreen(
             onBack = onBack,
@@ -422,8 +446,10 @@ fun SettingsSubHost(
             )
         }
         SettingsDestination.TemplateStudio -> {
+            com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = screenAccountScope to destination) {
             var component by remember { mutableStateOf<com.example.chat.core.templates.TemplateComponentType?>(null) }
-            BackHandler(enabled = component != null) { component = null }
+            // Previous registration retained inactive: BackHandler(enabled = component != null) { component = null }
+            com.example.chat.ui.kit.ChatyPredictiveBackHandler(enabled = component != null) { component = null }
             val c = component
             if (c == null) {
                 com.example.chat.ui.settings.templates.TemplatesSettingsScreen(
@@ -445,6 +471,7 @@ fun SettingsSubHost(
                     onMessage = toast,
                 )
             }
+                    } // Branch-local predictive presentation.
         }
         // Dart openWasteCleaning / openHomeShortcuts: modal sheets over the settings root.
         SettingsDestination.WasteCleaning -> com.example.chat.ui.settings.gb.GbStandaloneSheet(onDismiss = onBack) {

@@ -57,6 +57,21 @@ class AppLockCoordinator(
         while (checking) kotlinx.coroutines.delay(10)
     }
 
+    enum class InitialRouteAccess { Allowed, Locked, Unavailable }
+
+    /** A normal return from scheduleInitialIfNeeded is not proof of readiness. */
+    suspend fun checkInitialRouteAccess(): InitialRouteAccess {
+        awaitPendingCheck()
+        scheduleInitialIfNeeded()
+        awaitPendingCheck()
+        return when {
+            !isAuthenticated() || !isLockEnabled() -> InitialRouteAccess.Allowed
+            _lockRequired.value -> InitialRouteAccess.Locked
+            freshLoginSession || initialScheduled -> InitialRouteAccess.Allowed
+            else -> InitialRouteAccess.Unavailable
+        }
+    }
+
     /** Dart _scheduleInitialAppLockIfNeeded (cold start with a restored session). */
     suspend fun scheduleInitialIfNeeded() {
         if (!isAuthenticated() || !isLockEnabled()) return

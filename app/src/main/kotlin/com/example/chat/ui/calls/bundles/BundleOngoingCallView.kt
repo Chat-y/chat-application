@@ -123,7 +123,9 @@ private fun ChatyDefaultOngoingCall(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onMinimize) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, "Minimize", tint = Color.White)
+
+//Icon(Icons.Rounded.KeyboardArrowDown, "Minimize", tint = Color.White)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.pictureInPicture, Icons.Rounded.KeyboardArrowDown, "Minimize", tint = Color.White)
                 }
                 Surface(
                     shape = RoundedCornerShape(tokens.pillCornerRadiusDp.dp),
@@ -139,7 +141,9 @@ private fun ChatyDefaultOngoingCall(
                     )
                 }
                 IconButton(onClick = onInviteParticipant) {
-                    Icon(Icons.Rounded.PersonAdd, "Invite", tint = Color.White)
+
+//Icon(Icons.Rounded.PersonAdd, "Invite", tint = Color.White)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.personAdd, Icons.Rounded.PersonAdd, "Invite", tint = Color.White)
                 }
             }
 

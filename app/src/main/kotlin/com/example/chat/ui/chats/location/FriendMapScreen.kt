@@ -1,5 +1,6 @@
 package com.example.chat.ui.chats.location
 
+import com.example.chat.ui.kit.chatyDepth
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -291,7 +292,8 @@ fun FriendMapScreen(
                 shape = CircleShape,
                 // AUDIT-MAP-3: the chip floats over the map with no depth cue; every other floating
                 // element in this lane (mini window, pill) carries a shadow. Looks-only.
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).shadow(6.dp, CircleShape), // MAP-R1-038: redundant contentDescription removed (Text is read once)
+                // Previous (default black shadow): modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).shadow(6.dp, CircleShape), // MAP-R1-038: redundant contentDescription removed (Text is read once)
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).chatyDepth(6.dp, CircleShape), // MAP-R1-038: redundant contentDescription removed (Text is read once)
                 // .semantics { contentDescription = FriendMapCopy.MAP_STATUS_CHIP },
             ) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -329,7 +331,8 @@ fun FriendMapScreen(
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                 // AUDIT-MAP-3: the tray floats over the map like the mini window floats over chats;
                 // a small top-rounded shadow matches the lane's floating-element depth. Looks-only.
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().shadow(8.dp, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).heightIn(max = panelMaxHeight),
+                // Previous (default black shadow): modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().shadow(8.dp, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).heightIn(max = panelMaxHeight),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().chatyDepth(8.dp, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).heightIn(max = panelMaxHeight),
             ) {
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
                     // MAP-R4-197: drag-handle look removed (tray is not draggable); commented out, not deleted.
@@ -348,7 +351,9 @@ fun FriendMapScreen(
                             disabledContainerColor = mapColors.surfaceVariant, disabledContentColor = mapColors.onSurfaceVariant,
                         ) { tint ->
                             if (locating) FriendMapLocatingSpinner(tint)
-                            else Icon(Icons.Rounded.MyLocation, contentDescription = null, tint = tint)
+                            else
+//Icon(Icons.Rounded.MyLocation, contentDescription = null, tint = tint)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.locate, Icons.Rounded.MyLocation, contentDescription = null, tint = tint)
                         }
                     }
                     // MAP-R1-010: renderer and location status are announced independently.

@@ -190,7 +190,9 @@ internal fun ScheduleMessageSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(Icons.Rounded.CalendarToday, contentDescription = null)
+
+//Icon(Icons.Rounded.CalendarToday, contentDescription = null)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.calendar, Icons.Rounded.CalendarToday, contentDescription = null)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Schedule Date & Time")
@@ -249,7 +251,21 @@ internal fun ScheduleMessageSheet(
         DatePickerDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
-                TextButton(onClick = {
+                // Previous stock text action:
+                // TextButton(onClick = {
+                //                     val millis = datePickerState.selectedDateMillis
+                //                     if (millis != null) {
+                //                         // AUT-006/007: the picker value is a UTC-midnight date; build the
+                //                         // local date once and keep the chosen time and zone.
+                //                         val picked = Instant.ofEpochMilli(millis).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                //                         selectedDateTime = ZonedDateTime.of(picked, selectedDateTime.toLocalTime(), selectedDateTime.zone)
+                //                         showDatePicker = false
+                //                         showTimePicker = true
+                //                     }
+                //                 }) { Text("OK") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "OK",
+                    onClick = {
                     val millis = datePickerState.selectedDateMillis
                     if (millis != null) {
                         // AUT-006/007: the picker value is a UTC-midnight date; build the
@@ -259,10 +275,16 @@ internal fun ScheduleMessageSheet(
                         showDatePicker = false
                         showTimePicker = true
                     }
-                }) { Text("OK") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+                // Previous stock text action:
+                // TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Cancel",
+                    onClick = { showDatePicker = false },
+                )
             },
         ) {
             DatePicker(state = datePickerState)
@@ -277,15 +299,30 @@ internal fun ScheduleMessageSheet(
         com.example.chat.ui.kit.ChatyConfirmationDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
             onDismissRequest = { showTimePicker = false },
             confirmButton = {
-                TextButton(onClick = {
+                // Previous stock text action:
+                // TextButton(onClick = {
+                //                     selectedDateTime = selectedDateTime
+                //                         .withHour(timePickerState.hour)
+                //                         .withMinute(timePickerState.minute)
+                //                     showTimePicker = false
+                //                 }) { Text("OK") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "OK",
+                    onClick = {
                     selectedDateTime = selectedDateTime
                         .withHour(timePickerState.hour)
                         .withMinute(timePickerState.minute)
                     showTimePicker = false
-                }) { Text("OK") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+                // Previous stock text action:
+                // TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Cancel",
+                    onClick = { showTimePicker = false },
+                )
             },
             text = { TimePicker(state = timePickerState) },
         )

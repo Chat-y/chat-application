@@ -310,12 +310,16 @@ fun MapViewerScreen(
             }
             Column(Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 FilledIconButton(onClick = { mapView?.control("zoomIn") }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Zoom in" }, shape = androidx.compose.foundation.shape.CircleShape) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.add, semanticLabel = null) }
-                FilledIconButton(onClick = { mapView?.control("zoomOut") }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Zoom out" }, shape = androidx.compose.foundation.shape.CircleShape) { Icon(Icons.Rounded.Remove, contentDescription = null) }
+                FilledIconButton(onClick = { mapView?.control("zoomOut") }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Zoom out" }, shape = androidx.compose.foundation.shape.CircleShape) {
+//Icon(Icons.Rounded.Remove, contentDescription = null)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.minus, Icons.Rounded.Remove, contentDescription = null) }
                 FilledIconButton(onClick = { mapView?.control("toggleBuildings") }, enabled = rendererReady, colors = controlColors,
                     modifier = Modifier.size(48.dp).semantics { contentDescription = "Toggle 3D buildings"; stateDescription = buildingsStateDescription }, shape = androidx.compose.foundation.shape.CircleShape) { Text(if (buildingsEnabled) "2D" else "3D", modifier = Modifier.clearAndSetSemantics { }) }
                 Box {
                 FilledIconButton(onClick = { layersOpen = true }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Map layers" }, shape = androidx.compose.foundation.shape.CircleShape) {
-                    Icon(Icons.Rounded.Layers, contentDescription = null)
+
+//Icon(Icons.Rounded.Layers, contentDescription = null)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.layers, Icons.Rounded.Layers, contentDescription = null)
                 }
                 ChatyDropdownMenu(expanded = layersOpen, onDismissRequest = { layersOpen = false }, containerColor = mapColors.surfaceContainerHigh) {
                     listOf("liberty" to "Streets", "positron" to "Light", "dark" to "Dark", "bright" to "Bright", "fiord" to "Fiord").forEach { (style, label) ->
@@ -332,7 +336,9 @@ fun MapViewerScreen(
                 }
                 }
                 // MAP-R1-036 / MAP-R5-242: keyboard and switch-accessible pin placement without a map gesture.
-                FilledIconButton(onClick = { mapView?.dropPinAtCenter() }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Drop pin at map center" }, shape = androidx.compose.foundation.shape.CircleShape) { Icon(Icons.Rounded.Place, contentDescription = null) }
+                FilledIconButton(onClick = { mapView?.dropPinAtCenter() }, enabled = rendererReady, colors = controlColors, modifier = Modifier.size(48.dp).semantics { contentDescription = "Drop pin at map center" }, shape = androidx.compose.foundation.shape.CircleShape) {
+//Icon(Icons.Rounded.Place, contentDescription = null)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.location, Icons.Rounded.Place, contentDescription = null) }
             }
             FilledIconButton(
                 onClick = { locate() }, enabled = currentLocationEnabled && !locating,
@@ -342,7 +348,9 @@ fun MapViewerScreen(
             ) {
                 if (locating) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = mapColors.onPrimary)
             // Prior: if (status.isNotBlank()) Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
-                else Icon(Icons.Rounded.MyLocation, contentDescription = null)
+                else
+//Icon(Icons.Rounded.MyLocation, contentDescription = null)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.locate, Icons.Rounded.MyLocation, contentDescription = null)
             }
             }
             // MAP-R1-034: polite live region

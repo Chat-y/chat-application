@@ -1,6 +1,9 @@
 package com.example.chat.ui.navigation
 
+import com.example.chat.ui.kit.chatyDepth
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
 import com.example.chat.core.templates.NavigationTemplate
 
 import androidx.compose.animation.animateColorAsState
@@ -106,7 +109,11 @@ internal fun PresetNavigationShell(
     fab: @Composable () -> Unit,
     content: @Composable () -> Unit,
     animationsDisabled: Boolean = false,
-    rootHeaderActions: @Composable () -> Unit = {},
+    // TAS-SEARCH-1: destination-aware header actions (see MainNavigationShell).
+    // Prior: rootHeaderActions: @Composable () -> Unit = {},
+    rootHeaderActions: @Composable (String) -> Unit = { _ -> },
+    homeHeaderController: HomeHeaderController? = null,
+    rootHeaderExtension: (@Composable () -> Unit)? = null,
     referenceDefaultPresentation: Boolean = false,
     unreadCounts: Map<String, Int> = emptyMap(),
     /** OneUI center-button dock: the raised circle in the dock middle. */
@@ -148,25 +155,34 @@ internal fun PresetNavigationShell(
     val dockTextMeasurer = rememberTextMeasurer()
     val dockTextStyle = androidx.compose.material3.LocalTextStyle.current
     val activeId = navItemIds.getOrNull(selectedIndex)
-    val collapseRangePx = with(LocalDensity.current) { ReferenceLayoutMetrics.compactIdentityHeightDp.dp.toPx() }
-    var headerOffsetPx by remember(activeId, mode) { mutableFloatStateOf(0f) }
-    val headerCollapse = if (isOneUi && collapseRangePx > 0f) -headerOffsetPx / collapseRangePx else 0f
-    val headerScroll = remember(activeId, mode, collapseRangePx) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (!isOneUi) return Offset.Zero
-                val old = headerOffsetPx
-                headerOffsetPx = referenceHeaderScrollOffset(old, available.y, collapseRangePx)
-                return Offset(0f, headerOffsetPx - old)
-            }
-        }
-    }
+// Previous scroll-moving shell retained:     val collapseRangePx = with(LocalDensity.current) { ReferenceLayoutMetrics.compactIdentityHeightDp.dp.toPx() }
+// Previous scroll-moving shell retained:     var headerOffsetPx by remember(activeId, mode) { mutableFloatStateOf(0f) }
+// Previous scroll-moving shell retained:     val headerCollapse = if (isOneUi && collapseRangePx > 0f) -headerOffsetPx / collapseRangePx else 0f
+// Previous scroll-moving shell retained:     val headerScroll = remember(activeId, mode, collapseRangePx) {
+// Previous scroll-moving shell retained:         object : NestedScrollConnection {
+// Previous scroll-moving shell retained:             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+// Previous scroll-moving shell retained:                 if (!isOneUi) return Offset.Zero
+// Previous scroll-moving shell retained:                 val old = headerOffsetPx
+// Previous scroll-moving shell retained:                 headerOffsetPx = referenceHeaderScrollOffset(old, available.y, collapseRangePx)
+// Previous scroll-moving shell retained:                 return Offset(0f, headerOffsetPx - old)
+// Previous scroll-moving shell retained:             }
+// Previous scroll-moving shell retained:         }
+// Previous scroll-moving shell retained:     }
+    // Only the pager/list content scrolls. Shell identity and dock stay stationary.
+    val headerCollapse = 0f
     androidx.compose.runtime.CompositionLocalProvider(LocalReferenceHeaderCollapse provides headerCollapse, LocalReferenceDefaultPresentation provides (isOneUi && referenceDefaultPresentation)) {
-    Box(Modifier.fillMaxSize().background(exterior).nestedScroll(headerScroll)) {
+    // Previous: Box(Modifier.fillMaxSize().background(exterior).nestedScroll(headerScroll)) {
+    Box(Modifier.fillMaxSize().background(exterior)) {
         // Only adapters that already honor the title hand-off may suppress their title.
         // Other enabled destinations retain their existing functional header.
         val shellOwnsHeading = (isOneUi || isIos) && activeId in setOf("calls", "updates", "settings", "tasks")
         Column(Modifier.fillMaxSize().padding(bottom = barHeight.dp)) {
+            if (isIos && homeHeaderController != null) {
+                AccountHomeHeaderShell(homeHeaderController, colors, navItemIds, selectedIndex,
+                    activeId ?: "chats", onSelect, rootHeaderActions, { }, {
+                        androidx.compose.runtime.CompositionLocalProvider(LocalDestinationTitlePresentation provides activeId) { content() }
+                    }, rootHeaderExtension = rootHeaderExtension, showTabs = false)
+            } else {
             if (shellOwnsHeading) {
                 Row(Modifier.fillMaxWidth().height(if (isOneUi) (ReferenceLayoutMetrics.compactIdentityHeightDp * (1f - headerCollapse)).dp else 56.dp)
                     .padding(top = 0.dp)
@@ -181,7 +197,8 @@ internal fun PresetNavigationShell(
                         fontSize = if (isOneUi) ReferenceLayoutMetrics.compactIdentityTextSizeSp.sp else 20.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = if (isOneUi) Modifier else Modifier.weight(1f))
-                    if (!isOneUi && activeId != "settings") rootHeaderActions() // Settings hosts its own edit/search/QR row; the avatar already opens Settings.
+                    // Prior: if (!isOneUi && activeId != "settings") rootHeaderActions()
+                    if (!isOneUi && activeId != "settings") rootHeaderActions(activeId.orEmpty()) // Settings hosts its own edit/search/QR row; the avatar already opens Settings.
                 }
             }
             if (shellOwnsHeading && isOneUi && activeId != "settings") Row(
@@ -193,13 +210,15 @@ internal fun PresetNavigationShell(
                     modifier = Modifier.weight(1f).padding(start = 16.dp).alpha(headerCollapse),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // Settings hosts its own edit/search/QR row; the avatar already opens Settings.
-                if (activeId != "settings") rootHeaderActions()
+                // Prior: if (activeId != "settings") rootHeaderActions()
+                if (activeId != "settings") rootHeaderActions(activeId.orEmpty())
             }
             ReferenceLayoutContentSurface(rounded = isOneUi && activeId != null && activeId !in setOf("chats", "groups"), isDark = isDark,
                 lightSurface = colors.surface, modifier = Modifier.weight(1f).fillMaxWidth()) {
                 androidx.compose.runtime.CompositionLocalProvider(
                     LocalDestinationTitlePresentation provides if (shellOwnsHeading) activeId else null,
                 ) { content() }
+            }
             }
         }
         Box(
@@ -212,7 +231,8 @@ internal fun PresetNavigationShell(
                 .padding(bottom = if (isTelegram) 10.dp else 0.dp)
                 .height(barHeight.dp)
                 .then(
-                    if (isTelegram) Modifier.shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)) else Modifier,
+                    // Previous (default black shadow): if (isTelegram) Modifier.shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)) else Modifier,
+                    if (isTelegram) Modifier.chatyDepth(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)) else Modifier,
                 )
                 .background(dockBackground),
         ) {
@@ -242,9 +262,19 @@ internal fun PresetNavigationShell(
                     val tint by animateColorAsState(targetValue = targetTint,
                         animationSpec = tween(if (animationsDisabled) 0 else 140), label = "navigation-item-tint")
                     val selectedModifier = Modifier
-                        .weight(if (isBubbles && selected) 1.6f else 1f)
+                        // Previous: .weight(if (isBubbles && selected) 1.6f else 1f)
+                        .weight(1f)
                         .fillMaxSize()
                         .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(index) })
+                        .drawWithContent {
+                            drawContent()
+                            if (selected) {
+                                val h = ReferenceLayoutMetrics.navigationUnderlineHeightDp.dp.toPx()
+                                val w = minOf(size.width, ReferenceLayoutMetrics.navigationUnderlineWidthDp.dp.toPx())
+                                drawRect(color = accent, topLeft = Offset((size.width - w) / 2f, size.height - h),
+                                    size = Size(w, h))
+                            }
+                        }
                         .padding(horizontal = 4.dp, vertical = 6.dp)
                     when {
                         isOneUi -> Column(selectedModifier, horizontalAlignment = Alignment.CenterHorizontally,
@@ -280,14 +310,15 @@ internal fun PresetNavigationShell(
                                     }
                                 }
                             }
-                            Spacer(Modifier.height(4.dp))
-                            // Fixed geometry keeps selection from shifting the label.
-                            Row(modifier = Modifier.width(24.dp).height(3.dp)
-                                .background(if (selected) tint else Color.Transparent, RoundedCornerShape(999.dp)),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                repeat(5) { Box(Modifier.size(2.dp).background(
-                                    if (selected) tint else Color.Transparent, CircleShape)) }
-                            }
+// Previous OneUI-only marker retained:                             Spacer(Modifier.height(4.dp))
+// Previous OneUI-only marker retained:                             // Fixed geometry keeps selection from shifting the label.
+// Previous OneUI-only marker retained:                             Row(modifier = Modifier.width(24.dp).height(3.dp)
+// Previous OneUI-only marker retained:                                 .background(if (selected) tint else Color.Transparent, RoundedCornerShape(999.dp)),
+// Previous OneUI-only marker retained:                                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+// Previous OneUI-only marker retained:                                 repeat(5) { Box(Modifier.size(2.dp).background(
+// Previous OneUI-only marker retained:                                     if (selected) tint else Color.Transparent, CircleShape)) }
+// Previous OneUI-only marker retained:                             }
+
                         }
                         isBubbles -> Row(selectedModifier
                             .clip(RoundedCornerShape(999.dp))
@@ -302,7 +333,8 @@ internal fun PresetNavigationShell(
                         }
                         else -> Column(
                             // Telegram reference: selection is a rounded pill behind the
-                            // icon+label; tint stays foreground for every item, no underline.
+                            // Previous: icon+label; tint stays foreground for every item, no underline.
+                            // The shared selected-item underline now sits below every dock style.
                             if (isTelegram) selectedModifier
                                 .padding(horizontal = 2.dp)
                                 .clip(RoundedCornerShape(999.dp))
@@ -310,8 +342,9 @@ internal fun PresetNavigationShell(
                             else selectedModifier,
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center) {
-                            if (isInstagram) Box(Modifier.width(26.dp).height(2.dp)
-                                .background(if (selected) accent else Color.Transparent))
+// Previous top marker retained:                             if (isInstagram) Box(Modifier.width(26.dp).height(2.dp)
+// Previous top marker retained:                                 .background(if (selected) accent else Color.Transparent))
+
                             NavDestinationIcon(id, size = if (isBasic) 23 else 24,
                                 selected = isIos && selected,
                                 tint = if (isTelegram) foreground else if (isIos) tint else if (selected) accent else secondary)
@@ -347,7 +380,8 @@ internal fun PresetNavigationShell(
             if (isOneUi && !referenceDefaultPresentation) {
                 Box(
                     Modifier.align(Alignment.TopCenter).offset(y = (-14).dp)
-                        .size(52.dp).shadow(6.dp, CircleShape).clip(CircleShape)
+                        // Previous (default black shadow): .size(52.dp).shadow(6.dp, CircleShape).clip(CircleShape)
+                        .size(52.dp).chatyDepth(6.dp, CircleShape).clip(CircleShape)
                         .background(accent)
                         .clickable { onCenterAction() },
                     contentAlignment = Alignment.Center,
@@ -459,7 +493,8 @@ internal fun BottomShell(
                 .padding(start = sideMargin.dp, end = sideMargin.dp, bottom = bottomMargin.dp)
                 .fillMaxWidth()
                 .height(barHeight.dp)
-                .then(if (hasShadow) Modifier.shadow(18.dp, RoundedCornerShape(barRadius.dp)) else Modifier)
+                // Previous (default black shadow): .then(if (hasShadow) Modifier.shadow(18.dp, RoundedCornerShape(barRadius.dp)) else Modifier)
+                .then(if (hasShadow) Modifier.chatyDepth(18.dp, RoundedCornerShape(barRadius.dp)) else Modifier)
                 .clip(RoundedCornerShape(barRadius.dp))
                 .background(barBg)
                 .then(
@@ -570,7 +605,9 @@ internal fun BottomShell(
                 if (template.hasCenterAction && navItemIds.size < 3) {
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         IconButton(onClick = onCenterAction) {
-                            Icon(Icons.Rounded.Bolt, contentDescription = "Quick action", tint = accent)
+
+//Icon(Icons.Rounded.Bolt, contentDescription = "Quick action", tint = accent)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.bolt, Icons.Rounded.Bolt, contentDescription = "Quick action", tint = accent)
                         }
                     }
                 }
@@ -586,7 +623,8 @@ internal fun BottomShell(
             Box(
                 Modifier.align(Alignment.BottomCenter)
                     .padding(bottom = (bottomMargin + barHeight - 38).dp)
-                    .size(52.dp).shadow(6.dp, CircleShape).clip(CircleShape)
+                    // Previous (default black shadow): .size(52.dp).shadow(6.dp, CircleShape).clip(CircleShape)
+                    .size(52.dp).chatyDepth(6.dp, CircleShape).clip(CircleShape)
                     .background(accent)
                     .clickable(onClick = onCenterAction),
                 contentAlignment = Alignment.Center,
@@ -878,7 +916,9 @@ internal fun MoreDestinationsSheet(
                         .background(colors.primary.copy(alpha = 0.12f))
                         .padding(8.dp),
                 ) {
-                    Icon(Icons.Rounded.GridView, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.GridView, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.grid, Icons.Rounded.GridView, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {

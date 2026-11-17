@@ -118,12 +118,17 @@ class DynamicIslandControllerParityTest {
         assertEquals(IslandMode.compact, c.mode)
     }
 
-    @Test fun `two payloads with ongoing first go split`() {
+    // Single-island rule (Bandi 2026-11-14 "only the one share all"): concurrent payloads
+    // never split into a second pill; the queue and carousel still carry them.
+    // Previous implementation retained:
+    // @Test fun `two payloads with ongoing first go split`() {
+    // assertEquals(IslandMode.split, c.mode)
+    @Test fun `two payloads with ongoing first stay one compact island`() {
         val (_, _, c) = fixture()
         c.postPayload(payload("m1", IslandPayloadType.chatMessage), autoExpand = false)
         c.postPayload(payload("call", IslandPayloadType.ongoingCall), autoExpand = false)
         // ongoingCall has priority 1 < chatMessage 3, so it sorts first
-        assertEquals(IslandMode.split, c.mode)
+        assertEquals(IslandMode.compact, c.mode)
         assertEquals("call", c.activePayload?.id)
         assertEquals("m1", c.secondaryPayload?.id)
     }

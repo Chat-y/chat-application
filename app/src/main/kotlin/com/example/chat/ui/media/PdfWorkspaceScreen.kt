@@ -1,5 +1,7 @@
 package com.example.chat.ui.media
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import com.example.chat.ui.kit.ChatyHapticsPort
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -237,7 +239,9 @@ fun PdfWorkspaceScreen(
             finally { temporary.forEach { it.delete() }; isProcessing = false; processingStatus = "" }
         }
     }
-    androidx.activity.compose.BackHandler(enabled = isProcessing) { processingJob?.cancel() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(isProcessing)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(enabled = isProcessing) { processingJob?.cancel() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, enabled = isProcessing) { processingJob?.cancel() }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(9)) { uris ->
         startConversion(uris, ConversionType.imagesToPdf, "Image to PDF Complete")
     }
@@ -246,6 +250,7 @@ fun PdfWorkspaceScreen(
     }
 
     Scaffold(
+        modifier = Modifier.chatyPredictiveBack(predictiveBack),
         containerColor = colors.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -331,7 +336,9 @@ fun PdfWorkspaceScreen(
                                 scope.launch { try { library.refreshLibrary() } finally { refreshing = false } }
                             }
                         }) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library", modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library", modifier = Modifier.size(18.dp))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = if (refreshing) "Refreshing library" else "Refresh library", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -441,7 +448,9 @@ fun PdfWorkspaceScreen(
                 Box(
                     modifier = Modifier.size(54.dp).background(colors.success.copy(alpha = 0.15f), CircleShape),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = colors.success, modifier = Modifier.size(32.dp)) }
+                ) {
+//Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = colors.success, modifier = Modifier.size(32.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircle, contentDescription = null, tint = colors.success, modifier = Modifier.size(32.dp)) }
                 Spacer(Modifier.height(12.dp))
                 Text(title, fontWeight = FontWeight.W800, fontSize = 17.sp)
                 Spacer(Modifier.height(4.dp))

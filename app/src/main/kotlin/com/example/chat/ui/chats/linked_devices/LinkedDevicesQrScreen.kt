@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats.linked_devices
 
+import com.example.chat.ui.navigation.ReferenceLayoutMetrics as QrMetrics
+
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -10,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -266,7 +269,9 @@ fun LinkedDevicesQrScreen(
                         Tab(
                             selected = selectedTab == myQrIndex,
                             onClick = { selectedTab = myQrIndex },
-                            icon = { Icon(Icons.Rounded.QrCode2, contentDescription = null) },
+                            icon = {
+//Icon(Icons.Rounded.QrCode2, contentDescription = null)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.qrCode, Icons.Rounded.QrCode2, contentDescription = null) },
                             text = { Text("My QR") },
                             selectedContentColor = colors.primary,
                             unselectedContentColor = colors.foregroundSecondary,
@@ -274,7 +279,9 @@ fun LinkedDevicesQrScreen(
                         Tab(
                             selected = selectedTab == scanIndex,
                             onClick = { selectedTab = scanIndex },
-                            icon = { Icon(Icons.Rounded.QrCodeScanner, contentDescription = null) },
+                            icon = {
+//Icon(Icons.Rounded.QrCodeScanner, contentDescription = null)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.qrCode, Icons.Rounded.QrCodeScanner, contentDescription = null) },
                             text = { Text("Scan") },
                             selectedContentColor = colors.primary,
                             unselectedContentColor = colors.foregroundSecondary,
@@ -330,6 +337,7 @@ fun LinkedDevicesQrScreen(
                 qrOnly && selectedTab == 0 -> MyQrView(
                     currentUserDisplayName,
                     currentUserUsername,
+                    viewportInsets = padding,
                     onShowMessage = { message -> scope.launch { snackbar.showSnackbar(message) } },
                 )
                 qrOnly -> ScanTab(scanBusy, onDetected = { handleBarcode(it) })
@@ -356,6 +364,7 @@ fun LinkedDevicesQrScreen(
                 selectedTab == 1 -> MyQrView(
                     currentUserDisplayName,
                     currentUserUsername,
+                    viewportInsets = padding,
                     onShowMessage = { message -> scope.launch { snackbar.showSnackbar(message) } },
                 )
                 else -> ScanTab(scanBusy, onDetected = { handleBarcode(it) })
@@ -572,8 +581,14 @@ private fun DeviceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.background(colors.primary.copy(alpha = 0.12f), CircleShape).padding(8.dp)) {
-            Icon(
-                Icons.Rounded.DevicesOther,
+
+//Icon(
+//                Icons.Rounded.DevicesOther,
+//                contentDescription = null,
+//                tint = colors.primary,
+//                modifier = Modifier.size(20.dp),
+//            )
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.devices, Icons.Rounded.DevicesOther,
                 contentDescription = null,
                 tint = colors.primary,
                 modifier = Modifier.size(20.dp),
@@ -621,7 +636,8 @@ private fun DeviceRow(
 }
 
 @Composable
-private fun MyQrView(displayName: String, username: String, onShowMessage: (String) -> Unit) {
+// Previous signature: private fun MyQrView(displayName: String, username: String, onShowMessage: (String) -> Unit)
+private fun MyQrView(displayName: String, username: String, viewportInsets: PaddingValues, onShowMessage: (String) -> Unit) {
     val colors = LocalAppColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -632,17 +648,41 @@ private fun MyQrView(displayName: String, username: String, onShowMessage: (Stri
             foregroundArgb = android.graphics.Color.BLACK,
         )
     }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    // Card = 230dp QR + 24dp frame on each edge. The content viewport already excludes
+    // toolbar/tabs/system insets. Shift its target midpoint upward by half the top-minus-bottom
+    // exclusion so the CARD itself, not the entire details column, centers in the whole screen.
+    // Previous fixed estimate: val cardHeight = 278.dp
+    // A shared exact square frame avoids a zero-height first frame and keeps narrow QRs square.
+    val availableSide = (maxWidth - QrMetrics.qrPagePaddingDp.dp * 2).coerceAtLeast(1.dp)
+    val frameSide = minOf(availableSide, (QrMetrics.qrCodeSideDp + 2 * QrMetrics.qrFramePaddingDp).dp)
+    val framePadding = minOf(QrMetrics.qrFramePaddingDp.dp, frameSide / 6)
+    val codeSide = (frameSide - framePadding * 2).coerceAtLeast(1.dp)
+    val codeScale = codeSide / QrMetrics.qrCodeSideDp.dp
+    val cardHeight = frameSide
+    val topSpace = ((maxHeight + viewportInsets.calculateBottomPadding() -
+        viewportInsets.calculateTopPadding() - cardHeight) / 2 - QrMetrics.qrPagePaddingDp.dp).coerceAtLeast(0.dp)
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+            .padding(QrMetrics.qrPagePaddingDp.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Spacer(Modifier.height(topSpace))
+// Previous top-aligned content wrapper retained inactive:
+//     Column(
+//         Modifier
+//             .fillMaxSize()
+//             .verticalScroll(rememberScrollState())
+//             .padding(24.dp),
+//         horizontalAlignment = Alignment.CenterHorizontally,
+//     ) {
         Box(
             Modifier
-                .background(colors.surface, RoundedCornerShape(20.dp))
-                .padding(24.dp),
+                .size(frameSide)
+                .background(colors.surface, com.example.chat.ui.profile.profileBannerShape())
+                .padding(framePadding),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 // Dark modules on a white ground in EVERY theme: inverted
@@ -651,21 +691,28 @@ private fun MyQrView(displayName: String, username: String, onShowMessage: (Stri
                 Image(
                     bitmap = qrBitmap.asImageBitmap(),
                     contentDescription = "My Chaty contact QR",
-                    modifier = Modifier.size(230.dp),
+                    modifier = Modifier.size(codeSide),
                 )
                 // Center quiet-zone badge with the Chaty brand mark.
                 Box(
                     Modifier
-                        .size(44.dp)
+                        .size(QrMetrics.qrBadgeSideDp.dp * codeScale)
                         .background(colors.surface, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Rounded.QrCode2,
-                        contentDescription = "Chaty",
-                        tint = colors.primary,
-                        modifier = Modifier.size(26.dp),
+                    com.example.chat.ui.icons.ChatyIcon(
+                        com.example.chat.ui.icons.ChatyIconId.chats,
+                        semanticLabel = "Chaty",
+                        color = colors.primary,
+                        modifier = Modifier.size(QrMetrics.qrBrandGlyphDp.dp * codeScale),
                     )
+// Previous QR glyph retained inactive:
+//                     Icon(
+//                         Icons.Rounded.QrCode2,
+//                         contentDescription = "Chaty",
+//                         tint = colors.primary,
+//                         modifier = Modifier.size(26.dp),
+//                     )
                 }
             }
         }
@@ -688,19 +735,26 @@ private fun MyQrView(displayName: String, username: String, onShowMessage: (Stri
         // link via the system sheet) and Save to gallery, the actions
         // WhatsApp users expect (Jakob's law).
         Row {
-            TextButton(onClick = {
+//             TextButton(onClick = {
+//                 scope.launch { shareQrImage(context, qrBitmap, username, onShowMessage) }
+//             }) {
+//                 Text("Share", color = colors.primary, fontWeight = FontWeight.Bold)
+//             }
+            com.example.chat.ui.kit.ChatyTextButton(onClick = {
                 scope.launch { shareQrImage(context, qrBitmap, username, onShowMessage) }
-            }) {
-                Text("Share", color = colors.primary, fontWeight = FontWeight.Bold)
-            }
+            }, label = "Share", color = colors.primary, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(12.dp))
-            TextButton(onClick = {
+//             TextButton(onClick = {
+//                 scope.launch { saveQrToGallery(context, qrBitmap, username, onShowMessage) }
+//             }) {
+//                 Text("Save", color = colors.primary, fontWeight = FontWeight.Bold)
+//             }
+            com.example.chat.ui.kit.ChatyTextButton(onClick = {
                 scope.launch { saveQrToGallery(context, qrBitmap, username, onShowMessage) }
-            }) {
-                Text("Save", color = colors.primary, fontWeight = FontWeight.Bold)
-            }
+            }, label = "Save", color = colors.primary, fontWeight = FontWeight.Bold)
         }
     }
+    } // Whole-screen-centered, scrollable QR presentation.
 }
 
 /** Shares the QR PNG through the existing ${applicationId}.fileprovider

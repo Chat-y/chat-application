@@ -62,4 +62,29 @@ class CallExtrasServiceTest {
   s.handleRemoteSignal(reaction);assertTrue(s.callReaction!!.fromPeer);tick=2000;s.handleRemoteSignal(reaction);assertEquals("r1",s.callReaction!!.id)
   assertTrue(s.toggleLocalHold());assertTrue(sent.any {it["signal_type"]=="call_hold"});job.cancel()
  }
+ @Test fun holdNoticeFailureStillPublishesLocalMediaState()=runBlocking {
+  val job=SupervisorJob(); val sc=CoroutineScope(coroutineContext+job); val m=ExtrasMedia()
+  val service=CallSignalingService(scope=sc,currentUserId={"me"},
+   signalSender=CallSignalSender { _, data -> if(data["signal_type"]=="call_hold") error("offline") },
+   mediaFactory={m},callExtrasCapability={_,_,_->true})
+  service.initiateCall(remoteUserId="peer",remoteDisplayName="Peer",isVideo=false)
+  m.onConnectionState?.invoke(CallTransportState.connected)
+  var changes=0; service.addStateListener { changes++ }
+  assertTrue(service.toggleLocalHold()); assertTrue(service.currentSession!!.isLocallyHeld)
+  assertFalse(m.microphone); assertFalse(m.playout); assertFalse(service.localHoldNoticeAttempted)
+  assertTrue(changes>0); assertFalse(m.disposed); job.cancel()
+ }
+ @Test fun duplicateWaitingOfferDoesNotReplaceCallOrRepeatAlert()=runBlocking {
+  val job=SupervisorJob(); val sc=CoroutineScope(coroutineContext+job); val m=ExtrasMedia()
+  val sent=mutableListOf<Map<String,Any?>>()
+  val service=connected(sc,m,false,{0},sent); val id=service.currentSession!!.callId
+  var alerts=0; service.addCallWaitingListener { alerts++ }
+  val offer=mapOf("signal_type" to "offer","call_id" to "other-call", "sender_id" to "other-peer", "sdp" to "offer")
+  service.handleRemoteSignal(offer); service.handleRemoteSignal(offer)
+  assertEquals(1,alerts); assertEquals(id,service.currentSession!!.callId)
+  assertEquals(CallSessionState.connected,service.currentSession!!.state)
+  assertFalse(service.currentSession!!.isLocallyHeld); assertFalse(m.disposed)
+  assertEquals(2,sent.count { it["signal_type"]=="busy" }); job.cancel()
+ }
+
 }

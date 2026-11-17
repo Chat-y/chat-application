@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -502,11 +504,26 @@ fun NewChatScreen(
             if (roomCreationBlocked) {
                 Text(roomUncertainMessage, color = colors.error)
                 Column {
-                    TextButton(enabled = !isSubmittingGroup, onClick = { onBack() }) { Text("Check chats") }
-                    TextButton(enabled = !isSubmittingGroup, onClick = {
+                    // Previous stock text action:
+                    // TextButton(enabled = !isSubmittingGroup, onClick = { onBack() }) { Text("Check chats") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Check chats",
+                        enabled = !isSubmittingGroup,
+                        onClick = { onBack() },
+                    )
+                    // Previous stock text action:
+                    // TextButton(enabled = !isSubmittingGroup, onClick = {
+                    //                         // Explicit release only, never automatically submit from this button.
+                    //                         roomCreationBlocked = false; createError = null
+                    //                     }) { Text("Create anyway") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Create anyway",
+                        enabled = !isSubmittingGroup,
+                        onClick = {
                         // Explicit release only, never automatically submit from this button.
                         roomCreationBlocked = false; createError = null
-                    }) { Text("Create anyway") }
+                    },
+                    )
                 }
             } else createError?.let { Text(it, color = colors.error) }
         }
@@ -581,24 +598,47 @@ fun NewChatScreen(
                                     maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
-                            TextButton(
-                                enabled = !pending, onClick = { respondToRequest(req, true) },
+                            // Previous stock text action:
+                            // TextButton(
+                            //                                 enabled = !pending, onClick = { respondToRequest(req, true) },
+                            //                                 modifier = Modifier.semantics {
+                            //                                     contentDescription = acceptLabel
+                            //                                     if (pending) stateDescription = pendingLabel
+                            //                                 },
+                            //                             ) {
+                            //                                 Text(stringResource(R.string.social_newchat_accept), color = colors.primary, fontWeight = FontWeight.Bold)
+                            //                             }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = stringResource(R.string.social_newchat_accept),
+                                enabled = !pending,
+                                onClick = { respondToRequest(req, true) },
                                 modifier = Modifier.semantics {
                                     contentDescription = acceptLabel
                                     if (pending) stateDescription = pendingLabel
                                 },
-                            ) {
-                                Text(stringResource(R.string.social_newchat_accept), color = colors.primary, fontWeight = FontWeight.Bold)
-                            }
-                            TextButton(
-                                enabled = !pending, onClick = { respondToRequest(req, false) },
+                                color = colors.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            // Previous stock text action:
+                            // TextButton(
+                            //                                 enabled = !pending, onClick = { respondToRequest(req, false) },
+                            //                                 modifier = Modifier.semantics {
+                            //                                     contentDescription = declineLabel
+                            //                                     if (pending) stateDescription = pendingLabel
+                            //                                 },
+                            //                             ) {
+                            //                                 Text(stringResource(R.string.social_newchat_decline), color = colors.error)
+                            //                             }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = stringResource(R.string.social_newchat_decline),
+                                enabled = !pending,
+                                onClick = { respondToRequest(req, false) },
                                 modifier = Modifier.semantics {
                                     contentDescription = declineLabel
                                     if (pending) stateDescription = pendingLabel
                                 },
-                            ) {
-                                Text(stringResource(R.string.social_newchat_decline), color = colors.error)
-                            }
+                                color = colors.error,
+                            )
                             }
                         }
                     }
@@ -638,12 +678,25 @@ fun NewChatScreen(
                             fontSize = 14.sp,
                         )
                         Spacer(Modifier.height(12.dp))
-                        if (searchError != null) TextButton(onClick = { onSearchChanged(searchText) }) {
-                            Text(stringResource(R.string.social_newchat_lookup_retry), color = colors.primary)
-                        }
-                        TextButton(onClick = { onSearchChanged("") }) {
-                            Text(stringResource(R.string.social_newchat_clear_search), color = colors.primary, fontWeight = FontWeight.Bold)
-                        }
+                        if (searchError != null) // Previous stock text action:
+                        // TextButton(onClick = { onSearchChanged(searchText) }) {
+                        //                             Text(stringResource(R.string.social_newchat_lookup_retry), color = colors.primary)
+                        //                         }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = stringResource(R.string.social_newchat_lookup_retry),
+                            onClick = { onSearchChanged(searchText) },
+                            color = colors.primary,
+                        )
+                        // Previous stock text action:
+                        // TextButton(onClick = { onSearchChanged("") }) {
+                        //                             Text(stringResource(R.string.social_newchat_clear_search), color = colors.primary, fontWeight = FontWeight.Bold)
+                        //                         }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = stringResource(R.string.social_newchat_clear_search),
+                            onClick = { onSearchChanged("") },
+                            color = colors.primary,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
                 results.isEmpty() -> item(key = "contacts-feedback", contentType = "feedback") {
@@ -652,8 +705,14 @@ fun NewChatScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                     ) {
-                        Icon(
-                            Icons.Rounded.PersonSearch,
+
+//Icon(
+//                            Icons.Rounded.PersonSearch,
+//                            contentDescription = null,
+//                            tint = colors.foregroundTertiary,
+//                            modifier = Modifier.size(44.dp),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.personSearch, Icons.Rounded.PersonSearch,
                             contentDescription = null,
                             tint = colors.foregroundTertiary,
                             modifier = Modifier.size(44.dp),
@@ -672,9 +731,15 @@ fun NewChatScreen(
                             fontSize = 13.sp,
                         )
                         if (contactLoadError != null && loadContactRelations != null) {
-                            TextButton(onClick = { scope.launch { refreshAcceptedContacts() } }) {
-                                Text(stringResource(R.string.social_newchat_retry), color = colors.accent)
-                            }
+                            // Previous stock text action:
+                            // TextButton(onClick = { scope.launch { refreshAcceptedContacts() } }) {
+                            //                                 Text(stringResource(R.string.social_newchat_retry), color = colors.accent)
+                            //                             }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = stringResource(R.string.social_newchat_retry),
+                                onClick = { scope.launch { refreshAcceptedContacts() } },
+                                color = colors.accent,
+                            )
                         }
                     }
                 }
@@ -783,9 +848,12 @@ fun NewChatScreen(
             else { isCreatingGroup = false; isBroadcast = false; requestedGroupDetails = false }
         } else onBack()
     }
-    androidx.activity.compose.BackHandler(enabled = sheetUser == null && !showDiscardSelection) { handleBack() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(isCreatingGroup to showDiscardSelection)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(enabled = sheetUser == null && !showDiscardSelection) { handleBack() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, enabled = sheetUser == null && !showDiscardSelection) { handleBack() }
 
     Scaffold(
+        modifier = Modifier.chatyPredictiveBack(predictiveBack),
         containerColor = colors.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -847,9 +915,15 @@ fun NewChatScreen(
             if (isCreatingGroup && isBroadcast && createBroadcast == null) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(stringResource(R.string.social_newchat_broadcast_unavailable), color = colors.foregroundSecondary)
-                    TextButton(enabled = !isLoading, onClick = { isBroadcast = false; createError = null }) {
-                        Text(stringResource(R.string.social_newchat_switch_to_group))
-                    }
+                    // Previous stock text action:
+                    // TextButton(enabled = !isLoading, onClick = { isBroadcast = false; createError = null }) {
+                    //                         Text(stringResource(R.string.social_newchat_switch_to_group))
+                    //                     }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = stringResource(R.string.social_newchat_switch_to_group),
+                        enabled = !isLoading,
+                        onClick = { isBroadcast = false; createError = null },
+                    )
                 }
             }
             if (isCreatingGroup && !groupDetails) {
@@ -911,7 +985,9 @@ fun NewChatScreen(
                     title = stringResource(R.string.social_newchat_create_group_entry),
                     subtitle = stringResource(R.string.social_newchat_create_group_body),
                     icon = { tint ->
-                        Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.groupAdd, Icons.Rounded.GroupAdd, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
                     },
                     iconTint = colors.primary,
                     chevronTint = colors.foregroundTertiary,
@@ -925,7 +1001,9 @@ fun NewChatScreen(
                     title = stringResource(R.string.social_newchat_create_broadcast_entry),
                     subtitle = stringResource(R.string.social_newchat_create_broadcast_body),
                     icon = { tint ->
-                        Icon(Icons.Rounded.Cast, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.Cast, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.cast, Icons.Rounded.Cast, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
                     },
                     iconTint = colors.info,
                     chevronTint = colors.foregroundTertiary,
@@ -939,9 +1017,14 @@ fun NewChatScreen(
                         Text(stringResource(R.string.social_newchat_create_broadcast_entry), color = colors.foreground,
                             modifier = Modifier.semantics { heading() })
                         Text(stringResource(R.string.social_newchat_broadcast_unavailable), color = colors.foregroundSecondary)
-                        TextButton(onClick = { isCreatingGroup = true; isBroadcast = false; createError = null }) {
-                            Text(stringResource(R.string.social_newchat_switch_to_group))
-                        }
+                        // Previous stock text action:
+                        // TextButton(onClick = { isCreatingGroup = true; isBroadcast = false; createError = null }) {
+                        //                             Text(stringResource(R.string.social_newchat_switch_to_group))
+                        //                         }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = stringResource(R.string.social_newchat_switch_to_group),
+                            onClick = { isCreatingGroup = true; isBroadcast = false; createError = null },
+                        )
                     }
                 }
                 item(key = "entry-spacing", contentType = "spacing") { Spacer(Modifier.height(4.dp)) }
@@ -962,20 +1045,41 @@ fun NewChatScreen(
             title = { Text(stringResource(R.string.social_newchat_discard_title)) },
             text = { Text(stringResource(R.string.social_newchat_discard_body)) },
             dismissButton = {
-                TextButton(onClick = { showDiscardSelection = false }, modifier = Modifier.focusRequester(keepEditingFocus)) {
-                    Text(stringResource(R.string.social_newchat_keep_editing))
-                }
+                // Previous dialog action rendering retained inactive.
+                // TextButton(onClick = { showDiscardSelection = false }, modifier = Modifier.focusRequester(keepEditingFocus)) {
+                // Text(stringResource(R.string.social_newchat_keep_editing))
+                // }
+                // },
+                // confirmButton = {
+                // TextButton(onClick = {
+                // showDiscardSelection = false
+                // requestedGroupDetails = false
+                // selectedMembers = emptySet()
+                // groupName = ""
+                // createError = null
+                // isCreatingGroup = false
+                // isBroadcast = false
+                // }) { Text(stringResource(R.string.social_newchat_discard_selection), color = colors.error) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    onClick = { showDiscardSelection = false },
+                    modifier = Modifier.focusRequester(keepEditingFocus),
+                    label = stringResource(R.string.social_newchat_keep_editing),
+                )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    showDiscardSelection = false
-                    requestedGroupDetails = false
-                    selectedMembers = emptySet()
-                    groupName = ""
-                    createError = null
-                    isCreatingGroup = false
-                    isBroadcast = false
-                }) { Text(stringResource(R.string.social_newchat_discard_selection), color = colors.error) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    onClick = {
+                        showDiscardSelection = false
+                        requestedGroupDetails = false
+                        selectedMembers = emptySet()
+                        groupName = ""
+                        createError = null
+                        isCreatingGroup = false
+                        isBroadcast = false
+                    },
+                    label = stringResource(R.string.social_newchat_discard_selection),
+                    tone = com.example.chat.ui.kit.ChatyButtonTone.Destructive,
+                )
             },
         )
     }
@@ -1004,10 +1108,16 @@ fun NewChatScreen(
                         Text(stringResource(if (sheetTarget.id in uncertainRequestIds) R.string.social_newchat_request_uncertain
                             else R.string.social_newchat_request_status_unavailable),
                             color = colors.foregroundSecondary, modifier = Modifier.padding(16.dp))
-                        TextButton(enabled = !outgoingLoading,
-                            onClick = { scope.launch { refreshOutgoingRequests(); refreshAcceptedContacts() } }) {
-                            Text(stringResource(R.string.social_newchat_check_request_status))
-                        }
+                        // Previous stock text action:
+                        // TextButton(enabled = !outgoingLoading,
+                        //                             onClick = { scope.launch { refreshOutgoingRequests(); refreshAcceptedContacts() } }) {
+                        //                             Text(stringResource(R.string.social_newchat_check_request_status))
+                        //                         }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = stringResource(R.string.social_newchat_check_request_status),
+                            enabled = !outgoingLoading,
+                            onClick = { scope.launch { refreshOutgoingRequests(); refreshAcceptedContacts() } },
+                        )
                     } else if (sheetTarget.id in sendingRequestIds || NewChatRules.usernameKey(sheetTarget.username) in sendingRequestUsernames) {
                         Text(stringResource(R.string.social_newchat_request_sending), color = colors.foregroundTertiary,
                             modifier = Modifier.padding(16.dp).semantics { liveRegion = LiveRegionMode.Polite })
@@ -2811,3 +2921,6 @@ private fun SheetAction(label: String, tint: Color, onClick: () -> Unit) {
 //                 modifier = Modifier.weight(1f).semantics {
 
 */
+
+// Complete original-line retention for review (inactive).
+                        //                         if (searchError != null) TextButton(onClick = { onSearchChanged(searchText) }) {

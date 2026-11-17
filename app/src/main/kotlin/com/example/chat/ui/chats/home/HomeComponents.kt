@@ -160,6 +160,7 @@ fun HomeTimeLabel(text: String, highlight: Boolean, color: Color, highlightColor
     Text(
         text,
         maxLines = 1,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         color = if (highlight) highlightColor else color,
         fontSize = 12.sp,
         fontWeight = if (highlight) FontWeight.W700 else FontWeight.W500,

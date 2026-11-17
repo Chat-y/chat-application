@@ -338,9 +338,11 @@ class RichChatRealtimeService(
         // Online is a user-scoped event; apply the guards of that contact's
         // direct conversation when one is loaded.
         val conversationId = backend.directConversationIdForUser(userId)
+        // Disabled master wins before per-contact Always. No legacy OR bypass after migration.
+        if (!preferences.enableGlobalNotifications || !preferences.notifyContactOnline) return
         val allow = ContactEventAlertPolicy.shouldPopup(
-            globalEventEnabled = preferences.notifyContactOnline ||
-                preferences.gbBool("abu_saleh_toast_online"),
+            // Previous: notifyContactOnline || gbBool("abu_saleh_toast_online")
+            globalEventEnabled = preferences.notifyContactOnline,
             contactOverride = preferences.contactEventAlertOverride(userId),
             kind = ContactEventKind.ONLINE,
             conversationProtected = conversationId?.let { backend.isConversationProtected(it) } == true,
@@ -362,9 +364,10 @@ class RichChatRealtimeService(
     }
 
     private fun fireTypingToastIfAllowed(conversationId: String, userId: String) {
+        if (!preferences.enableGlobalNotifications || !preferences.notifyTypingStarted) return
         val allow = ContactEventAlertPolicy.shouldPopup(
-            globalEventEnabled = preferences.notifyTypingStarted ||
-                preferences.gbBool("abu_saleh_toast_typing"),
+            // Previous: notifyTypingStarted || gbBool("abu_saleh_toast_typing")
+            globalEventEnabled = preferences.notifyTypingStarted,
             contactOverride = preferences.contactEventAlertOverride(userId),
             kind = ContactEventKind.TYPING,
             conversationProtected = backend.isConversationProtected(conversationId),

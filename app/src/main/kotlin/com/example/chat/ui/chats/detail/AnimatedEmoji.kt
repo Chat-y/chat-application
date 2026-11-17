@@ -204,7 +204,9 @@ fun AnimatedEmojiView(
 ) {
     val view = LocalView.current
     val savedPack = ChatyEmojiPack.rememberStyle(emojiStyle)
-    val pack = if (com.example.chat.data.packs.ChatyPackServer.DOWNLOADABLE_PACKS_ENABLED) savedPack else ChatyEmojiPack.CHATY
+    // Previous server flag incorrectly disabled even locally bundled selected artwork:
+    // val pack = if (ChatyPackServer.DOWNLOADABLE_PACKS_ENABLED) savedPack else ChatyEmojiPack.CHATY
+    val pack = savedPack
     val packAnimated = ChatyEmojiPack.needsAnimatedDecoder(pack)
     val packPath = if (!packAnimated || ChatyEmojiPack.iosSupported()) ChatyEmojiPack.assetPathFor(pack, unicode) else null
     // Own-server on-demand packs: a downloaded file wins over the bundled
@@ -267,13 +269,18 @@ fun AnimatedEmojiView(
         // keep normal Unicode glyphs where their partial artwork set has no entry.
         val animationsOn = animate && !animationsDisabled()
         val lottiePath = if (pack == ChatyEmojiPack.TELEGRAM_LOTTIE) ChatyEmojiPack.lottieAssetPath(unicode) else null
-        if (lottiePath != null && downloadedPath != null) {
+        if (pack == ChatyEmojiPack.SYSTEM) {
+            // Platform glyphs preserve Unicode from the keyboard/paste. Never substitute pack artwork here.
+            Text(unicode, fontSize = (size * 0.82f).sp, lineHeight = (size * 0.82f).sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Default, maxLines = 1)
+        } else if (lottiePath != null && downloadedPath != null) {
             val composition by com.airbnb.lottie.compose.rememberLottieComposition(com.airbnb.lottie.compose.LottieCompositionSpec.File(downloadedPath))
             if (composition != null) com.airbnb.lottie.compose.LottieAnimation(
                 composition = composition, isPlaying = animationsOn,
                 iterations = com.airbnb.lottie.compose.LottieConstants.IterateForever,
                 modifier = Modifier.size(size.dp),
-            ) else Text(unicode, fontSize = (size * 0.82f).sp, lineHeight = (size * 0.82f).sp, maxLines = 1)
+            // Previous missing-composition fallback was a direct system glyph.
+            ) else BundledEmojiFallback(unicode, size)
         } else if (downloadedPath != null && !packUnavailable && packAnimated) {
             // Downloaded animated pack (own server), same decode policy as bundled.
             FileAnimatedEmoji(downloadedPath, size, animate = animationsOn) { packUnavailable = true }
@@ -286,13 +293,26 @@ fun AnimatedEmojiView(
             // Static pack (OpenMoji): shown in every mode; never animated.
             StaticAssetEmoji(packPath, size) { packUnavailable = true }
         } else {
+            // Selected partial pack fell through: prefer lightweight bundled art before system glyphs.
+            BundledEmojiFallback(unicode, size)
+        }
+    }
+}
+
+@Composable
+private fun BundledEmojiFallback(unicode: String, size: Float) {
+    val fallback = ChatyEmojiPack.packAssetPath(ChatyEmojiPack.OPENMOJI_PACK, unicode)
+    var unavailable by remember(fallback) { mutableStateOf(false) }
+    if (fallback != null && !unavailable) {
+        StaticAssetEmoji(fallback, size) { unavailable = true }
+    } else {
+            // Original final system-glyph fallback retained for unsupported Unicode.
             Text(
                 unicode,
                 fontSize = (size * 0.82f).sp,
                 lineHeight = (size * 0.82f).sp,
                 maxLines = 1,
             )
-        }
     }
 }
 
@@ -329,6 +349,7 @@ fun AnimatedEmojiText(
     emojiStyle: String? = null,
 ) {
     if (text.isEmpty()) return
+    val systemGlyphs = ChatyEmojiPack.rememberStyle(emojiStyle) == ChatyEmojiPack.SYSTEM
 
     if (enableExpressiveSizing) {
         val mode = ChatyEmojiParser.resolveEmojiOnlyDisplayMode(text)
@@ -347,7 +368,8 @@ fun AnimatedEmojiText(
             ) {
                 spans.forEachIndexed { index, span ->
                     AnimatedEmojiView(
-                        unicode = span.normalizedUnicode,
+                        // Previous pack input always stripped variation selectors: span.normalizedUnicode.
+                        unicode = if (systemGlyphs) span.rawText else span.normalizedUnicode,
                         size = emojiSize,
                         animate = animate,
                         interactive = true,
@@ -392,7 +414,8 @@ fun AnimatedEmojiText(
         ) {
             Box(Modifier.size(inlineSize.dp), contentAlignment = Alignment.Center) {
                 AnimatedEmojiView(
-                    unicode = span.normalizedUnicode,
+                    // Previous pack input always stripped variation selectors: span.normalizedUnicode.
+                        unicode = if (systemGlyphs) span.rawText else span.normalizedUnicode,
                     size = inlineSize,
                     animate = animate,
                     interactive = true,

@@ -59,7 +59,9 @@ fun ChatMessagesStateOverlay(
                 verticalArrangement = Arrangement.Center,
             ) {
                 if (isSecureSetupPendingError(loadError)) {
-                    Icon(Icons.Rounded.VerifiedUser, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))
+
+//Icon(Icons.Rounded.VerifiedUser, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.permissions, Icons.Rounded.VerifiedUser, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))
                     Spacer(Modifier.height(10.dp))
                     Text("Waiting for secure chat setup", color = primary, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
@@ -70,14 +72,18 @@ fun ChatMessagesStateOverlay(
                         textAlign = TextAlign.Center,
                     )
                 } else {
-                    Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))
+
+//Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.cloudOff, Icons.Rounded.CloudOff, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))
                     Spacer(Modifier.height(10.dp))
                     Text("Could not load messages", color = primary, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
                     Text(loadError, color = secondary, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(12.dp))
                     FilledTonalButton(onClick = onRetryLoad) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null)
+
+//Icon(Icons.Rounded.Refresh, contentDescription = null)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
                         Text("Retry")
                     }

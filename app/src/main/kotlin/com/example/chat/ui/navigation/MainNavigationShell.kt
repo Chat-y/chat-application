@@ -1,5 +1,7 @@
 package com.example.chat.ui.navigation
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import com.example.chat.core.templates.ChatyNavigationDestinationIds
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
@@ -49,6 +51,7 @@ import com.example.chat.core.theme.UILayoutMode
 import com.example.chat.ui.core.theme.ChatyColors
 import kotlin.math.abs
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 /** Parameters the Dart shell reads from the preference / appearance /
  *  template controllers. Defaults mirror the registered defaults so the
@@ -59,7 +62,7 @@ data class NavigationShellPrefs(
     val hideTasks: Boolean = false,
     val hideUpdates: Boolean = false,
     /** preferences.home.pagerTransition3d (default 'Default' = identity, GB key_pager_animation 0). */
-    val pagerTransition3d: String = "Default",
+    val pagerTransition3d: String = "Cube 3D",
     /** appearance.bottomBarStyle (default 'Floating Pill'). */
     val bottomBarStyle: String = "Floating Pill",
     /** Explicit One UI pick renders the raised-centre scrolling dock in the bottom shell. */
@@ -115,9 +118,21 @@ fun MainNavigationShell(
     previewOnly: Boolean = false,
     /** Read-only picker thumbnails reveal the selected drawer; normal app previews stay closed. */
     previewMenusOpen: Boolean = false,
-    rootHeaderActions: @Composable () -> Unit = {},
+    // TAS-SEARCH-1: the visible destination id is handed to the header actions so
+    // per-tab actions (e.g. Tasks search) can differ from the global default.
+    // Prior: rootHeaderActions: @Composable () -> Unit = {},
+    rootHeaderActions: @Composable (String) -> Unit = { _ -> },
     unreadCounts: Map<String, Int> = emptyMap(),
+    bannerPlaybackSelected: Boolean = false,
+    /** Optional root-owned content, never a page slot; reserved as one action lane. */
+    rootHeaderExtension: (@Composable () -> Unit)? = null,
+    homeHeaderController: HomeHeaderController? = null,
+    accountSessionIdentity: Any? = null,
+    homeToolRequest: com.example.chat.ui.chats.home.HomeToolRequest? = null,
+    onHomeToolDestinationCancelled: (com.example.chat.ui.chats.home.HomeToolRequest) -> Unit = {},
+    onHomeToolDestinationReady: (com.example.chat.ui.chats.home.HomeToolRequest) -> Unit = {},
 ) {
+    androidx.compose.runtime.key(accountSessionIdentity) {
     val scope = rememberCoroutineScope()
 
     val catalogIds = NavigationCatalog.catalogIds(
@@ -140,23 +155,85 @@ fun MainNavigationShell(
 
     val pagerState = rememberPagerState(initialPage = currentIndex, pageCount = { allDestinationIds.size })
 
+    val reduceRootMotion = prefs.animationsDisabled || com.example.chat.ui.kit.rememberChatyReduceMotion()
+    val pageStates = androidx.compose.runtime.key(accountSessionIdentity) {
+        androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    }
+    val catalogRevision = allDestinationIds.toList()
+    // A single effect owns every programmatic pager mutation. A new request cancels
+    // the previous animation; catalog repair, Back, tab taps and Home tools share it.
+    var requestedPage by remember(accountSessionIdentity) { mutableStateOf<String?>(null) }
+    var navigationRevision by remember { mutableStateOf(0) }
+    fun requestPage(page: Int) {
+        if (page !in allDestinationIds.indices) return
+        navigationRevision++
+        requestedPage = allDestinationIds[page]
+    }
+    androidx.compose.runtime.LaunchedEffect(requestedPage, navigationRevision, catalogRevision, reduceRootMotion, accountSessionIdentity) {
+        val destination = requestedPage ?: return@LaunchedEffect
+        val target = allDestinationIds.indexOf(destination)
+        if (target < 0) { requestedPage = null; return@LaunchedEffect }
+        val revision = navigationRevision
+        try {
+            if (reduceRootMotion) pagerState.scrollToPage(target)
+            else pagerState.animateScrollToPage(target, animationSpec = tween(
+                durationMillis = com.example.chat.ui.kit.ChatyMotionTokens.BASE_MS,
+                easing = com.example.chat.ui.kit.ChatyMotionTokens.enter,
+            ))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            // User drag may cancel the pager mutation while this effect remains active.
+            // Effect-key changes cancel the effect itself: retain the ID for its successor.
+            if (kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive == true &&
+                revision == navigationRevision) requestedPage = null
+            throw cancelled
+        }
+        if (revision == navigationRevision) requestedPage = null
+    }
+
     fun selectRootDestination(next: Int, destinationId: String? = null) {
         if (previewOnly) return
-        if (next == currentIndex && (destinationId == null || destinationId == currentDestinationId)) return
+        if (next == currentIndex && requestedPage == null && !pagerState.isScrollInProgress &&
+            (destinationId == null || destinationId == currentDestinationId)) return
         val nextId = destinationId ?: allDestinationIds.getOrNull(next) ?: return
-        rootHistory = rootHistory + currentDestinationId
         lastExitAttempt = 0L
-        currentIndex = next
-        currentDestinationId = nextId
-        if (pagerState.currentPage != next) {
-            scope.launch {
-                if (prefs.animationsDisabled) pagerState.scrollToPage(next)
-                else pagerState.animateScrollToPage(next)
+        // Publish tab-tap selection only when the pager settles, like a swipe.
+        requestPage(next)
+    }
+
+    // Tools route through the same mutation owner; publication happens only on settle.
+    androidx.compose.runtime.LaunchedEffect(homeToolRequest, catalogRevision, accountSessionIdentity) {
+        val request = homeToolRequest ?: return@LaunchedEffect
+        var delivered = false
+        try {
+            val chatsIndex = allDestinationIds.indexOf(ChatyNavigationDestinationIds.chats)
+            if (chatsIndex >= 0 && !previewOnly && request.owner === accountSessionIdentity) {
+                requestPage(chatsIndex)
+                val toolRevision = navigationRevision
+                androidx.compose.runtime.snapshotFlow {
+                    navigationRevision != toolRevision ||
+                        (requestedPage == null && !pagerState.isScrollInProgress)
+                }.first { it }
+                if (navigationRevision == toolRevision &&
+                    allDestinationIds.getOrNull(pagerState.settledPage) == ChatyNavigationDestinationIds.chats) {
+                    delivered = true
+                    onHomeToolDestinationReady(request)
+                }
             }
+        } finally {
+            // Key/account/unmount cancellation is not a user rejection. The successor
+            // effect retains the same request; only active-effect supersession reports it.
+            if (!delivered && kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive == true)
+                onHomeToolDestinationCancelled(request)
         }
     }
 
     fun handleRootBack() {
+        if (requestedPage != null || pagerState.isScrollInProgress) {
+            // Pending navigation never walks stale history. Supersede it with Home.
+            rootHistory = emptyList()
+            allDestinationIds.indexOf(ChatyNavigationDestinationIds.chats).takeIf { it >= 0 }?.let(::requestPage)
+            return
+        }
         if (currentDestinationId == ChatyNavigationDestinationIds.chats) rootHistory = emptyList()
         if (currentDestinationId != ChatyNavigationDestinationIds.chats && rootHistory.isNotEmpty()) {
             val previous = rootHistory.last()
@@ -166,7 +243,7 @@ fun MainNavigationShell(
                 currentIndex = index
                 currentDestinationId = previous
                 lastExitAttempt = 0L
-                scope.launch { pagerState.scrollToPage(index) }
+                requestPage(index)
                 return
             }
         }
@@ -174,7 +251,7 @@ fun MainNavigationShell(
             currentIndex = allDestinationIds.indexOf(ChatyNavigationDestinationIds.chats).coerceAtLeast(0)
             currentDestinationId = allDestinationIds[currentIndex]
             lastExitAttempt = 0L
-            scope.launch { pagerState.scrollToPage(currentIndex) }
+            requestPage(currentIndex)
             return
         }
         val now = System.currentTimeMillis()
@@ -186,7 +263,9 @@ fun MainNavigationShell(
         onExitApp()
     }
 
-    BackHandler(enabled = !previewOnly, onBack = ::handleRootBack)
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(accountSessionIdentity to currentDestinationId)
+    // Previous registration retained inactive: BackHandler(enabled = !previewOnly, onBack = ::handleRootBack)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, enabled = !previewOnly, onBack = ::handleRootBack)
 
     var moreMenuOpen by remember { mutableStateOf(false) }
 
@@ -195,7 +274,7 @@ fun MainNavigationShell(
         androidx.compose.runtime.LaunchedEffect(effectiveIndex, wasInvalid) {
             currentIndex = effectiveIndex
             currentDestinationId = allDestinationIds.getOrElse(effectiveIndex) { ChatyNavigationDestinationIds.chats }
-            if (pagerState.currentPage != effectiveIndex) pagerState.scrollToPage(effectiveIndex)
+            if (pagerState.currentPage != effectiveIndex) requestPage(effectiveIndex)
         }
     }
     val activeDestinationId = allDestinationIds.getOrElse(effectiveIndex) { ChatyNavigationDestinationIds.chats }
@@ -207,22 +286,26 @@ fun MainNavigationShell(
     // false, rounded surface off) and the dock/FAB snapped only when the
     // settledPage effect ran. Selection state itself still updates on
     // settledPage below; history/back semantics are unchanged.
-    val presentationIndex = if (previewOnly) effectiveIndex else pagerState.targetPage
+    // Keep header/FAB ownership steady throughout a gesture; settled-page publication
+    // changes the active destination only after content lands.
+    val presentationIndex = effectiveIndex
     val presentationDestinationId = allDestinationIds.getOrElse(presentationIndex) { activeDestinationId }
 
     @Composable
     fun pageContent() {
         if (previewOnly) {
-            screenContent(activeDestinationId)
+            com.example.chat.ui.profile.ProfileBannerSelection(bannerPlaybackSelected) { screenContent(activeDestinationId) }
             return
         }
         HorizontalPager(
             state = pagerState,
+            key = { index -> allDestinationIds[index] },
             userScrollEnabled = !previewOnly,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.chatyPredictiveBack(predictiveBack, enabled = !reduceRootMotion).fillMaxSize(),
             // User directive ("smooth" tab swipes): precompose the adjacent page so a
             // swipe never waits on first composition, and lower the snap threshold so a
             // short deliberate fling changes the page instead of snapping back.
+            // Retain only adjacent content; do not keep every root page's effects alive.
             beyondViewportPageCount = 1,
             flingBehavior = androidx.compose.foundation.pager.PagerDefaults.flingBehavior(
                 state = pagerState,
@@ -236,15 +319,23 @@ fun MainNavigationShell(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .pagerTransition(if (prefs.animationsDisabled) "Default" else prefs.pagerTransition3d, pagerState, index),
+                    // Preserve explicit saved transitions; only unset preferences default to cube.
+                    .pagerTransition(rootContentTransition(
+                        prefs.homeStyle?.let(HomePresetNormalizer::presentationNavigationMode) ?: navigationMode,
+                        reduceRootMotion, prefs.pagerTransition3d), pagerState, index),
             ) {
-                screenContent(destinationId)
+                pageStates.SaveableStateProvider(destinationId) {
+                    com.example.chat.ui.profile.ProfileBannerSelection(
+                        bannerPlaybackSelected && !pagerState.isScrollInProgress && index == pagerState.settledPage,
+                    ) { screenContent(destinationId) }
+                }
             }
         }
     }
 
     // Keep the pager and selection in sync after swipes (Dart onPageChanged).
-    androidx.compose.runtime.LaunchedEffect(pagerState.settledPage) {
+    androidx.compose.runtime.LaunchedEffect(pagerState.settledPage, pagerState.isScrollInProgress, requestedPage) {
+        if (requestedPage != null || pagerState.isScrollInProgress) return@LaunchedEffect
         val id = allDestinationIds.getOrNull(pagerState.settledPage) ?: return@LaunchedEffect
         if (currentIndex != pagerState.settledPage || currentDestinationId != id) {
             rootHistory = rootHistory + currentDestinationId
@@ -264,7 +355,12 @@ fun MainNavigationShell(
         com.example.chat.ui.kit.LocalReferenceLayoutPresentation provides
             com.example.chat.ui.kit.ReferenceLayoutPresentation(referenceStyle, prefs.animationsDisabled),
     ) {
-    androidx.compose.runtime.CompositionLocalProvider(LocalHomeHeaderTabs provides homeHeaderTabsState) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalHomeHeaderTabs provides homeHeaderTabsState,
+        LocalHomeHeaderController provides homeHeaderController.takeIf {
+            activeLayoutMode == AppNavigationMode.topWhatsAppBar || activeLayoutMode == AppNavigationMode.iosStyle
+        },
+    ) {
     androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxSize().navigationBarsPadding()) {
         val appearanceStyles = com.example.chat.core.templates.AppearanceVariantController.navigationStyles
         val appearanceNavigationIndex = appearanceStyles.indexOf(prefs.navigationStyleName).coerceIn(0, appearanceStyles.size - 1)
@@ -280,6 +376,8 @@ fun MainNavigationShell(
                 selectedIndex = presentationIndex,
                 activeDestinationId = presentationDestinationId,
                 rootHeaderActions = rootHeaderActions,
+                homeHeaderController = homeHeaderController,
+                rootHeaderExtension = rootHeaderExtension,
                 onSelect = { idx -> selectRootDestination(idx, allDestinationIds.getOrNull(idx)) },
                 homeHeaderTabsSlot = homeHeaderTabsSlot,
                 fab = { fab(presentationDestinationId) },
@@ -341,6 +439,8 @@ fun MainNavigationShell(
                 AppNavigationMode.basicTabStyle,
                 AppNavigationMode.gestureTabs,
             ) -> PresetNavigationShell(
+                homeHeaderController = homeHeaderController,
+                rootHeaderExtension = rootHeaderExtension,
                 unreadCounts = unreadCounts,
                 referenceDefaultPresentation = prefs.homeStyle?.let(com.example.chat.core.preferences.HomePresentationPolicy::isDefault) ?: false,
                 rootHeaderActions = rootHeaderActions,
@@ -422,12 +522,19 @@ fun MainNavigationShell(
 }
 }
 
+}
+
 /** Dart _buildTransitionPage: the five named 3D pager transitions, plus the thirteen
  *  GB-reference transformer names (PDF v8 section 7b mapping 0..13 = default + 13
  *  options). The GB-named cases are Compose approximations of the well-known
  *  eftimoff ViewPagerTransformer behaviors; exact GB timings/curves are unverified
  *  and these must not be presented as exact parity. Delta is page index minus live
  *  pager position, clamped to [-1, 1]. */
+/** HorizontalPager supplies native horizontal content slide when no layer transform is applied.
+ * iOS never applies Cube to chrome or content; explicit saved preference remains unchanged. */
+internal fun rootContentTransition(mode: AppNavigationMode, reducedMotion: Boolean, configured: String): String =
+    if (reducedMotion || mode == AppNavigationMode.iosStyle) "Default" else configured
+
 fun Modifier.pagerTransition(transition: String, delta: Float): Modifier = when (transition) {
     "Cube 3D" -> graphicsLayer {
         transformOrigin = TransformOrigin(if (delta >= 0f) 0f else 1f, 0.5f)

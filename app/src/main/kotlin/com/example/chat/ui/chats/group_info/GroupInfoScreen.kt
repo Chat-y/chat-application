@@ -1,5 +1,8 @@
 package com.example.chat.ui.chats.group_info
 
+import androidx.compose.ui.layout.onSizeChanged
+import com.example.chat.ui.navigation.ReferenceLayoutMetrics as IdentityMetrics
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -30,6 +33,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -67,6 +71,9 @@ fun GroupInfoScreen(
     var showAllMedia by remember(conversation.id, currentUserId) { mutableStateOf(false) }
     if (showAllMedia) com.example.chat.ui.chats.contact_info.ConversationMediaDialog(messages, onOpenMedia, onClose = { showAllMedia = false })
     val colors = LocalAppColors.current
+    val infoScroll = rememberScrollState()
+    var measuredIdentityPx by remember(conversation.id) { mutableStateOf(0f) }
+    val collapseFraction = com.example.chat.ui.chats.contact_info.infoHeaderFraction(infoScroll, measuredIdentityPx)
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var memberQuery by remember(conversation.id, currentUserId) { mutableStateOf("") }
@@ -91,6 +98,14 @@ fun GroupInfoScreen(
                 IconButton(onClick = onBack) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = colors.foreground)
                 }
+                val compactHeader by remember(collapseFraction) { derivedStateOf { collapseFraction.value >= 1f } }
+                if (compactHeader) {
+                    com.example.chat.ui.chats.contact_info.InfoToolbarIdentity(conversation.title, "$memberCount known members",
+                        conversation.avatarUrl, conversation.avatarInitials ?: "GP",
+                        Color(com.example.chat.ui.chats.contact_info.parseAvatarColorArgb(conversation.avatarColorHex, LocalThemeConfig.current.accentColor)),
+                        collapseFraction, Modifier.weight(1f))
+                } else {
+                // Original fixed toolbar title stays visible until the identity collapses.
                 Text(
                     "Group Info",
                     color = colors.foreground,
@@ -98,6 +113,7 @@ fun GroupInfoScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
+                }
                 IconButton(onClick = {
                     scope.launch { snackbar.showSnackbar("Group editing is not available in this build.") }
                 }) {
@@ -110,33 +126,40 @@ fun GroupInfoScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
+                // Previous scrolling state: .verticalScroll(rememberScrollState())
+                .verticalScroll(infoScroll)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             // Group header card.
             Column(
-                Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp)).padding(20.dp),
+                Modifier.fillMaxWidth().onSizeChanged { measuredIdentityPx = it.height.toFloat() }.background(colors.surface, RoundedCornerShape(16.dp)).padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(
-                    modifier = Modifier.size(68.dp).background(
-                        Color(com.example.chat.ui.chats.contact_info.parseAvatarColorArgb(conversation.avatarColorHex, LocalThemeConfig.current.accentColor)),
-                        CircleShape,
-                    ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        conversation.avatarInitials ?: "GP",
-                        color = colors.onPrimary,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                com.example.chat.ui.chats.contact_info.InfoAvatarHero(
+                    conversation.id, conversation.avatarUrl, conversation.avatarInitials ?: "GP",
+                    Color(com.example.chat.ui.chats.contact_info.parseAvatarColorArgb(conversation.avatarColorHex, LocalThemeConfig.current.accentColor)),
+                    conversation.title, IdentityMetrics.identityGroupAvatarDp.dp, collapseFraction,
+                )
+// Previous fixed initials presentation retained inactive:
+//                 Box(
+//                     modifier = Modifier.size(68.dp).background(
+//                         Color(com.example.chat.ui.chats.contact_info.parseAvatarColorArgb(conversation.avatarColorHex, LocalThemeConfig.current.accentColor)),
+//                         CircleShape,
+//                     ),
+//                     contentAlignment = Alignment.Center,
+//                 ) {
+//                     Text(
+//                         conversation.avatarInitials ?: "GP",
+//                         color = colors.onPrimary,
+//                         fontSize = 22.sp,
+//                         fontWeight = FontWeight.Bold,
+//                     )
+//                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
                     conversation.title,
                     color = colors.foreground,
-                    fontSize = 20.sp,
+                    style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
@@ -144,17 +167,29 @@ fun GroupInfoScreen(
                 Text(
                     "$memberCount known members",
                     color = colors.foregroundSecondary,
-                    fontSize = 12.sp,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                 )
             }
             Spacer(Modifier.height(16.dp))
 
-            androidx.compose.material3.TextButton(onClick = onSearch) { Text("Search conversation") }
-            androidx.compose.material3.TextButton(onClick = { showAllMedia = true }) { Text("All media, documents and links") }
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = onSearch) { Text("Search conversation") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Search conversation",
+                onClick = onSearch,
+            )
+            // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = { showAllMedia = true }) { Text("All media, documents and links") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "All media, documents and links",
+                onClick = { showAllMedia = true },
+            )
             com.example.chat.ui.chats.contact_info.SectionTitle("Group Security & Settings", colors)
             Column(Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp))) {
                 com.example.chat.ui.chats.contact_info.InfoTile(
-                    icon = { Icon(Icons.Outlined.Timer, contentDescription = null, tint = colors.warning) },
+                    icon = {
+//Icon(Icons.Outlined.Timer, contentDescription = null, tint = colors.warning)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.timer, Icons.Outlined.Timer, contentDescription = null, tint = colors.warning) },
                     title = "Disappearing Messages",
                     titleColor = colors.foreground,
                     subtitle = "Settings unavailable in this build",
@@ -162,7 +197,9 @@ fun GroupInfoScreen(
                     onClick = { scope.launch { snackbar.showSnackbar("Disappearing message settings are not available. No setting was changed.") } },
                 )
                 com.example.chat.ui.chats.contact_info.InfoTile(
-                    icon = { Icon(Icons.Outlined.VerifiedUser, contentDescription = null, tint = colors.success) },
+                    icon = {
+//Icon(Icons.Outlined.VerifiedUser, contentDescription = null, tint = colors.success)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.permissions, Icons.Outlined.VerifiedUser, contentDescription = null, tint = colors.success) },
                     title = "Encryption Verification",
                     titleColor = colors.foreground,
                     subtitle = "Encryption has not been verified",
@@ -179,7 +216,9 @@ fun GroupInfoScreen(
                         Box(
                             Modifier.background(colors.primary.copy(alpha = 0.12f), CircleShape).padding(8.dp),
                         ) {
-                            Icon(Icons.Rounded.PersonAdd, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.PersonAdd, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.personAdd, Icons.Rounded.PersonAdd, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
                         }
                     },
                     title = "Add Member",
@@ -254,7 +293,9 @@ fun GroupInfoScreen(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, tint = colors.error)
+
+//Icon(Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, tint = colors.error)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.logout, Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, tint = colors.error)
                     Spacer(Modifier.width(12.dp))
                     Text("Leave Group", color = colors.error, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 }

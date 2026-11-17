@@ -1,5 +1,7 @@
 package com.example.chat.island.ui
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import com.example.chat.island.ui.components.IslandIcon as Icon
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -102,8 +104,11 @@ private fun IslandSettingsContent(onBack: () -> Unit) {
     }
 
     if (!ready) {
-        BackHandler { onBack() }
-        OnboardingScreen(tick = tick)
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = ready) {
+            // Previous registration retained inactive: BackHandler { onBack() }
+            com.example.chat.ui.kit.ChatyPredictiveBackHandler { onBack() }
+            OnboardingScreen(tick = tick)
+        }
         return
     }
 
@@ -112,7 +117,9 @@ private fun IslandSettingsContent(onBack: () -> Unit) {
     val haptics = LocalHapticFeedback.current
 
     // Back from any secondary tab returns to Home first; Home backs out.
-    BackHandler {
+    val islandBack = com.example.chat.ui.kit.rememberChatyBackPresentation(selectedTabName)
+    // Previous registration retained inactive: BackHandler {
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = islandBack) {
         if (selectedTab != IslandTab.Home) {
             selectedTabName = IslandTab.Home.name
         } else {
@@ -127,7 +134,7 @@ private fun IslandSettingsContent(onBack: () -> Unit) {
         }
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.chatyPredictiveBack(islandBack).fillMaxSize()) {
         val useRail = maxWidth >= 600.dp
 
         Row(Modifier.fillMaxSize()) {

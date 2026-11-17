@@ -71,6 +71,7 @@ class CallPipActivity : ComponentActivity() {
                 ServiceLocator.preferencesController.security.protectFromScreenshots,
             )
             val session = ServiceLocator.callSignaling.currentSession?.takeIf { valid() }
+            com.example.chat.ui.calls.KeepCallKeyboardClosed(enabled = !compact && session != null)
             val scope = rememberCoroutineScope()
             fun action(block: suspend () -> Unit) {
                 scope.launch {

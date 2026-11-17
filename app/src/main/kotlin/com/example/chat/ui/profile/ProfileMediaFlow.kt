@@ -83,10 +83,21 @@ fun rememberProfileMediaFlow(
             claimedFile = file
             delivered.value = null
             check(!retired.get() && currentCheck.value()) { "Account changed. Reopen profile settings." }
-            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.readBytes() }
+            // Previous byte read: val bytes = withContext(Dispatchers.IO) { file.readBytes() }
+            val gif = !isAvatar && file.extension.equals("gif", true)
+            val video = !isAvatar && file.extension.equals("mp4", true)
+            val account = com.example.chat.ServiceLocator.apiBackend.authSnapshot()
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if (video) BannerVideoInput.validate(file)
+                file.readBytes().also { if (gif) com.example.chat.data.services.BannerGifPolicy.inspect(it) }
+            }
+            // Previous poster branch was video-only.
+            val poster = if (gif) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { BannerGifInput.poster(bytes) } else if (video) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { BannerVideoInput.poster(file) } else null
             check(!retired.get() && currentCheck.value()) { "Account changed. Reopen profile settings." }
-            val result = if (isAvatar) service().uploadAvatar(bytes) else service().uploadBanner(bytes)
+            // Previous: val result = if (isAvatar) service().uploadAvatar(bytes) else service().uploadBanner(bytes)
+            val result = if (gif) service().uploadBannerGif(bytes) else if (video) service().uploadBannerVideo(bytes) else if (isAvatar) service().uploadAvatar(bytes) else service().uploadBanner(bytes)
             check(!retired.get() && currentCheck.value()) { "Account changed. Reopen profile settings." }
+            if (video || gif) BannerVideoPosters.put(account, result, poster)
             return result
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             // Native results have no launch identity. A cancelled host must not accept another request.

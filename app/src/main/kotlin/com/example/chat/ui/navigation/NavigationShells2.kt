@@ -1,5 +1,8 @@
 package com.example.chat.ui.navigation
 
+import com.example.chat.ui.kit.chatyDepth
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -82,10 +85,12 @@ internal fun PerspectiveDrawerShell(
         label = "perspectiveDrawer",
     )
 
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(colors.surfaceElevated)) {
+    val drawerBack = com.example.chat.ui.kit.rememberChatyBackPresentation(open)
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.chatyPredictiveBack(drawerBack, enabled = !animationsDisabled).fillMaxSize().background(colors.surfaceElevated)) {
         val panelWidth = DrawerLayoutMetrics.perspectiveWidth(maxWidth.value).dp
         val slide = DrawerLayoutMetrics.perspectiveTranslation(maxWidth.value).dp
-        androidx.activity.compose.BackHandler(enabled = open) { open = false }
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler(enabled = open) { open = false }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = drawerBack, enabled = open) { open = false }
         // Left menu
         Column(
             modifier = Modifier
@@ -201,10 +206,12 @@ internal fun CurvedRadialDrawerShell(
         animationSpec = tween(if (animationsDisabled) 0 else 190),
         label = "radialFan",
     )
-    androidx.activity.compose.BackHandler(enabled = menuOpen) { menuOpen = false }
+    val drawerBack = com.example.chat.ui.kit.rememberChatyBackPresentation(menuOpen)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(enabled = menuOpen) { menuOpen = false }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = drawerBack, enabled = menuOpen) { menuOpen = false }
 
     androidx.compose.foundation.layout.BoxWithConstraints(
-        Modifier.fillMaxSize().background(colors.background)
+        Modifier.chatyPredictiveBack(drawerBack, enabled = !animationsDisabled).fillMaxSize().background(colors.background)
             .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.safeDrawing)
             .clipToBounds(),
         // Coordinates below are physical-left offsets, including in RTL.
@@ -256,7 +263,8 @@ internal fun CurvedRadialDrawerShell(
                         modifier = Modifier.absoluteOffset(x = (point.x - half).dp, y = (point.y - half).dp)
                             .size(RadialMenuGeometry.targetSize.dp)
                             .graphicsLayer { alpha = progress; scaleX = progress; scaleY = progress }
-                            .shadow(if (selected) 4.dp else 1.dp, CircleShape)
+                            // Previous (default black shadow): .shadow(if (selected) 4.dp else 1.dp, CircleShape)
+                            .chatyDepth(if (selected) 4.dp else 1.dp, CircleShape)
                             .clip(CircleShape)
                             .background(colors.onPrimary)
                             .border(if (selected) 3.dp else 1.dp, if (selected) colors.foreground else colors.onPrimary.copy(alpha = 0.7f), CircleShape)
@@ -338,7 +346,8 @@ internal fun CurvedRadialDrawerShell(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.absoluteOffset(x = (geometry.anchor.x - half).dp, y = (geometry.anchor.y - half).dp)
                     .size(RadialMenuGeometry.targetSize.dp)
-                    .shadow(4.dp, CircleShape).clip(CircleShape).background(colors.surface)
+                    // Previous (default black shadow): .shadow(4.dp, CircleShape).clip(CircleShape).background(colors.surface)
+                    .chatyDepth(4.dp, CircleShape).clip(CircleShape).background(colors.surface)
                     // Label the actual 56dp interactive target, not the 24dp glyph.
                     .semantics(mergeDescendants = true) {
                         contentDescription = triggerLabel

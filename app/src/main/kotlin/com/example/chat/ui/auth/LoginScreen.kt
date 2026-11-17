@@ -459,8 +459,14 @@ private fun RegisterOrgCard(theme: ThemeConfig, onClick: () -> Unit) {
                 .background(Color(argbWithAlpha(theme.accentColor, 0.15)), ChatyUiTokens.cardShape)
                 .padding(ChatyUiTokens.space8),
         ) {
-            Icon(
-                Icons.Rounded.DomainAdd,
+
+//Icon(
+//                Icons.Rounded.DomainAdd,
+//                contentDescription = null,
+//                tint = Color(theme.accentColor),
+//                modifier = Modifier.size(ChatyUiTokens.space20),
+//            )
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.organizationAdd, Icons.Rounded.DomainAdd,
                 contentDescription = null,
                 tint = Color(theme.accentColor),
                 modifier = Modifier.size(ChatyUiTokens.space20),

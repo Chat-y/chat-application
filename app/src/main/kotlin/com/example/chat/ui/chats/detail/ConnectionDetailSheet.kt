@@ -274,7 +274,10 @@ fun ConnectionDetailSheetContent(
                         strokeWidth = 2.dp,
                     )
                 } else {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null,
+
+//Icon(Icons.Rounded.Refresh, contentDescription = null,
+//                        modifier = Modifier.size(18.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = null,
                         modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.width(6.dp))

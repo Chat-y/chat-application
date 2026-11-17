@@ -238,6 +238,7 @@ private val authResourceNames = mapOf(
         "Confirm password" to "auth_confirm_password_placeholder",
         "Reset Password" to "auth_reset_password_button",
         "Password updated. Signing you in..." to "auth_reset_success_signing_in",
+        "Password updated. Sign in with your new password." to "auth_reset_success_explicit_login",
         "Open the newest password-recovery email link first." to "auth_reset_use_newest_link",
         "Verify Your Email" to "auth_otp_title_verify_email",
         "Sign in with email code" to "auth_otp_title_sign_in",

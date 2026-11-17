@@ -32,7 +32,9 @@ class NotificationReplyWiringTest {
         assertTrue(reply.contains("it.tempId == queuedId"))
         assertFalse(reply.contains("it.message.text == text"))
         val c = File(root,"java/com/example/chat/notifications/ChatyNotificationCoordinator.kt").readText()
-        assertTrue(c.contains("if (api.sendMessageForScope(account, id, text)) lane.cancelMessageFor(account, id)"))
+        // Prior source assertion checked the single-line version before nonce single-flight protection.
+        assertTrue(c.contains("if (api.sendMessageForScope(account, id, text)) {"))
+        assertTrue(c.contains("lane.cancelMessageFor(account, id)"))
     }
     @Test fun newSendsDoNotWaitForSchedulerOrOtherConversations() {
         val s = File(root,"kotlin/com/example/chat/data/api/ApiBackendService.kt").readText()

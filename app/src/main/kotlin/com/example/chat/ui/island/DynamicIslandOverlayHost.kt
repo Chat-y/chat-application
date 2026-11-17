@@ -71,9 +71,12 @@ import kotlin.math.sqrt
  *    caller (device-side adapter); [CutoutAnchorResolver] does the math.
  *  - Velocity thresholds: Flutter logical px/s -> Compose px/ms (1000x). */
 
-/** Dart SpringDescription(mass 0.9, stiffness 380, damping 36) as a Compose
- *  damping ratio: damping / (2 * sqrt(stiffness * mass)). */
-val ISLAND_SPRING_DAMPING_RATIO: Float = (36.0 / (2.0 * sqrt(380.0 * 0.9))).toFloat()
+// Bandi 2026-11-14: tap-to-open felt slow; a lightly under-damped spring opens
+// fluidly instead of creeping to rest. Previous doc and value retained below:
+// /** Dart SpringDescription(mass 0.9, stiffness 380, damping 36) as a Compose
+//  *  damping ratio: damping / (2 * sqrt(stiffness * mass)). */
+// val ISLAND_SPRING_DAMPING_RATIO: Float = (36.0 / (2.0 * sqrt(380.0 * 0.9))).toFloat()
+val ISLAND_SPRING_DAMPING_RATIO: Float = 0.75f
 val ISLAND_SPRING_STIFFNESS: Float = 380f
 
 fun islandModeToTarget(mode: IslandMode): Float = when (mode) {

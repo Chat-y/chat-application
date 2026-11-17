@@ -1,0 +1,750 @@
+{
+  "mode": "source-only, no compilation or visual verification",
+  "meaning": "Exact XML duplicates are findings; distinct XML and IDs do not establish visual or semantic uniqueness.",
+  "scope": "Effective unselected asset-pack mappings, plus direct UI ChatyIconId references. Selected variants, procedural drawings, dynamic calls and every intended purpose still need review.",
+  "asset_themes": {
+    "hugeiconsFree": {
+      "mapped_ids": 281,
+      "missing_resources": [],
+      "identical_xml_groups": [
+        [
+          {
+            "id": "callAudio",
+            "resource": "ic_hgf_call_audio"
+          },
+          {
+            "id": "calls",
+            "resource": "ic_hgf_calls"
+          },
+          {
+            "id": "earpiece",
+            "resource": "ic_hgf_earpiece"
+          },
+          {
+            "id": "voiceCall",
+            "resource": "ic_hgf_voice_call"
+          }
+        ],
+        [
+          {
+            "id": "callVideo",
+            "resource": "ic_hgf_call_video"
+          },
+          {
+            "id": "videoCam",
+            "resource": "ic_hgf_video_cam"
+          }
+        ],
+        [
+          {
+            "id": "cameraFlip",
+            "resource": "ic_hgf_camera_flip"
+          },
+          {
+            "id": "cameraSwitch",
+            "resource": "ic_hgf_camera_switch"
+          }
+        ],
+        [
+          {
+            "id": "check",
+            "resource": "ic_hgf_check"
+          },
+          {
+            "id": "checkSingle",
+            "resource": "ic_hgf_check_single"
+          },
+          {
+            "id": "messageCheckSingle",
+            "resource": "ic_hgf_message_check_single"
+          }
+        ],
+        [
+          {
+            "id": "checkDouble",
+            "resource": "ic_hgf_check_double"
+          },
+          {
+            "id": "messageCheckDouble",
+            "resource": "ic_hgf_message_check_double"
+          }
+        ],
+        [
+          {
+            "id": "clear",
+            "resource": "ic_hgf_clear"
+          },
+          {
+            "id": "close",
+            "resource": "ic_hgf_close"
+          }
+        ],
+        [
+          {
+            "id": "delete",
+            "resource": "ic_hgf_delete"
+          },
+          {
+            "id": "deleteOutline",
+            "resource": "ic_hgf_delete_outline"
+          }
+        ],
+        [
+          {
+            "id": "edit",
+            "resource": "ic_hgf_edit"
+          },
+          {
+            "id": "editOutline",
+            "resource": "ic_hgf_edit_outline"
+          }
+        ],
+        [
+          {
+            "id": "grid",
+            "resource": "ic_hgf_role_grid"
+          },
+          {
+            "id": "widgets",
+            "resource": "ic_hgf_role_widgets"
+          }
+        ],
+        [
+          {
+            "id": "messageClock",
+            "resource": "ic_hgf_message_clock"
+          },
+          {
+            "id": "schedule",
+            "resource": "ic_hgf_schedule"
+          }
+        ]
+      ]
+    },
+    "majesticonsLine": {
+      "mapped_ids": 281,
+      "missing_resources": [],
+      "identical_xml_groups": [
+        [
+          {
+            "id": "callAudio",
+            "resource": "ic_mjl_call_audio"
+          },
+          {
+            "id": "calls",
+            "resource": "ic_mjl_calls"
+          },
+          {
+            "id": "voiceCall",
+            "resource": "ic_mjl_voice_call"
+          }
+        ],
+        [
+          {
+            "id": "callVideo",
+            "resource": "ic_mjl_call_video"
+          },
+          {
+            "id": "videoCam",
+            "resource": "ic_mjl_video_cam"
+          }
+        ],
+        [
+          {
+            "id": "clear",
+            "resource": "ic_mjl_clear"
+          },
+          {
+            "id": "close",
+            "resource": "ic_mjl_close"
+          }
+        ],
+        [
+          {
+            "id": "delete",
+            "resource": "ic_mjl_delete"
+          },
+          {
+            "id": "deleteOutline",
+            "resource": "ic_mjl_delete_outline"
+          }
+        ],
+        [
+          {
+            "id": "edit",
+            "resource": "ic_mjl_edit"
+          },
+          {
+            "id": "editOutline",
+            "resource": "ic_mjl_edit_outline"
+          }
+        ],
+        [
+          {
+            "id": "grid",
+            "resource": "ic_mjl_role_grid"
+          },
+          {
+            "id": "widgets",
+            "resource": "ic_mjl_role_widgets"
+          }
+        ],
+        [
+          {
+            "id": "messageClock",
+            "resource": "ic_mjl_message_clock"
+          },
+          {
+            "id": "schedule",
+            "resource": "ic_mjl_schedule"
+          }
+        ]
+      ]
+    },
+    "majesticonsSolid": {
+      "mapped_ids": 281,
+      "missing_resources": [],
+      "identical_xml_groups": [
+        [
+          {
+            "id": "callAudio",
+            "resource": "ic_mjs_call_audio"
+          },
+          {
+            "id": "calls",
+            "resource": "ic_mjs_calls"
+          },
+          {
+            "id": "voiceCall",
+            "resource": "ic_mjs_voice_call"
+          }
+        ],
+        [
+          {
+            "id": "callVideo",
+            "resource": "ic_mjs_call_video"
+          },
+          {
+            "id": "videoCam",
+            "resource": "ic_mjs_video_cam"
+          }
+        ],
+        [
+          {
+            "id": "clear",
+            "resource": "ic_mjs_clear"
+          },
+          {
+            "id": "close",
+            "resource": "ic_mjs_close"
+          }
+        ],
+        [
+          {
+            "id": "delete",
+            "resource": "ic_mjs_delete"
+          },
+          {
+            "id": "deleteOutline",
+            "resource": "ic_mjs_delete_outline"
+          }
+        ],
+        [
+          {
+            "id": "edit",
+            "resource": "ic_mjs_edit"
+          },
+          {
+            "id": "editOutline",
+            "resource": "ic_mjs_edit_outline"
+          }
+        ],
+        [
+          {
+            "id": "favourite",
+            "resource": "ic_mjs_favourite"
+          },
+          {
+            "id": "favouriteFilled",
+            "resource": "ic_mjs_favourite_filled"
+          }
+        ],
+        [
+          {
+            "id": "grid",
+            "resource": "ic_mjs_role_grid"
+          },
+          {
+            "id": "widgets",
+            "resource": "ic_mjs_role_widgets"
+          }
+        ],
+        [
+          {
+            "id": "messageClock",
+            "resource": "ic_mjs_message_clock"
+          },
+          {
+            "id": "schedule",
+            "resource": "ic_mjs_schedule"
+          }
+        ]
+      ]
+    },
+    "pikaiconsStroke": {
+      "mapped_ids": 281,
+      "missing_resources": [],
+      "identical_xml_groups": [
+        [
+          {
+            "id": "callVideo",
+            "resource": "ic_pks_call_video"
+          },
+          {
+            "id": "videoCam",
+            "resource": "ic_pks_video_cam"
+          }
+        ],
+        [
+          {
+            "id": "check",
+            "resource": "ic_pks_check"
+          },
+          {
+            "id": "checkSingle",
+            "resource": "ic_pks_check_single"
+          }
+        ],
+        [
+          {
+            "id": "clear",
+            "resource": "ic_pks_clear"
+          },
+          {
+            "id": "close",
+            "resource": "ic_pks_close"
+          }
+        ],
+        [
+          {
+            "id": "delete",
+            "resource": "ic_pks_delete"
+          },
+          {
+            "id": "deleteOutline",
+            "resource": "ic_pks_delete_outline"
+          }
+        ],
+        [
+          {
+            "id": "edit",
+            "resource": "ic_pks_edit"
+          },
+          {
+            "id": "editOutline",
+            "resource": "ic_pks_edit_outline"
+          }
+        ],
+        [
+          {
+            "id": "grid",
+            "resource": "ic_pkf_role_grid"
+          },
+          {
+            "id": "widgets",
+            "resource": "ic_pkf_role_widgets"
+          }
+        ]
+      ]
+    },
+    "pikaiconsSolid": {
+      "mapped_ids": 281,
+      "missing_resources": [],
+      "identical_xml_groups": [
+        [
+          {
+            "id": "callVideo",
+            "resource": "ic_pkf_call_video"
+          },
+          {
+            "id": "videoCam",
+            "resource": "ic_pkf_video_cam"
+          }
+        ],
+        [
+          {
+            "id": "check",
+            "resource": "ic_pkf_check"
+          },
+          {
+            "id": "checkSingle",
+            "resource": "ic_pkf_check_single"
+          }
+        ],
+        [
+          {
+            "id": "delete",
+            "resource": "ic_pkf_delete"
+          },
+          {
+            "id": "deleteOutline",
+            "resource": "ic_pkf_delete_outline"
+          }
+        ],
+        [
+          {
+            "id": "edit",
+            "resource": "ic_pkf_edit"
+          },
+          {
+            "id": "editOutline",
+            "resource": "ic_pkf_edit_outline"
+          }
+        ],
+        [
+          {
+            "id": "grid",
+            "resource": "ic_pks_role_grid"
+          },
+          {
+            "id": "widgets",
+            "resource": "ic_pks_role_widgets"
+          }
+        ]
+      ]
+    },
+    "phosphorRegular": {
+      "mapped_ids": 281,
+      "missing_resources": [],
+      "identical_xml_groups": [
+        [
+          {
+            "id": "grid",
+            "resource": "ic_phr_role_grid"
+          },
+          {
+            "id": "widgets",
+            "resource": "ic_phr_role_widgets"
+          }
+        ]
+      ]
+    }
+  },
+  "direct_ui_reference_counts": {
+    "add": 14,
+    "addTask": 1,
+    "alignTop": 3,
+    "animation": 1,
+    "archive": 7,
+    "arrowRight": 1,
+    "aspectRatio": 1,
+    "atSign": 1,
+    "attachment": 3,
+    "attachmentPlus": 2,
+    "autoAwesome": 9,
+    "back": 40,
+    "block": 2,
+    "bubbleChart": 1,
+    "callAudio": 19,
+    "callDataSaver": 1,
+    "callEnd": 21,
+    "callVideo": 8,
+    "callVideoOff": 2,
+    "calls": 4,
+    "camera": 17,
+    "cameraFlashOff": 1,
+    "cameraFlashOn": 3,
+    "cameraFlip": 3,
+    "cameraShutter": 2,
+    "cameraSwitch": 2,
+    "channelOff": 1,
+    "chats": 21,
+    "check": 32,
+    "checkCircle": 2,
+    "checklist": 1,
+    "chevronDown": 2,
+    "chevronRight": 40,
+    "chevronUp": 1,
+    "clear": 3,
+    "close": 41,
+    "cloudDownload": 1,
+    "community": 1,
+    "contactLabel": 1,
+    "copy": 3,
+    "corner": 1,
+    "delete": 7,
+    "deleteOutline": 10,
+    "desktop": 5,
+    "dock": 1,
+    "document": 1,
+    "download": 2,
+    "earpiece": 1,
+    "edit": 11,
+    "emoji": 8,
+    "entries": 2,
+    "entry": 2,
+    "errorOutline": 10,
+    "eye": 8,
+    "eyeOff": 6,
+    "fabChat": 1,
+    "favourite": 2,
+    "favouriteFilled": 1,
+    "food": 1,
+    "forward": 6,
+    "gallery": 9,
+    "ghost": 1,
+    "groups": 8,
+    "hourglass": 3,
+    "info": 11,
+    "layers": 4,
+    "layout": 1,
+    "link": 2,
+    "list": 1,
+    "lock": 20,
+    "logout": 3,
+    "mail": 4,
+    "markRead": 2,
+    "markUnread": 3,
+    "mediaError": 1,
+    "messageCheckDouble": 5,
+    "messageCheckSingle": 1,
+    "messageClock": 1,
+    "microphone": 9,
+    "microphoneOff": 2,
+    "more": 7,
+    "moreOptions": 14,
+    "mosaic": 1,
+    "moveDown": 1,
+    "musicNote": 1,
+    "mute": 6,
+    "note": 1,
+    "numberOne": 2,
+    "onlineRing": 1,
+    "openInNew": 7,
+    "paint": 1,
+    "paintFill": 1,
+    "palette": 5,
+    "pause": 4,
+    "paw": 1,
+    "personOff": 2,
+    "phone": 3,
+    "pin": 8,
+    "playArrow": 8,
+    "playCircle": 2,
+    "presenceDot": 5,
+    "profile": 15,
+    "qrCode": 1,
+    "quote": 1,
+    "radioOff": 4,
+    "radioOn": 5,
+    "reactionAdd": 1,
+    "refresh": 2,
+    "reply": 4,
+    "report": 3,
+    "reset": 1,
+    "rotateLeft": 1,
+    "rotateRight": 2,
+    "rupee": 1,
+    "schedule": 3,
+    "scheduleSend": 3,
+    "screenShare": 1,
+    "search": 27,
+    "selectAll": 3,
+    "send": 14,
+    "settings": 6,
+    "share": 7,
+    "signal": 7,
+    "speaker": 3,
+    "sportsBall": 1,
+    "star": 4,
+    "starFilled": 4,
+    "symbols": 1,
+    "tasks": 6,
+    "textFormat": 4,
+    "timer": 3,
+    "toggle": 1,
+    "translate": 1,
+    "tune": 8,
+    "unarchive": 1,
+    "unlock": 5,
+    "unmute": 3,
+    "unpin": 3,
+    "updates": 14,
+    "videoCam": 3,
+    "voiceCall": 3,
+    "wallpaper": 10,
+    "warning": 1,
+    "waveform": 2,
+    "workspace": 5
+  },
+  "stock_icon_call_sites_requiring_purpose_review": [
+    "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt:87",
+    "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt:94",
+    "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt:142",
+    "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt:165",
+    "app/src/main/kotlin/com/example/chat/ui/ChatVoiceBinding.kt:441",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt:223",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt:235",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt:248",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt:259",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt:271",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt:283",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt:436",
+    "app/src/main/kotlin/com/example/chat/ui/auth/RegisterScreen.kt:805",
+    "app/src/main/kotlin/com/example/chat/ui/automation/AutoReplyRulesScreen.kt:191",
+    "app/src/main/kotlin/com/example/chat/ui/automation/AutoReplyRulesScreen.kt:411",
+    "app/src/main/kotlin/com/example/chat/ui/automation/ScheduleMessageSheet.kt:193",
+    "app/src/main/kotlin/com/example/chat/ui/automation/ScheduledMessagesScreen.kt:131",
+    "app/src/main/kotlin/com/example/chat/ui/calls/CallContactPickerScreen.kt:348",
+    "app/src/main/kotlin/com/example/chat/ui/calls/CallsScreen.kt:270",
+    "app/src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt:460",
+    "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleGroupMeetingView.kt:103",
+    "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleOngoingCallView.kt:126",
+    "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleOngoingCallView.kt:142",
+    "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt:62",
+    "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt:73",
+    "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt:80",
+    "app/src/main/kotlin/com/example/chat/ui/chats/NewChatScreen.kt:919",
+    "app/src/main/kotlin/com/example/chat/ui/chats/NewChatScreen.kt:933",
+    "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt:415",
+    "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt:436",
+    "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt:548",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/AttachmentSheet.kt:145",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/ChatyEmojiPicker.kt:214",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/ConnectionDetailSheet.kt:277",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt:168",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt:173",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt:188",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt:215",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt:645",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt:661",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt:686",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt:688",
+    "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaViewerScreen.kt:834",
+    "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt:180",
+    "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt:188",
+    "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt:205",
+    "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt:280",
+    "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt:387",
+    "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt:530",
+    "app/src/main/kotlin/com/example/chat/ui/chats/linked_devices/LinkedDevicesQrScreen.kt:272",
+    "app/src/main/kotlin/com/example/chat/ui/chats/linked_devices/LinkedDevicesQrScreen.kt:280",
+    "app/src/main/kotlin/com/example/chat/ui/chats/location/FriendMapScreen.kt:351",
+    "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt:313",
+    "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt:318",
+    "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt:335",
+    "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt:345",
+    "app/src/main/kotlin/com/example/chat/ui/chats/locked_chats/LockedChatsScreen.kt:298",
+    "app/src/main/kotlin/com/example/chat/ui/chats/starred/StarredMessagesScreen.kt:404",
+    "app/src/main/kotlin/com/example/chat/ui/media/ChatyVideoPlayerWidget.kt:458",
+    "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt:430",
+    "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt:1066",
+    "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt:1099",
+    "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt:1118",
+    "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt:1129",
+    "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt:409",
+    "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt:412",
+    "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt:498",
+    "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt:501",
+    "app/src/main/kotlin/com/example/chat/ui/media/MediaWorkspaceScreen.kt:160",
+    "app/src/main/kotlin/com/example/chat/ui/media/MediaWorkspaceScreen.kt:164",
+    "app/src/main/kotlin/com/example/chat/ui/media/PdfWorkspaceScreen.kt:339",
+    "app/src/main/kotlin/com/example/chat/ui/media/PdfWorkspaceScreen.kt:449",
+    "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationFab.kt:657",
+    "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells.kt:181",
+    "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells.kt:271",
+    "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells3.kt:604",
+    "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells3.kt:912",
+    "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt:153",
+    "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt:173",
+    "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt:266",
+    "app/src/main/kotlin/com/example/chat/ui/onboarding/NotificationPermissionSheet.kt:194",
+    "app/src/main/kotlin/com/example/chat/ui/onboarding/PermissionOnboarding.kt:226",
+    "app/src/main/kotlin/com/example/chat/ui/profile/ProfileEditScreen.kt:558",
+    "app/src/main/kotlin/com/example/chat/ui/profile/ProfileEditorSheet.kt:181",
+    "app/src/main/kotlin/com/example/chat/ui/search/GlobalSearchScreen.kt:616",
+    "app/src/main/kotlin/com/example/chat/ui/settings/AudioSettingsScreen.kt:423",
+    "app/src/main/kotlin/com/example/chat/ui/settings/AudioSettingsScreen.kt:852",
+    "app/src/main/kotlin/com/example/chat/ui/settings/HideMediaScreen.kt:323",
+    "app/src/main/kotlin/com/example/chat/ui/settings/HideMediaScreen.kt:373",
+    "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt:330",
+    "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt:436",
+    "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt:606",
+    "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt:295",
+    "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt:311",
+    "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt:341",
+    "app/src/main/kotlin/com/example/chat/ui/settings/appearance/ComponentStylesScreen.kt:203",
+    "app/src/main/kotlin/com/example/chat/ui/settings/appicon/AppIconSettingsScreen.kt:532",
+    "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbSettingsScreen.kt:403",
+    "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt:72",
+    "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt:92",
+    "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt:109",
+    "app/src/main/kotlin/com/example/chat/ui/settings/home/HeaderSettingsScreen.kt:516",
+    "app/src/main/kotlin/com/example/chat/ui/settings/home/HomeRowsSettingsScreen.kt:135",
+    "app/src/main/kotlin/com/example/chat/ui/settings/navigation/NavigationDestinationsSettingsScreen.kt:455",
+    "app/src/main/kotlin/com/example/chat/ui/settings/navigation/NavigationDestinationsSettingsScreen.kt:462",
+    "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationSettingsPage.kt:357",
+    "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationSettingsPage.kt:364",
+    "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationToastSettingsScreen.kt:303",
+    "app/src/main/kotlin/com/example/chat/ui/settings/permissions/SystemPermissionsScreen.kt:663",
+    "app/src/main/kotlin/com/example/chat/ui/settings/permissions/SystemPermissionsScreen.kt:722",
+    "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt:463",
+    "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt:775",
+    "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt:793",
+    "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt:815",
+    "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt:1558",
+    "app/src/main/kotlin/com/example/chat/ui/settings/security/SecurityCenterScreen.kt:602",
+    "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt:235",
+    "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt:238",
+    "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt:422",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatePreviewWidget.kt:253",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatePreviewWidget.kt:439",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt:105",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt:107",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt:109",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt:192",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt:195",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt:199",
+    "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt:446",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:270",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:271",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:272",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:285",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:397",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:407",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:465",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:506",
+    "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt:519",
+    "app/src/main/kotlin/com/example/chat/ui/settings/universal/UniversalChatyIconsScreen.kt:156",
+    "app/src/main/kotlin/com/example/chat/ui/settings/universal/UniversalChatyIconsScreen.kt:336",
+    "app/src/main/kotlin/com/example/chat/ui/subscription/PlanSubscriptionScreen.kt:637",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TaskCreateEditModal.kt:281",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt:237",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt:310",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt:325",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt:333",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt:246",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt:261",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt:910",
+    "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt:960",
+    "app/src/main/kotlin/com/example/chat/ui/updates/UpdatesScreenParts.kt:669",
+    "app/src/main/kotlin/com/example/chat/ui/updates/UpdatesScreenParts.kt:1081"
+  ],
+  "known_cross_purpose_binding": {
+    "source": "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt",
+    "id": "callAudio",
+    "labels": [
+      "New Call",
+      "Who can call me?"
+    ],
+    "gap": "Different actions currently use the same icon ID and artwork."
+  },
+  "recovered_menu_mapping_checks": {
+    "triage_button_removed": true,
+    "old_preview_label_removed": true,
+    "appearance_callback_wired": true,
+    "appearance_menu_name": true,
+    "unread_filter_retained": true,
+    "date_grouping_setting": true
+  }
+}

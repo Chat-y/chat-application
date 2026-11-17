@@ -232,10 +232,14 @@ fun ThemeStudioScreen(
                 },
                 actions = {
                     IconButton(onClick = { exportTheme() }) {
-                        Icon(Icons.Rounded.FileUpload, contentDescription = "Export Theme JSON", tint = Color(theme.primaryTextColor))
+
+//Icon(Icons.Rounded.FileUpload, contentDescription = "Export Theme JSON", tint = Color(theme.primaryTextColor))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.upload, Icons.Rounded.FileUpload, contentDescription = "Export Theme JSON", tint = Color(theme.primaryTextColor))
                     }
                     IconButton(onClick = { importTheme() }) {
-                        Icon(Icons.Rounded.FileDownload, contentDescription = "Import Theme JSON", tint = Color(theme.primaryTextColor))
+
+//Icon(Icons.Rounded.FileDownload, contentDescription = "Import Theme JSON", tint = Color(theme.primaryTextColor))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.download, Icons.Rounded.FileDownload, contentDescription = "Import Theme JSON", tint = Color(theme.primaryTextColor))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -271,6 +275,7 @@ fun ThemeStudioScreen(
             // Morphing segmented tab bar.
             Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 MorphingSegmentedControl(
+                    itemRole = androidx.compose.ui.semantics.Role.Tab,
                     selectedValue = selectedTab,
                     items = listOf(
                         MorphingSegmentItem(0, "Bubbles", Icons.Outlined.ChatBubbleOutline),
@@ -342,8 +347,13 @@ fun ThemeStudioScreen(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            Icons.Outlined.DashboardCustomize,
+
+//Icon(
+//                            Icons.Outlined.DashboardCustomize,
+//                            contentDescription = null,
+//                            tint = Color(theme.accentColor),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.layout, Icons.Outlined.DashboardCustomize,
                             contentDescription = null,
                             tint = Color(theme.accentColor),
                         )
@@ -418,7 +428,9 @@ private fun BubblesTab(
     BentoCard(
         title = "Bubble Geometry & Font Scale",
         subtitle = "Adjust radius curvature and message typography scale",
-        headerLeading = { Icon(Icons.Rounded.RoundedCorner, contentDescription = null) },
+        headerLeading = {
+//Icon(Icons.Rounded.RoundedCorner, contentDescription = null)
+        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.corner, Icons.Rounded.RoundedCorner, contentDescription = null) },
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Corner Radius", fontSize = 13.sp, color = Color(theme.primaryTextColor))

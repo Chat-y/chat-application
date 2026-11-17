@@ -11,10 +11,11 @@ import org.junit.Test
 class NotificationToastDefaultsGapTest {
     @Test fun freshDefaultsArePinnedPerType() {
         val p = NotificationToastPreferences()
-        assertTrue(p.onlineToastEnabled)
+        // Previous fresh default was true. User requested all event masters off.
+        assertFalse(p.onlineToastEnabled)
         assertFalse(p.storyToastEnabled)
         assertFalse(p.profileToastEnabled)
-        assertTrue(p.typingToastEnabled)
+        assertFalse(p.typingToastEnabled)
         listOf("online", "story", "profile", "typing").forEach { type ->
             val m = p.toMap()
             assertEquals(8.0, m[type + "ToastRadius"])

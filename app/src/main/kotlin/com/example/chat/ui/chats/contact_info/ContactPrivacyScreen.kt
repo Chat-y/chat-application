@@ -182,8 +182,14 @@ fun ContactPrivacyScreen(
                 Row(
                     Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp)).padding(16.dp),
                 ) {
-                    Icon(
-                        Icons.Rounded.Shield,
+
+//Icon(
+//                        Icons.Rounded.Shield,
+//                        contentDescription = null,
+//                        tint = colors.primary,
+//                        modifier = Modifier.size(22.dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.shield, Icons.Rounded.Shield,
                         contentDescription = null,
                         tint = colors.primary,
                         modifier = Modifier.size(22.dp),

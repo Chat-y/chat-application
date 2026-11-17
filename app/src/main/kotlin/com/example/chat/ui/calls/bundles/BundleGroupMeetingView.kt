@@ -100,7 +100,9 @@ fun BundleGroupMeetingView(
                     )
                 }
                 IconButton(onClick = onInviteClicked) {
-                    Icon(Icons.Rounded.PersonAdd, "Invite People", tint = tokens.primaryAccent)
+
+//Icon(Icons.Rounded.PersonAdd, "Invite People", tint = tokens.primaryAccent)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.personAdd, Icons.Rounded.PersonAdd, "Invite People", tint = tokens.primaryAccent)
                 }
             }
 

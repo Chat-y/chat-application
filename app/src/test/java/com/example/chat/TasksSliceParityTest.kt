@@ -31,10 +31,11 @@ class TaskWorkflowParityTest {
             ),
             TaskWorkflow.stages,
         )
-        assertEquals("Todo", TaskWorkflow.label(TaskStatus.inbox))
-        assertEquals("In Process", TaskWorkflow.label(TaskStatus.inProgress))
-        assertEquals("In Review", TaskWorkflow.label(TaskStatus.assigned))
-        assertEquals("Testing", TaskWorkflow.label(TaskStatus.blocked))
+        // P4: labels aligned to the badge names (see TaskWorkflow).
+        assertEquals("Inbox", TaskWorkflow.label(TaskStatus.inbox))
+        assertEquals("In Progress", TaskWorkflow.label(TaskStatus.inProgress))
+        assertEquals("Assigned", TaskWorkflow.label(TaskStatus.assigned))
+        assertEquals("Blocked", TaskWorkflow.label(TaskStatus.blocked))
         assertEquals("Done", TaskWorkflow.label(TaskStatus.completed))
         assertEquals("Archived", TaskWorkflow.label(TaskStatus.archived))
     }
@@ -63,7 +64,7 @@ class TaskWorkflowParityTest {
             TaskWorkflow.validate(TaskStatus.archived, TaskStatus.inbox)
             fail("expected TaskTransitionError")
         } catch (error: TaskTransitionError) {
-            assertEquals("Archived → Todo is not a valid workflow move.", error.reason)
+            assertEquals("Archived → Inbox is not a valid workflow move.", error.reason)
         }
     }
 }
@@ -246,7 +247,7 @@ class TasksControllerParityTest {
         val invalid = c.moveTask(task.copy(status = TaskStatus.archived), TaskStatus.inbox)
         assertTrue(invalid is TasksController.MoveResult.Invalid)
         assertEquals(
-            "Archived → Todo is not a valid workflow move.",
+            "Archived → Inbox is not a valid workflow move.",
             (invalid as TasksController.MoveResult.Invalid).reason,
         )
 
@@ -254,7 +255,7 @@ class TasksControllerParityTest {
         transport.body = "{\"data\":{\"uid\":\"t1\",\"status\":\"in_progress\",\"title\":\"T\"}}"
         assertTrue(c.moveTask(task, TaskStatus.inProgress) is TasksController.MoveResult.Moved)
         assertEquals(TaskStatus.inProgress, c.tasks.single().status)
-        assertEquals(listOf("Todo → In Process • 25/10 18:30"), c.historyFor("t1"))
+        assertEquals(listOf("Inbox → In Progress • 25/10 18:30"), c.historyFor("t1"))
     }
 
     @Test fun moveTaskServerFailureKeepsPersistedStatus() = runBlocking {

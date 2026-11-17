@@ -234,7 +234,12 @@ fun CustomBrandIconEditor(
             TopAppBar(
                 title = { Text("Adjust custom icon") },
                 actions = {
-                    TextButton(onClick = { if (!saving) reset() }) { Text("Reset") }
+                    // Previous stock text action:
+                    // TextButton(onClick = { if (!saving) reset() }) { Text("Reset") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Reset",
+                        onClick = { if (!saving) reset() },
+                    )
                     Spacer(Modifier.width(8.dp))
                 },
             )

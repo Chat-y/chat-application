@@ -192,10 +192,16 @@ fun ConversationEntryStyleScreen(preferences: ChatyPreferencesController, onBack
         ConversationSettingsScaffold(title = strings.getString(com.example.chat.R.string.conv_ui_message_bar_880ea4), onBack = onBack) {
 
             Column(Modifier.weight(1f).align(Alignment.CenterHorizontally).widthIn(max = 600.dp).fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().imePadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp, vertical = 16.dp)) {
-                androidx.compose.material3.TextButton(onClick = { previewOtherMode = !previewOtherMode }) {
-                    Text(strings.getString(if (previewOtherMode) com.example.chat.R.string.conv_proposal_use_app_mode
-                        else com.example.chat.R.string.conv_proposal_other_mode))
-                }
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = { previewOtherMode = !previewOtherMode }) {
+                //                     Text(strings.getString(if (previewOtherMode) com.example.chat.R.string.conv_proposal_use_app_mode
+                //                         else com.example.chat.R.string.conv_proposal_other_mode))
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = strings.getString(if (previewOtherMode) com.example.chat.R.string.conv_proposal_use_app_mode
+                        else com.example.chat.R.string.conv_proposal_other_mode),
+                    onClick = { previewOtherMode = !previewOtherMode },
+                )
                 val previewTheme = conversationAlternatePreviewTheme(config, previewOtherMode)
                 val previewEntryBg = p.uiEntryBackgroundColor?.let(::Color) ?: Color(previewTheme.surfaceColor)
                 val previewComposerColors = com.example.chat.ui.chats.detail.ComposerColors.resolve(previewTheme,
@@ -237,9 +243,14 @@ fun ConversationEntryStyleScreen(preferences: ChatyPreferencesController, onBack
                     }
                 }
                 */
-                androidx.compose.material3.TextButton(onClick = { previewText = if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_message_fa769f) else "" }) {
-                    Text(if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_send_state_598ff4) else strings.getString(com.example.chat.R.string.conv_ui_preview_microphone_state_e707e8))
-                }
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = { previewText = if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_message_fa769f) else "" }) {
+                //                     Text(if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_send_state_598ff4) else strings.getString(com.example.chat.R.string.conv_ui_preview_microphone_state_e707e8))
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_send_state_598ff4) else strings.getString(com.example.chat.R.string.conv_ui_preview_microphone_state_e707e8),
+                    onClick = { previewText = if (previewText.isBlank()) strings.getString(com.example.chat.R.string.conv_ui_preview_message_fa769f) else "" },
+                )
                 Text(strings.getString(com.example.chat.R.string.conv_ui_preview_only_nothing_is_sent_5c68fa), color = Color(config.secondaryTextColor), fontSize = 12.sp)
                 ConversationContrastNote(composerColors.inputText, composerColors.inputBg, 4.5f, strings.getString(com.example.chat.R.string.conv_ui_field_text_a2f608))
                 ConversationContrastNote(composerColors.uiButtons, uiEntryBg, 3f, strings.getString(com.example.chat.R.string.conv_ui_bar_icons_29dbfc))
@@ -370,12 +381,22 @@ fun ConversationEntryStyleScreen(preferences: ChatyPreferencesController, onBack
                 )
                 }
                     }
-                    androidx.compose.material3.TextButton(onClick = {
+                    // Previous stock text action:
+                    // androidx.compose.material3.TextButton(onClick = {
+                    //                         /* Previous reset: preferences.editConversation { latest -> latest.copy(uiEntryBackgroundColor = null, uiButtonsColor = null,
+                    //                             emojiButtonColor = null, sendButtonColor = null, micSendBgCircleColor = null,
+                    //                             textEntryBackgroundColor = null, textEntryColor = null) } */
+                    //                         model.onEvent(EntryStyleEvent.Reset)
+                    //                     }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_entry_colours_b2d814)) }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = strings.getString(com.example.chat.R.string.conv_ui_reset_all_entry_colours_b2d814),
+                        onClick = {
                         /* Previous reset: preferences.editConversation { latest -> latest.copy(uiEntryBackgroundColor = null, uiButtonsColor = null,
                             emojiButtonColor = null, sendButtonColor = null, micSendBgCircleColor = null,
                             textEntryBackgroundColor = null, textEntryColor = null) } */
                         model.onEvent(EntryStyleEvent.Reset)
-                    }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_entry_colours_b2d814)) }
+                    },
+                    )
                 }
             }
         }

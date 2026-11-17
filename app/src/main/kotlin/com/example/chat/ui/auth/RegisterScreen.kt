@@ -473,8 +473,14 @@ fun RegisterScreen(
                             onValueChange = { onWorkspaceChanged(it) },
                             error = workspaceError,
                             prefixIcon = {
-                                Icon(
-                                    Icons.Rounded.Apartment,
+
+//Icon(
+//                                    Icons.Rounded.Apartment,
+//                                    contentDescription = null,
+//                                    tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.7)),
+//                                    modifier = Modifier.size(ChatyUiTokens.space20),
+//                                )
+                                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.organization, Icons.Rounded.Apartment,
                                     contentDescription = null,
                                     tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.7)),
                                     modifier = Modifier.size(ChatyUiTokens.space20),
@@ -802,7 +808,9 @@ private fun OrgStatusBanner(
                 // Prior: Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))
                     .padding(horizontal = ChatyUiTokens.space16, vertical = ChatyUiTokens.space8),
             ) {
-                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(theme.successColor), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))
+
+//Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(theme.successColor), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(theme.successColor), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))
                 Spacer(Modifier.width(ChatyUiTokens.touchGap))
                         // Prior: color = Color(0xFF047857),
                 Column {
@@ -908,8 +916,14 @@ private fun RegisterOrgCard(theme: ThemeConfig, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(modifier = Modifier.background(Color(argbWithAlpha(theme.accentColor, 0.15)), ChatyUiTokens.cardShape).padding(ChatyUiTokens.space8)) {
-            Icon(
-                Icons.Rounded.DomainAdd,
+
+//Icon(
+//                Icons.Rounded.DomainAdd,
+//                contentDescription = null,
+//                tint = Color(theme.accentColor),
+//                modifier = Modifier.size(ChatyUiTokens.space20),
+//            )
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.organizationAdd, Icons.Rounded.DomainAdd,
                 contentDescription = null,
                 tint = Color(theme.accentColor),
                 modifier = Modifier.size(ChatyUiTokens.space20),

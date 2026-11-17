@@ -41,7 +41,16 @@ data class MessageAttachment(
     val size: String,
     val url: String? = null,
     val durationSeconds: Int = 0,
+    /** Present only after MLS application decryption. Never serialize into REST content. */
+    val encryptedFile: Map<String, Any?>? = null,
 )
+
+/** Constructed only by verified native projection or authenticated local snapshots.
+ * Never inferred from mutable wire metadata booleans. */
+data class AuthenticatedMlsSender internal constructor(val userId: String, val deviceId: String)
+
+/** Authenticated application revision context. Never constructed from wire metadata. */
+data class AuthenticatedMlsRevision internal constructor(val messageId: String, val conversationId: String, val seq: Int, val hash: String)
 
 data class ChatMessage(
     val id: String,
@@ -66,6 +75,8 @@ data class ChatMessage(
     val isRevokedBySender: Boolean = false,
     val readAt: Instant? = null,
     val recipientReceipts: Map<String, com.example.chat.data.api.MessageReceiptTimes> = emptyMap(),
+    val authenticatedMlsSender: AuthenticatedMlsSender? = null,
+    val authenticatedMlsRevision: AuthenticatedMlsRevision? = null,
 ) {
     companion object {
         /** Exact port of ChatMessage.fromApi (lib/domain/models/chat_message.dart). */

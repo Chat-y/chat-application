@@ -17,9 +17,9 @@ import com.example.chat.core.validators.ChatyValidators
  */
 object CreateNewPasswordLogic {
 
-    /** Toast text shown after a successful reset; the app auto-signs-in with
-     *  the new password right after (research 4a.6). */
-    const val SUCCESS_MESSAGE = "Password updated. Signing you in..."
+    // Previous: const val SUCCESS_MESSAGE = "Password updated. Signing you in..."
+    /** Reset completion does not grant or adopt a new session. */
+    const val SUCCESS_MESSAGE = "Password updated. Sign in with your new password."
 
     /** Dart: thrown when the recovery session is gone before updateUser. */
     const val NO_SESSION_MESSAGE = "Open the newest password-recovery email link first."

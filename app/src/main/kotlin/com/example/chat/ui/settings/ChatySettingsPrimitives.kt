@@ -1,5 +1,15 @@
 package com.example.chat.ui.settings
 
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+
+import androidx.compose.ui.semantics.error
+
+import androidx.compose.ui.draw.alpha
+
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.contentDescription
+
 import androidx.compose.ui.semantics.disabled
 
 import androidx.compose.ui.semantics.toggleableState
@@ -186,31 +196,54 @@ fun ChatySettingsRowDivider() {
     )
 }
 
+/** Passive badge: [enabled] selects only disabled foreground tone. It is not an action,
+ * adds no disabled-role semantics, and does not announce changes unless the caller labels it.
+ */
 @Composable
-fun ChatyBadge(text: String, color: Color? = null) {
+fun ChatyBadge(text: String, color: Color? = null, accessibilityLabel: String? = null, enabled: Boolean = true) {
     val colors = LocalAppColors.current
-    val bg = color ?: colors.primary
+    val bg = if (enabled) color ?: colors.primary else colors.disabledForeground
     Box(
         Modifier
+            .then(if (accessibilityLabel != null) Modifier.clearAndSetSemantics { contentDescription = accessibilityLabel } else Modifier)
             .background(bg.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
             .padding(horizontal = 7.dp, vertical = 2.dp),
     ) { Text(text, color = bg, fontSize = 10.5.sp, fontWeight = FontWeight.Bold) }
 }
 
 @Composable
-fun ChatySwitch(value: Boolean, onChanged: ((Boolean) -> Unit)?, interactive: Boolean = true) {
+// Previous signature: fun ChatySwitch(value: Boolean, onChanged: ((Boolean) -> Unit)?, interactive: Boolean = true) {
+fun ChatySwitch(
+    value: Boolean, onChanged: ((Boolean) -> Unit)?, interactive: Boolean = true,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    label: String? = null,
+    statusLabel: String? = null,
+) {
     val colors = LocalAppColors.current
     if (onChanged != null) {
-        Box(if (interactive) Modifier.toggleable(value, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onChanged) else Modifier) {
-            Box(Modifier.clearAndSetSemantics { }) {
+        // One toggle owner only; inner GbCustomSwitch remains visual/non-interactive.
+        Box(modifier.then(if (label != null || statusLabel != null) Modifier.semantics {
+            label?.let { contentDescription = it }
+            statusLabel?.let { stateDescription = it }
+        } else Modifier).then(if (interactive) Modifier.toggleable(value, enabled = enabled,
+            role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onChanged) else Modifier),
+            contentAlignment = Alignment.Center) {
+            Box(Modifier.clearAndSetSemantics { }.alpha(if (enabled) 1f else 0.45f)) {
                 com.example.chat.ui.kit.GbCustomSwitch(value, onChanged, interactive = false)
             }
         }
     } else {
         Box(
-            Modifier.size(width = 52.dp, height = 30.dp)
+            modifier.size(width = 52.dp, height = 30.dp)
                 .background(if (value) colors.primary.copy(alpha = 0.45f) else colors.foregroundSecondary.copy(alpha = 0.22f), RoundedCornerShape(15.dp))
-                .semantics { role = androidx.compose.ui.semantics.Role.Switch; toggleableState = androidx.compose.ui.state.ToggleableState(value); disabled() }
+                .semantics {
+                    role = androidx.compose.ui.semantics.Role.Switch
+                    toggleableState = androidx.compose.ui.state.ToggleableState(value)
+                    disabled()
+                    label?.let { contentDescription = it }
+                    statusLabel?.let { stateDescription = it }
+                }
                 .padding(3.dp),
             contentAlignment = if (value) Alignment.CenterEnd else Alignment.CenterStart,
         ) { Box(Modifier.size(22.dp).background(colors.foregroundSecondary, CircleShape)) }
@@ -249,12 +282,21 @@ fun ChatySettingsTile(
     badgeColor: Color? = null,
     onTap: (() -> Unit)? = null,
     enabled: Boolean = true,
+    statusText: String? = null,
+    errorMessage: String? = null,
 ) {
     val colors = LocalAppColors.current
     val tint = iconColor ?: colors.primary
     val base = if (onTap != null && enabled) modifier.clickable(onClick = onTap) else modifier
     Row(
-        base.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp).defaultMinSize(minHeight = 56.dp),
+        base.then(if (!enabled || errorMessage != null || statusText != null) Modifier.semantics {
+            if (!enabled) disabled()
+            if (errorMessage != null) {
+                error(errorMessage)
+                stateDescription = errorMessage
+                liveRegion = LiveRegionMode.Polite
+            } else statusText?.let { stateDescription = it; liveRegion = LiveRegionMode.Polite }
+        } else Modifier).fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp).defaultMinSize(minHeight = 56.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
@@ -278,11 +320,15 @@ fun ChatySettingsTile(
                 )
                 if (badgeText != null) {
                     Spacer(Modifier.width(6.dp))
-                    ChatyBadge(badgeText, badgeColor)
+                    ChatyBadge(badgeText, badgeColor, enabled = enabled)
                 }
             }
             if (subtitle != null) {
                 Text(subtitle, color = colors.foregroundSecondary.copy(alpha = 0.7f), fontSize = 12.5.sp)
+            }
+            (errorMessage ?: statusText)?.let {
+                Text(it, color = if (errorMessage != null) colors.error else colors.foregroundSecondary,
+                    fontSize = 12.5.sp)
             }
         }
         val trail = trailing

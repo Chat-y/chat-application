@@ -26,6 +26,8 @@ object ChatyMotion {
     const val fastMs = 140
     const val baseMs = 220
     const val emphasisMs = 320
+    // Small feedback transform only; never changes measured bubble/touch geometry.
+    const val reactionFeedbackScale = 1.06f
 
     val standard: Easing = CubicBezierEasing(0.645f, 0.045f, 0.355f, 1.0f)
     val enter: Easing = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1.0f)

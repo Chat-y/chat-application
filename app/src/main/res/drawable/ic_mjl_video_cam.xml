@@ -1,6 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:pathData="M4 7 H15 Q17 7 17 9 V17 H3 V9 Q3 7 4 7 Z M17 10 L22 7 V18 L17 15 Z" android:fillColor="#00000000" android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round"/><path android:pathData="M6 3 H10 M8 3 V7 M6 11 H10 M8 9 V13" android:fillColor="#00000000" android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round"/></vector>
+<!-- Original purpose-specific supplement, not vendor artwork. Previous duplicate retained.
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:name="video-line"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
     <path android:pathData="M17 12V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4zm0 0 4-4v8l-4-4z" android:strokeColor="#FF000000" android:strokeWidth="2" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>
+
+-->

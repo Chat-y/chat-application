@@ -1,5 +1,10 @@
 package com.example.chat.ui.kit
 
+import androidx.compose.material3.Text
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -54,6 +59,9 @@ fun ChatyConfirmationDialog(
     shape: Shape = ChatyModalShape,
     containerColor: Color = LocalAppColors.current.surfaceElevated,
     properties: DialogProperties = DialogProperties(),
+    accessibilityLabel: String = "Chaty dialog",
+    supportingMessage: String? = null,
+    isError: Boolean = false,
 ) {
     val colors = LocalAppColors.current
     val effectiveShape = if (shape == ChatyModalShape)
@@ -62,9 +70,10 @@ fun ChatyConfirmationDialog(
     Dialog(onDismissRequest = onDismissRequest, properties = properties) {
         Column(
             modifier.widthIn(max = 480.dp).fillMaxWidth().imePadding()
-                .shadow(20.dp, effectiveShape).clip(effectiveShape).background(containerColor)
+                // Previous (default black shadow): .shadow(20.dp, effectiveShape).clip(effectiveShape).background(containerColor)
+                .chatyDepth(20.dp, effectiveShape).clip(effectiveShape).background(containerColor)
                 .heightIn(max = maxHeight)
-                .semantics { paneTitle = "Chaty dialog" },
+                .semantics { paneTitle = accessibilityLabel },
         ) {
             // Compact, borderless modal chrome; elevation and rounded clipping define the edge.
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp)) {
@@ -82,6 +91,16 @@ fun ChatyConfirmationDialog(
                     CompositionLocalProvider(LocalContentColor provides colors.foregroundSecondary) {
                         ProvideTextStyle(TextStyle(fontSize = 14.sp, lineHeight = 21.sp)) { it() }
                     }
+                }
+                // Caller supplies validation/loading/error text. Dismiss/save policy remains external.
+                supportingMessage?.let {
+                    Spacer(Modifier.height(12.dp))
+                    Text(it, color = if (isError) colors.error else colors.foregroundSecondary,
+                        modifier = Modifier.semantics {
+                            liveRegion = LiveRegionMode.Polite
+                            if (isError) error(it)
+                        },
+                        style = TextStyle(fontSize = 14.sp, lineHeight = 21.sp))
                 }
             }
             Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.borderSubtle))
@@ -111,3 +130,6 @@ fun ChatySheetGrabber() {
             .background(colors.foregroundTertiary.copy(alpha = 0.45f)))
     }
 }
+
+// Complete original-line retention for review (inactive).
+                //                 .shadow(20.dp, effectiveShape).clip(effectiveShape).background(containerColor)

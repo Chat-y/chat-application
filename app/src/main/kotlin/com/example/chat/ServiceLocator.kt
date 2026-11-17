@@ -70,6 +70,12 @@ object ServiceLocator {
      *  Called once from ChatyApplication.onCreate. */
     fun init(context: Context) {
         appContext = context.applicationContext
+        // Finish crash recovery before UI/staging can be admitted. Never race live files.
+        try { sweepSecureAttachmentPartials() }
+        catch (_: Exception) {
+            secureMediaRecoveryReady.set(false)
+            android.util.Log.w("ChatyMedia", "Secure media recovery needs attention; secure media stays blocked.")
+        }
         loadChatFontScale()
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) { appTrafficMonitor.start(appScope) }
         com.example.chat.core.theme.ThemePresets.platformIsLightProvider = {
@@ -250,17 +256,38 @@ object ServiceLocator {
             apiBackendUnderConstruction = service
             service.deviceIdentity = com.example.chat.data.api.DeviceIdentityManager(secureStore)
             service.configureSnapshotCache(snapshotCache)
+            // Same policy as secure messages, evaluated lazily only for an active account.
+            service.shouldSendReadReceipts = { roomId, owner ->
+                val p = preferencesController
+                p.isReadyForUser(owner.userId) && service.authSnapshot() === owner &&
+                    com.example.chat.ui.core.system.ReadReceiptPolicy.shouldSend(
+                        ghostMode = p.home.ghostMode, gbGhost = p.gbBool("yo_want_ghostmode"),
+                        readReceipts = p.privacy.readReceipts,
+                        blueTicksAfterReply = p.privacy.showBlueTicksAfterReply,
+                        myId = owner.userId, senderIds = service.getMessages(roomId).map { it.senderId },
+                    )
+            }
             service.transferMonitor = transferMonitor
             service.conversationDispatchLocks = conversationDispatchLocks
             // Dart locator wiring for _syncFcmToken / unregisterOnLogout:
             // deferred lambdas so the registrar's lazy init cannot cycle
             // back into this lazy block during construction.
             service.onAttachmentsGone = { refs -> invalidateMediaFor(refs) }
+            service.encryptedMessageRouter = { owner, room, body, type, attachment, metadata ->
+                check(service.authSnapshot() === owner) { "Account changed before encrypted dispatch." }
+                conversationsRepository.sendMessage(room, body, type, attachment,
+                    extraMetadata = metadata, expectedScope = owner)
+            }
             service.secureMessageIngest = { data ->
                 // Capture before dispatch: an old event cannot adopt the next login.
                 val owner = service.authSnapshot()
                 appScope.launch {
                     runCatching { conversationsRepository.ingestSecureEnvelope(data, owner) }
+                }
+            }
+            service.secureRoomRetentionIngest = { _, owner ->
+                appScope.launch {
+                    runCatching { conversationsRepository.sweepRevisionRetention(owner) }
                 }
             }
             service.secureMessageEditIngest = { data ->
@@ -338,6 +365,17 @@ object ServiceLocator {
                 }
             }
         }
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            // Fail closed records remain on disk on any cleanup failure.
+            try { recoverConfirmedAccountDeletions() }
+            catch (_: Exception) {
+                deletionIndexReady.set(false)
+                val saved = deletionQuarantine.edit().putBoolean("all_blocked", true).commit()
+                deletionRecoveryState.value = if (saved)
+                    "Account deletion recovery needs attention. Sending and private media stay blocked until recovery is verified."
+                else "Account recovery quarantine could not be saved. Stop using this account until recovery can be saved; the encrypted journal still blocks sending."
+            }
+        }
         startNetworkRecovery(service)
     }
 
@@ -350,7 +388,8 @@ object ServiceLocator {
             apiDevices = (apiBackendUnderConstruction ?: apiBackend).deviceTokenClient,
             log = { android.util.Log.d("FcmTokenRegistrar", it) },
             runAsync = { block -> Thread(block, "fcm-register").start() },
-            registerRetainedAccounts = { token -> appScope.launch(kotlinx.coroutines.Dispatchers.IO) { accountPushBindings.registerRetained(token) } },
+// Prior source:             registerRetainedAccounts = { token -> appScope.launch(kotlinx.coroutines.Dispatchers.IO) { accountPushBindings.registerRetained(token) } },
+            registerRetainedAccounts = { _ -> com.example.chat.notifications.PushRegistrationRecoveryWorker.enqueue(requireContext()) },
             // Dart FirebaseMessaging.getToken(); throws IllegalStateException while FirebaseApp is
             // not initialised (no google-services.json), which the registrar logs.
             tokenFetcher = { onToken, onError ->
@@ -519,6 +558,11 @@ object ServiceLocator {
     private suspend fun catchUpInactiveAccounts() = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try { inactiveAccountPush.run() } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { /* Inactive catch-up cannot fail the active wake. */ }
     }
+
+    /** Current platform token is fetched by the durable worker, never serialized into work data. */
+    suspend fun registerRetainedPushAccounts(token: String, deadlineEpochMs: Long): Boolean = accountPushBindings.registerRetained(token, deadlineEpochMs)
+
+    fun hasRetainedPushBindingMapping(bindingId: String): Boolean = accountPushBindings.hasRetainedBindingMapping(bindingId)
 
     /** Durable content-free push recovery. The router re-verifies the binding and retained owner on every attempt. */
     suspend fun recoverAccountPush(bindingId: String, callId: String?): Boolean = accountPushBindings.handle(bindingId, callId)
@@ -694,6 +738,29 @@ object ServiceLocator {
             prefs = preferencesController, appLock = appLock, channelManager = notificationChannelManager,
             isChatVaultLocked = { id -> hiddenVaultService.isConversationLocked(id) },
             callPresentation = callPresentationPrefs,
+            replySender = { owner, conversationId, text, nonce ->
+                check(apiBackend.authSnapshot() === owner) { "Account changed before notification reply." }
+                val secure = conversationsRepository.isSecureChannel(conversationId)
+                check(apiBackend.authSnapshot() === owner) { "Account changed while checking reply routing." }
+                if (secure) {
+                    check(ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) { "Encrypted reply is unavailable." }
+                    try {
+                        conversationsRepository.sendMessage(conversationId, text,
+                            clientMessageId = java.util.UUID.nameUUIDFromBytes(
+                                ("chaty-notification-reply-v1:" + nonce).toByteArray(Charsets.UTF_8)).toString(),
+                            expectedScope = owner)
+                        check(apiBackend.authSnapshot() === owner) { "Account changed during encrypted reply." }
+                        true
+                    } catch (pending: com.example.chat.data.messaging.SecureSendPendingException) {
+                        // This exception is raised only after the encrypted pending queue was durably saved.
+                        check(apiBackend.authSnapshot() === owner) { "Account changed after queuing encrypted reply." }
+                        true
+                    }
+                } else {
+                    // Existing regular rooms only, until server-backed default activation lands.
+                    apiBackend.sendMessageForScope(owner, conversationId, text)
+                }
+            },
         )
     }
 
@@ -752,6 +819,47 @@ object ServiceLocator {
     /** D2=C encrypted attachment queue (upload/download/confirm of opaque
      *  ciphertext blobs; keys travel only inside MLS messages). The
      *  file-transfer flow wires in with the media section. */
+    private val secureMediaRecoveryReady = java.util.concurrent.atomic.AtomicBoolean(true)
+    private fun sweepSecureAttachmentPartials() {
+        requireContext().cacheDir.listFiles()?.filter {
+            it.isFile && it.name.startsWith("chaty-outgoing-secure-") && it.name.endsWith(".part")
+        }?.forEach { check(it.delete()) { "Private attachment staging recovery failed. Secure media is blocked." } }
+        val root = java.io.File(requireContext().noBackupFilesDir, "chaty_secure_files")
+        if (!root.exists()) return
+        root.walkTopDown().filter { it.isFile && it.name.endsWith(".part") }.forEach {
+            check(it.delete()) { "Private media recovery cleanup failed. Secure media is blocked." }
+        }
+    }
+
+    val secureAttachmentFiles by lazy {
+        // Recovery sweep runs synchronously before operation admission, not here.
+        check(secureMediaRecoveryReady.get()) { "Secure media recovery needs attention. Other app features remain available." }
+        com.example.chat.data.media.SecureAttachmentFileService(
+            transport = encryptedAttachments,
+            isCurrent = { apiBackend.authSnapshot() === it },
+            directory = { ns -> java.io.File(requireContext().noBackupFilesDir, "chaty_secure_files/$ns") },
+            currentNamespace = { owner ->
+                var ns: String? = null
+                check(apiBackend.withAuthScope(owner) { ns = apiBackend.currentAccountHash() }) { "Account changed." }
+                checkNotNull(ns)
+            },
+            assertActive = { ns -> pendingSends.assertNamespaceActive(ns) },
+            ensureConversation = { mls.ensureConversationReady(it); Unit },
+            isOnline = { networkMonitor.state.value.online },
+            localCipherLimit = { com.example.chat.data.local.MediaCacheSettings.limitBytes(requireContext()) / 2 },
+        )
+    }
+
+    private fun secureAttachmentMessage(owner: com.example.chat.data.api.ApiAccountScope, ref: com.example.chat.data.local.AttachmentRef): com.example.chat.domain.models.ChatMessage? {
+        var result: com.example.chat.domain.models.ChatMessage? = null
+        apiBackend.withAuthScope(owner) {
+            result = conversationsRepository.messagesByChatId[ref.conversationId]?.firstOrNull {
+                it.id == ref.messageId && it.attachment?.id == ref.attachmentId
+            }
+        }
+        return result
+    }
+
     val encryptedAttachments: com.example.chat.data.api.ApiEncryptedAttachmentClient by lazy {
         com.example.chat.data.api.ApiEncryptedAttachmentClient(
             baseUrl = { apiBackend.config.restApiBaseUrl },
@@ -767,51 +875,209 @@ object ServiceLocator {
             currentAuthUserId = currentUserId,
             dbPathForUser = { safeNs -> requireContext().filesDir.absolutePath + "/mls/" + safeNs },
             accountNamespaceProvider = { apiBackend.currentAccountHash() },
+            assertNamespaceActive = { ns -> pendingSends.assertNamespaceActive(ns) },
         )
     }
 
     /** Dart purgeLocalDataForDeletedAccount (profile_actions.dart:217); deletes ONLY the target account's
      *  secrets when other signed-in accounts exist in the multi-account registry. */
-    suspend fun purgeLocalDataForDeletedAccount(userId: String) {
-        val currentHash = apiBackend.currentAccountHash()
-        val matchingAccounts = apiBackend.multiAccount.accounts().filter { it.userId == userId }
-        val targetNamespaces = buildSet {
-            add(userId)
-            currentHash?.let { add(it) }
-            matchingAccounts.forEach { add(it.accountHash) }
-        }
-        val otherAccountsRemain = apiBackend.multiAccount.accounts().any { it.userId != userId }
-        com.example.chat.data.services.AccountDeletionPurge(
-            clearOutbox = { pendingSends.clear(it) },
-            purgeMlsIdentity = { uid ->
-                targetNamespaces.forEach { ns -> mls.purgeLocalIdentityForNamespace(ns) }
-            },
-            purgeTemporaryFiles = {
-                com.example.chat.data.services.AccountDeletionPurge.purgeChatyTemporaryFiles(requireContext().cacheDir)
-            },
-            deleteSnapshots = { uid ->
-                snapshotCache.deleteUser(uid)
-                targetNamespaces.forEach { ns -> runCatching { snapshotCache.deleteUser(ns) } }
-            },
-            deleteAllSecureStorage = {
-                if (!otherAccountsRemain) {
-                    secureStore.deleteAll()
-                } else {
-                    targetNamespaces.forEach { ns ->
-                        secureStore.deletePrefix("chaty.mls.$ns.")
-                        secureStore.deletePrefix("chaty.hidden_vault.$ns.")
-                        secureStore.deletePrefix("chaty.local_lock.v2.$ns.")
-                    }
+// Previous uid-wide purge retained inactive:     suspend fun purgeLocalDataForDeletedAccount(userId: String) {
+// Previous uid-wide purge retained inactive:         val currentHash = apiBackend.currentAccountHash()
+// Previous uid-wide purge retained inactive:         val matchingAccounts = apiBackend.multiAccount.accounts().filter { it.userId == userId }
+// Previous uid-wide purge retained inactive:         val targetNamespaces = buildSet {
+// Previous uid-wide purge retained inactive:             add(userId)
+// Previous uid-wide purge retained inactive:             currentHash?.let { add(it) }
+// Previous uid-wide purge retained inactive:             matchingAccounts.forEach { add(it.accountHash) }
+// Previous uid-wide purge retained inactive:         }
+// Previous uid-wide purge retained inactive:         val otherAccountsRemain = apiBackend.multiAccount.accounts().any { it.userId != userId }
+// Previous uid-wide purge retained inactive:         com.example.chat.data.services.AccountDeletionPurge(
+// Previous uid-wide purge retained inactive:             clearOutbox = { pendingSends.clear(it) },
+// Previous uid-wide purge retained inactive:             purgeMlsIdentity = { uid ->
+// Previous uid-wide purge retained inactive:                 targetNamespaces.forEach { ns -> mls.purgeLocalIdentityForNamespace(ns) }
+// Previous uid-wide purge retained inactive:             },
+// Previous uid-wide purge retained inactive:             purgeTemporaryFiles = {
+// Previous uid-wide purge retained inactive:                 com.example.chat.data.services.AccountDeletionPurge.purgeChatyTemporaryFiles(requireContext().cacheDir)
+// Previous uid-wide purge retained inactive:             },
+// Previous uid-wide purge retained inactive:             deleteSnapshots = { uid ->
+// Previous uid-wide purge retained inactive:                 snapshotCache.deleteUser(uid)
+// Previous uid-wide purge retained inactive:                 targetNamespaces.forEach { ns -> runCatching { snapshotCache.deleteUser(ns) } }
+// Previous uid-wide purge retained inactive:             },
+// Previous uid-wide purge retained inactive:             deleteAllSecureStorage = {
+// Previous uid-wide purge retained inactive:                 if (!otherAccountsRemain) {
+// Previous uid-wide purge retained inactive:                     secureStore.deleteAll()
+// Previous uid-wide purge retained inactive:                 } else {
+// Previous uid-wide purge retained inactive:                     targetNamespaces.forEach { ns ->
+// Previous uid-wide purge retained inactive:                         secureStore.deletePrefix("chaty.mls.$ns.")
+// Previous uid-wide purge retained inactive:                         secureStore.deletePrefix("chaty.hidden_vault.$ns.")
+// Previous uid-wide purge retained inactive:                         secureStore.deletePrefix("chaty.local_lock.v2.$ns.")
+// Previous uid-wide purge retained inactive:                     }
+// Previous uid-wide purge retained inactive:                 }
+// Previous uid-wide purge retained inactive:             },
+// Previous uid-wide purge retained inactive:             purgeMediaCache = { mediaCache.deleteAccount(it) },
+// Previous uid-wide purge retained inactive:         ).purge(userId)
+// Previous uid-wide purge retained inactive:         targetNamespaces.forEach { ns ->
+// Previous uid-wide purge retained inactive:             runCatching { secureMessageStore.purgeNamespace(ns) }
+// Previous uid-wide purge retained inactive:         }
+// Previous uid-wide purge retained inactive:     }
+// Previous uid-wide purge retained inactive: 
+    private val deletionJournal by lazy { com.example.chat.data.messaging.AccountDeletionJournal(snapshotCache) }
+    private val deletionQuarantine by lazy { requireContext().getSharedPreferences("chaty_deleted_owner_quarantine_v1", android.content.Context.MODE_PRIVATE) }
+    private val deletionIndexReady = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val deletedNamespaces = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private fun deletionBlocked(namespace: String) = !deletionIndexReady.get() || namespace in deletedNamespaces ||
+        deletionQuarantine.getBoolean("all_blocked", false) || deletionQuarantine.getBoolean(namespace, false)
+    val deletionRecoveryState = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+
+    private val deletionOperationLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
+    private suspend fun <T> withDeletionOperation(namespace: String, action: suspend () -> T): T {
+        val mutex = deletionOperationLocks.getOrPut(namespace) { kotlinx.coroutines.sync.Mutex() }
+        mutex.lock()
+        try { return action() } finally { mutex.unlock() }
+    }
+    suspend fun deleteAccountWithReceipt(owner: com.example.chat.data.api.ApiAccountScope, namespace: String, password: String) = withDeletionOperation(namespace) {
+        val receipt = beginAccountDeletion(owner, namespace)
+        val entry = deletionJournal.entries().first { it.namespace == namespace && it.operationId == receipt.operationId }
+        deletionJournal.record(entry.copy(dispatched = true)) // conservative crash marker BEFORE HTTP
+        apiBackend.deleteUser(checkNotNull(owner.userId), expectedScope = owner, password = password, prepared = receipt,
+            onServerConfirmed = { confirmAccountDeletion(owner, namespace) })
+    }
+
+    suspend fun beginAccountDeletion(owner: com.example.chat.data.api.ApiAccountScope, namespace: String): com.example.chat.data.api.ApiDeletionReceiptClient.Prepared {
+        check(apiBackend.authSnapshot() === owner && !owner.userId.isNullOrBlank()) { "Account changed before deletion." }
+        val session = mediaCache.session()
+        var coherent = false
+        check(apiBackend.withAuthScope(owner) {
+            coherent = namespace == apiBackend.currentAccountHash() && (session == null || mediaCache.isEpochCurrent(session))
+        } && coherent) { "Account changed while capturing deletion media ownership." }
+        val receipt = apiBackend.prepareAccountDeletion(owner)
+        check(apiBackend.authSnapshot() === owner) { "Account changed while preparing deletion." }
+        val entry = com.example.chat.data.messaging.AccountDeletionJournal.Entry(namespace, owner.userId!!, session, false,
+            receipt.operationId, receipt.receiptToken, receipt.expiresAt, owner.baseUrl)
+        // First persist UNKNOWN outcome. A crash before/while DELETE stays quarantined,
+        // retaining local data until the server outcome is verified by recovery UI.
+        deletionJournal.beginNextOperation(entry)
+        deletedNamespaces.add(namespace)
+        // The encrypted journal is authoritative if quarantine publication fails.
+        check(deletionQuarantine.edit().putBoolean(namespace, true).commit()) { "Deletion quarantine could not be saved. Account remains blocked by its recovery record." }
+        mediaCache.retireOwnerNamespace(namespace, owner.userId!!)
+        // Waits for active delivery under the queue barrier, then blocks all late send/retry.
+        pendingSends.quarantineNamespace(entry.userId, namespace)
+        return receipt
+    }
+
+    /** Only called by an explicit recovery action. Never scheduled or polled. */
+    suspend fun recoverAccountDeletionExplicitly(owner: com.example.chat.data.api.ApiAccountScope): String {
+        var ns: String? = null
+        check(apiBackend.withAuthScope(owner) { ns = apiBackend.currentAccountHash() }) { "Account changed." }
+        return recoverAccountDeletionByNamespace(checkNotNull(ns))
+    }
+    suspend fun savedDeletionRecoveryNamespaces(): List<String> = deletionJournal.entries()
+        .filterNot { it.confirmed }.map { it.namespace }
+
+    /** Journal and receipt only: intentionally works without a live session. */
+    suspend fun recoverAccountDeletionByNamespace(namespace: String): String = withDeletionOperation(namespace) {
+        recoverAccountDeletionLocked(namespace)
+    }
+    private suspend fun recoverAccountDeletionLocked(namespace: String): String {
+        val entry = deletionJournal.entries().firstOrNull { it.namespace == namespace }
+            ?: return "No saved deletion operation."
+        if (entry.confirmed) { cleanupDeletedOwner(entry); return "Deletion confirmed. Local cleanup completed." }
+        val id = entry.operationId; val token = entry.receiptToken; val expires = entry.expiresAt
+        if (id == null || token == null || expires == null || entry.baseUrl == null)
+            return "Outcome indeterminate. This older operation has no recovery receipt. Local data is retained."
+        val receipt = com.example.chat.data.api.ApiDeletionReceiptClient.Prepared(id, token, expires)
+        val result = apiBackend.recoverAccountDeletionReceipt(entry.baseUrl, receipt)
+        return when (result) {
+            is com.example.chat.data.api.ApiDeletionReceiptClient.Recovery.Confirmed -> {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    val confirmed = entry.copy(confirmed = true, releasedPending = false)
+                    deletionJournal.record(confirmed); cleanupDeletedOwner(confirmed)
                 }
-            },
-            purgeMediaCache = { mediaCache.deleteAccount(it) },
-        ).purge(userId)
-        targetNamespaces.forEach { ns ->
-            runCatching { secureMessageStore.purgeNamespace(ns) }
+                "Deletion confirmed. Local cleanup completed. Sign out of this account."
+            }
+            is com.example.chat.data.api.ApiDeletionReceiptClient.Recovery.Pending -> {
+                if (entry.releasedPending) deletionJournal.record(entry.copy(releasedPending = false, notDeletedStatus = null))
+                deletedNamespaces.add(namespace)
+                check(deletionQuarantine.edit().putBoolean(namespace, true).commit())
+                mediaCache.retireOwnerNamespace(namespace, entry.userId)
+                pendingSends.quarantineNamespace(entry.userId, namespace)
+                "Deletion outcome is pending. Your data is kept and sending stays quarantined. Retry the saved receipt later."
+            }
+            is com.example.chat.data.api.ApiDeletionReceiptClient.Recovery.NotDeleted -> {
+                val fresh = deletionJournal.entries().first { it.namespace == namespace }
+                check(fresh.operationId == entry.operationId && fresh.revision == entry.revision && !fresh.confirmed) { "Deletion state changed during recovery." }
+                val released = fresh.copy(releasedPending = true, notDeletedStatus = result.status)
+                deletionJournal.record(released)
+                releasePendingDeletion(deletionJournal.entries().first { it.namespace == namespace })
+                "The server reports this operation ${result.status}. Local data is kept and quarantine was released. A new deletion needs a fresh operation."
+            }
+            com.example.chat.data.api.ApiDeletionReceiptClient.Recovery.RateLimited ->
+                "Too many recovery requests. Wait at least 60 seconds before retrying."
+            com.example.chat.data.api.ApiDeletionReceiptClient.Recovery.Indeterminate ->
+                "Outcome indeterminate. Local data is retained. Retry the saved receipt later. A 404 never proves either outcome; retained confirmed receipts remain recoverable after expiry."
         }
     }
 
-    private val pendingSends: PendingSecureSendStore by lazy { PendingSecureSendStore(snapshotCache) }
+    private suspend fun releasePendingDeletion(entry: com.example.chat.data.messaging.AccountDeletionJournal.Entry) {
+        val fresh = deletionJournal.entries().first { it.namespace == entry.namespace }
+        check(fresh.operationId == entry.operationId && fresh.releasedPending && !fresh.confirmed && fresh.notDeletedStatus in setOf("rejected", "expired"))
+        pendingSends.releasePendingNamespace(entry.namespace)
+        check(deletionQuarantine.edit().remove(entry.namespace).commit()) { "Recovery could not release local quarantine." }
+        mediaCache.restorePendingOwnerNamespace(entry.namespace, entry.userId)
+        deletedNamespaces.remove(entry.namespace)
+    }
+
+    suspend fun confirmAccountDeletion(owner: com.example.chat.data.api.ApiAccountScope, namespace: String) {
+        val old = deletionJournal.entries().first { it.namespace == namespace && it.userId == owner.userId }
+        deletionJournal.record(old.copy(confirmed = true, releasedPending = false))
+        cleanupDeletedOwner(old.copy(confirmed = true, releasedPending = false))
+    }
+
+    suspend fun recoverConfirmedAccountDeletions() {
+        val namespaces = deletionJournal.entries().map { it.namespace }
+        for (namespace in namespaces) withDeletionOperation(namespace) {
+            val entry = deletionJournal.entries().firstOrNull { it.namespace == namespace } ?: return@withDeletionOperation
+            if (entry.releasedPending && !entry.confirmed && entry.notDeletedStatus in setOf("rejected", "expired")) {
+                releasePendingDeletion(entry)
+            } else {
+                if (entry.releasedPending && !entry.confirmed) deletionJournal.record(entry.copy(releasedPending = false, notDeletedStatus = null))
+                deletedNamespaces.add(namespace)
+                check(deletionQuarantine.edit().putBoolean(namespace, true).commit())
+                mediaCache.retireOwnerNamespace(namespace, entry.userId)
+                pendingSends.quarantineNamespace(entry.userId, namespace)
+                if (entry.confirmed) cleanupDeletedOwner(entry)
+                else deletionRecoveryState.value = "Account deletion outcome is unknown. Queued messages and local data are kept, but this account is blocked pending server verification."
+            }
+        }
+        deletionIndexReady.set(true)
+    }
+
+    private suspend fun cleanupDeletedOwner(entry: com.example.chat.data.messaging.AccountDeletionJournal.Entry) {
+        check(entry.confirmed)
+        val ns = entry.namespace
+        pendingSends.retireNamespace(entry.userId, ns)
+        mls.purgeLocalIdentityForNamespace(ns)
+        secureAttachmentFiles.purgeNamespace(ns)
+        entry.mediaSession?.let { mediaDownloads.purgeSession(it) }
+        mediaCache.deleteOwnerNamespace(ns, entry.userId)
+        secureMessageStore.purgeNamespace(ns)
+        snapshotCache.deleteUserStrict(ns)
+        secureStore.deletePrefix("chaty.hidden_vault.$ns.")
+        secureStore.deletePrefix("chaty.local_lock.v2.$ns.")
+    }
+
+    // Previous constructor retained inactive:
+    // private val pendingSends: PendingSecureSendStore by lazy { PendingSecureSendStore(snapshotCache) }
+    private val pendingSends: PendingSecureSendStore by lazy {
+        PendingSecureSendStore(snapshotCache, strictStorage = ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING,
+            deletionPolicy = true,
+            assertOwnerActive = { ns ->
+                check(!deletionBlocked(ns) && deletionJournal.entries().none { it.namespace == ns && !it.releasedPending }) {
+                    "Account deletion has an unresolved or confirmed receipt. Sending is quarantined."
+                }
+            })
+    }
 
     /** Dart NotificationChannelManager (badge scope). Home's conversation source is ApiBackendService
      *  (api.conversations, Dart dataStore.conversations), so the badge reads the same list. The lambda is only
@@ -958,6 +1224,7 @@ object ServiceLocator {
             currentUserId = currentUserId,
             pendingStore = pendingSends,
             onQueuedCountChanged = { count -> connectionHealth.updateQueuedCount(count) },
+            onSecureSendHeld = { heldSendRevision.value += 1 },
             onPendingEnqueued = { appScope.launch { outgoingQueue.processQueue() } },
             snapshotCache = snapshotCache,
             messageSnapshotNamespace = { captured ->
@@ -1021,12 +1288,88 @@ object ServiceLocator {
         )
     }
 
+    val heldSendRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    suspend fun heldSecureSendIds(): List<String> {
+        val owner = apiBackend.authSnapshot()
+        val uid = owner.userId ?: return emptyList()
+        val namespace = apiBackend.currentAccountHash() ?: return emptyList()
+        val items = pendingSends.read(uid, namespace)
+        val ids = items.filter { item ->
+            val binding = snapshotCache.readJsonStrict(namespace, "own_binding_${item.clientMessageId}") as? Map<*, *>
+            binding?.get("held") == true && binding["user_id"] == uid
+        }.map { it.clientMessageId }
+        check(apiBackend.authSnapshot() === owner) { "Account changed." }
+        return ids
+    }
+    suspend fun discardHeldSecureSend(clientId: String, expectedOwner: com.example.chat.data.api.ApiAccountScope) {
+        require(clientId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        val owner = expectedOwner
+        check(apiBackend.authSnapshot() === owner && !appLock.lockRequired.value) { "Unlock the original account before discarding." }
+        val uid = checkNotNull(owner.userId); val namespace = checkNotNull(apiBackend.currentAccountHash())
+        // Read only to resolve the lock key; revalidated inside both barriers.
+        val initial = snapshotCache.readJsonStrict(namespace, "own_binding_$clientId") as? Map<*, *> ?: error("Held send unavailable.")
+        val room = initial["conversation_id"] as? String ?: error("Held room unavailable.")
+        conversationDispatchLocks.withLock(
+            com.example.chat.data.messaging.ConversationDispatchLocks.accountKey(uid, owner.tenantId, owner.baseUrl), room) {
+            check(apiBackend.authSnapshot() === owner && !appLock.lockRequired.value) { "Account changed or locked before discard." }
+            pendingSends.discardHeld(uid, namespace, clientId)
+            conversationsRepository.forgetDiscardedQueuedMessage(room, clientId, uid, owner)
+        }
+        outgoingQueue.updateQueuedCount()
+        check(apiBackend.withAuthScope(owner) { heldSendRevision.value += 1 }) { "Account changed after discard." }
+        appScope.launch { outgoingQueue.processQueue() }
+    }
+
     val outgoingQueue: OutgoingMessageQueueEngine by lazy {
         OutgoingMessageQueueEngine(
             store = pendingSends,
             healthService = connectionHealth,
-            deliver = { pending -> conversationsRepository.retryPendingSecureMessage(pending); Unit },
+            // Previous ambient delivery retained: deliver = { pending -> conversationsRepository.retryPendingSecureMessage(pending); Unit },
+            deliver = { error("Encrypted queue requires a captured account owner.") },
             currentUserId = currentUserId,
+            storageNamespaceForOwner = { captured, userId ->
+                val owner = captured as? com.example.chat.data.api.ApiAccountScope ?: error("Queue owner unavailable.")
+                check(owner.userId == userId) { "Queue owner mismatch." }
+                var namespace: String? = null
+                check(apiBackend.withAuthScope(owner) { namespace = apiBackend.currentAccountHash() }) {
+                    "Account changed while capturing queue namespace."
+                }
+                // Storage mode remains a store decision; deletion identity is ALWAYS the hash.
+                checkNotNull(namespace)
+            },
+            ownerSnapshot = { apiBackend.authSnapshot() },
+            ownerIsCurrent = { expected -> apiBackend.authSnapshot() === expected },
+            recoverOwnOperations = { expected, uid, namespace ->
+                val owner = expected as? com.example.chat.data.api.ApiAccountScope ?: error("Recovery owner unavailable.")
+                check(apiBackend.authSnapshot() === owner && owner.userId == uid) { "Account changed before operation recovery." }
+                conversationsRepository.sweepRevisionRetention(owner)
+                val queued = pendingSends.read(uid, namespace).map { it.clientMessageId }.toSet()
+                val scopes = snapshotCache.listOwnOperationScopes(namespace)
+                for (key in scopes.filter { it.startsWith("own_binding_") }) {
+                    val binding = snapshotCache.readJsonStrict(namespace, key) as? Map<*, *> ?: continue
+                    if (binding["canonical_id"] != null || binding["discarded"] == true) continue
+                    val client = binding["client_id"] as? String ?: error("Own operation identity is corrupt.")
+                    check(client.matches(Regex("[A-Za-z0-9_-]{1,128}")) && key == "own_binding_$client" && binding["user_id"] == uid) { "Own operation owner mismatch." }
+                    if (client in queued) continue
+                    val payload = snapshotCache.readJsonStrict(namespace, "own_mls_$client") as? Map<String, Any?> ?: error("Own operation payload is unavailable.")
+                    val send = com.example.chat.data.messaging.PendingSecureSend.fromJson(payload)
+                    check(send.clientMessageId == client && send.conversationId == binding["conversation_id"]) { "Own operation payload mismatch." }
+                    check(apiBackend.authSnapshot() === owner) { "Account changed during operation recovery." }
+                    pendingSends.put(uid, send, namespace)
+                }
+                // Legacy payload-only records cannot establish whether an older send
+                // reached the server. Enumerate and flag, never blindly resend them.
+                val bindingClients = scopes.filter { it.startsWith("own_binding_") }.map { it.removePrefix("own_binding_") }.toSet()
+                if (scopes.any { it.startsWith("own_mls_") && it.removePrefix("own_mls_") !in bindingClients && it.removePrefix("own_mls_") !in queued })
+                    deletionRecoveryState.value = "Some older encrypted sends have an unknown outcome. Their saved payloads are retained and were not resent."
+            },
+            deliverForOwner = { pending, expected ->
+                val owner = expected as? com.example.chat.data.api.ApiAccountScope
+                    ?: error("Encrypted queue owner is unavailable.")
+                check(apiBackend.authSnapshot() === owner) { "Account changed before encrypted retry." }
+                conversationsRepository.retryPendingSecureMessage(pending, expectedScope = owner)
+                Unit
+            },
         )
     }
 
@@ -1105,6 +1448,11 @@ object ServiceLocator {
             currentUserDisplayName = { apiBackend.currentUser?.displayName ?: "User" },
             remoteNameFor = { id -> apiBackend.callDisplayNameFor(id) },
             canInitiateCall = { com.example.chat.data.services.CallNetworkAdmission.online(requireContext()) },
+            onFailureStage = { stage ->
+                // Debug only, fixed stage names. No exception text, SDP, IDs, URLs or credentials.
+                if (com.example.chat.BuildConfig.DEBUG) android.util.Log.w("ChatyCallStage", "Call failed [${stage.name}]")
+                Unit
+            },
             currentUserAvatarInitials = { apiBackend.currentUser?.avatarInitials },
             currentUserAvatarColorHex = { apiBackend.currentUser?.avatarColorHex },
             signalSender = com.example.chat.data.services.CallSignalSender { targetUserId, data ->
@@ -1188,16 +1536,23 @@ object ServiceLocator {
                     handledCallInboxEvents.add(key)
                 }
                 appScope.launch {
+                    com.example.chat.data.services.atCallStage(
+                        com.example.chat.data.services.CallFailureStage.REMOTE_SIGNAL_HANDLER,
+                    ) {
                     svc.handleRemoteSignal(data,
                         validScope = { apiBackend.authSnapshot() === expected },
                         guardScope = { action -> apiBackend.withAuthScope(expected, action) })
+                    }
                 }
             }
             // Calls matrix "survive network switch mid-call": feed transport
             // changes (Wi-Fi <-> cellular) into ICE restart.
             appScope.launch {
                 networkMonitor.state.collect { status ->
-                    svc.onNetworkTransportChanged(status.transport)
+// Previous implementation retained:                     svc.onNetworkTransportChanged(status.transport)
+                    // Include identity: wifi->wifi and cellular->cellular replacements need renegotiation too.
+                    svc.onNetworkTransportChanged(if (status.online)
+                        "${status.transport}:${status.networkHandle ?: 0L}" else "unknown")
                 }
             }
         }
@@ -1465,10 +1820,20 @@ object ServiceLocator {
             identity = {
                 val account = apiBackend.authSnapshot()
                 account.userId?.takeIf { it.isNotBlank() && !account.token.isNullOrBlank() }?.let {
-                    com.example.chat.data.local.SessionEpoch.Identity(account.tenantId, it, account.generation)
+                    var namespace: String? = null
+                    if (!apiBackend.withAuthScope(account) { namespace = apiBackend.currentAccountHash() }) null
+                    else if (namespace.isNullOrBlank() || deletionBlocked(checkNotNull(namespace))) null
+                    else com.example.chat.data.local.SessionEpoch.Identity(
+                        "owner-$namespace",
+                        it, account.generation)
                 }
             },
-            maxBytes = { com.example.chat.data.local.MediaCacheSettings.limitBytes(requireContext()) },
+            maxBytes = {
+                val total = com.example.chat.data.local.MediaCacheSettings.limitBytes(requireContext())
+                // Fixed partition guarantees the combined opaque sender + encrypted
+                // opened-media caches stay within the selected total, even concurrently.
+                if (ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) total / 2 else total
+            },
             maxEntryBytes = com.example.chat.data.services.ChatMediaService.STORAGE_LIMIT_MB * 1024L * 1024L,
             exportPolicy = { ref -> trustedAttachmentFor(ref)?.let { !it.viewOnce && !it.restricted } == true },
             editedOutputValidator = com.example.chat.data.media.AndroidEditedOutputValidator,
@@ -1482,12 +1847,14 @@ object ServiceLocator {
             val account = apiBackend.authSnapshot()
             var trusted: com.example.chat.data.media.TrustedAttachment? = null
             apiBackend.withAuthScope(account) {
-                val m = apiBackend.getMessages(ref.conversationId).firstOrNull { it.id == ref.messageId }
+                val m = secureAttachmentMessage(account, ref)
+                    ?: apiBackend.getMessages(ref.conversationId).firstOrNull { it.id == ref.messageId }
                 val attachment = m?.attachment
                 if (m != null && attachment != null && attachment.id == ref.attachmentId &&
                     !m.isDeletedForEveryone && !m.isDeletedForMe && !m.isRevokedBySender) {
                     trusted = com.example.chat.data.media.TrustedAttachment(attachment.type,
-                        com.example.chat.data.local.AttachmentCachePolicy.viewOnceRestricted(m.metadata), false)
+                        com.example.chat.data.local.AttachmentCachePolicy.viewOnceRestricted(m.metadata), false,
+                        encrypted = attachment.encryptedFile != null)
                 }
             }
             trusted
@@ -1507,6 +1874,21 @@ object ServiceLocator {
             store = mediaCache,
             isOnline = { networkMonitor.state.value.online },
             lookup = { ref -> trustedAttachmentFor(ref) },
+            secureFetch = { ref, stamp ->
+                val owner = apiBackend.authSnapshot()
+                secureAttachmentFiles.fetch(owner, ref, stamp,
+                    lookup = { secureAttachmentMessage(owner, it) },
+                    ingest = { r, session, part -> attachmentResolver.ingestPart(r, session, part) },
+                    pinStored = { r ->
+                        val pin = mediaCache.pinForDelivery(r)
+                        if (pin == null) null else {
+                            when (val stored = mediaCache.leaseForSession(r, stamp)) {
+                                is com.example.chat.data.local.StoreRead.Hit -> { stored.value.release(); pin }
+                                else -> { pin.close(); null }
+                            }
+                        }
+                    })
+            },
             download = { url ->
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val transferId = transferMonitor.begin(
@@ -1676,3 +2058,86 @@ private class ConnectionHealthSinkAdapter(
 // runCatching { conversationsRepository.ingestSecureEnvelope(data) }
 // runCatching { conversationsRepository.applySecureEdit(data) }
 // runCatching { conversationsRepository.applyRemoteDeleteForEveryone(data) }
+
+// Previous E2EE media wiring retained inactive:
+//                 val m = apiBackend.getMessages(ref.conversationId).firstOrNull { it.id == ref.messageId }
+//                         com.example.chat.data.local.AttachmentCachePolicy.viewOnceRestricted(m.metadata), false)
+
+// Previous implementation retained inactive (unified v4):
+//     suspend fun purgeLocalDataForDeletedAccount(userId: String) {
+//         val currentHash = apiBackend.currentAccountHash()
+//         val matchingAccounts = apiBackend.multiAccount.accounts().filter { it.userId == userId }
+//         val targetNamespaces = buildSet {
+//             add(userId)
+//             currentHash?.let { add(it) }
+//             matchingAccounts.forEach { add(it.accountHash) }
+//         val otherAccountsRemain = apiBackend.multiAccount.accounts().any { it.userId != userId }
+//         com.example.chat.data.services.AccountDeletionPurge(
+//             clearOutbox = { pendingSends.clear(it) },
+//             purgeMlsIdentity = { uid ->
+//                 targetNamespaces.forEach { ns -> mls.purgeLocalIdentityForNamespace(ns) }
+//             },
+//             purgeTemporaryFiles = {
+//                 com.example.chat.data.services.AccountDeletionPurge.purgeChatyTemporaryFiles(requireContext().cacheDir)
+//             },
+//             deleteSnapshots = { uid ->
+//                 snapshotCache.deleteUser(uid)
+//                 targetNamespaces.forEach { ns -> runCatching { snapshotCache.deleteUser(ns) } }
+//             },
+//             deleteAllSecureStorage = {
+//                 if (!otherAccountsRemain) {
+//                     secureStore.deleteAll()
+//                 } else {
+//                     targetNamespaces.forEach { ns ->
+//                         secureStore.deletePrefix("chaty.mls.$ns.")
+//                         secureStore.deletePrefix("chaty.hidden_vault.$ns.")
+//                         secureStore.deletePrefix("chaty.local_lock.v2.$ns.")
+//                     }
+//                 }
+//             },
+//             purgeMediaCache = { mediaCache.deleteAccount(it) },
+//         ).purge(userId)
+//         targetNamespaces.forEach { ns ->
+//             runCatching { secureMessageStore.purgeNamespace(ns) }
+//         }
+//         PendingSecureSendStore(snapshotCache, strictStorage = ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING)
+//                 if (!ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING) userId else {
+//                     val owner = captured as? com.example.chat.data.api.ApiAccountScope
+//                         ?: error("Queue owner unavailable.")
+//                     check(owner.userId == userId) { "Queue owner mismatch." }
+//                     var namespace: String? = null
+//                     check(apiBackend.withAuthScope(owner) { namespace = apiBackend.currentAccountHash() }) {
+//                         "Account changed while capturing queue namespace."
+//                     }
+//                     checkNotNull(namespace)
+//                     com.example.chat.data.local.SessionEpoch.Identity(account.tenantId, it, account.generation)
+
+// Previous implementation retained inactive (v5 review):
+//             maxBytes = { com.example.chat.data.local.MediaCacheSettings.limitBytes(requireContext()) },
+
+// Previous pending-status release branch retained inactive:
+//             is com.example.chat.data.api.ApiDeletionReceiptClient.Recovery.Pending -> {
+//                 if (entry.dispatched) return "Deletion is not confirmed. Your data is kept and sending stays blocked because deletion was dispatched. A pending snapshot is not cancellation."
+//                 val fresh = deletionJournal.entries().first { it.namespace == namespace }
+//                 check(fresh.operationId == entry.operationId && !fresh.confirmed && !fresh.dispatched) { "Deletion state changed during recovery." }
+//                 val released = entry.copy(releasedPending = true)
+//                 deletionJournal.record(released) // durable replay before releasing any gate
+//                 releasePendingDeletion(released)
+//                 "Deletion is not confirmed. Your data is kept and account quarantine was released."
+//             }
+
+// Row51 v10 originals retained byte-for-byte after the comment prefix.
+// Original segment 1:
+//                 if (entry.dispatched) return "Deletion is not confirmed. Your data is kept and sending stays blocked because deletion was dispatched. A pending snapshot is not cancellation."
+// Original segment 2:
+//                 check(fresh.operationId == entry.operationId && !fresh.confirmed && !fresh.dispatched) { "Deletion state changed during recovery." }
+//                 val released = entry.copy(releasedPending = true)
+//                 deletionJournal.record(released) // durable replay before releasing any gate
+//                 releasePendingDeletion(released)
+//                 "Deletion is not confirmed. Your data is kept and account quarantine was released."
+// Original segment 3:
+//                 "Outcome indeterminate. Local data is retained. You can retry recovery within 72 hours of preparation; expired receipts cannot prove either outcome."
+// Original segment 4:
+//         check(fresh.operationId == entry.operationId && fresh.releasedPending && !fresh.confirmed && !fresh.dispatched)
+// Original segment 5:
+//             if (entry.releasedPending && !entry.confirmed) {

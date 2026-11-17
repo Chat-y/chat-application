@@ -1,0 +1,995 @@
+{
+  "scope": "198 full removed Icon expressions recovered directly from exact base + unified v3. Only // prefixes inserted; original internal bytes/newlines retained.",
+  "sites": [
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "vector": "Icons.Rounded.CheckCircle",
+      "original_expression": "Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(19.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "vector": "Icons.Rounded.Poll",
+      "original_expression": "Icon(Icons.Rounded.Poll, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "vector": "Icons.Rounded.AddCircleOutline",
+      "original_expression": "Icon(Icons.Rounded.AddCircleOutline, \"Add option\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatPollUi.kt",
+      "vector": "Icons.Rounded.RemoveCircleOutline",
+      "original_expression": "Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = \"Remove option\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/ChatVoiceBinding.kt",
+      "vector": "Icons.Rounded.LooksOne",
+      "original_expression": "Icon(Icons.Rounded.LooksOne,\n                        // Previous tint = if (viewOnce) onAccent else foreground; inherit disabledForeground too.\n                        if (viewOnce) \"View once on. The voice message plays once.\" else \"Send as view once voice message\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountRecentCardsSection.kt",
+      "vector": "Icons.Outlined.NotificationsOff",
+      "original_expression": "Icon(\n                                                Icons.Outlined.NotificationsOff,\n                                                contentDescription = null,\n                                                tint = colors.foregroundSecondary,\n                                                modifier = Modifier.size(15.dp).padding(end = 4.dp),\n                                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountRecentCardsSection.kt",
+      "vector": "Icons.Outlined.ArrowUpward",
+      "original_expression": "Icon(\n                                    Icons.Outlined.ArrowUpward,\n                                    contentDescription = \"Move ${meta.displayName} card earlier\",\n                                    tint = if (index > 0) colors.foregroundSecondary else colors.disabledForeground,\n                                    modifier = Modifier.size(18.dp),\n                                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountSwitcherOverlay.kt",
+      "vector": "Icons.Outlined.Add",
+      "original_expression": "Icon(\n                    Icons.Outlined.Add,\n                    contentDescription = null,\n                    tint = Color(theme.accentColor),\n                    modifier = Modifier.size(22.dp),\n                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountSwitcherOverlay.kt",
+      "vector": "Icons.Outlined.CheckCircle",
+      "original_expression": "Icon(\n                            Icons.Outlined.CheckCircle,\n                            contentDescription = null,\n                            tint = Color(theme.accentColor),\n                            modifier = Modifier.size(12.dp),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountSwitcherOverlay.kt",
+      "vector": "Icons.Outlined.Logout",
+      "original_expression": "Icon(\n                        Icons.Outlined.Logout,\n                        contentDescription = \"Sign out ${meta.displayName}\",\n                        tint = colors.foregroundSecondary,\n                        modifier = Modifier.size(18.dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountSwitcherOverlay.kt",
+      "vector": "Icons.Outlined.WarningAmber",
+      "original_expression": "Icon(\n                                    Icons.Outlined.WarningAmber,\n                                    contentDescription = null,\n                                    tint = Color(theme.dangerColor),\n                                    modifier = Modifier.size(18.dp),\n                                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountSwitcherOverlay.kt",
+      "vector": "Icons.Outlined.Close",
+      "original_expression": "Icon(\n                                Icons.Outlined.Close,\n                                contentDescription = \"Close account switcher\",\n                                tint = colors.foreground,\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/accounts/AccountSwitcherOverlay.kt",
+      "vector": "Icons.Outlined.Settings",
+      "original_expression": "Icon(\n                                Icons.Outlined.Settings,\n                                contentDescription = \"Settings\",\n                                tint = colors.foreground,\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/LoginScreen.kt",
+      "vector": "Icons.Rounded.DomainAdd",
+      "original_expression": "Icon(\n                Icons.Rounded.DomainAdd,\n                contentDescription = null,\n                tint = Color(theme.accentColor),\n                modifier = Modifier.size(ChatyUiTokens.space20),\n            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "vector": "Icons.Rounded.GroupAdd",
+      "original_expression": "Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = Color(activeColor), modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "vector": "Icons.Rounded.AlternateEmail",
+      "original_expression": "Icon(Icons.Rounded.AlternateEmail, null, tint = it, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "vector": "Icons.Rounded.Badge",
+      "original_expression": "Icon(Icons.Rounded.Badge, null, tint = it, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "vector": "Icons.Rounded.AdminPanelSettings",
+      "original_expression": "Icon(Icons.Rounded.AdminPanelSettings, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "vector": "Icons.Rounded.Link",
+      "original_expression": "Icon(Icons.Rounded.Link, null, tint = it, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "vector": "Icons.Rounded.Business",
+      "original_expression": "Icon(Icons.Rounded.Business, null, tint = it, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterOrganizationScreen.kt",
+      "vector": "Icons.Rounded.Apartment",
+      "original_expression": "Icon(Icons.Rounded.Apartment, contentDescription = null, tint = Color(theme.accentColor), modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterScreen.kt",
+      "vector": "Icons.Rounded.DomainAdd",
+      "original_expression": "Icon(\n                Icons.Rounded.DomainAdd,\n                contentDescription = null,\n                tint = Color(theme.accentColor),\n                modifier = Modifier.size(ChatyUiTokens.space20),\n            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterScreen.kt",
+      "vector": "Icons.Rounded.CheckCircle",
+      "original_expression": "Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(theme.successColor), modifier = Modifier.size(ChatyUiTokens.space16).padding(top = ChatyUiTokens.space8))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/RegisterScreen.kt",
+      "vector": "Icons.Rounded.Apartment",
+      "original_expression": "Icon(\n                                    Icons.Rounded.Apartment,\n                                    contentDescription = null,\n                                    tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.7)),\n                                    modifier = Modifier.size(ChatyUiTokens.space20),\n                                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/auth/SplashScreen.kt",
+      "vector": "Icons.Rounded.Forum",
+      "original_expression": "Icon(\n                    Icons.Rounded.Forum,\n                    contentDescription = \"Chaty\",\n                    tint = Color(theme.accentColor),\n                    modifier = Modifier.size(64.dp),\n                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/AutoReplyRulesScreen.kt",
+      "vector": "Icons.AutoMirrored.Rounded.ReplyAll",
+      "original_expression": "Icon(Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null, tint = primary)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/AutoReplyRulesScreen.kt",
+      "vector": "Icons.Rounded.RuleFolder",
+      "original_expression": "Icon(\n                                Icons.Rounded.RuleFolder,\n                                contentDescription = null,\n                                modifier = Modifier.size(48.dp),\n                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/AutoReplyRulesScreen.kt",
+      "vector": "Icons.AutoMirrored.Rounded.ReplyAll",
+      "original_expression": "Icon(Icons.AutoMirrored.Rounded.ReplyAll, contentDescription = null,\n                                    tint = if (isMasterEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,\n                                    modifier = Modifier.padding(8.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/ScheduleMessageSheet.kt",
+      "vector": "Icons.Rounded.CalendarToday",
+      "original_expression": "Icon(Icons.Rounded.CalendarToday, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/automation/ScheduledMessagesScreen.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = \"Refresh scheduled messages\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallContactPickerScreen.kt",
+      "vector": "Icons.Rounded.Backspace",
+      "original_expression": "Icon(\n                                Icons.Rounded.Backspace,\n                                contentDescription = null,\n                                tint = if (query.isEmpty()) {\n                                    Color(argbWithAlpha(theme.secondaryTextColor, 0.5))\n                                } else {\n                                    Color(theme.secondaryTextColor)\n                                },\n                                modifier = Modifier.size(24.dp),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallContactPickerScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(\n                                Icons.Rounded.KeyboardArrowDown,\n                                contentDescription = null,\n                                tint = Color(theme.secondaryTextColor),\n                                modifier = Modifier.size(28.dp),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallContactPickerScreen.kt",
+      "vector": "Icons.Rounded.Dialpad",
+      "original_expression": "Icon(Icons.Rounded.Dialpad, contentDescription = context.getString(com.example.chat.R.string.calls_ui_26), modifier = Modifier.size(28.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallsScreen.kt",
+      "vector": "Icons.Rounded.PhoneCallback",
+      "original_expression": "Icon(\n                                Icons.Rounded.PhoneCallback,\n                                contentDescription = null,\n                                tint = Color(theme.accentColor),\n                                modifier = Modifier.size(42.dp),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallsScreen.kt",
+      "vector": "Icons.Rounded.CloudOff",
+      "original_expression": "Icon(\n                                Icons.Rounded.CloudOff,\n                                contentDescription = null,\n                                tint = Color(theme.dangerColor),\n                                modifier = Modifier.size(42.dp),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/CallsScreen.kt",
+      "vector": "Icons.Rounded.Dialpad",
+      "original_expression": "Icon(Icons.Rounded.Dialpad, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/InAppCallPip.kt",
+      "vector": "Icons.Rounded.Minimize",
+      "original_expression": "Icon(\n                            Icons.Rounded.Minimize,\n                            contentDescription = \"Minimize to Island\",\n                            tint = callSecondary(),\n                            modifier = Modifier.size(20.dp),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/InAppCallPip.kt",
+      "vector": "Icons.Rounded.Fullscreen",
+      "original_expression": "Icon(\n                            Icons.Rounded.Fullscreen,\n                            contentDescription = \"Expand call\",\n                            tint = callForeground(),\n                            modifier = Modifier.size(22.dp),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt",
+      "vector": "Icons.Rounded.ScreenShare",
+      "original_expression": "Icon(Icons.Rounded.ScreenShare, contentDescription = null, tint = callAccent(), modifier = Modifier.size(16.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt",
+      "vector": "Icons.Rounded.PictureInPicture",
+      "original_expression": "Icon(\n                                Icons.Rounded.PictureInPicture,\n                                contentDescription = \"Picture-in-picture\",\n                                tint = callForeground(),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt",
+      "vector": "Icons.Rounded.Cameraswitch",
+      "original_expression": "Icon(\n                                Icons.Rounded.Cameraswitch,\n                                contentDescription = \"Switch camera\",\n                                tint = callForeground(),\n                                modifier = Modifier.size(16.dp),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleGroupMeetingView.kt",
+      "vector": "Icons.Rounded.PersonAdd",
+      "original_expression": "Icon(Icons.Rounded.PersonAdd, \"Invite People\", tint = tokens.primaryAccent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleIncomingCallView.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(\n                        Icons.Rounded.KeyboardArrowUp,\n                        contentDescription = null,\n                        tint = callSecondary(),\n                        modifier = Modifier.offset(y = (if (hintReduced) 0f else hintDy).dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleOngoingCallView.kt",
+      "vector": "Icons.Rounded.PersonAdd",
+      "original_expression": "Icon(Icons.Rounded.PersonAdd, \"Invite\", tint = Color.White)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleOngoingCallView.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowDown, \"Minimize\", tint = Color.White)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(\n                    Icons.Rounded.KeyboardArrowDown,\n                    contentDescription = \"Next match\",\n                    tint = Color(if (matchIndex in 1 until matchCount) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex in 1 until matchCount) 1f else 0.5f),\n                    modifier = Modifier.size(22.dp),\n                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(\n                    Icons.Rounded.KeyboardArrowUp,\n                    contentDescription = \"Previous match\",\n                    tint = Color(if (matchIndex > 1) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex > 1) 1f else 0.5f),\n                    modifier = Modifier.size(22.dp),\n                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(\n                        Icons.Rounded.KeyboardArrowDown,\n                        contentDescription = \"Scroll to bottom\",\n                        tint = Color(theme.primaryTextColor),\n                        modifier = Modifier.size(27.dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt",
+      "vector": "Icons.Rounded.CloudOff",
+      "original_expression": "Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/ChatDetailStates.kt",
+      "vector": "Icons.Rounded.VerifiedUser",
+      "original_expression": "Icon(Icons.Rounded.VerifiedUser, contentDescription = null, tint = secondary, modifier = Modifier.size(42.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/NewChatScreen.kt",
+      "vector": "Icons.Rounded.Cast",
+      "original_expression": "Icon(Icons.Rounded.Cast, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/NewChatScreen.kt",
+      "vector": "Icons.Rounded.GroupAdd",
+      "original_expression": "Icon(Icons.Rounded.GroupAdd, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/NewChatScreen.kt",
+      "vector": "Icons.Rounded.PersonSearch",
+      "original_expression": "Icon(\n                            Icons.Rounded.PersonSearch,\n                            contentDescription = null,\n                            tint = colors.foregroundTertiary,\n                            modifier = Modifier.size(44.dp),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt",
+      "vector": "Icons.Rounded.PersonRemove",
+      "original_expression": "Icon(Icons.Rounded.PersonRemove, contentDescription = null, tint = colors.error)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt",
+      "vector": "Icons.Outlined.Description",
+      "original_expression": "Icon(Icons.Outlined.Description, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactInfoScreen.kt",
+      "vector": "Icons.Rounded.Link",
+      "original_expression": "Icon(Icons.Rounded.Link, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/contact_info/ContactPrivacyScreen.kt",
+      "vector": "Icons.Rounded.Shield",
+      "original_expression": "Icon(\n                        Icons.Rounded.Shield,\n                        contentDescription = null,\n                        tint = colors.primary,\n                        modifier = Modifier.size(22.dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/AttachmentSheet.kt",
+      "vector": "Icons.Rounded.Science",
+      "original_expression": "Icon(Icons.Rounded.Science, contentDescription = null, tint = Color(theme.onAccentColor),\n                        modifier = Modifier.size(12.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/ChatyEmojiPicker.kt",
+      "vector": "Icons.Rounded.Keyboard",
+      "original_expression": "Icon(Icons.Rounded.Keyboard, contentDescription = \"Return to keyboard\",\n                        tint = headerForeground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/ConnectionDetailSheet.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = null,\n                        modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "vector": "Icons.Rounded.BrokenImage",
+      "original_expression": "Icon(Icons.Rounded.BrokenImage, \"Preview unavailable. Tap to open\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "vector": "Icons.Rounded.BrokenImage",
+      "original_expression": "Icon(Icons.Rounded.BrokenImage, contentDescription = \"Preview unavailable\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = \"Retry download\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaAttachmentPreview.kt",
+      "vector": "Icons.Rounded.CloudOff",
+      "original_expression": "Icon(Icons.Rounded.CloudOff, contentDescription = \"Waiting for network\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowDown, stringResource(com.example.chat.R.string.media_released_review_move_later, media.file.name))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowUp, stringResource(com.example.chat.R.string.media_released_review_move_earlier, media.file.name))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowUp, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaReviewScreen.kt",
+      "vector": "Icons.Rounded.MoreVert",
+      "original_expression": "Icon(Icons.Rounded.MoreVert, stringResource(com.example.chat.R.string.media_released_review_more))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MediaViewerScreen.kt",
+      "vector": "Icons.Rounded.MoreVert",
+      "original_expression": "Icon(Icons.Rounded.MoreVert, contentDescription = \"More media actions\", tint = foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MessageBubble.kt",
+      "vector": "Icons.Rounded.LocationOn",
+      "original_expression": "Icon(\n                Icons.Rounded.LocationOn,\n                contentDescription = null,\n                tint = accentColor,\n                modifier = Modifier.size(20.dp),\n            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MessageBubble.kt",
+      "vector": "Icons.Rounded.LocationOn",
+      "original_expression": "Icon(\n                Icons.Rounded.LocationOn,\n                contentDescription = null,\n                tint = accentColor,\n                modifier = Modifier.size(46.dp),\n            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MessageBubble.kt",
+      "vector": "Icons.Rounded.Description",
+      "original_expression": "Icon(\n                Icons.Rounded.Description,\n                contentDescription = null,\n                tint = accentColor,\n                modifier = Modifier.size(22.dp),\n            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/detail/MessageBubble.kt",
+      "vector": "Icons.Rounded.Checklist",
+      "original_expression": "Icon(\n                        Icons.Rounded.Checklist,\n                        contentDescription = null,\n                        tint = textColor.copy(alpha = 0.65f),\n                        modifier = Modifier.size(13.dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "vector": "Icons.AutoMirrored.Rounded.ExitToApp",
+      "original_expression": "Icon(Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, tint = colors.error)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "vector": "Icons.Rounded.PersonAdd",
+      "original_expression": "Icon(Icons.Rounded.PersonAdd, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "vector": "Icons.Outlined.VerifiedUser",
+      "original_expression": "Icon(Icons.Outlined.VerifiedUser, contentDescription = null, tint = colors.success)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/group_info/GroupInfoScreen.kt",
+      "vector": "Icons.Outlined.Timer",
+      "original_expression": "Icon(Icons.Outlined.Timer, contentDescription = null, tint = colors.warning)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/home/ConversationRow.kt",
+      "vector": "Icons.Rounded.AlternateEmail",
+      "original_expression": "Icon(\n                                        Icons.Rounded.AlternateEmail,\n                                        contentDescription = null,\n                                        tint = homePrefs.mentionIconColor?.let { Color(it) }\n                                            ?: Color(theme.accentColor),\n                                        modifier = Modifier.size(12.dp),\n                                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt",
+      "vector": "Icons.Rounded.WorkspacePremium",
+      "original_expression": "Icon(\n            Icons.Rounded.WorkspacePremium,\n            contentDescription = null,\n            tint = Color(0xFFD97706),\n            modifier = Modifier.size(22.dp),\n        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt",
+      "vector": "Icons.Outlined.GroupAdd",
+      "original_expression": "Icon(Icons.Outlined.GroupAdd, null, tint = Color(theme.secondaryTextColor), modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/home/HomeAppBars.kt",
+      "vector": "Icons.Outlined.PersonAddAlt1",
+      "original_expression": "Icon(Icons.Outlined.PersonAddAlt1, contentDescription = \"Account settings\", tint = Color(theme.primaryTextColor))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/linked_devices/LinkedDevicesQrScreen.kt",
+      "vector": "Icons.Rounded.DevicesOther",
+      "original_expression": "Icon(\n                Icons.Rounded.DevicesOther,\n                contentDescription = null,\n                tint = colors.primary,\n                modifier = Modifier.size(20.dp),\n            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/linked_devices/LinkedDevicesQrScreen.kt",
+      "vector": "Icons.Rounded.QrCodeScanner",
+      "original_expression": "Icon(Icons.Rounded.QrCodeScanner, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/linked_devices/LinkedDevicesQrScreen.kt",
+      "vector": "Icons.Rounded.QrCode2",
+      "original_expression": "Icon(Icons.Rounded.QrCode2, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/FriendMapScreen.kt",
+      "vector": "Icons.Rounded.MyLocation",
+      "original_expression": "Icon(Icons.Rounded.MyLocation, contentDescription = null, tint = tint)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "vector": "Icons.Rounded.MyLocation",
+      "original_expression": "Icon(Icons.Rounded.MyLocation, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "vector": "Icons.Rounded.Place",
+      "original_expression": "Icon(Icons.Rounded.Place, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "vector": "Icons.Rounded.Layers",
+      "original_expression": "Icon(Icons.Rounded.Layers, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/location/MapViewerScreen.kt",
+      "vector": "Icons.Rounded.Remove",
+      "original_expression": "Icon(Icons.Rounded.Remove, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/locked_chats/LockedChatsScreen.kt",
+      "vector": "Icons.Rounded.Key",
+      "original_expression": "Icon(Icons.Rounded.Key, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/locked_chats/LockedChatsScreen.kt",
+      "vector": "Icons.Outlined.Shield",
+      "original_expression": "Icon(\n                        Icons.Outlined.Shield,\n                        contentDescription = \"Lock Settings\",\n                        tint = colors.foreground,\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/starred/StarredMessagesScreen.kt",
+      "vector": "Icons.Rounded.SyncProblem",
+      "original_expression": "Icon(\n                            Icons.Rounded.SyncProblem,\n                            contentDescription = null,\n                            tint = colors.onSurfaceVariant,\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/starred/StarredMessagesScreen.kt",
+      "vector": "Icons.Rounded.ArrowUpward",
+      "original_expression": "Icon(Icons.Rounded.ArrowUpward,\n                        contentDescription = stringResource(R.string.social_starred_back_to_top))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/chats/starred/StarredMessagesScreen.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(\n                            Icons.Rounded.Refresh,\n                            contentDescription = stringResource(R.string.social_starred_refresh),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/kit/OptionCards.kt",
+      "vector": "Icons.Rounded.CheckCircle",
+      "original_expression": "Icon(\n                    Icons.Rounded.CheckCircle, null, tint = colors.primary,\n                    modifier = Modifier.align(Alignment.TopEnd).width(18.dp).height(18.dp),\n                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/ChatyAudioPlayerScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(\n                                Icons.Rounded.KeyboardArrowDown,\n                                contentDescription = \"Close\",\n                                modifier = Modifier.size(30.dp),\n                            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/ChatyVideoPlayerWidget.kt",
+      "vector": "Icons.Rounded.Speed",
+      "original_expression": "Icon(Icons.Rounded.Speed, contentDescription = \"Playback Speed\", tint = Color.White, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "vector": "Icons.Rounded.FileOpen",
+      "original_expression": "Icon(Icons.Rounded.FileOpen, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "vector": "Icons.Rounded.FolderOpen",
+      "original_expression": "Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "vector": "Icons.Rounded.ArrowUpward",
+      "original_expression": "Icon(Icons.Rounded.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "vector": "Icons.Rounded.InsertDriveFile",
+      "original_expression": "Icon(Icons.Rounded.InsertDriveFile, contentDescription = null,\n            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(size.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/CustomFilePickerScreen.kt",
+      "vector": "Icons.Rounded.AddToPhotos",
+      "original_expression": "Icon(Icons.Rounded.AddToPhotos, contentDescription = \"Browse device files\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = \"Next match\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = \"Previous match\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = \"Next match\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/DocumentReaderScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = \"Previous match\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/MediaWorkspaceScreen.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) \"Refreshing library\" else \"Refresh library\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/MediaWorkspaceScreen.kt",
+      "vector": "Icons.Rounded.CleaningServices",
+      "original_expression": "Icon(Icons.Rounded.CleaningServices, contentDescription = \"Clean temporary cache\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/PdfWorkspaceScreen.kt",
+      "vector": "Icons.Rounded.CheckCircle",
+      "original_expression": "Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = colors.success, modifier = Modifier.size(32.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/media/PdfWorkspaceScreen.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = if (refreshing) \"Refreshing library\" else \"Refresh library\", modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationFab.kt",
+      "vector": "Icons.Rounded.PersonSearch",
+      "original_expression": "Icon(Icons.Rounded.PersonSearch, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells.kt",
+      "vector": "Icons.Rounded.Menu",
+      "original_expression": "Icon(Icons.Rounded.Menu, contentDescription = \"Open menu\", tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells.kt",
+      "vector": "Icons.Rounded.Bolt",
+      "original_expression": "Icon(Icons.Rounded.Bolt, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells3.kt",
+      "vector": "Icons.Rounded.GridView",
+      "original_expression": "Icon(Icons.Rounded.GridView, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/navigation/NavigationShells3.kt",
+      "vector": "Icons.Rounded.Bolt",
+      "original_expression": "Icon(Icons.Rounded.Bolt, contentDescription = \"Quick action\", tint = accent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt",
+      "vector": "Icons.Outlined.NotificationsNone",
+      "original_expression": "Icon(Icons.Outlined.NotificationsNone,\n                contentDescription = null,\n                tint = MaterialTheme.colorScheme.onSecondaryContainer,\n            )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt",
+      "vector": "Icons.Outlined.NotificationsNone",
+      "original_expression": "Icon(Icons.Outlined.NotificationsNone,\n                            contentDescription = null,\n                            modifier = Modifier.size(30.dp),\n                            tint = MaterialTheme.colorScheme.onSurfaceVariant,\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/notifications/NotificationsInboxScreen.kt",
+      "vector": "Icons.Outlined.DeleteSweep",
+      "original_expression": "Icon(Icons.Outlined.DeleteSweep, contentDescription = stringResource(R.string.social_activity_clear_action))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/onboarding/NotificationPermissionSheet.kt",
+      "vector": "Icons.Rounded.NotificationsActive",
+      "original_expression": "Icon(Icons.Rounded.NotificationsActive,\n                    contentDescription = null,\n                    tint = colors.primary,\n                    modifier = Modifier.size(40.dp),\n                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/onboarding/PermissionOnboarding.kt",
+      "vector": "Icons.Rounded.CheckCircleOutline",
+      "original_expression": "Icon(Icons.Rounded.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/profile/ProfileEditScreen.kt",
+      "vector": "Icons.Outlined.AlternateEmail",
+      "original_expression": "Icon(Icons.Outlined.AlternateEmail, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/profile/ProfileEditorSheet.kt",
+      "vector": "Icons.Rounded.Photo",
+      "original_expression": "Icon(Icons.Rounded.Photo, contentDescription = null, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/search/GlobalSearchScreen.kt",
+      "vector": "Icons.Rounded.Verified",
+      "original_expression": "Icon(Icons.Rounded.Verified, contentDescription = stringResource(R.string.social_search_verified), tint = colors.primary, modifier = Modifier.size(15.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/search/GlobalSearchScreen.kt",
+      "vector": "Icons.Rounded.AlternateEmail",
+      "original_expression": "Icon(\n                    Icons.Rounded.AlternateEmail,\n                    contentDescription = null,\n                    tint = colors.primary,\n                    modifier = Modifier.size(40.dp),\n                )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/AudioSettingsScreen.kt",
+      "vector": "Icons.Rounded.Info",
+      "original_expression": "Icon(Icons.Rounded.Info, null, Modifier.size(24.dp), tint = colors.foregroundSecondary)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/AudioSettingsScreen.kt",
+      "vector": "Icons.Rounded.SpeakerGroup",
+      "original_expression": "Icon(Icons.Rounded.SpeakerGroup, null, Modifier.size(26.dp), tint = colors.accent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/HideMediaScreen.kt",
+      "vector": "Icons.Rounded.Check",
+      "original_expression": "Icon(Icons.Rounded.Check, null, Modifier.size(SwitchDefaults.IconSize))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/HideMediaScreen.kt",
+      "vector": "Icons.Rounded.RestartAlt",
+      "original_expression": "Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = accent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/NavigationEffectsScreen.kt",
+      "vector": "Icons.Rounded.Animation",
+      "original_expression": "Icon(\n                        Icons.Rounded.Animation, null, Modifier.size(24.dp),\n                        tint = if (fx.enableClickParticles) colors.accent else colors.foregroundTertiary,\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt",
+      "vector": "Icons.Rounded.ChevronRight",
+      "original_expression": "Icon(Icons.Rounded.ChevronRight, null, Modifier.size(21.dp), tint = colors.foregroundSecondary)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt",
+      "vector": "Icons.Outlined.Shield",
+      "original_expression": "Icon(Icons.Outlined.Shield, null, tint = colors.accent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsRootScreen.kt",
+      "vector": "Icons.Rounded.QrCode2",
+      "original_expression": "Icon(Icons.Rounded.QrCode2, \"QR code\", Modifier.size(25.dp), tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(22.dp), tint = secondaryText)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt",
+      "vector": "Icons.Rounded.Mood",
+      "original_expression": "Icon(Icons.Rounded.Mood, null, Modifier.size(16.dp), tint = accent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/SettingsScreen.kt",
+      "vector": "Icons.Rounded.IosShare",
+      "original_expression": "Icon(Icons.Rounded.IosShare, \"Export chats\", Modifier.size(22.dp), tint = primaryText)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/appearance/ComponentStylesScreen.kt",
+      "vector": "Icons.Rounded.Undo",
+      "original_expression": "Icon(Icons.Rounded.Undo, contentDescription = \"Undo last change\", tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/appicon/AppIconSettingsScreen.kt",
+      "vector": "Icons.Outlined.BrokenImage",
+      "original_expression": "Icon(Icons.Outlined.BrokenImage, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbSettingsScreen.kt",
+      "vector": "Icons.Rounded.ContentPaste",
+      "original_expression": "Icon(Icons.Rounded.ContentPaste, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt",
+      "vector": "Icons.Rounded.DashboardCustomize",
+      "original_expression": "Icon(Icons.Rounded.DashboardCustomize, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt",
+      "vector": "Icons.Rounded.DeleteSweep",
+      "original_expression": "Icon(Icons.Rounded.DeleteSweep, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/gb/GbStandaloneSheets.kt",
+      "vector": "Icons.Rounded.CleaningServices",
+      "original_expression": "Icon(Icons.Rounded.CleaningServices, null, tint = accent, modifier = Modifier.size(28.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/home/HeaderSettingsScreen.kt",
+      "vector": "Icons.AutoMirrored.Rounded.KeyboardArrowRight",
+      "original_expression": "Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,\n                tint = colors.primary, modifier = Modifier.padding(horizontal = 8.dp).size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/home/HomeRowsSettingsScreen.kt",
+      "vector": "Icons.Rounded.AlternateEmail",
+      "original_expression": "Icon(Icons.Rounded.AlternateEmail, null, tint = colorOr(p.mentionIconColor, accent), modifier = Modifier.size(11.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/navigation/NavigationDestinationsSettingsScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowDown",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = \"Move down\", tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/navigation/NavigationDestinationsSettingsScreen.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = \"Move up\", tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/navigation/SettingsSearchScreen.kt",
+      "vector": "Icons.Rounded.SearchOff",
+      "original_expression": "Icon(\n                        Icons.Rounded.SearchOff,\n                        contentDescription = null,\n                        tint = colors.foregroundTertiary,\n                        modifier = Modifier.size(48.dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationSettingsPage.kt",
+      "vector": "Icons.Rounded.PlayCircleOutline",
+      "original_expression": "Icon(Icons.Rounded.PlayCircleOutline, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationSettingsPage.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/notifications/NotificationToastSettingsScreen.kt",
+      "vector": "Icons.AutoMirrored.Rounded.KeyboardArrowRight",
+      "original_expression": "Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = colors.foregroundSecondary.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/permissions/SystemPermissionsScreen.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = \"Re-check permissions\")"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/permissions/SystemPermissionsScreen.kt",
+      "vector": "Icons.Rounded.LocationOn",
+      "original_expression": "Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = colors.primary)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "vector": "Icons.Rounded.Block",
+      "original_expression": "Icon(Icons.Rounded.Block, contentDescription = null,\n                        tint = colors.foregroundSecondary,\n                        modifier = Modifier.size(48.dp).testTag(\"blocked-contacts-empty-illustration\"))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "vector": "Icons.Rounded.Close",
+      "original_expression": "Icon(Icons.Rounded.Close, androidx.compose.ui.res.stringResource(com.example.chat.R.string.privacy_dismiss_tip), tint = secondaryText, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "vector": "Icons.Rounded.WarningAmber",
+      "original_expression": "Icon(Icons.Rounded.WarningAmber, null, tint = accent, modifier = Modifier.size(24.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "vector": "Icons.Rounded.WarningAmber",
+      "original_expression": "Icon(Icons.Rounded.WarningAmber, null, tint = appColors.error, modifier = Modifier.size(24.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/privacy/PrivacyCenterScreen.kt",
+      "vector": "Icons.Rounded.Check",
+      "original_expression": "Icon(Icons.Rounded.Check, null, tint = style.accent, modifier = Modifier.size(24.dp).clearAndSetSemantics { })"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/security/SecurityCenterScreen.kt",
+      "vector": "Icons.Rounded.Key",
+      "original_expression": "Icon(Icons.Rounded.Key, null, tint = colors.accent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt",
+      "vector": "Icons.Rounded.RoundedCorner",
+      "original_expression": "Icon(Icons.Rounded.RoundedCorner, contentDescription = null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt",
+      "vector": "Icons.Outlined.DashboardCustomize",
+      "original_expression": "Icon(\n                            Icons.Outlined.DashboardCustomize,\n                            contentDescription = null,\n                            tint = Color(theme.accentColor),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt",
+      "vector": "Icons.Rounded.FileDownload",
+      "original_expression": "Icon(Icons.Rounded.FileDownload, contentDescription = \"Import Theme JSON\", tint = Color(theme.primaryTextColor))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/studio/ThemeStudioScreen.kt",
+      "vector": "Icons.Rounded.FileUpload",
+      "original_expression": "Icon(Icons.Rounded.FileUpload, contentDescription = \"Export Theme JSON\", tint = Color(theme.primaryTextColor))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatePreviewWidget.kt",
+      "vector": "Icons.Rounded.AddCircleOutline",
+      "original_expression": "Icon(Icons.Rounded.AddCircleOutline, contentDescription = null, modifier = Modifier.size(10.dp), tint = accent)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatePreviewWidget.kt",
+      "vector": "Icons.Rounded.FilterList",
+      "original_expression": "Icon(Icons.Rounded.FilterList, contentDescription = null, modifier = Modifier.size(14.dp), tint = colors.foregroundSecondary)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "vector": "Icons.Rounded.SearchOff",
+      "original_expression": "Icon(Icons.Rounded.SearchOff, contentDescription = null, modifier = Modifier.size(34.dp), tint = colors.foregroundSecondary)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "vector": "Icons.Rounded.RestartAlt",
+      "original_expression": "Icon(Icons.Rounded.RestartAlt, contentDescription = \"Reset All Templates\", tint = colors.foreground, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "vector": "Icons.Rounded.Download",
+      "original_expression": "Icon(Icons.Rounded.Download, contentDescription = \"Import template profile\", tint = colors.foreground, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "vector": "Icons.Rounded.Upload",
+      "original_expression": "Icon(Icons.Rounded.Upload, contentDescription = \"Export template profile\", tint = colors.foreground, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "vector": "Icons.AutoMirrored.Rounded.FormatListBulleted",
+      "original_expression": "Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = null, tint = tint, modifier = modifier)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "vector": "Icons.Outlined.Home",
+      "original_expression": "Icon(Icons.Outlined.Home, contentDescription = null, tint = tint, modifier = modifier)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/templates/TemplatesSettingsScreen.kt",
+      "vector": "Icons.Rounded.Dock",
+      "original_expression": "Icon(Icons.Rounded.Dock, contentDescription = null, tint = tint, modifier = modifier)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Outlined.FileDownload",
+      "original_expression": "Icon(Icons.Outlined.FileDownload, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Rounded.CloudDownload",
+      "original_expression": "Icon(Icons.Rounded.CloudDownload, null, Modifier.size(28.dp), tint = colors.primary)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Rounded.RestartAlt",
+      "original_expression": "Icon(Icons.Rounded.RestartAlt, null, tint = colors.error)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Rounded.RestartAlt",
+      "original_expression": "Icon(Icons.Rounded.RestartAlt, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Rounded.Check",
+      "original_expression": "Icon(Icons.Rounded.Check, null)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Rounded.RestartAlt",
+      "original_expression": "Icon(Icons.Rounded.RestartAlt, null, Modifier.size(20.dp), tint = colors.error)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Outlined.FileUpload",
+      "original_expression": "Icon(Icons.Outlined.FileUpload, \"Export Theme JSON\", tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Outlined.FileDownload",
+      "original_expression": "Icon(Icons.Outlined.FileDownload, \"Import Theme JSON\", tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/theme/ThemeEditorScreen.kt",
+      "vector": "Icons.Outlined.CloudDownload",
+      "original_expression": "Icon(Icons.Outlined.CloudDownload, \"Theme Packs & Download Guide\", tint = colors.foreground)"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/universal/UniversalChatyIconsScreen.kt",
+      "vector": "Icons.Rounded.CheckCircle",
+      "original_expression": "Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/settings/universal/UniversalChatyIconsScreen.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/subscription/PlanSubscriptionScreen.kt",
+      "vector": "Icons.Rounded.CheckCircle",
+      "original_expression": "Icon(\n                        Icons.Rounded.CheckCircle,\n                        contentDescription = null,\n                        // SUB-R1-044: darker tint for 3:1 non-text contrast.\n                        // tint = SuccessGreenAccessible,\n                        tint = Color(theme.successColor),\n                        // SUB-R3-045: was 16dp.\n                        modifier = Modifier.size(18.dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/subscription/PlanSubscriptionScreen.kt",
+      "vector": "Icons.Rounded.Refresh",
+      "original_expression": "Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/subscription/PlanSubscriptionScreen.kt",
+      "vector": "Icons.Rounded.LayersClear",
+      "original_expression": "Icon(\n                            Icons.Rounded.LayersClear,\n                            contentDescription = null,\n                            tint = Color(argbWithAlpha(theme.secondaryTextColor, 0.7)),\n                            modifier = Modifier.size(44.dp),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/subscription/PlanSubscriptionScreen.kt",
+      "vector": "Icons.Rounded.WorkspacePremium",
+      "original_expression": "Icon(\n                        Icons.Rounded.WorkspacePremium,\n                        contentDescription = null,\n                        tint = Color(theme.accentColor),\n                        modifier = Modifier.size(16.dp),\n                    )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/subscription/PlanSubscriptionScreen.kt",
+      "vector": "Icons.AutoMirrored.Rounded.ArrowForward",
+      "original_expression": "Icon(\n                            Icons.AutoMirrored.Rounded.ArrowForward,\n                            contentDescription = null,\n                            tint = Color(theme.onAccentColor),\n                            modifier = Modifier.size(18.dp),\n                        )"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskCreateEditModal.kt",
+      "vector": "Icons.Rounded.Notes",
+      "original_expression": "Icon(Icons.Rounded.Notes, contentDescription = null, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "vector": "Icons.Rounded.Alarm",
+      "original_expression": "Icon(Icons.Rounded.Alarm, contentDescription = null, tint = colors.warning, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "vector": "Icons.Rounded.CalendarToday",
+      "original_expression": "Icon(Icons.Rounded.CalendarToday, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "vector": "Icons.Rounded.Fingerprint",
+      "original_expression": "Icon(Icons.Rounded.Fingerprint, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TaskDetailScreen.kt",
+      "vector": "Icons.Rounded.ArrowDropDown",
+      "original_expression": "Icon(Icons.Rounded.ArrowDropDown, contentDescription = \"Change Status\", tint = colors.primary, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "vector": "Icons.Rounded.History",
+      "original_expression": "Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "vector": "Icons.Rounded.History",
+      "original_expression": "Icon(Icons.Rounded.History, contentDescription = \"History\", tint = colors.primary, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "vector": "Icons.Rounded.ViewKanban",
+      "original_expression": "Icon(Icons.Rounded.ViewKanban, contentDescription = null, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/tasks/TasksScreen.kt",
+      "vector": "Icons.Rounded.ListAlt",
+      "original_expression": "Icon(Icons.Rounded.ListAlt, contentDescription = null, modifier = Modifier.size(18.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/updates/UpdatesScreenParts.kt",
+      "vector": "Icons.Rounded.GraphicEq",
+      "original_expression": "Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = colors.primary, modifier = Modifier.size(30.dp))"
+    },
+    {
+      "file": "app/src/main/kotlin/com/example/chat/ui/updates/UpdatesScreenParts.kt",
+      "vector": "Icons.Rounded.KeyboardArrowUp",
+      "original_expression": "Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))"
+    }
+  ]
+}

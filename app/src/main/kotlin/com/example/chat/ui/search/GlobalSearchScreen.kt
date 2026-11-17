@@ -1,5 +1,7 @@
 package com.example.chat.ui.search
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
@@ -26,6 +28,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.example.chat.ui.effects.iosItemEntrance
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -314,14 +318,16 @@ fun GlobalSearchScreen(
         }
     }
 
-    BackHandler(onBack = onBack)
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Unit)
+    // Previous registration retained inactive: BackHandler(onBack = onBack)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, onBack = onBack)
 
     LaunchedEffect(Unit) {
         androidx.compose.runtime.withFrameNanos { }
         runCatching { focusRequester.requestFocus() }
     }
 
-    Column(modifier = modifier.widthIn(max = 840.dp).fillMaxSize().background(colors.background).semantics { paneTitle = paneLabel }) {
+    Column(modifier = modifier.chatyPredictiveBack(predictiveBack).widthIn(max = 840.dp).fillMaxSize().background(colors.background).semantics { paneTitle = paneLabel }) {
         // ChatyAppBar equivalent: back + the 40dp pill search field + the
         // progress/clear action.
         Row(
@@ -331,49 +337,68 @@ fun GlobalSearchScreen(
             IconButton(onClick = onBack) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = stringResource(R.string.social_search_back), color = colors.foreground)
             }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .clip(CircleShape)
-                    .background(colors.inputFill)
-                    .padding(horizontal = 16.dp),
-            ) {
-                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search,
-                    semanticLabel = null,
-                    color = colors.foreground.copy(alpha = 0.5f),
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                BasicTextField(
-                    value = query,
-                    onValueChange = {
-                        query = it
-                        queueSearch(it)
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrect = false),
-                    keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-                    textStyle = TextStyle(color = colors.foreground, fontSize = 15.sp),
-                    cursorBrush = SolidColor(colors.primary),
-                    modifier = Modifier.weight(1f).testTag("global-search-input").focusRequester(focusRequester).semantics {
-                        contentDescription = inputLabel
-                    },
-                    decorationBox = { inner ->
-                        Box {
-                            if (query.isEmpty()) {
-                                Text(
-                                    stringResource(R.string.social_search_hint),
-                                    color = colors.foreground.copy(alpha = 0.5f),
-                                    fontSize = 12.sp,
-                                )
-                            }
-                            inner()
-                        }
-                    },
-                )
-            }
+            // Row(
+            // verticalAlignment = Alignment.CenterVertically,
+            // modifier = Modifier
+            // .weight(1f)
+            // .heightIn(min = 48.dp)
+            // .clip(CircleShape)
+            // .background(colors.inputFill)
+            // .padding(horizontal = 16.dp),
+            // ) {
+            // com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search,
+            // semanticLabel = null,
+            // color = colors.foreground.copy(alpha = 0.5f),
+            // modifier = Modifier.size(20.dp),
+            // )
+            // Spacer(Modifier.width(8.dp))
+            // BasicTextField(
+            // value = query,
+            // onValueChange = {
+            // query = it
+            // queueSearch(it)
+            // },
+            // singleLine = true,
+            // keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrect = false),
+            // keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+            // textStyle = TextStyle(color = colors.foreground, fontSize = 15.sp),
+            // cursorBrush = SolidColor(colors.primary),
+            // modifier = Modifier.weight(1f).testTag("global-search-input").focusRequester(focusRequester).semantics {
+            // contentDescription = inputLabel
+            // },
+            // decorationBox = { inner ->
+            // Box {
+            // if (query.isEmpty()) {
+            // Text(
+            // stringResource(R.string.social_search_hint),
+            // color = colors.foreground.copy(alpha = 0.5f),
+            // fontSize = 12.sp,
+            // )
+            // }
+            // inner()
+            // }
+            // },
+            // )
+            // }
+            com.example.chat.ui.kit.ChatyTaskField(
+                value = query,
+                onValueChange = {
+                    query = it
+                    queueSearch(it)
+                },
+                placeholder = stringResource(R.string.social_search_hint),
+                accessibilityLabel = inputLabel,
+                density = com.example.chat.ui.kit.ChatyFieldDensity.CompactHeader,
+                modifier = Modifier.weight(1f).testTag("global-search-input").focusRequester(focusRequester),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrect = false),
+                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                leadingIcon = {
+                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search,
+                        semanticLabel = null, color = colors.foregroundSecondary,
+                        modifier = Modifier.size(20.dp))
+                },
+            )
             // if (isSearching || isOpeningChat) {
             if (isSearching || isOpeningChat || verifyingRequestId != null) {
                 CircularProgressIndicator(
@@ -417,7 +442,12 @@ fun GlobalSearchScreen(
             onDismissRequest = { showPrivacyInfo = false },
             title = { Text(stringResource(R.string.social_search_privacy_title)) },
             text = { Text(stringResource(R.string.social_search_privacy_body)) },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { showPrivacyInfo = false }) { Text(stringResource(R.string.social_search_close)) } },
+            confirmButton = { // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = { showPrivacyInfo = false }) { Text(stringResource(R.string.social_search_close)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = stringResource(R.string.social_search_close),
+                onClick = { showPrivacyInfo = false },
+            ) },
         )
         if (query.isNotBlank()) {
             androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -444,8 +474,14 @@ fun GlobalSearchScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth().padding(40.dp).semantics(mergeDescendants = true) {},
             ) {
-                Icon(
-                    Icons.Rounded.AlternateEmail,
+
+//Icon(
+//                    Icons.Rounded.AlternateEmail,
+//                    contentDescription = null,
+//                    tint = colors.primary,
+//                    modifier = Modifier.size(40.dp),
+//                )
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.atSign, Icons.Rounded.AlternateEmail,
                     contentDescription = null,
                     tint = colors.primary,
                     modifier = Modifier.size(40.dp),
@@ -478,8 +514,14 @@ fun GlobalSearchScreen(
                         Text(stringResource(R.string.social_search_people_header), color = colors.foregroundSecondary,
                             modifier = Modifier.padding(vertical = 8.dp).semantics { heading() })
                     }
-                    items(matchedUsers, key = { "person:${it.id}" }, contentType = { "person" }) { user ->
+// Previous implementation retained:                     items(matchedUsers, key = { "person:${it.id}" }, contentType = { "person" }) { user ->
+// Previous implementation retained:                         UserTile(user, colors, openingUserId == user.id, query = query, enabled = !isOpeningChat && !isSearching) { startConversationWith(user) }
+// Previous implementation retained:                     }
+                    itemsIndexed(matchedUsers, key = { _, it -> "person:${it.id}" }, contentType = { _, _ -> "person" }) { index, user ->
+                        // Row 9 (iOS-style content motion): staggered entrance per result.
+                        Box(Modifier.iosItemEntrance(index, user.id)) {
                         UserTile(user, colors, openingUserId == user.id, query = query, enabled = !isOpeningChat && !isSearching) { startConversationWith(user) }
+                        }
                     }
                 }
                 val visibleConversations = matchedConversations.filter {
@@ -491,10 +533,13 @@ fun GlobalSearchScreen(
                         Text(stringResource(R.string.social_search_chats_header), color = colors.foregroundSecondary,
                             modifier = Modifier.padding(vertical = 8.dp).semantics { heading() })
                     }
-                    items(visibleConversations, key = { "conversation:${it.id}" }, contentType = { "conversation" }) { conversation ->
+// Previous implementation retained:                     items(visibleConversations, key = { "conversation:${it.id}" }, contentType = { "conversation" }) { conversation ->
+                    itemsIndexed(visibleConversations, key = { _, it -> "conversation:${it.id}" }, contentType = { _, _ -> "conversation" }) { index, conversation ->
+                        Box(Modifier.iosItemEntrance(index, conversation.id)) {
                         ConversationTile(conversation, colors, query) {
                             if (isCurrentSearchSession() && !isConversationHidden(conversation.id) &&
                                 !isConversationProtected(conversation.id)) onOpenConversation(conversation.id)
+                        }
                         }
                     }
                 }
@@ -590,7 +635,9 @@ private fun UserTile(
                 )
                 if (user.isVerified) {
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Rounded.Verified, contentDescription = stringResource(R.string.social_search_verified), tint = colors.primary, modifier = Modifier.size(15.dp))
+
+//Icon(Icons.Rounded.Verified, contentDescription = stringResource(R.string.social_search_verified), tint = colors.primary, modifier = Modifier.size(15.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.verified, Icons.Rounded.Verified, contentDescription = stringResource(R.string.social_search_verified), tint = colors.primary, modifier = Modifier.size(15.dp))
                 }
             }
             Text(
@@ -679,18 +726,28 @@ private fun highlightSearchMatch(value: String, rawQuery: String): androidx.comp
  */
 @Composable
 fun SearchPolicyUnavailable(onBack: () -> Unit) {
-    BackHandler(onBack = onBack)
+    val unavailableBack = com.example.chat.ui.kit.rememberChatyBackPresentation()
+    // Previous registration retained inactive: BackHandler(onBack = onBack)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = unavailableBack, onBack = onBack)
     val colors = com.example.chat.ui.theme.LocalAppColors.current
     Column(
-        Modifier.fillMaxSize().background(colors.background).padding(24.dp),
+        Modifier.chatyPredictiveBack(unavailableBack).fillMaxSize().background(colors.background).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(stringResource(R.string.social_search_policy_unavailable),
             color = colors.foreground,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-        androidx.compose.material3.TextButton(onClick = onBack) {
-            Text(stringResource(R.string.social_search_back))
-        }
+        // Previous stock text action:
+        // androidx.compose.material3.TextButton(onClick = onBack) {
+        //             Text(stringResource(R.string.social_search_back))
+        //         }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = stringResource(R.string.social_search_back),
+            onClick = onBack,
+        )
     }
 }
+
+// Complete original-line retention for review (inactive).
+            //             confirmButton = { androidx.compose.material3.TextButton(onClick = { showPrivacyInfo = false }) { Text(stringResource(R.string.social_search_close)) } },

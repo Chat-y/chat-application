@@ -97,6 +97,9 @@ class LocalSnapshotCacheService(context: Context) : SnapshotCacheStore {
                         stream.fd.sync()
                     }
                     android.system.Os.rename(tmp.absolutePath, file.absolutePath)
+                    val parentFd = android.system.Os.open(file.parentFile!!.absolutePath,
+                        android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_DIRECTORY, 0)
+                    try { android.system.Os.fsync(parentFd) } finally { android.system.Os.close(parentFd) }
                 } finally {
                     if (tmp.exists()) runCatching { tmp.delete() }
                 }
@@ -138,6 +141,21 @@ class LocalSnapshotCacheService(context: Context) : SnapshotCacheStore {
         }
     }
 
+    override suspend fun listOwnOperationScopes(userId: String): List<String> = withContext(Dispatchers.IO) {
+        require(userId.isNotBlank())
+        val candidates = SnapshotScopeNames.ownOperationsFor(safe(userId), directory().list()?.toList().orEmpty())
+        // AAD authenticates namespace and scope; filenames never establish ownership.
+        candidates.filter { readJsonStrict(userId, it) != null }
+    }
+
+    override suspend fun listRevisionPayloadScopes(userId: String): List<String> = withContext(Dispatchers.IO) {
+        require(userId.isNotBlank())
+        val files = directory().list()?.toList() ?: throw java.io.IOException("Revision inventory cannot be read.")
+        // Enumeration is only a candidate list. AAD must verify exact ownership
+        // before overwriting any candidate from a potentially ambiguous prefix.
+        SnapshotScopeNames.revisionPayloadsFor(safe(userId), files).filter { readJsonStrict(userId, it) != null }
+    }
+
     override suspend fun listScopes(userId: String): List<String> {
         if (userId.isEmpty()) return emptyList()
         return withContext(Dispatchers.IO) {
@@ -146,6 +164,14 @@ class LocalSnapshotCacheService(context: Context) : SnapshotCacheStore {
                     safe(userId), directory().list()?.toList().orEmpty(),
                 )
             }.getOrDefault(emptyList())
+        }
+    }
+
+    suspend fun deleteUserStrict(userId: String) = withContext(Dispatchers.IO) {
+        require(userId.isNotBlank())
+        val prefix = "chaty_snapshot_${safe(userId)}_"
+        for (file in directory().listFiles() ?: throw java.io.IOException("Snapshot directory cannot be inspected.")) {
+            if (file.isFile && file.name.startsWith(prefix)) check(file.delete()) { "Account snapshot cleanup failed." }
         }
     }
 

@@ -137,8 +137,13 @@ fun LockedChatsScreen(
                     )
                 }
                 IconButton(onClick = onOpenSecuritySettings) {
-                    Icon(
-                        Icons.Outlined.Shield,
+
+//Icon(
+//                        Icons.Outlined.Shield,
+//                        contentDescription = "Lock Settings",
+//                        tint = colors.foreground,
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.shield, Icons.Outlined.Shield,
                         contentDescription = "Lock Settings",
                         tint = colors.foreground,
                     )
@@ -295,7 +300,9 @@ fun LockedChatsScreen(
                     Box(
                         Modifier.background(colors.primary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)).padding(8.dp),
                     ) {
-                        Icon(Icons.Rounded.Key, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
+
+//Icon(Icons.Rounded.Key, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.key, Icons.Rounded.Key, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
                     }
                     Spacer(Modifier.width(12.dp))
                     Text(

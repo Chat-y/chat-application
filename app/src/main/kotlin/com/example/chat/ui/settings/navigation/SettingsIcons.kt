@@ -89,7 +89,7 @@ object SettingsIcons {
         "online_prediction_rounded" -> Icons.Rounded.OnlinePrediction
         "palette_outlined" -> Icons.Outlined.Palette
         "person_outline_rounded" -> Icons.Outlined.Person
-        "preview_outlined" -> Icons.Outlined.Preview
+        "preview_outlined" -> /* Previous stock: Icons.Outlined.Preview */ com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.appearancePreview)
         "qr_code_scanner_rounded" -> Icons.Rounded.QrCodeScanner
         "reply_rounded" -> Icons.Rounded.Reply
         "ring_volume_rounded" -> Icons.Rounded.RingVolume

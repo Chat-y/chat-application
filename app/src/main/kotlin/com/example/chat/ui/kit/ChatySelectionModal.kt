@@ -78,7 +78,8 @@ fun ChatySelectionModal(
             Column(
                 Modifier.onGloballyPositioned { cardBounds[0] = it.boundsInWindow() }
                     .sizeIn(maxWidth = width, maxHeight = height)
-                    .fillMaxWidth().shadow(20.dp, layoutShape).clip(layoutShape)
+                    // Previous (default black shadow): .fillMaxWidth().shadow(20.dp, layoutShape).clip(layoutShape)
+                    .fillMaxWidth().chatyDepth(20.dp, layoutShape).clip(layoutShape)
                     .background(colors.surfaceElevated).border(1.dp, colors.border, layoutShape),
             ) {
                 if (compactChrome) Row(
@@ -108,3 +109,6 @@ fun ChatySelectionModal(
         }
     }
 }
+
+// Complete original-line retention for review (inactive).
+                    //                     .fillMaxWidth().shadow(20.dp, layoutShape).clip(layoutShape)

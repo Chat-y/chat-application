@@ -102,11 +102,17 @@ fun ComponentGlyph(
         TemplateComponentType.calls ->
             ChatyIcon(ChatyIconId.calls, modifier = modifier, size = 20.dp, color = tint)
         TemplateComponentType.navigation ->
-            Icon(Icons.Rounded.Dock, contentDescription = null, tint = tint, modifier = modifier)
+
+//Icon(Icons.Rounded.Dock, contentDescription = null, tint = tint, modifier = modifier)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.dock, Icons.Rounded.Dock, contentDescription = null, tint = tint, modifier = modifier)
         TemplateComponentType.home ->
-            Icon(Icons.Outlined.Home, contentDescription = null, tint = tint, modifier = modifier)
+
+//Icon(Icons.Outlined.Home, contentDescription = null, tint = tint, modifier = modifier)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.home, Icons.Outlined.Home, contentDescription = null, tint = tint, modifier = modifier)
         TemplateComponentType.chatList ->
-            Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = null, tint = tint, modifier = modifier)
+
+//Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = null, tint = tint, modifier = modifier)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.list, Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = null, tint = tint, modifier = modifier)
     }
 }
 
@@ -189,14 +195,20 @@ fun TemplatesSettingsScreen(
                     onNotify("Template profile copied. It contains appearance settings only.")
                 },
             ) {
-                Icon(Icons.Rounded.Upload, contentDescription = "Export template profile", tint = colors.foreground, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.Upload, contentDescription = "Export template profile", tint = colors.foreground, modifier = Modifier.size(20.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.upload, Icons.Rounded.Upload, contentDescription = "Export template profile", tint = colors.foreground, modifier = Modifier.size(20.dp))
             }
             IconButton(onClick = { importDialogOpen = true }) {
-                Icon(Icons.Rounded.Download, contentDescription = "Import template profile", tint = colors.foreground, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.Download, contentDescription = "Import template profile", tint = colors.foreground, modifier = Modifier.size(20.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.download, Icons.Rounded.Download, contentDescription = "Import template profile", tint = colors.foreground, modifier = Modifier.size(20.dp))
             }
             if (overridesCount > 0 || config.baseTemplate != ChatyTemplateId.messageFirst) {
                 IconButton(onClick = { resetDialogOpen = true }) {
-                    Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset All Templates", tint = colors.foreground, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset All Templates", tint = colors.foreground, modifier = Modifier.size(20.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.reset, Icons.Rounded.RestartAlt, contentDescription = "Reset All Templates", tint = colors.foreground, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -272,11 +284,36 @@ fun TemplatesSettingsScreen(
 
                 item(key = "search") {
                     Spacer(Modifier.height(16.dp))
-                    OutlinedTextField(
+                    // Previous stock field:
+                    // OutlinedTextField(
+                    //                         value = query,
+                    //                         onValueChange = { query = it.trim().lowercase() },
+                    //                         modifier = Modifier.fillMaxWidth(),
+                    //                         placeholder = { Text("Search templates and components") },
+                    //                         leadingIcon = {
+                    //                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = null, color = colors.foregroundSecondary, modifier = Modifier.size(20.dp))
+                    //                         },
+                    //                         trailingIcon = {
+                    //                             if (query.isNotEmpty()) {
+                    //                                 IconButton(onClick = { query = "" }) {
+                    //                                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Clear search", color = colors.foregroundSecondary, modifier = Modifier.size(18.dp))
+                    //                                 }
+                    //                             }
+                    //                         },
+                    //                         singleLine = true,
+                    //                         shape = RoundedCornerShape(14.dp),
+                    //                         colors = OutlinedTextFieldDefaults.colors(
+                    //                             focusedContainerColor = colors.surfaceSecondary,
+                    //                             unfocusedContainerColor = colors.surfaceSecondary,
+                    //                             focusedBorderColor = colors.primary,
+                    //                             unfocusedBorderColor = colors.border,
+                    //                         ),
+                    //                     )
+                    com.example.chat.ui.kit.ChatyTaskField(
                         value = query,
                         onValueChange = { query = it.trim().lowercase() },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Search templates and components") },
+                        placeholder = "Search templates and components",
                         leadingIcon = {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = null, color = colors.foregroundSecondary, modifier = Modifier.size(20.dp))
                         },
@@ -288,13 +325,9 @@ fun TemplatesSettingsScreen(
                             }
                         },
                         singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = colors.surfaceSecondary,
-                            unfocusedContainerColor = colors.surfaceSecondary,
-                            focusedBorderColor = colors.primary,
-                            unfocusedBorderColor = colors.border,
-                        ),
+                        minLines = 1,
+                        maxLines = 1,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                     )
                 }
 
@@ -358,18 +391,26 @@ fun TemplatesSettingsScreen(
                                 color = colors.foregroundSecondary,
                             )
                             Spacer(Modifier.height(14.dp))
-                            Button(
+                            // Previous: Button(
+                            // Previous: onClick = { applyCandidate = tmpl },
+                            // Previous: enabled = !(isBase && overridesCount == 0),
+                            // Previous: modifier = Modifier.fillMaxWidth(),
+                            // Previous: shape = RoundedCornerShape(12.dp),
+                            // Previous: colors = ButtonDefaults.buttonColors(
+                            // Previous: containerColor = if (isBase) colors.surfaceElevated else colors.primary,
+                            // Previous: contentColor = if (isBase) colors.foregroundSecondary else Color.White,
+                            // Previous: ),
+                            // Previous: ) {
+                            // Previous: Text(if (isBase && overridesCount == 0) "Currently Used" else "Apply Complete Template")
+                            // Previous: }
+                            com.example.chat.ui.kit.ChatyActionButton(
                                 onClick = { applyCandidate = tmpl },
                                 enabled = !(isBase && overridesCount == 0),
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isBase) colors.surfaceElevated else colors.primary,
-                                    contentColor = if (isBase) colors.foregroundSecondary else Color.White,
-                                ),
-                            ) {
-                                Text(if (isBase && overridesCount == 0) "Currently Used" else "Apply Complete Template")
-                            }
+                                containerColor = if (isBase) colors.surfaceElevated else colors.primary,
+                                contentColor = if (isBase) colors.foregroundSecondary else colors.onPrimary,
+                                label = if (isBase && overridesCount == 0) "Currently Used" else "Apply Complete Template",
+                            )
                         }
                     }
                 }
@@ -443,7 +484,9 @@ fun TemplatesSettingsScreen(
                                 .padding(vertical = 32.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Icon(Icons.Rounded.SearchOff, contentDescription = null, modifier = Modifier.size(34.dp), tint = colors.foregroundSecondary)
+
+//Icon(Icons.Rounded.SearchOff, contentDescription = null, modifier = Modifier.size(34.dp), tint = colors.foregroundSecondary)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.searchOff, Icons.Rounded.SearchOff, contentDescription = null, modifier = Modifier.size(34.dp), tint = colors.foregroundSecondary)
                             Spacer(Modifier.height(10.dp))
                             Text("No template or component found", color = colors.foreground, fontWeight = FontWeight.W700)
                             Spacer(Modifier.height(4.dp))
@@ -470,28 +513,65 @@ fun TemplatesSettingsScreen(
                         "Paste a Chaty template profile JSON. Only template and component style choices are imported; chats, account data, credentials and keys are never included.",
                     )
                     Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
+                    // Previous stock field:
+                    // OutlinedTextField(
+                    //                         value = input,
+                    //                         onValueChange = { input = it },
+                    //                         modifier = Modifier.fillMaxWidth(),
+                    //                         placeholder = { Text("Paste template profile JSON") },
+                    //                         minLines = 4,
+                    //                         maxLines = 8,
+                    //                     )
+                    com.example.chat.ui.kit.ChatyTaskField(
                         value = input,
                         onValueChange = { input = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Paste template profile JSON") },
+                        placeholder = "Paste template profile JSON",
                         minLines = 4,
                         maxLines = 8,
+                        singleLine = false,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(
+                        // Previous stock text action:
+                        // TextButton(
+                        //                             onClick = {
+                        //                                 val clip = clipboard.getText()?.text
+                        //                                 if (clip != null) input = clip
+                        //                             },
+                        //                         ) {
+                        //                             Text("Paste clipboard")
+                        //                         }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = "Paste clipboard",
                             onClick = {
                                 val clip = clipboard.getText()?.text
                                 if (clip != null) input = clip
                             },
-                        ) {
-                            Text("Paste clipboard")
-                        }
+                        )
                     }
                 }
             },
             confirmButton = {
-                Button(
+                // Previous stock filled action:
+                // Button(
+                //                     onClick = {
+                //                         importDialogOpen = false
+                //                         scope.launch {
+                //                             try {
+                //                                 val configuration = TemplateProfileCodec.decode(input)
+                //                                 templateController.applyConfiguration(configuration, templateRuntime)
+                //                                 onNotify("Template profile imported.")
+                //                             } catch (e: Exception) {
+                //                                 onNotify("Import failed. Check the template JSON and try again.")
+                //                             }
+                //                         }
+                //                     },
+                //                 ) {
+                //                     Text("Validate & Import")
+                //                 }
+                com.example.chat.ui.kit.ChatyActionButton(
+                    label = "Validate & Import",
                     onClick = {
                         importDialogOpen = false
                         scope.launch {
@@ -504,12 +584,11 @@ fun TemplatesSettingsScreen(
                             }
                         }
                     },
-                ) {
-                    Text("Validate & Import")
-                }
+                )
             },
             dismissButton = {
-                TextButton(onClick = { importDialogOpen = false }) { Text("Cancel") }
+                // Previous: TextButton(onClick = { importDialogOpen = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { importDialogOpen = false }, label = "Cancel")
             },
         )
     }
@@ -524,7 +603,25 @@ fun TemplatesSettingsScreen(
                 )
             },
             confirmButton = {
-                Button(
+                // Previous stock filled action:
+                // Button(
+                //                     onClick = {
+                //                         applyCandidate = null
+                //                         scope.launch {
+                //                             try {
+                //                                 templateController.applyFullTemplate(tmpl.id, templateRuntime)
+                //                                 onNotify("Applied ${tmpl.name} template.")
+                //                             } catch (e: Exception) {
+                //                                 // Dart: error.toString().replaceFirst('Bad state: ', '')
+                //                                 onNotify(e.message ?: e.toString())
+                //                             }
+                //                         }
+                //                     },
+                //                 ) {
+                //                     Text("Apply")
+                //                 }
+                com.example.chat.ui.kit.ChatyActionButton(
+                    label = "Apply",
                     onClick = {
                         applyCandidate = null
                         scope.launch {
@@ -537,12 +634,11 @@ fun TemplatesSettingsScreen(
                             }
                         }
                     },
-                ) {
-                    Text("Apply")
-                }
+                )
             },
             dismissButton = {
-                TextButton(onClick = { applyCandidate = null }) { Text("Cancel") }
+                // Previous: TextButton(onClick = { applyCandidate = null }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { applyCandidate = null }, label = "Cancel")
             },
         )
     }
@@ -557,7 +653,24 @@ fun TemplatesSettingsScreen(
                 )
             },
             confirmButton = {
-                Button(
+                // Previous stock filled action:
+                // Button(
+                //                     onClick = {
+                //                         resetDialogOpen = false
+                //                         scope.launch {
+                //                             try {
+                //                                 templateController.resetToDefaults(templateRuntime)
+                //                                 onNotify("Templates reset to default")
+                //                             } catch (e: Exception) {
+                //                                 onNotify(e.message ?: e.toString())
+                //                             }
+                //                         }
+                //                     },
+                //                 ) {
+                //                     Text("Reset")
+                //                 }
+                com.example.chat.ui.kit.ChatyActionButton(
+                    label = "Reset",
                     onClick = {
                         resetDialogOpen = false
                         scope.launch {
@@ -569,12 +682,11 @@ fun TemplatesSettingsScreen(
                             }
                         }
                     },
-                ) {
-                    Text("Reset")
-                }
+                )
             },
             dismissButton = {
-                TextButton(onClick = { resetDialogOpen = false }) { Text("Cancel") }
+                // Previous: TextButton(onClick = { resetDialogOpen = false }) { Text("Cancel") }
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { resetDialogOpen = false }, label = "Cancel")
             },
         )
     }

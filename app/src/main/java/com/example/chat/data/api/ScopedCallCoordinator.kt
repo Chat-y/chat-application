@@ -14,6 +14,8 @@ class ScopedCallCoordinator(
     private val clock: () -> Long,
     private val legacyAllowed: (ApiAccountScope) -> Boolean = { true },
     private val inboxWake: (ApiAccountScope) -> Unit = {},
+    /** Session scope can be replaced on reset/adopt; resolve at each launch, never cache it. */
+    private val launchScope: () -> CoroutineScope = { scope },
 ) {
     private val stateLock = Any()
     private var account: ApiAccountScope? = null
@@ -55,8 +57,24 @@ class ScopedCallCoordinator(
         guarded(expected) {
             val prepared = prepare(expected) ?: return@guarded
             lateinit var job: Job
-            job = scope.launch(start = CoroutineStart.LAZY) {
-                try { prepared.first.send(prepared.second, target, signal) }
+// Previous implementation retained:             job = scope.launch(start = CoroutineStart.LAZY) {
+            job = launchScope().launch(start = CoroutineStart.LAZY) {
+                try {
+                    // Previous ignored result retained: prepared.first.send(prepared.second, target, signal)
+                    val result = prepared.first.send(prepared.second, target, signal)
+                    val stage = when (result) {
+                        ApiCallSignalClient.SendResult.ACCEPTED -> null
+                        ApiCallSignalClient.SendResult.UNAUTHORIZED -> com.example.chat.data.services.CallFailureStage.REST_SIGNAL_UNAUTHORIZED
+                        ApiCallSignalClient.SendResult.UNAVAILABLE -> com.example.chat.data.services.CallFailureStage.REST_SIGNAL_UNAVAILABLE
+                        ApiCallSignalClient.SendResult.STALE -> com.example.chat.data.services.CallFailureStage.REST_SIGNAL_STALE
+                        ApiCallSignalClient.SendResult.FAILED -> com.example.chat.data.services.CallFailureStage.REST_SIGNAL_FAILED
+                    }
+                    if (stage != null) com.example.chat.data.services.CallFailureDiagnostics.report(stage)
+                } catch (failure: Throwable) {
+                    if (failure !is kotlinx.coroutines.CancellationException)
+                        com.example.chat.data.services.CallFailureDiagnostics.report(com.example.chat.data.services.CallFailureStage.REST_SIGNAL_EXCEPTION)
+                    throw failure
+                }
                 finally { synchronized(stateLock) { posts.remove(job) } }
             }
             synchronized(stateLock) { if (account === expected) posts.add(job) else job.cancel() }
@@ -79,7 +97,8 @@ class ScopedCallCoordinator(
                     active = existing
                     return@synchronized
                 }
-                val job = scope.launch(start = CoroutineStart.LAZY) {
+// Previous implementation retained:                 val job = scope.launch(start = CoroutineStart.LAZY) {
+                val job = launchScope().launch(start = CoroutineStart.LAZY) {
                     val result = prepared.first.poll(prepared.second)
                     guarded(expected) {
                         synchronized(stateLock) {
@@ -108,7 +127,8 @@ class ScopedCallCoordinator(
             val prepared = prepare(expected) ?: return@guarded
             synchronized(stateLock) {
                 if (!foreground || account !== expected || polling?.isActive == true || clock() < nextPoll) return@synchronized
-                polling = scope.launch(start = CoroutineStart.LAZY) {
+// Previous implementation retained:                 polling = scope.launch(start = CoroutineStart.LAZY) {
+                polling = launchScope().launch(start = CoroutineStart.LAZY) {
                     val result = prepared.first.poll(prepared.second)
                     guarded(expected) {
                         synchronized(stateLock) {

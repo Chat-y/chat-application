@@ -66,11 +66,13 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
         service.addStateListener(l)
         presentation.addListener(l)
         prefsStore.addListener(l)
+        ServiceLocator.apiBackend.addListener(l)
         onDispose {
             attached = false
             service.removeStateListener(l)
             presentation.removeListener(l)
             prefsStore.removeListener(l)
+            ServiceLocator.apiBackend.removeListener(l)
         }
     }
     val feedbackRequest = qualityPrompt
@@ -112,7 +114,21 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
     val hostView = androidx.compose.ui.platform.LocalView.current
     DisposableEffect(service, hostView) {
         val waiting: () -> Unit = {
-            hostView.post { if (hostView.isAttachedToWindow) com.example.chat.ui.kit.ChatyHapticsPort.error(hostView) }
+// Previous implementation retained: hostView.post { if (hostView.isAttachedToWindow) com.example.chat.ui.kit.ChatyHapticsPort.error(hostView) }
+            val activeCallId = service.currentSession?.callId
+            val waitingOwner = ServiceLocator.apiBackend.authSnapshot()
+            val name = service.lastWaitingCallerName ?: "Unknown caller"
+            hostView.post {
+                if (hostView.isAttachedToWindow && ServiceLocator.apiBackend.authSnapshot() === waitingOwner &&
+                    !ServiceLocator.appLock.lockRequired.value &&
+                    feedbackLifecycle.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) &&
+                    service.currentSession?.callId == activeCallId &&
+                    service.currentSession?.state?.isTerminal == false) {
+                    com.example.chat.ui.kit.ChatyHapticsPort.error(hostView)
+                    android.widget.Toast.makeText(hostContext,
+                        "$name tried to call. Your current call continues.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
         }
         service.addCallWaitingListener(waiting)
         onDispose { service.removeCallWaitingListener(waiting) }
@@ -154,7 +170,9 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
                     id = "call_${cs.callId}",
                     type = if (cs.state == CallSessionState.incoming) com.example.chat.ui.island.IslandPayloadType.incomingCall
                     else com.example.chat.ui.island.IslandPayloadType.ongoingCall,
-                    title = cs.remoteDisplayName,
+                    // Previous implementation retained: title = cs.remoteDisplayName,
+                    title = ServiceLocator.apiBackend.callDisplayNameFor(cs.remoteUserId)
+                        ?: com.example.chat.data.services.CallContactName.meaningful(cs.remoteDisplayName) ?: "Unknown caller",
                     message = if (cs.isVideo) "Video Call" else "Voice Call",
                     timestamp = java.time.Instant.now(),
                     durationSeconds = service.callDurationSeconds,
@@ -179,7 +197,12 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
             islandCtrl.removePayloadsWhere { it.id.startsWith("call_") }
         }
     }
-    val session = service.currentSession ?: return
+// Previous implementation retained: val session = service.currentSession ?: return
+    val liveSession = service.currentSession ?: return
+    val session = liveSession.copy(remoteDisplayName =
+        ServiceLocator.apiBackend.callDisplayNameFor(liveSession.remoteUserId)
+            ?: com.example.chat.data.services.CallContactName.meaningful(liveSession.remoteDisplayName)
+            ?: if (liveSession.isOutgoing) "Contact" else "Unknown caller")
     var reminderDismissed by remember(session.callId) { mutableStateOf(false) }
     var reminderBusy by remember(session.callId) { mutableStateOf(false) }
     val reminderOwner = remember(session.callId) { ServiceLocator.apiBackend.authSnapshot() }
@@ -238,6 +261,8 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
         }
     }
     val incomingPreviewOwner = notificationPreviewOwner
+    KeepCallKeyboardClosed(enabled = (bundlePresentation.incoming && !incomingBanner) ||
+        (session.isActive && presentation.isFullScreen))
     if (bundlePresentation.incoming) {
         com.example.chat.ui.calls.bundles.BundleIncomingCallView(
             bundleId = activeBundle,
@@ -277,7 +302,11 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
     var toolsOpen by remember(session.callId) { mutableStateOf(false) }
     if (toolsOpen && !terminalNotice) {
         CallToolsDialog(session.isLocallyHeld, service.canHoldLocally, service.canNotifyHold,
-            onHold = { service.toggleLocalHold() },
+// Previous implementation retained: onHold = { service.toggleLocalHold() },
+            onHold = {
+                if (!service.toggleLocalHold()) android.widget.Toast.makeText(hostContext,
+                    "Hold could not be changed. Your call stays in its current state.", android.widget.Toast.LENGTH_SHORT).show()
+            },
             onReaction = { emoji ->
                 if (service.sendLocalCallReaction(emoji)) toolsOpen = false
                 else android.widget.Toast.makeText(hostContext, "Wait a moment before another reaction, or reconnect the call.", android.widget.Toast.LENGTH_SHORT).show()
@@ -290,7 +319,12 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
             hasLocalMedia = service.hasLocalMedia,
             microphoneCapture = service.activeMedia as? com.example.chat.data.services.CallMicrophoneCaptureProvider,
             videoSurfaces = surfaces,
-            setupError = null,
+// Previous implementation retained:             setupError = null,
+            setupError = when (session.healthIssue) {
+                com.example.chat.data.services.CallHealthIssue.setupTimedOut -> "Call media setup timed out. Please try again."
+                com.example.chat.data.services.CallHealthIssue.microphoneUnavailable -> "The microphone could not start or stopped working. End the call and check microphone access."
+                null -> null
+            },
             template = bundlePresentation.template,
             bundleId = activeBundle,
             pictureInPictureEnabled = prefs.pictureInPictureEnabled,
@@ -301,7 +335,8 @@ fun GlobalCallHost(isAuthenticated: Boolean) {
             },
             onCallTools = if (session.state == CallSessionState.connected) ({ toolsOpen = true }) else null,
             callToolsStatus = when {
-                session.isLocallyHeld -> if (service.canNotifyHold) "On hold" else "On hold locally - peer not notified"
+                // Previous implementation retained: session.isLocallyHeld -> if (service.canNotifyHold) "On hold" else "On hold locally - peer not notified"
+                session.isLocallyHeld -> if (service.localHoldNoticeAttempted) "On hold locally - notice attempted" else "On hold locally - peer notice not confirmed"
                 session.isRemotelyHeld -> "Other person put the call on hold"
                 else -> null
             },

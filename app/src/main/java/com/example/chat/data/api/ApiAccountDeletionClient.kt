@@ -11,9 +11,12 @@ class ApiAccountDeletionClient(private val transport: ApiHttpTransport) {
         val headers = mapOf("Authorization" to "Bearer ${scope.token}", "x-tenant-id" to scope.tenantId)
         val base = scope.baseUrl.trimEnd('/')
         val first = transport.execute("DELETE", "$base/app-users/$id", headers, null)
-        check(current()) { "Account changed. Deletion result was not applied." }
-        val response = if (first.first == 404) transport.execute("DELETE", "$base/api/v1/app-users/$id", headers, null) else first
-        check(current()) { "Account changed. Deletion result was not applied." }
+        // A verified success belongs to the captured owner even if the UI switched.
+        // Do not discard it before its durable cleanup receipt is recorded.
+        val response = if (first.first == 404) {
+            check(current()) { "Account changed before fallback. Server outcome requires verification." }
+            transport.execute("DELETE", "$base/api/v1/app-users/$id", headers, null)
+        } else first
         // Live backend answers 200 {"success": true, "data": null,
         // "message": "User deleted successfully."} - no user_id/deleted echo.
         // Accept the success envelope as the completion receipt (still
@@ -30,3 +33,8 @@ class ApiAccountDeletionClient(private val transport: ApiHttpTransport) {
         check(confirmed) { "Server did not confirm account deletion. Your local data and sign-in were kept. Try again or contact support." }
     }
 }
+
+// Previous implementation retained inactive (unified v4):
+//         check(current()) { "Account changed. Deletion result was not applied." }
+//         val response = if (first.first == 404) transport.execute("DELETE", "$base/api/v1/app-users/$id", headers, null) else first
+//         check(current()) { "Account changed. Deletion result was not applied." }

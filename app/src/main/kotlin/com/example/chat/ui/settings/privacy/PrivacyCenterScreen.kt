@@ -460,7 +460,9 @@ private fun PrivacySwitchRow(
             }
         }
         if (flash) {
-            Icon(Icons.Rounded.Check, null, tint = style.accent, modifier = Modifier.size(24.dp).clearAndSetSemantics { })
+
+//Icon(Icons.Rounded.Check, null, tint = style.accent, modifier = Modifier.size(24.dp).clearAndSetSemantics { })
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.check, Icons.Rounded.Check, null, tint = style.accent, modifier = Modifier.size(24.dp).clearAndSetSemantics { })
         } else {
             Switch(checked = value, onCheckedChange = null, modifier = Modifier.clearAndSetSemantics { })
         }
@@ -772,7 +774,9 @@ fun PrivacyCenterScreen(
                             .padding(14.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Icon(Icons.Rounded.WarningAmber, null, tint = appColors.error, modifier = Modifier.size(24.dp))
+
+//Icon(Icons.Rounded.WarningAmber, null, tint = appColors.error, modifier = Modifier.size(24.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.warning, Icons.Rounded.WarningAmber, null, tint = appColors.error, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Privacy checkup", color = primaryText, fontSize = (13.5f * fs).sp, fontWeight = FontWeight.W700)
@@ -790,7 +794,9 @@ fun PrivacyCenterScreen(
                             .padding(14.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Icon(Icons.Rounded.WarningAmber, null, tint = accent, modifier = Modifier.size(24.dp))
+
+//Icon(Icons.Rounded.WarningAmber, null, tint = accent, modifier = Modifier.size(24.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.warning, Icons.Rounded.WarningAmber, null, tint = accent, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(10.dp))
 //                         Text(
 //                             "Message delays? Check your connection and Android battery restrictions. Resetting privacy choices does not repair message delivery.",
@@ -812,7 +818,9 @@ fun PrivacyCenterScreen(
                                 Text(stringResource(R.string.privacy_open_connection_settings))
                             }
                         }
-                        IconButton(onClick = { tipDismissed = true }) { Icon(Icons.Rounded.Close, androidx.compose.ui.res.stringResource(com.example.chat.R.string.privacy_dismiss_tip), tint = secondaryText, modifier = Modifier.size(18.dp)) }
+                        IconButton(onClick = { tipDismissed = true }) {
+//Icon(Icons.Rounded.Close, androidx.compose.ui.res.stringResource(com.example.chat.R.string.privacy_dismiss_tip), tint = secondaryText, modifier = Modifier.size(18.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.close, Icons.Rounded.Close, androidx.compose.ui.res.stringResource(com.example.chat.R.string.privacy_dismiss_tip), tint = secondaryText, modifier = Modifier.size(18.dp)) }
                     }
                     Spacer(Modifier.height(16.dp))
                 }
@@ -1555,7 +1563,11 @@ internal fun BlockedContactsDialog(
                 // Text("No blocked contacts.", color = colors.foregroundSecondary)
                 Column(Modifier.fillMaxWidth().padding(vertical = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Rounded.Block, contentDescription = null,
+
+//Icon(Icons.Rounded.Block, contentDescription = null,
+//                        tint = colors.foregroundSecondary,
+//                        modifier = Modifier.size(48.dp).testTag("blocked-contacts-empty-illustration"))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.block, Icons.Rounded.Block, contentDescription = null,
                         tint = colors.foregroundSecondary,
                         modifier = Modifier.size(48.dp).testTag("blocked-contacts-empty-illustration"))
                     Spacer(Modifier.height(12.dp))

@@ -120,7 +120,7 @@ class RichChatRealtimeLiveEventTest {
     }
 
     @Test
-    fun perContactOverrideForcesAndBlocksOnlineToast() {
+    fun disabledMasterCannotBeOverriddenByPerContactAlways() {
         val sink = RecordingSink()
         val prefs = FakePrefs(
             online = false,
@@ -132,7 +132,25 @@ class RichChatRealtimeLiveEventTest {
         val svc = service(prefs = prefs, sink = sink)
         svc.onLivePresenceChanged("user-1", true)
         svc.onLivePresenceChanged("user-2", true)
-        assertEquals(1, sink.titles.size)
+        // Previously Always bypassed disabled master. The master now wins.
+        assertEquals(0, sink.titles.size)
+    }
+
+    @Test
+    fun legacyTrueCannotBypassDisabledOnlineOrTypingMasters() {
+        val sink = RecordingSink()
+        val prefs = FakePrefs(online = false, typing = false,
+            gb = mapOf("abu_saleh_toast_online" to true, "abu_saleh_toast_typing" to true))
+        val svc = service(prefs = prefs, sink = sink)
+        svc.onLivePresenceChanged("user-1", true)
+        svc.onLiveTypingChanged("convo-1", "user-1", true)
+        assertTrue(sink.titles.isEmpty())
+        prefs.online = true; prefs.typing = true
+        svc.onLivePresenceChanged("user-1", false)
+        svc.onLivePresenceChanged("user-1", true)
+        svc.onLiveTypingChanged("convo-1", "user-1", false)
+        svc.onLiveTypingChanged("convo-1", "user-1", true)
+        assertEquals(2, sink.titles.size)
     }
 
     @Test

@@ -1,0 +1,120 @@
+{
+  "hugeiconsFree": {
+    "mapped_ids": 418,
+    "duplicate_groups": []
+  },
+  "majesticonsLine": {
+    "mapped_ids": 418,
+    "duplicate_groups": []
+  },
+  "majesticonsSolid": {
+    "mapped_ids": 418,
+    "duplicate_groups": []
+  },
+  "pikaiconsStroke": {
+    "mapped_ids": 418,
+    "duplicate_groups": []
+  },
+  "pikaiconsSolid": {
+    "mapped_ids": 418,
+    "duplicate_groups": []
+  },
+  "phosphorRegular": {
+    "mapped_ids": 418,
+    "duplicate_groups": []
+  },
+  "chatySigil": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "precisionContour": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "monolithicCutout": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "origamiGeometry": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ],
+      [
+        "rotateLeft",
+        "reset"
+      ]
+    ]
+  },
+  "organicMotion": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "pixelPrecision": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "technicalBlueprint": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "sculptedVolume": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "expressiveInk": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  },
+  "signalLanguage": {
+    "mapped_ids": 336,
+    "duplicate_groups": [
+      [
+        "grid",
+        "widgets"
+      ]
+    ]
+  }
+}

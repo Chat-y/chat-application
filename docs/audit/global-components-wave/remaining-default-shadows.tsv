@@ -1,0 +1,6 @@
+source	line	status	arguments
+app/src/main/kotlin/com/example/chat/ui/chats/detail/MessageTranslateDialog.kt	153	default/incomplete explicit shadow colors	20.dp, shape
+app/src/main/kotlin/com/example/chat/ui/calls/bundles/BundleCompactCallCard.kt	57	default/incomplete explicit shadow colors	12.dp, RoundedCornerShape(tokens.cardCornerRadiusDp.dp)
+app/src/main/kotlin/com/example/chat/ui/core/components/overlays/ChatyOverlayRenderer.kt	161	default/incomplete explicit shadow colors	6.dp, RoundedCornerShape(4.dp)
+app/src/main/kotlin/com/example/chat/ui/core/components/overlays/ChatyOverlayRenderer.kt	245	default/incomplete explicit shadow colors	28.dp, RoundedCornerShape(10.dp)
+app/src/main/kotlin/com/example/chat/ui/core/components/headers/ChatyHeaderRenderer.kt	189	default/incomplete explicit shadow colors	elevation

@@ -1,3 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M4 8 H15 V18 H4 Z M15 10 L21 7 V19 L15 16 Z" android:fillColor="#00000000" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M4 4 H15 L13 2 M15 4 L13 6 M17 22 H6 L8 20 M6 22 L8 23" android:fillColor="#00000000" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>
+<!-- Original purpose-specific replacement; previous duplicated vector retained below.
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:name="SwitchCamera"
     android:width="24dp" android:height="24dp"
@@ -7,3 +12,5 @@
     <path android:pathData="M12.2001 4L10.2001 2.20004C10.8463 2.06886 11.5151 2 12.2001 2C17.038 2 21.0735 5.43552 22 10M11.8 20L13.8 21.8C13.1538 21.9311 12.4849 22 11.8 22C6.96208 22 2.92657 18.5645 2.00003 14" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round" />
     <path android:pathData="M12 12V12.5M13 12.5C13 13.0523 12.5523 13.5 12 13.5C11.4477 13.5 11 13.0523 11 12.5C11 11.9477 11.4477 11.5 12 11.5C12.5523 11.5 13 11.9477 13 12.5Z" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>
+
+-->

@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats.detail
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.compose.ui.semantics.*
@@ -643,7 +645,9 @@ fun MediaViewerScreen(
             onBack()
         }
     }
-    androidx.activity.compose.BackHandler { closeViewer() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(storagePath)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler { closeViewer() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) { closeViewer() }
     val elevated = Color(theme.cardColor)
     val foreground = Color(theme.primaryTextColor)
     val foregroundSecondary = Color(theme.secondaryTextColor)
@@ -713,7 +717,7 @@ fun MediaViewerScreen(
         confirmButton = { TextButton(onClick = { keyboardHelp = false }) { Text("Close shortcuts") } },
     )
     // MV-R2-045: measure the actual host window, preserving the caller modifier outside Scaffold.
-    BoxWithConstraints(modifier) {
+    BoxWithConstraints(modifier.chatyPredictiveBack(predictiveBack)) {
     val wideActionRail = viewerUsesActionRail(maxWidth.value)
     // MV-R4-037: overflow menu state hoisted from the top bar so an image long-press can open
     // the same menu; the compact classification of the same window width preserves reset semantics.
@@ -827,7 +831,9 @@ fun MediaViewerScreen(
                     if (!wideActionRail) {
                     com.example.chat.ui.media.AudioPlayerTooltip("More media actions") {
                     IconButton(onClick = { actionsExpanded = true }) {
-                        Icon(Icons.Rounded.MoreVert, contentDescription = "More media actions", tint = foreground)
+
+//Icon(Icons.Rounded.MoreVert, contentDescription = "More media actions", tint = foreground)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.moreOptions, Icons.Rounded.MoreVert, contentDescription = "More media actions", tint = foreground)
                     }
                     }
                     }

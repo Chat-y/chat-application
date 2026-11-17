@@ -20,11 +20,14 @@ object TaskWorkflow {
         TaskStatus.completed,
     )
 
+    // P4 (Bandi 2026-11-17): stage names match the status badges shown on the same
+    // cards (TaskStatusBadge) instead of the old dev-board names.
+    // Prior: inbox "Todo", inProgress "In Process", assigned "In Review", blocked "Testing".
     private val labels = mapOf(
-        TaskStatus.inbox to "Todo",
-        TaskStatus.inProgress to "In Process",
-        TaskStatus.assigned to "In Review",
-        TaskStatus.blocked to "Testing",
+        TaskStatus.inbox to "Inbox",
+        TaskStatus.inProgress to "In Progress",
+        TaskStatus.assigned to "Assigned",
+        TaskStatus.blocked to "Blocked",
         TaskStatus.completed to "Done",
         TaskStatus.archived to "Archived",
     )

@@ -50,7 +50,9 @@ data class SwipeActionConfig(
 
 /** Multiple accounts in one install (Telegram): sessions switch without
  *  logging the other out; each account keeps its own storage namespace. */
-class MultiAccountPolicy(private val maxAccounts: Int = 3) {
+// Previous legacy default retained inactive: class MultiAccountPolicy(private val maxAccounts: Int = 3) {
+// Match the production registry default: two retained accounts per installation.
+class MultiAccountPolicy(private val maxAccounts: Int = 2) {
     private val accounts = mutableListOf<String>()   // user ids, active first
 
     fun add(userId: String): Boolean {

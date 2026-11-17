@@ -66,8 +66,12 @@ fun NavigationEffectsScreen(preferences: ChatyPreferencesController, onBack: () 
                             )
                         }
                     }
-                    Icon(
-                        Icons.Rounded.Animation, null, Modifier.size(24.dp),
+
+//Icon(
+//                        Icons.Rounded.Animation, null, Modifier.size(24.dp),
+//                        tint = if (fx.enableClickParticles) colors.accent else colors.foregroundTertiary,
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.animation, Icons.Rounded.Animation, null, Modifier.size(24.dp),
                         tint = if (fx.enableClickParticles) colors.accent else colors.foregroundTertiary,
                     )
                 }

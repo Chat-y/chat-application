@@ -100,18 +100,23 @@ private fun TagPill(
     text: String, selected: Boolean, accent: Color, fg: Color, card: Color,
     label: String = text, onClick: () -> Unit, onLongClick: (() -> Unit)? = null,
 ) {
-    Box(
-        Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(percent = 50))
-            .background(if (selected) accent.copy(alpha = .18f) else card, RoundedCornerShape(percent = 50))
-            .border(1.dp, if (selected) accent.copy(alpha = .5f) else fg.copy(alpha = .12f), RoundedCornerShape(percent = 50))
-            .semantics { contentDescription = label; this.selected = selected }
-            .then(if (onLongClick == null) Modifier.selectable(selected, role = Role.Tab, onClick = onClick)
-                else Modifier.combinedClickable(role = Role.Tab, onClick = onClick,
-                    onLongClickLabel = "Edit local tag", onLongClick = onLongClick))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) { Text(text, color = if (selected) accent else fg, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
+    // Box(
+    // Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+    // .clip(RoundedCornerShape(percent = 50))
+    // .background(if (selected) accent.copy(alpha = .18f) else card, RoundedCornerShape(percent = 50))
+    // .border(1.dp, if (selected) accent.copy(alpha = .5f) else fg.copy(alpha = .12f), RoundedCornerShape(percent = 50))
+    // .semantics { contentDescription = label; this.selected = selected }
+    // .then(if (onLongClick == null) Modifier.selectable(selected, role = Role.Tab, onClick = onClick)
+    // else Modifier.combinedClickable(role = Role.Tab, onClick = onClick,
+    // onLongClickLabel = "Edit local tag", onLongClick = onLongClick))
+    // .padding(horizontal = 14.dp, vertical = 12.dp),
+    // contentAlignment = Alignment.Center,
+    // ) { Text(text, color = if (selected) accent else fg, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
+    com.example.chat.ui.kit.ChatyChoiceTile(
+        label = text, selected = selected, onClick = onClick, role = Role.Tab,
+        modifier = Modifier.semantics { contentDescription = label },
+        onLongClick = onLongClick, onLongClickLabel = "Edit local tag",
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -185,22 +190,46 @@ private fun HomeTagEditor(
             topBar = {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 64.dp).padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss, enabled = !busy && !retry) { Text("Back") }
+                    // Previous stock text action:
+                    // TextButton(onClick = onDismiss, enabled = !busy && !retry) { Text("Back") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Back",
+                        onClick = onDismiss,
+                        enabled = !busy && !retry,
+                    )
                     Text(if (target == null) "Create tag" else "Edit tag", color = fg,
                         style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { save() }, enabled = !busy && !blocked && name.isNotBlank()) {
-                        Text(if (busy) "Saving..." else if (retry) "Retry save" else "Save")
-                    }
+                    // Previous stock text action:
+                    // TextButton(onClick = { save() }, enabled = !busy && !blocked && name.isNotBlank()) {
+                    //                         Text(if (busy) "Saving..." else if (retry) "Retry save" else "Save")
+                    //                     }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = if (busy) "Saving..." else if (retry) "Retry save" else "Save",
+                        onClick = { save() },
+                        enabled = !busy && !blocked && name.isNotBlank(),
+                    )
                 }
             },
         ) { insets ->
         Column(Modifier.fillMaxSize().padding(insets).imePadding().navigationBarsPadding()
             .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
             Text("Local to this account. Existing chats only; no chats or invites are created.", color = fg)
-            OutlinedTextField(name, { name = it; error = null }, Modifier.fillMaxWidth().padding(top = 12.dp),
-                label = { Text("Tag name") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
-            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(top = 8.dp),
-                label = { Text("Search existing chat names") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
+            // OutlinedTextField(name, { name = it; error = null }, Modifier.fillMaxWidth().padding(top = 12.dp),
+            // label = { Text("Tag name") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
+            com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+                value = name, onValueChange = { name = it; error = null },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                label = "Tag name", singleLine = true, enabled = !locked,
+            )
+            // OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(top = 8.dp),
+            // label = { Text("Search existing chat names") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
+            com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+                value = query, onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                label = "Search existing chat names", singleLine = true, enabled = !locked,
+            )
             Text("${members.intersect(liveVisible).size} visible chats selected", color = fg, modifier = Modifier.padding(vertical = 10.dp))
             val matches = visibleConversations.distinctBy { it.id }.filter {
                 query.isBlank() || (titles[it.id] ?: it.title).contains(query, ignoreCase = true)
@@ -243,11 +272,20 @@ private fun HomeTagEditor(
             */
             if (snapshot.issues.isNotEmpty()) Text("Stored tags need review. No data will be rewritten.", color = fg)
             error?.let { Text(it, color = Color(theme.dangerColor), modifier = Modifier.padding(top = 8.dp)) }
-            if (blocked) TextButton(onClick = {
+            if (blocked) // Previous stock text action:
+            // TextButton(onClick = {
+            //                 snapshot = store.editSnapshot(); result = null; error = null
+            //                 name = snapshot.folders.firstOrNull { it.id == target?.id }?.name.orEmpty()
+            //                 members = snapshot.members[target?.id].orEmpty()
+            //             }) { Text("Reload tag") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Reload tag",
+                onClick = {
                 snapshot = store.editSnapshot(); result = null; error = null
                 name = snapshot.folders.firstOrNull { it.id == target?.id }?.name.orEmpty()
                 members = snapshot.members[target?.id].orEmpty()
-            }) { Text("Reload tag") }
+            },
+            )
 
         }
         }
@@ -428,10 +466,22 @@ private fun HomeTagEditor(
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding()) {
             Text(if (target == null) "Create tag" else "Edit tag", color = fg, style = MaterialTheme.typography.titleLarge)
             Text("Local to this account. Existing chats only; no chats or invites are created.", color = fg)
-            OutlinedTextField(name, { name = it; error = null }, Modifier.fillMaxWidth().padding(top = 12.dp),
-                label = { Text("Tag name") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
-            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(top = 8.dp),
-                label = { Text("Search existing chat names") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
+            // OutlinedTextField(name, { name = it; error = null }, Modifier.fillMaxWidth().padding(top = 12.dp),
+            // label = { Text("Tag name") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
+            com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+                value = name, onValueChange = { name = it; error = null },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                label = "Tag name", singleLine = true, enabled = !locked,
+            )
+            // OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(top = 8.dp),
+            // label = { Text("Search existing chat names") }, shape = RoundedCornerShape(100.dp), singleLine = true, enabled = !locked)
+            com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+                value = query, onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                label = "Search existing chat names", singleLine = true, enabled = !locked,
+            )
             Text("${members.intersect(liveVisible).size} visible chats selected", color = fg, modifier = Modifier.padding(vertical = 10.dp))
             val matches = visibleConversations.distinctBy { it.id }.filter {
                 query.isBlank() || (titles[it.id] ?: it.title).contains(query, ignoreCase = true)

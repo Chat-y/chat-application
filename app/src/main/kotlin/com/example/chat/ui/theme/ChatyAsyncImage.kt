@@ -23,8 +23,27 @@ fun ChatyAsyncImage(
     requestSize: coil.size.Size? = null,
     // Opt-in only. Disabled by both app reduced motion and Android Remove animations.
     crossfadeMillis: Int = 0,
+    // Profile-only opt-in. Other media/local-file consumers keep their existing model semantics.
+    profileMediaBase: String? = null,
 ) {
     if (url.isNullOrBlank()) {
+        error?.invoke() ?: placeholder?.invoke()
+        return
+    }
+    val resolvedUrl = androidx.compose.runtime.remember(url, profileMediaBase) {
+        // Local drafts remain local; only remote profile references use HTTP validation.
+        val localScheme = runCatching { java.net.URI(url.trim()).scheme?.lowercase(java.util.Locale.ROOT) }.getOrNull()
+        if (profileMediaBase == null) url
+        else if (localScheme == "file" || localScheme == "content") url.trim()
+        else com.example.chat.data.remote.ProfileMediaUrl.resolve(url, profileMediaBase)
+    }
+    androidx.compose.runtime.LaunchedEffect(url, profileMediaBase) {
+        if (profileMediaBase != null && com.example.chat.BuildConfig.DEBUG) {
+            // DEBUG TEMPORARY: enum-like form/validity only, never URL, query, path or auth.
+            android.util.Log.d("ProfileMediaImage", "image-url-form=${com.example.chat.data.remote.ProfileMediaUrl.form(url)} usable=${resolvedUrl != null}")
+        }
+    }
+    if (resolvedUrl.isNullOrBlank()) {
         error?.invoke() ?: placeholder?.invoke()
         return
     }
@@ -33,9 +52,10 @@ fun ChatyAsyncImage(
     val wantsFade = crossfadeMillis > 0 && LocalThemeConfig.current.animationLevel > 0.0
     val mayAnimate = if (wantsFade) com.example.chat.ui.kit.rememberSystemAnimationsAllowed() else false
     val fadeMillis = if (mayAnimate) crossfadeMillis.coerceAtLeast(0) else 0
-    val model = androidx.compose.runtime.remember(url, requestSize, fadeMillis, context) {
-        if (requestSize == null && fadeMillis == 0) url else coil.request.ImageRequest.Builder(context)
-            .data(url)
+    val model = androidx.compose.runtime.remember(resolvedUrl, requestSize, fadeMillis, context) {
+        // Previous model: if (requestSize == null && fadeMillis == 0) url else ImageRequest.Builder(context).data(url)
+        if (requestSize == null && fadeMillis == 0) resolvedUrl else coil.request.ImageRequest.Builder(context)
+            .data(resolvedUrl)
             .apply { if (requestSize != null) size(requestSize) }
             .crossfade(fadeMillis)
             .build()
@@ -46,7 +66,17 @@ fun ChatyAsyncImage(
     // .data(url).size(requestSize).build()
     // }
     val painter = rememberAsyncImagePainter(model = model)
-    when (painter.state) {
+    val imageState = painter.state
+    androidx.compose.runtime.LaunchedEffect(imageState, resolvedUrl, profileMediaBase) {
+        if (profileMediaBase != null && com.example.chat.BuildConfig.DEBUG && imageState is AsyncImagePainter.State.Error) {
+            // DEBUG TEMPORARY: exception type only. Throwable messages can contain signed URLs.
+            val failure = imageState.result.throwable
+            val status = (failure as? coil.network.HttpException)?.response?.code
+            android.util.Log.d("ProfileMediaImage", "image-load-failed type=${failure.javaClass.simpleName} http=${status ?: -1}")
+        }
+    }
+    // Previous: when (painter.state)
+    when (imageState) {
         is AsyncImagePainter.State.Loading -> placeholder?.invoke()
         is AsyncImagePainter.State.Error -> (error ?: placeholder)?.invoke()
         else -> Image(

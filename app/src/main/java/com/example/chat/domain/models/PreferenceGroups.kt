@@ -220,7 +220,7 @@ data class NotificationPreferences(
     val showSenderAvatar: Boolean = true,
     val showSenderName: Boolean = true,
     val showMessagePreview: Boolean = true,
-    val notifyContactOnline: Boolean = true,
+    val notifyContactOnline: Boolean = false,
     val notifyStatusViewed: Boolean = true,
     val notifyTypingStarted: Boolean = false,
     val notifyMessageDeleted: Boolean = true,
@@ -249,7 +249,7 @@ data class NotificationPreferences(
             showSenderAvatar = map["showSenderAvatar"] as Boolean? ?: true,
             showSenderName = map["showSenderName"] as Boolean? ?: true,
             showMessagePreview = map["showMessagePreview"] as Boolean? ?: true,
-            notifyContactOnline = map["notifyContactOnline"] as Boolean? ?: true,
+            notifyContactOnline = map["notifyContactOnline"] as Boolean? ?: false,
             notifyStatusViewed = map["notifyStatusViewed"] as Boolean? ?: true,
             notifyTypingStarted = map["notifyTypingStarted"] as Boolean? ?: false,
             notifyMessageDeleted = map["notifyMessageDeleted"] as Boolean? ?: true,
@@ -340,7 +340,8 @@ data class UniversalPreferences(
     val iconTheme: String = "Hugeicons Free",
     /** Per-icon visual theme overrides keyed by stable ChatyIconId.name. */
     val iconVariants: Map<String, String> = emptyMap(),
-    val emojiStyle: String = "Chaty Motion",
+    // Previous default: val emojiStyle: String = "Chaty Motion",
+    val emojiStyle: String = "Android system",
     val loadFontEnabled: Boolean = false,
     /** Local basename only. A restored preference never authorizes an arbitrary filesystem path. */
     val customFontFileName: String? = null,
@@ -419,7 +420,8 @@ data class UniversalPreferences(
                 ?.mapNotNull { (key, value) ->
                     if (key != null && value != null) key.toString() to value.toString() else null
                 }?.toMap() ?: emptyMap(),
-            emojiStyle = map["emojiStyle"] as String? ?: "Chaty Motion",
+            // Previous missing-key fallback: "Chaty Motion". Explicit saved pack IDs remain untouched.
+            emojiStyle = map["emojiStyle"] as String? ?: "Android system",
             loadFontEnabled = map["loadFontEnabled"] as Boolean? ?: false,
             customFontFileName = (map["customFontFileName"] as? String)?.takeIf { it.startsWith("custom_font_") && !it.contains('/') && !it.contains('\\') },
             hidePhotosFromGallery = map["hidePhotosFromGallery"] as Boolean? ?: false,
@@ -519,7 +521,8 @@ data class StatusPreferences(
 
 /** Exact port including the Dart alias getters the toast UI reads. */
 data class NotificationToastPreferences(
-    val onlineToastEnabled: Boolean = true,
+    // Previous default: onlineToastEnabled = true. New/unset event masters default off.
+    val onlineToastEnabled: Boolean = false,
     val onlineToastInNotificationBar: Boolean = false,
     val onlineToastWithProfilePicture: Boolean = true,
     val onlineToastElevation: Boolean = true,
@@ -546,7 +549,8 @@ data class NotificationToastPreferences(
     val profileToastPosition: String = "Top of the screen",
     val profileToastBgColor: Long? = null,
     val profileToastTextColor: Long? = null,
-    val typingToastEnabled: Boolean = true,
+    // Previous default: typingToastEnabled = true. New/unset event masters default off.
+    val typingToastEnabled: Boolean = false,
     val typingToastInNotificationBar: Boolean = false,
     val typingToastWithProfilePicture: Boolean = true,
     val typingToastElevation: Boolean = true,
@@ -645,7 +649,7 @@ data class NotificationToastPreferences(
 
     companion object {
         fun fromMap(map: Map<String, Any?>): NotificationToastPreferences = NotificationToastPreferences(
-            onlineToastEnabled = map["onlineToastEnabled"] as Boolean? ?: true,
+            onlineToastEnabled = map["onlineToastEnabled"] as Boolean? ?: false,
             onlineToastInNotificationBar = map["onlineToastInNotificationBar"] as Boolean? ?: false,
             onlineToastWithProfilePicture = map["onlineToastWithProfilePicture"] as Boolean? ?: true,
             onlineToastElevation = map["onlineToastElevation"] as Boolean? ?: true,
@@ -675,7 +679,7 @@ data class NotificationToastPreferences(
             profileToastPosition = map["profileToastPosition"] as String? ?: "Top of the screen",
             profileToastBgColor = (map["profileToastBgColor"] as Number?)?.toLong(),
             profileToastTextColor = (map["profileToastTextColor"] as Number?)?.toLong(),
-            typingToastEnabled = map["typingToastEnabled"] as Boolean? ?: true,
+            typingToastEnabled = map["typingToastEnabled"] as Boolean? ?: false,
             typingToastInNotificationBar = map["typingToastInNotificationBar"] as Boolean? ?: false,
             typingToastWithProfilePicture = map["typingToastWithProfilePicture"] as Boolean? ?: true,
             typingToastElevation = map["typingToastElevation"] as Boolean? ?: true,
@@ -749,7 +753,7 @@ data class HomePreferences(
     val hideCutEditFab: Boolean = false,
     val hidePluginsList: Boolean = false,
     val hideGbwaSettingsFab: Boolean = false,
-    val pagerTransition3d: String = "Default",
+    val pagerTransition3d: String = "Cube 3D",
     val tabBubbleStyle: String = "Capsule Pill",
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
@@ -872,7 +876,7 @@ data class HomePreferences(
             hideCutEditFab = map["hideCutEditFab"] as Boolean? ?: false,
             hidePluginsList = map["hidePluginsList"] as Boolean? ?: false,
             hideGbwaSettingsFab = map["hideGbwaSettingsFab"] as Boolean? ?: false,
-            pagerTransition3d = map["pagerTransition3d"] as String? ?: "Default",
+            pagerTransition3d = map["pagerTransition3d"] as String? ?: "Cube 3D",
             tabBubbleStyle = map["tabBubbleStyle"] as String? ?: "Capsule Pill",
         )
     }

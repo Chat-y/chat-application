@@ -292,7 +292,9 @@ fun SettingsScreen(
                 if (onBack != null) IconButton(onClick = { onBack.invoke() }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", modifier = Modifier.size(22.dp), color = primaryText) } else Spacer(Modifier.size(48.dp))
                 Row {
                     IconButton(onClick = { onOpenSearch(searchIndex) }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search, semanticLabel = "Search settings", modifier = Modifier.size(22.dp), color = primaryText) }
-                    IconButton(onClick = { sheet = SettingsSheet.Export }) { Icon(Icons.Rounded.IosShare, "Export chats", Modifier.size(22.dp), tint = primaryText) }
+                    IconButton(onClick = { sheet = SettingsSheet.Export }) {
+//Icon(Icons.Rounded.IosShare, "Export chats", Modifier.size(22.dp), tint = primaryText)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.share, Icons.Rounded.IosShare, "Export chats", Modifier.size(22.dp), tint = primaryText) }
                     IconButton(onClick = { sheet = SettingsSheet.EditProfile }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit profile", modifier = Modifier.size(22.dp), color = primaryText) }
                 }
             }
@@ -308,7 +310,9 @@ fun SettingsScreen(
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.Mood, null, Modifier.size(16.dp), tint = accent)
+
+//Icon(Icons.Rounded.Mood, null, Modifier.size(16.dp), tint = accent)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.emoji, Icons.Rounded.Mood, null, Modifier.size(16.dp), tint = accent)
                     Spacer(Modifier.width(6.dp))
                     Text(if (user.about.isNotEmpty()) user.about else "Current mood", color = primaryText, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
@@ -338,7 +342,9 @@ fun SettingsScreen(
                         color = primaryText, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.3).sp,
                     )
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(22.dp), tint = secondaryText)
+
+//Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(22.dp), tint = secondaryText)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronDown, Icons.Rounded.KeyboardArrowDown, null, Modifier.size(22.dp), tint = secondaryText)
                 }
                 Spacer(Modifier.height(3.dp))
                 if (user.username.isNotEmpty()) Text("@${user.username}", color = secondaryText, fontSize = 13.5.sp)

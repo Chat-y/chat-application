@@ -322,8 +322,14 @@ fun OngoingCallScreen(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier.size(32.dp).background(callSurface(), CircleShape),
                         ) {
-                            Icon(
-                                Icons.Rounded.Cameraswitch,
+
+//Icon(
+//                                Icons.Rounded.Cameraswitch,
+//                                contentDescription = "Switch camera",
+//                                tint = callForeground(),
+//                                modifier = Modifier.size(16.dp),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.cameraSwitch, Icons.Rounded.Cameraswitch,
                                 contentDescription = "Switch camera",
                                 tint = callForeground(),
                                 modifier = Modifier.size(16.dp),
@@ -421,8 +427,13 @@ fun OngoingCallScreen(
                             // CALL-R1-01: honor the settings parameter at the point of use (it was a dead param).
                             enabled = isActive && pictureInPictureEnabled,
                         ) {
-                            Icon(
-                                Icons.Rounded.PictureInPicture,
+
+//Icon(
+//                                Icons.Rounded.PictureInPicture,
+//                                contentDescription = "Picture-in-picture",
+//                                tint = callForeground(),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.pictureInPicture, Icons.Rounded.PictureInPicture,
                                 contentDescription = "Picture-in-picture",
                                 tint = callForeground(),
                             )
@@ -457,7 +468,9 @@ fun OngoingCallScreen(
                         .background(callSurface(), RoundedCornerShape(16.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.ScreenShare, contentDescription = null, tint = callAccent(), modifier = Modifier.size(16.dp))
+
+//Icon(Icons.Rounded.ScreenShare, contentDescription = null, tint = callAccent(), modifier = Modifier.size(16.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.screenShare, Icons.Rounded.ScreenShare, contentDescription = null, tint = callAccent(), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
 // Previous implementation retained:                     Text("You are sharing your screen", color = callForeground(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text("You are sharing your screen", color = callForeground(), style = com.example.chat.ui.calls.callTypographyRoles(androidx.compose.material3.MaterialTheme.typography).status, fontWeight = FontWeight.SemiBold)

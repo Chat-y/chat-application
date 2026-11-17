@@ -68,30 +68,56 @@ fun CreatePollDialog(onCancel: () -> Unit, onCreate: (PollDraft) -> Unit) {
                 // ChatyConfirmationDialog's body already scrolls; an inner unbounded scrollable
                 // is measured with infinite max height and throws at first composition.
             ) {
-                OutlinedTextField(
+                // Previous stock field:
+                // OutlinedTextField(
+                //                     value = question,
+                //                     onValueChange = { if (it.length <= 240) question = it },
+                //                     label = { Text("Question") },
+                //                     modifier = Modifier.fillMaxWidth(),
+                //                 )
+                com.example.chat.ui.kit.ChatyTaskField(
                     value = question,
                     onValueChange = { if (it.length <= 240) question = it },
-                    label = { Text("Question") },
+                    label = "Question",
                     modifier = Modifier.fillMaxWidth(),
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = Int.MAX_VALUE,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                 )
                 options.forEachIndexed { index, value ->
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
+                        // Previous stock field:
+                        // OutlinedTextField(
+                        //                             value = value,
+                        //                             onValueChange = { if (it.length <= 120) options[index] = it },
+                        //                             label = { Text("Option ${index + 1}") },
+                        //                             modifier = Modifier.weight(1f),
+                        //                         )
+                        com.example.chat.ui.kit.ChatyTaskField(
                             value = value,
                             onValueChange = { if (it.length <= 120) options[index] = it },
-                            label = { Text("Option ${index + 1}") },
+                            label = "Option ${index + 1}",
                             modifier = Modifier.weight(1f),
+                            singleLine = false,
+                            minLines = 1,
+                            maxLines = Int.MAX_VALUE,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
                         )
                         if (options.size > 2) {
                             IconButton(onClick = { options.removeAt(index) }) {
-                                Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = "Remove option")
+
+//Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = "Remove option")
+                                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.minusCircle, Icons.Rounded.RemoveCircleOutline, contentDescription = "Remove option")
                             }
                         }
                     }
                 }
                 if (options.size < 12) {
                     TextButton(onClick = { options.add("") }) {
-                        Icon(Icons.Rounded.AddCircleOutline, "Add option")
+
+//Icon(Icons.Rounded.AddCircleOutline, "Add option")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.addCircle, Icons.Rounded.AddCircleOutline, "Add option")
                         Spacer(Modifier.width(6.dp))
                         Text("Add option")
                     }
@@ -102,12 +128,21 @@ fun CreatePollDialog(onCancel: () -> Unit, onCreate: (PollDraft) -> Unit) {
                 }
             }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+        // Previous: dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+        dismissButton = { com.example.chat.ui.kit.ChatyTextButton(onClick = onCancel, label = "Cancel") },
         confirmButton = {
-            TextButton(onClick = {
+            // Previous stock text action:
+            // TextButton(onClick = {
+            //                 val draft = PollDraft.normalized(question, options.toList(), multiple)
+            //                 if (draft != null) onCreate(draft)
+            //             }) { Text("Create") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Create",
+                onClick = {
                 val draft = PollDraft.normalized(question, options.toList(), multiple)
                 if (draft != null) onCreate(draft)
-            }) { Text("Create") }
+            },
+            )
         },
     )
 }
@@ -139,7 +174,9 @@ fun PollViewerSheet(
                 error != null && s == null -> Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { Text(error ?: "") }
                 s != null -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Poll, contentDescription = null)
+
+//Icon(Icons.Rounded.Poll, contentDescription = null)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.poll, Icons.Rounded.Poll, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text(s.question, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                         IconButton(onClick = onDismiss) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.close, semanticLabel = "Close") }
@@ -162,7 +199,9 @@ fun PollViewerSheet(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(option.label, Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                                    if (option.votedByMe) Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(19.dp))
+                                    if (option.votedByMe)
+//Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(19.dp))
+                                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(19.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text("${option.votes}")
                                 }

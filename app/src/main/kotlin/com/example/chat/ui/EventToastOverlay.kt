@@ -1,5 +1,6 @@
 package com.example.chat.ui
 
+import com.example.chat.ui.kit.chatyDepth
 import com.example.chat.ServiceLocator
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -78,6 +79,11 @@ fun ChatyEventToastOverlay(
     }
     @Suppress("UNUSED_EXPRESSION") preferencesTick
     val routeSuppressed = suppressMessageContent || MessageOverlayPrivacy.suppressed
+    fun eventEnabled(event: ChatyEventNotification): Boolean = when (event.icon) {
+        com.example.chat.data.realtime.EventNotificationIcon.onlinePrediction -> preferences.toasts.onlineToastEnabled
+        com.example.chat.data.realtime.EventNotificationIcon.keyboardAlt -> preferences.toasts.typingToastEnabled
+        else -> true
+    }
     val concealProtected = com.example.chat.ui.settings.security.ProtectedToastPolicy.conceal(
         concealWhileLocked || routeSuppressed, preferences.security.hideLockNotificationContent,
         preferences.security.lockedConversationIds.isNotEmpty(),
@@ -98,7 +104,7 @@ fun ChatyEventToastOverlay(
         if (preferences.notification.enableGlobalNotifications &&
 // Superseded source retained below per additive-only review rule.
 //             !preferences.universal.disableHeadsUpNotification
-            !preferences.universal.disableHeadsUpNotification && !routeSuppressed
+            !preferences.universal.disableHeadsUpNotification && !routeSuppressed && eventEnabled(latest)
         ) {
             visible = latest
             // Dart _onNotificationChanged: DynamicIslandController.postPayload(chatMessage), masked while locked.
@@ -129,6 +135,13 @@ fun ChatyEventToastOverlay(
             }
         }
     }
+    LaunchedEffect(preferencesTick) {
+        visible?.takeIf { !eventEnabled(it) || !preferences.notification.enableGlobalNotifications ||
+            preferences.universal.disableHeadsUpNotification }?.let {
+            ServiceLocator.dynamicIslandController.removePayload(it.id)
+            visible = null
+        }
+    }
     val seconds = preferences.gbInt("event_toast_duration_seconds", 3).coerceIn(2, 8)
     LaunchedEffect(visible?.id) {
         val id = visible?.id ?: return@LaunchedEffect
@@ -156,7 +169,8 @@ fun ChatyEventToastOverlay(
         AnimatedVisibility(
 // Superseded source retained below per additive-only review rule.
 //             visible = n != null,
-            visible = n != null && !routeSuppressed,
+            visible = n != null && eventEnabled(n) && !routeSuppressed &&
+                preferences.notification.enableGlobalNotifications && !preferences.universal.disableHeadsUpNotification,
             modifier = Modifier.align(if (islandMode) Alignment.TopCenter else align),
             enter = fadeIn(),
             exit = fadeOut(),
@@ -172,7 +186,11 @@ fun ChatyEventToastOverlay(
                 val avatarSize = preferences.gbDouble("toast_avatar_size", 40.0).coerceIn(24.0, 56.0).dp
                 val corner = (typedStyle?.radius ?: preferences.gbDouble("toast_corner_radius", 18.0).coerceIn(4.0, 32.0)).dp
                 val elevation = (if (typedStyle?.elevated == false) 0.0 else preferences.gbDouble("toast_elevation", 10.0).coerceIn(0.0, 24.0)).dp
-                val bg = (typedStyle?.background ?: preferences.gbColor("event_toast_bg"))?.let { Color(it.toInt()) } ?: colors.surface
+                // Previous: val bg = (typedStyle?.background ?: preferences.gbColor("event_toast_bg"))?.let { Color(it.toInt()) } ?: colors.surface
+                // Presence pill uses theme tokens only. Saved custom colors remain stored unchanged.
+                // Previous: (typedStyle?.background ?: preferences.gbColor("event_toast_bg"))?.let { Color(it.toInt()) }
+                val bg = if (typedStyle != null) colors.surfaceElevated
+                    else preferences.gbColor("event_toast_bg")?.let { Color(it.toInt()) } ?: colors.surface
                 val preset = ChatyNotificationIconPresets.forName(preferences.universal.notificationIcon)
                 val presetColor = Color(preset.colorArgb.toInt())
                 // Previous implementation retained: val textTint = (typedStyle?.text ?: shown.textColorArgb)?.let { Color(it.toInt()) }
@@ -190,11 +208,29 @@ fun ChatyEventToastOverlay(
                     else -> Modifier.windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.safeDrawing).padding(start = 14.dp, end = 14.dp, top = 2.dp)
                 }
                 Box(pad) {
+                    if (typedStyle != null) {
+                        PresenceToastPill(
+                            event = shown,
+                            style = typedStyle,
+                            avatarSize = avatarSize,
+                            background = bg,
+                            // Token foreground, not the legacy event/saved raw tint.
+                            foreground = colors.foreground,
+                            corner = corner,
+                            elevation = elevation,
+                            showAvatar = preferences.notification.showSenderAvatar,
+                            showName = preferences.notification.showSenderName,
+                            showPreview = preferences.notification.showMessagePreview && !concealProtected,
+                        )
+                    } else {
+                    // Original generic event card remains unchanged for non-presence notifications.
                     Surface(
                         shape = RoundedCornerShape(corner),
                         color = bg,
-                        shadowElevation = elevation,
-                        modifier = Modifier.widthIn(max = 430.dp)
+                        // Previous (default black shadow): shadowElevation = elevation,
+                        //                        modifier = Modifier.widthIn(max = 430.dp)
+                        shadowElevation = 0.dp,
+                        modifier = Modifier.chatyDepth(elevation, RoundedCornerShape(corner)).widthIn(max = 430.dp)
                             .border(1.dp, colors.borderSubtle, RoundedCornerShape(corner)),
                     ) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
@@ -233,12 +269,13 @@ fun ChatyEventToastOverlay(
                             }
                         }
                     }
+                    } // Generic event card; online/typing use compact pill above.
                 }
             }
         }
         // Dart _buildDynamicIsland -> DynamicIslandOverlayHost(controller: locator<DynamicIslandController>()),
         // shown only while heads-up is enabled and the island preference is on.
-        if (n != null && preferences.gbBool("dynamic_island_notifications", false) &&
+        if (n != null && eventEnabled(n) && preferences.gbBool("dynamic_island_notifications", false) &&
             preferences.notification.enableGlobalNotifications &&
 // Superseded source retained below per additive-only review rule.
 //             !preferences.universal.disableHeadsUpNotification

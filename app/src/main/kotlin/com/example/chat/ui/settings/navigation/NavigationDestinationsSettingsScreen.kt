@@ -1,5 +1,7 @@
 package com.example.chat.ui.settings.navigation
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -101,7 +103,9 @@ fun NavigationDestinationsSettingsScreen(
     }
     // Match toolbar Back and system/predictive Back. Previously only the toolbar
     // checked dirty state, so a gesture could discard unsaved destination edits.
-    androidx.activity.compose.BackHandler { requestBack() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Unit)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler { requestBack() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) { requestBack() }
 
     // SET-R1-023: canned copy, no raw backend text in the UI
     fun errorText(error: Throwable): String = "Could not save. Try again."
@@ -147,6 +151,7 @@ fun NavigationDestinationsSettingsScreen(
     }
 
     Scaffold(
+        modifier = Modifier.chatyPredictiveBack(predictiveBack, enabled = !saving),
         containerColor = colors.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -172,9 +177,17 @@ fun NavigationDestinationsSettingsScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { confirm = "reset" }, enabled = !saving, modifier = Modifier.height(48.dp)) {
-                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset), color = colors.primary) // was: "Reset"
-                }
+                // Previous stock text action:
+                // TextButton(onClick = { confirm = "reset" }, enabled = !saving, modifier = Modifier.height(48.dp)) {
+                //                     Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset), color = colors.primary) // was: "Reset"
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset),
+                    onClick = { confirm = "reset" },
+                    enabled = !saving,
+                    modifier = Modifier.height(48.dp),
+                    color = colors.primary,
+                )
                 Spacer(Modifier.width(4.dp))
                 IconButton(onClick = { save() }, enabled = !saving) {
                     if (saving) {
@@ -318,8 +331,18 @@ fun NavigationDestinationsSettingsScreen(
             onDismissRequest = { confirm = "" },
             title = { Text("Discard changes?") },
             text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_your_destination_order_has_not_been_save)) }, // was: "Your destination order has not been saved."
-            dismissButton = { TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_keep_editing)) } }, // was: "Keep editing"
-            confirmButton = { TextButton(onClick = { confirm = ""; onBack() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_discard)) } }, // was: "Discard"
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_keep_editing)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_keep_editing),
+                onClick = { confirm = "" },
+            ) }, // was: "Keep editing"
+            confirmButton = { // Previous stock text action:
+            // TextButton(onClick = { confirm = ""; onBack() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_discard)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_discard),
+                onClick = { confirm = ""; onBack() },
+            ) }, // was: "Discard"
         )
     }
     if (confirm == "reset") {
@@ -327,8 +350,18 @@ fun NavigationDestinationsSettingsScreen(
             onDismissRequest = { confirm = "" },
             title = { Text("Reset to template order?") },
             text = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_the_destination_order_returns_to_the_act)) }, // was: "The destination order returns to the active template."
-            dismissButton = { TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel)) } }, // was: "Cancel"
-            confirmButton = { TextButton(onClick = { confirm = ""; reset() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset)) } }, // was: "Reset"
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel),
+                onClick = { confirm = "" },
+            ) }, // was: "Cancel"
+            confirmButton = { // Previous stock text action:
+            // TextButton(onClick = { confirm = ""; reset() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset),
+                onClick = { confirm = ""; reset() },
+            ) }, // was: "Reset"
         )
     }
 }
@@ -447,14 +480,18 @@ private fun DestinationRow(
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
         ) {
             IconButton(onClick = { onReorder(index, -1) }, enabled = enabled && index != 0, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up", tint = colors.foreground)
+
+//Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up", tint = colors.foreground)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.arrowUp, Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up", tint = colors.foreground)
             }
             IconButton(
                 onClick = { onReorder(index, 1) },
                 enabled = enabled && index != count - 1,
                 modifier = Modifier.size(48.dp),
             ) {
-                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down", tint = colors.foreground)
+
+//Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down", tint = colors.foreground)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.moveDown, Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down", tint = colors.foreground)
             }
             // Freeze edits while save/reset owns the submitted destination snapshot.
             val moveEnabled = enabled && (if (isPrimary) primaryCount > 1 else primaryCount < NavigationDestinationsLogic.MAX_PRIMARY)
@@ -496,3 +533,9 @@ private fun destinationIcon(id: String): ImageVector = when (id) {
     ChatyNavigationDestinationIds.settings -> Icons.Outlined.Settings
     else -> Icons.Outlined.Devices
 }
+
+// Complete original-line retention for review (inactive).
+            //             dismissButton = { TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_keep_editing)) } }, // was: "Keep editing"
+            //             confirmButton = { TextButton(onClick = { confirm = ""; onBack() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_navdest_discard)) } }, // was: "Discard"
+            //             dismissButton = { TextButton(onClick = { confirm = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_cancel)) } }, // was: "Cancel"
+            //             confirmButton = { TextButton(onClick = { confirm = ""; reset() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.settings_main_reset)) } }, // was: "Reset"

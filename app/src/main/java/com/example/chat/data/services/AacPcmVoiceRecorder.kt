@@ -18,6 +18,7 @@ import android.os.HandlerThread
 import android.util.Log
 import android.util.Range
 import androidx.core.content.ContextCompat
+import com.example.chat.ui.chats.detail.VoiceFinalizationException
 import com.example.chat.ui.chats.detail.VoiceRecordConfig
 import com.example.chat.ui.chats.detail.VoiceRecorderPort
 import java.nio.ByteBuffer
@@ -26,7 +27,9 @@ import java.util.LinkedList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
+// Previous gate import: import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.min
@@ -78,14 +81,28 @@ class AndroidPcmVoiceRecorderPort(
         next.startRecording() // throws when reader/encoder init fails (see CaptureThread.startRecording)
     }
 
+    override fun captureStopRequest(): (() -> Unit)? {
+        // Capture the generation now. A delayed caller must never stop a replacement recording.
+        val current = capture ?: return null
+        return { current.stopRecording() }
+    }
+
     /** record plugin stop(): returns the recorded path after the capture thread and
      *  muxer have fully finished. Blocks until then, like the plugin's MethodChannel
      *  stop which answers from the onStop callback. */
     override suspend fun stop(): String? {
         val current = capture ?: return lastPath
         current.stopRecording()
-        current.awaitStop()
-        capture = null
+        // Previous blocking caller-thread wait: current.awaitStop()
+        // AAC EOS, muxer finalization and native release must never block the Compose event loop.
+        try { withContext(Dispatchers.IO) { current.awaitStop() } }
+        catch (error: VoiceFinalizationException) {
+            // awaitStop acknowledged released handles, not a valid file. Detach failed generation.
+            if (capture === current) { capture = null; lastPath = null }
+            throw error
+        }
+        // Previous unconditional detach: capture = null
+        if (capture === current) capture = null
         return lastPath
     }
 
@@ -106,7 +123,12 @@ class AndroidPcmVoiceRecorderPort(
         val current = capture ?: return
         // A failed old generation keeps its reference and refuses replacement capture.
         current.stopRecording()
-        current.awaitStop()
+        // Previous: current.awaitStop(); capture = null
+        try { current.awaitStop() }
+        catch (error: VoiceFinalizationException) {
+            if (capture === current) { capture = null; lastPath = null }
+            throw error
+        }
         capture = null
     }
 
@@ -120,7 +142,8 @@ private class CaptureThread(
     private val config: VoiceRecordConfig,
     private val path: String,
 ) {
-    private val recording = AtomicBoolean(false)
+    // Previous recording gate: private val recording = AtomicBoolean(false)
+    private val captureBoundary = VoiceCaptureBoundary()
     private val transition = java.lang.Object()
     @Volatile private var paused = false
     private var generation = 0L
@@ -134,11 +157,13 @@ private class CaptureThread(
     private val cleanupLock = Any()
     private val stopLatch = CountDownLatch(1)
 
-    fun isRecording(): Boolean = captureThread != null && recording.get()
+    // Previous: fun isRecording(): Boolean = captureThread != null && recording.get()
+    fun isRecording(): Boolean = captureThread != null && captureBoundary.canStartRead()
 
     fun stopRecording() {
         synchronized(transition) {
-            recording.set(false)
+            // Previous: recording.set(false)
+            captureBoundary.requestStop()
             transition.notifyAll()
         }
     }
@@ -202,21 +227,28 @@ private class CaptureThread(
                 aacEncoder.startEncoding()
 
                 readerRef = pcmReader
-                recording.set(true)
+                // Previous: recording.set(true)
+                captureBoundary.start()
                 startLatch.countDown()
 
                 while (isRecording()) {
                     val readGeneration = synchronized(transition) {
                         while (paused && isRecording()) transition.wait()
-                        generation
-                    }
-                    if (!isRecording()) break
+                        // Atomically admit a read against Send's transition, not a separate check/read.
+                        // Previous: generation (then if (!isRecording()) break outside the lock).
+                        if (captureBoundary.tryBeginRead()) generation else null
+                    } ?: break
                     val buffer = try { pcmReader.read() } catch (error: Exception) {
-                        val interruptedByPause = synchronized(transition) { generation != readGeneration || !isRecording() }
+                        // Previous stop guard also hid native read failures after Send:
+                        // val interruptedByPause = synchronized(transition) { generation != readGeneration || !isRecording() }
+                        val interruptedByPause = synchronized(transition) { generation != readGeneration }
                         if (interruptedByPause) continue else throw error
-                    }
+                    } finally { captureBoundary.endRead() }
                     synchronized(transition) {
-                        if (isRecording() && !paused && generation == readGeneration && buffer.isNotEmpty()) {
+                        // Previous: if (isRecording() && !paused && generation == readGeneration && buffer.isNotEmpty()) {
+                        // The previous isRecording() check discarded the final admitted PCM read on Send.
+                        // Stop forbids the NEXT read, but preserve this same-segment read through AAC EOS.
+                        if (captureBoundary.keepCompletedRead(readGeneration, generation, paused) && buffer.isNotEmpty()) {
                             // Encoder PTS uses input byte position, so no paused wall-clock gap enters AAC.
                             aacEncoder.encode(buffer)
                         }
@@ -247,6 +279,8 @@ private class CaptureThread(
             // Capture loop is stopped. Retry only retained native handles, never restart audio.
             cleanupRetained()
         }
+        // A capture/encoder failure must never turn an incomplete output into a sendable file.
+        failure?.let { throw VoiceFinalizationException(it) }
     }
 
     private fun fail(ex: Exception) {
@@ -628,6 +662,8 @@ private class AacEncoder(
                     val task = Runnable { try { stopAndRelease() } finally { forced.countDown() } }
                     if (mHandler?.post(task) != true) task.run()
                     check(forced.await(5, TimeUnit.SECONDS)) { "Encoder cleanup is still pending." }
+                    // Forced cleanup is NOT successful EOS: never upload a possibly truncated file.
+                    throw IllegalStateException("Encoder did not finalize its audio tail before timeout.")
                 }
             } finally { quitSafely() }
         } else {

@@ -63,9 +63,12 @@ enum class ProcessedMessageType { application, proposal, stagedCommit }
 data class ProcessedMessageResult(
     val messageType: ProcessedMessageType,
     val applicationMessage: ByteArray?,
+    /** Authenticated MLS leaf, never the server row's claimed sender. */
+    val senderIndex: Int? = null,
+    val authenticatedSenderIdentity: ByteArray = byteArrayOf(),
 )
 data class KeyPackageResult(val keyPackageBytes: ByteArray)
-data class MlsMember(val credential: ByteArray, val index: Int)
+data class MlsMember(val credential: ByteArray, val index: Int, val signatureKey: ByteArray = byteArrayOf())
 
 interface MlsEngine {
     suspend fun close()
@@ -90,9 +93,17 @@ interface MlsEngine {
         signerBytes: ByteArray,
     ): JoinGroupResult
 
+    suspend fun joinGroupFromWelcomePinned(config: MlsGroupConfig, welcomeBytes: ByteArray, signerBytes: ByteArray,
+        pinIdentities: List<ByteArray>, pinKeys: List<ByteArray>, expectedGroupId: ByteArray, expectedEpoch: Long): JoinGroupResult = throw MlsE2eeException("Pinned Welcome binding unavailable.")
+    suspend fun processMembershipCommitPinned(groupIdBytes: ByteArray, messageBytes: ByteArray,
+        pinIdentities: List<ByteArray>, pinKeys: List<ByteArray>, expectedEpoch: Long): Unit = throw MlsE2eeException("Pinned commit binding unavailable.")
+
     suspend fun groupEpoch(groupIdBytes: ByteArray): Long
     suspend fun groupIsActive(groupIdBytes: ByteArray): Boolean
     suspend fun groupMembers(groupIdBytes: ByteArray): List<MlsMember>
+
+    suspend fun inspectKeyPackagePin(bytes: ByteArray): MlsMember =
+        throw MlsE2eeException("Native KeyPackage pin inspection is unavailable.")
 
     suspend fun addMembers(
         groupIdBytes: ByteArray,
@@ -193,3 +204,6 @@ class MlsStorageInitializationException private constructor(
         }
     }
 }
+
+// Previous implementation retained inactive (v5 review):
+// data class MlsMember(val credential: ByteArray, val index: Int)

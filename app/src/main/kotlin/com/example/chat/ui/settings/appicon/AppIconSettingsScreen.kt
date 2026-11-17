@@ -418,7 +418,12 @@ fun AppIconSettingsScreen(
                 ) { Text(request.confirmLabel) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmRequest = null }) { Text(request.cancelLabel) }
+                // Previous stock text action:
+                // TextButton(onClick = { confirmRequest = null }) { Text(request.cancelLabel) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = request.cancelLabel,
+                    onClick = { confirmRequest = null },
+                )
             },
         )
     }
@@ -529,7 +534,9 @@ private fun SavedCustomIconOption(
         } else {
             // Dart errorBuilder fallback.
             Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.BrokenImage, contentDescription = null)
+
+//Icon(Icons.Outlined.BrokenImage, contentDescription = null)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.mediaError, Icons.Outlined.BrokenImage, contentDescription = null)
             }
         }
     }

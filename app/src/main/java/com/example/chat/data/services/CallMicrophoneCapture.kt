@@ -4,7 +4,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class CallMicrophoneCaptureState { unknown, starting, active, stopped }
+// Previous implementation retained: enum class CallMicrophoneCaptureState { unknown, starting, active, stopped }
+enum class CallMicrophoneCaptureState { unknown, starting, active, stopped, unavailable }
 
 interface CallMicrophoneCaptureProvider {
     val microphoneCaptureState: StateFlow<CallMicrophoneCaptureState>
@@ -21,13 +22,20 @@ internal class CallMicrophoneCaptureMonitor {
         mutableState.value = CallMicrophoneCaptureState.starting
     }
     @Synchronized fun started(token: Token) {
-        if (current === token) mutableState.value = CallMicrophoneCaptureState.active
+// Previous implementation retained:         if (current === token) mutableState.value = CallMicrophoneCaptureState.active
+        if (current === token && mutableState.value != CallMicrophoneCaptureState.unavailable)
+            mutableState.value = CallMicrophoneCaptureState.active
     }
     @Synchronized fun stopped(token: Token) {
         if (current === token) mutableState.value = CallMicrophoneCaptureState.stopped
     }
-    @Synchronized fun unavailable(token: Token) {
-        if (current === token) mutableState.value = CallMicrophoneCaptureState.unknown
+// Previous implementation retained:     @Synchronized fun unavailable(token: Token) {
+// Previous implementation retained:         if (current === token) mutableState.value = CallMicrophoneCaptureState.unknown
+// Previous implementation retained:     }
+    @Synchronized fun unavailable(token: Token): Boolean {
+        if (current !== token || mutableState.value == CallMicrophoneCaptureState.unavailable) return false
+        mutableState.value = CallMicrophoneCaptureState.unavailable
+        return true
     }
     @Synchronized fun close(token: Token?) {
         if (token != null && current === token) {

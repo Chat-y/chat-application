@@ -11,6 +11,7 @@ object ChatyNotificationPolicy {
     const val ACTION_HANGUP = "com.example.chat.notif.CALL_HANGUP"
     const val ACTION_MUTE = "com.example.chat.notif.CALL_MUTE"
     const val ACTION_SPEAKER = "com.example.chat.notif.CALL_SPEAKER"
+    const val ACTION_ACCEPT = "com.example.chat.notif.CALL_ACCEPT"
     const val ACTION_DECLINE = "com.example.chat.notif.CALL_DECLINE"
     const val EXTRA_NONCE = "chaty.notif.nonce"
     const val KEY_REPLY_TEXT = "chaty.notif.reply_text"
@@ -94,6 +95,11 @@ class ChatyActionRegistry<S : Any>(private val maxEntries: Int = 64, private val
     }
 
     fun resolve(n: String?): Entry<S>? = synchronized(lock) { n?.let { byNonce[it] } }
+
+    /** Resolve again after acquiring an external in-flight slot. A previously captured entry can be retired meanwhile. */
+    fun isCurrent(n: String?, expected: Entry<S>): Boolean = synchronized(lock) {
+        n != null && byNonce[n] === expected
+    }
 
     /** Drops entries by nonce. Nulls and unknown nonces are ignored (idempotent, P5); used when a
      *  lane op is rejected or fails admission before posting, so its PendingIntents can never fire. */

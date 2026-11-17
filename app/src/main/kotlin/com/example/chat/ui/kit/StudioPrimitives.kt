@@ -1,5 +1,6 @@
 package com.example.chat.ui.kit
 
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.role
 
@@ -8,6 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
@@ -59,12 +63,16 @@ fun <T> MorphingSegmentedControl(
     activePillColor: Color? = null,
     activeTextColor: Color? = null,
     inactiveTextColor: Color? = null,
+    itemEnabled: (T) -> Boolean = { true },
+    itemRole: Role = Role.Button,
+    statusLabel: String? = null,
 ) {
     val theme = LocalThemeConfig.current
     val appColors = LocalAppColors.current
     val pillColor = activePillColor ?: Color(theme.accentColor)
     val textActive = activeTextColor ?: Color(theme.onAccentColor)
     val textInactive = inactiveTextColor ?: Color(theme.secondaryTextColor)
+    val reduceMotion = rememberChatyReduceMotion()
 
     // Minimum segment hit area is 48dp: with the 4dp vertical bar padding on each side the
     // bar is never shorter than 56dp, and each segment fills the bar's inner height.
@@ -76,34 +84,42 @@ fun <T> MorphingSegmentedControl(
             .background(Color(theme.cardColor), RoundedCornerShape((barHeight / 2).dp))
             .border(1.dp, appColors.borderSubtle, RoundedCornerShape((barHeight / 2).dp))
             .padding(4.dp)
-            .horizontalScroll(rememberScrollState()),
+            .horizontalScroll(rememberScrollState())
+            .then(if (itemRole == Role.Tab) Modifier.selectableGroup() else Modifier)
+            .then(if (statusLabel != null) Modifier.semantics { stateDescription = statusLabel } else Modifier),
     ) {
         for (item in items) {
             val isSelected = item.value == selectedValue
+            val enabled = itemEnabled(item.value)
+            val labelColor = if (!enabled) appColors.disabledForeground else if (isSelected) textActive else textInactive
             val pillBg by animateColorAsState(
                 if (isSelected) pillColor else Color.Transparent,
-                animationSpec = tween(220),
+                animationSpec = tween(if (reduceMotion) 0 else ChatyMotionTokens.BASE_MS),
                 label = "segmentPill",
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .springInteractiveScale()
+                    .then(if (enabled) Modifier.springInteractiveScale() else Modifier)
+                    .widthIn(min = 48.dp)
                     .semantics(mergeDescendants = true) {
                         selected = isSelected
-                        role = Role.Button
+                        role = itemRole
                     }
                     .fillMaxHeight()
                     .clip(RoundedCornerShape((height / 2).dp))
                     .background(pillBg)
-                    .clickable { if (!isSelected) onSelected(item.value) }
+                    // Previous default activation retained for Button-role consumers.
+                    .then(if (itemRole == Role.Tab) Modifier.selectable(selected = isSelected,
+                        enabled = enabled, role = Role.Tab, onClick = { if (!isSelected) onSelected(item.value) })
+                        else Modifier.clickable(enabled = enabled) { if (!isSelected) onSelected(item.value) })
                     .padding(horizontal = 14.dp, vertical = 6.dp),
             ) {
                 if (item.icon != null) {
                     Icon(
                         item.icon,
                         contentDescription = null,
-                        tint = if (isSelected) textActive else textInactive,
+                        tint = labelColor,
                         modifier = Modifier.size(15.dp),
                     )
                     Spacer(Modifier.width(5.dp))
@@ -112,7 +128,7 @@ fun <T> MorphingSegmentedControl(
                     item.label,
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) textActive else textInactive,
+                    color = labelColor,
                 )
                 if (item.badgeCount != null && item.badgeCount > 0) {
                     Spacer(Modifier.width(6.dp))
@@ -154,8 +170,11 @@ fun BentoCard(
 ) {
     val theme = LocalThemeConfig.current
     val isDark = theme.isDark
-    val defaultBg = if (isDark) Color(0xFF161A22) else Color(0xFFF6F8FA)
-    val defaultBorder = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
+// Previous: val defaultBg = if (isDark) Color(0xFF161A22) else Color(0xFFF6F8FA)
+// Previous: val defaultBorder = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
+    val colors = LocalAppColors.current
+    val defaultBg = colors.surface
+    val defaultBorder = colors.borderSubtle
     val shadowColor = Color.Black.copy(alpha = if (isDark) 0.28f else 0.05f)
 
     Column(

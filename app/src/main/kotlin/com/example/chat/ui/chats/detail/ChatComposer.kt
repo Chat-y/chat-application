@@ -236,7 +236,11 @@ fun ChatEntryBar(
                 ComposerActionButton("Send message", Icons.AutoMirrored.Rounded.Send, com.example.chat.ui.kit.themeGlyphColor(colors.sendFill, theme),
                     fillColor = colors.sendFill, emphasized = true, onTap = onSend,
                     onLongClick = { sendOptionsOpen = true })
+                // Bottom composer anchor: open upward when below would hide the options.
+                // Previous: ChatyDropdownMenu(expanded = sendOptionsOpen, onDismissRequest = { sendOptionsOpen = false })
                 com.example.chat.ui.kit.ChatyDropdownMenu(expanded = sendOptionsOpen,
+                    preferBelow = false,
+                    shadowColor = com.example.chat.ui.theme.LocalAppColors.current.shadow,
                     onDismissRequest = { sendOptionsOpen = false }) {
                     com.example.chat.ui.kit.ChatyDropdownMenuItem(
                         text = { androidx.compose.material3.Text("Send as view once") },

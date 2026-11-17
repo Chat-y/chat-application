@@ -207,7 +207,8 @@ private fun RecordingRow(data: ChatyComposerData) {
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(c.primary).clickable { data.onSend() },
             contentAlignment = Alignment.Center,
-        ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = null, modifier = Modifier.size(18.dp), color = Color.White) }
+        // Previous: ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = null, modifier = Modifier.size(18.dp), color = Color.White) }
+        ) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = null, modifier = Modifier.size(18.dp), color = c.onPrimary) }
     }
 }
 
@@ -309,7 +310,14 @@ private fun InstagramRow(data: ChatyComposerData) {
             IconBtn(Icons.Outlined.MicNone, 22.dp, c.foreground, data.onMicPress, "Microphone")
             IconBtn(Icons.Outlined.Image, 22.dp, c.foreground, data.onAttach, "Gallery")
         } else {
-            TextButton(onClick = data.onSend) { Text("Send", color = c.primary, fontWeight = FontWeight.W700) }
+            // Previous stock text action:
+            // TextButton(onClick = data.onSend) { Text("Send", color = c.primary, fontWeight = FontWeight.W700) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Send",
+                onClick = data.onSend,
+                color = c.primary,
+                fontWeight = FontWeight.W700,
+            )
         }
     }
 }
@@ -328,8 +336,10 @@ private fun ActionBubble(isSend: Boolean, onSend: () -> Unit, onMicPress: () -> 
     ) {
         val ms = if (reducedMotion) 0 else 160
         AnimatedContent(isSend, transitionSpec = { fadeIn(tween(ms)) togetherWith fadeOut(tween(ms)) }, label = "actionBubble") { send ->
-            if (send) com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = null, modifier = Modifier.size(20.dp), color = Color.White)
-            else com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = null, modifier = Modifier.size(22.dp), color = Color.White)
+            // Previous: if (send) com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = null, modifier = Modifier.size(20.dp), color = Color.White)
+            if (send) com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.send, semanticLabel = null, modifier = Modifier.size(20.dp), color = c.onPrimary)
+            // Previous: else com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = null, modifier = Modifier.size(22.dp), color = Color.White)
+            else com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = null, modifier = Modifier.size(22.dp), color = c.onPrimary)
         }
     }
 }

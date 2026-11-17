@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats.home
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
@@ -78,7 +80,13 @@ fun HomeSwipeActions(
         animation.value?.cancel()
         animation.value = scope.launch {
             snap.snapTo(offset.floatValue)
-            snap.animateTo(target, tween(durationMillis = if(reducedMotion) 0 else 220, easing = easeOutCubic)) {
+            // was: snap.animateTo(target, tween(durationMillis = if(reducedMotion) 0 else 220, easing = easeOutCubic)) {
+            // iOS-style settle: a lightly damped spring. Reduce-motion still snaps instantly.
+            snap.animateTo(
+                target,
+                if (reducedMotion) tween(durationMillis = 0)
+                else androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 600f),
+            ) {
                 offset.floatValue = value
             }
         }
@@ -100,9 +108,11 @@ fun HomeSwipeActions(
         }
     }
 
-    BackHandler(enabled = enabled && abs(offset.floatValue) > 4f) { settle(0f) }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Unit)
+    // Previous registration retained inactive: BackHandler(enabled = enabled && abs(offset.floatValue) > 4f) { settle(0f) }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, enabled = enabled && abs(offset.floatValue) > 4f) { settle(0f) }
 
-    BoxWithConstraints(modifier.fillMaxWidth().clipToBounds()) {
+    BoxWithConstraints(modifier.chatyPredictiveBack(predictiveBack).fillMaxWidth().clipToBounds()) {
         // Never let an action tray remove the entire foreground on a narrow
         // window. Size cells together so the last action remains reachable.
         val trailingExtent = homeSwipeExtent(maxWidth.value, actions.size, actionExtent)

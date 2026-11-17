@@ -67,6 +67,15 @@ class UniffiMlsEngine private constructor(private val inner: ChatyMlsEngine) : M
         JoinGroupResult(inner.joinGroupFromWelcome(config.toU(), welcomeBytes, signerBytes).groupId)
     }
 
+    override suspend fun joinGroupFromWelcomePinned(config: MlsGroupConfig, welcomeBytes: ByteArray, signerBytes: ByteArray,
+        pinIdentities: List<ByteArray>, pinKeys: List<ByteArray>, expectedGroupId: ByteArray, expectedEpoch: Long): JoinGroupResult = wrap {
+        JoinGroupResult(inner.joinGroupFromWelcomePinned(config.toU(), welcomeBytes, signerBytes, pinIdentities, pinKeys, expectedGroupId, expectedEpoch.toULong()).groupId)
+    }
+    override suspend fun processMembershipCommitPinned(groupIdBytes: ByteArray, messageBytes: ByteArray,
+        pinIdentities: List<ByteArray>, pinKeys: List<ByteArray>, expectedEpoch: Long): Unit = wrap {
+        inner.processMembershipCommitPinned(groupIdBytes, messageBytes, pinIdentities, pinKeys, expectedEpoch.toULong())
+    }
+
     override suspend fun groupEpoch(groupIdBytes: ByteArray): Long =
         wrap { inner.groupEpoch(groupIdBytes).toLong() }
 
@@ -74,7 +83,12 @@ class UniffiMlsEngine private constructor(private val inner: ChatyMlsEngine) : M
         wrap { inner.groupIsActive(groupIdBytes) }
 
     override suspend fun groupMembers(groupIdBytes: ByteArray): List<MlsMember> = wrap {
-        inner.groupMembers(groupIdBytes).map { MlsMember(credential = it.credential, index = it.index.toInt()) }
+        inner.groupMembers(groupIdBytes).map { MlsMember(credential = it.credential, index = it.index.toInt(), signatureKey = it.signatureKey) }
+    }
+
+    override suspend fun inspectKeyPackagePin(bytes: ByteArray): MlsMember = wrap {
+        val member = inner.inspectKeyPackagePin(bytes)
+        MlsMember(member.credential, member.index.toInt(), member.signatureKey)
     }
 
     override suspend fun addMembers(
@@ -130,6 +144,10 @@ class UniffiMlsEngine private constructor(private val inner: ChatyMlsEngine) : M
                 UProcessedMessageType.STAGED_COMMIT -> ProcessedMessageType.stagedCommit
             },
             applicationMessage = r.applicationMessage,
+            authenticatedSenderIdentity = r.authenticatedSenderIdentity,
+            senderIndex = r.senderIndex?.let { index ->
+                check(index <= Int.MAX_VALUE.toUInt()) { "MLS sender index is out of range." }; index.toInt()
+            },
         )
     }
 
@@ -192,3 +210,6 @@ class UniffiMlsEngine private constructor(private val inner: ChatyMlsEngine) : M
         )
     }
 }
+
+// Previous implementation retained inactive (v5 review):
+//         inner.groupMembers(groupIdBytes).map { MlsMember(credential = it.credential, index = it.index.toInt()) }

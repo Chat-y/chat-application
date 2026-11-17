@@ -156,7 +156,20 @@ fun ComponentOverrideScreen(
             backgroundColor = colors.surface,
             actions = {
                 if (isOverridden) {
-                    TextButton(onClick = {
+                    // Previous stock text action:
+                    // TextButton(onClick = {
+                    //                         scope.launch {
+                    //                             try {
+                    //                                 templateController.removeComponentOverride(component, runtime)
+                    //                                 onMessage(overrideResetSuccess(component.title))
+                    //                             } catch (t: Throwable) {
+                    //                                 onMessage(overrideErrorText(t))
+                    //                             }
+                    //                         }
+                    //                     }) { Text("Reset") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Reset",
+                        onClick = {
                         scope.launch {
                             try {
                                 templateController.removeComponentOverride(component, runtime)
@@ -165,7 +178,8 @@ fun ComponentOverrideScreen(
                                 onMessage(overrideErrorText(t))
                             }
                         }
-                    }) { Text("Reset") }
+                    },
+                    )
                 }
             },
         )

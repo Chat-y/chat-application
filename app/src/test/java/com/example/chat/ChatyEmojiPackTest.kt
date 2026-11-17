@@ -7,16 +7,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatyEmojiPackTest {
-    @Test fun defaultAndLegacyStylesAreChaty() {
-        assertEquals("Chaty", ChatyEmojiPack.normalize(null))
-        assertEquals("Chaty", ChatyEmojiPack.normalize("Chaty Motion"))
-        assertEquals("Chaty", ChatyEmojiPack.normalize(""))
-        assertEquals("Chaty", ChatyEmojiPack.normalize("Chaty"))
+    @Test fun defaultAndLegacyStylesAreAndroidSystem() {
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize(null))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("Chaty Motion"))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize(""))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("Chaty"))
     }
 
-    @Test fun iosIsSelectedOnlyByIos() {
-        assertEquals("iOS", ChatyEmojiPack.normalize("iOS"))
-        assertEquals("iOS", ChatyEmojiPack.normalize("ios"))
+    @Test fun oldIosChoiceNowResolvesToAndroidSystem() {
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("iOS"))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("ios"))
     }
 
     @Test fun fiftyEmojisMapToDistinctFiles() {
@@ -44,12 +44,13 @@ class ChatyEmojiPackTest {
         assertTrue(ChatyEmojiPack.iosSupported(28))
     }
 
-    @Test fun sevenActuallyBundledPackIdentitiesInPickerOrder() {
-        assertEquals(listOf("Chaty", "iOS", "Microsoft", "OpenMoji", "Telegram", "Telegram Lottie", "Drive MOV animations"), ChatyEmojiPack.ORDER)
-        assertEquals("Microsoft", ChatyEmojiPack.normalize("microsoft"))
-        assertEquals("OpenMoji", ChatyEmojiPack.normalize("OPENMOJI"))
-        assertEquals("Telegram", ChatyEmojiPack.normalize("Telegram"))
-        assertEquals("Chaty", ChatyEmojiPack.normalize("Chaty Motion"))
+    @Test fun onlyAndroidSystemIdentityIsSelectable() {
+        // Previous selectable order included all custom packs; now only Android system is allowed.
+        assertEquals(listOf(ChatyEmojiPack.SYSTEM), ChatyEmojiPack.ORDER)
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("microsoft"))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("OPENMOJI"))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("Telegram"))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("Chaty Motion"))
     }
 
     @Test fun codePointPackPaths() {
@@ -60,7 +61,8 @@ class ChatyEmojiPackTest {
     }
 
     @Test fun chatyAndUncoveredTelegramHaveNoPackArt() {
-        assertNull(ChatyEmojiPack.assetPathFor("Chaty", "\uD83D\uDE02"))
+        // Previous null expectation predates retained Chaty-to-OpenMoji asset helper. Display no longer uses it.
+        assertEquals("emoji/openmoji/1F602.png", ChatyEmojiPack.assetPathFor("Chaty", "\uD83D\uDE02"))
         assertNull(ChatyEmojiPack.assetPathFor("Telegram", "\uD83D\uDE02"))
     }
 
@@ -79,7 +81,7 @@ class ChatyEmojiPackTest {
         assertTrue(paths.all { it?.endsWith(".json") == true })
         assertNull(ChatyEmojiPack.lottieAssetPath("😫"))
         assertNull(ChatyEmojiPack.lottieAssetPath("😅😅"))
-        assertEquals("Telegram Lottie", ChatyEmojiPack.normalize("telegram lottie"))
+        assertEquals(ChatyEmojiPack.SYSTEM, ChatyEmojiPack.normalize("telegram lottie"))
         assertEquals(ChatyEmojiPack.lottieAssetPath("🌤"), ChatyEmojiPack.lottieAssetPath("🌤️"))
     }
     @Test fun drivePackSupportsActualGenderedZwjSequencesWithoutChangingOtherStyles() {

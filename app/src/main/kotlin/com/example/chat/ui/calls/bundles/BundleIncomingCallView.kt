@@ -642,8 +642,14 @@ private fun GoogleClassicIncomingCall(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(bottom = 16.dp),
                 ) {
-                    Icon(
-                        Icons.Rounded.KeyboardArrowUp,
+
+//Icon(
+//                        Icons.Rounded.KeyboardArrowUp,
+//                        contentDescription = null,
+//                        tint = callSecondary(),
+//                        modifier = Modifier.offset(y = (if (hintReduced) 0f else hintDy).dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronUp, Icons.Rounded.KeyboardArrowUp,
                         contentDescription = null,
                         tint = callSecondary(),
                         modifier = Modifier.offset(y = (if (hintReduced) 0f else hintDy).dp),

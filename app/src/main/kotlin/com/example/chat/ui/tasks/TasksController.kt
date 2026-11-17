@@ -95,6 +95,17 @@ class TasksController(
     }
     private var loadGeneration = 0L
 
+    /** P5 (Bandi 2026-11-17): last load failure, shown in the not-loaded state.
+     *  Null when the last completed load succeeded or none was attempted. */
+    // Previous unscoped error state retained inactive:
+    // @Volatile var lastLoadError: String? = null
+    //     private set
+    private var loadErrorOwner: OperationOwner? = null
+    private var loadError: String? = null
+    val lastLoadError: String? get() = synchronized(lock) {
+        if (loadErrorOwner?.let(::isCurrent) == true) loadError else null
+    }
+
     /** True only when a completed (200) load for the CURRENT account exists.
      *  False after account switch until the next successful load, so stale
      *  prior-account tasks can neither resolve nor dismiss restored UI state. */
@@ -114,16 +125,42 @@ class TasksController(
         val startedFor = captureOwner()
         // TAS-010: a newer load invalidates older in-flight ones.
         val generation = synchronized(lock) { ++loadGeneration }
-        val fetched = client.listTasks(startedFor.token as? com.example.chat.data.api.ApiAccountScope) ?: return
+        // TAS-NET-1: ApiTasksClient.request() blocks on OkHttp execute(); the Compose callers run on
+        // the main dispatcher, so the call must move to IO or Android throws NetworkOnMainThreadException.
+        val fetched = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.listTasks(startedFor.token as? com.example.chat.data.api.ApiAccountScope)
+        }
+        // // P5: a failed load kept prior state silently and never recomposed the screen.
+        // // Prior: `?: return` on the fetch above, no error, no notifyListeners().
+        // if (fetched == null) {
+        // lastLoadError = "Couldn't load tasks. Check your connection and tap Retry."
+        // notifyListeners()
+        // return
+        // }
+        // lastLoadError = null
+        // synchronized(lock) {
+        // // Previous guard compared only accountKey().
+        // if (generation != loadGeneration || !isCurrent(startedFor)) return
+        // _tasks.clear()
+        // _tasks.addAll(fetched)
+        // loadedAccountKey = startedFor.key
+        // loadedOwner = startedFor.token
+        // hasSnapshot = true
+        // hasCompletedLoad = true
+        // }
+        // Only the newest load for the current owner may publish error or data.
         synchronized(lock) {
-            // Previous guard compared only accountKey().
             if (generation != loadGeneration || !isCurrent(startedFor)) return
-            _tasks.clear()
-            _tasks.addAll(fetched)
-            loadedAccountKey = startedFor.key
-            loadedOwner = startedFor.token
-            hasSnapshot = true
-            hasCompletedLoad = true
+            loadErrorOwner = startedFor
+            loadError = if (fetched == null) "Couldn't load tasks. Check your connection and tap Retry." else null
+            if (fetched != null) {
+                _tasks.clear()
+                _tasks.addAll(fetched)
+                loadedAccountKey = startedFor.key
+                loadedOwner = startedFor.token
+                hasSnapshot = true
+                hasCompletedLoad = true
+            }
         }
         notifyListeners()
     }
@@ -138,10 +175,17 @@ class TasksController(
         dueAtIso: String?,
     ): ChatTask {
         val owner = mutationOwner()
-        val task = client.createTask(title, description, assigneeIds, priority, dueAtIso, owner.token as? com.example.chat.data.api.ApiAccountScope)
+        // TAS-NET-1: blocking client call moved to IO (see loadTasks).
+        val task = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.createTask(title, description, assigneeIds, priority, dueAtIso, owner.token as? com.example.chat.data.api.ApiAccountScope)
+        }
         // Previous completion unconditionally inserted into the current cache.
         synchronized(lock) {
             requireCurrent(owner)
+            // A list request started before this confirmed create may contain an older
+            // snapshot. Invalidate its generation before publishing the new server task.
+            // Later explicit loads still replace the cache normally.
+            ++loadGeneration
             _tasks.add(0, task)
             // A create marks cache ownership, not a successful complete list load.
             loadedAccountKey = owner.key
@@ -156,7 +200,10 @@ class TasksController(
      *  server did not confirm (TAS-001), so callers can report it. */
     suspend fun updateTaskStatus(taskId: String, status: TaskStatus): Boolean {
         val owner = mutationOwner()
-        val updated = client.updateTaskStatus(taskId, status, owner.token as? com.example.chat.data.api.ApiAccountScope) ?: return false
+        // TAS-NET-1: blocking client call moved to IO (see loadTasks).
+        val updated = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.updateTaskStatus(taskId, status, owner.token as? com.example.chat.data.api.ApiAccountScope)
+        } ?: return false
         synchronized(lock) {
             // Previously applied the response even after an account switch.
             requireCurrent(owner)
@@ -177,8 +224,10 @@ class TasksController(
         dueAtIso: String?,
     ): Boolean {
         val owner = mutationOwner()
-        val updated = client.updateTask(taskId, title, description, assigneeIds, priority, dueAtIso, owner.token as? com.example.chat.data.api.ApiAccountScope)
-            ?: return false
+        // TAS-NET-1: blocking client call moved to IO (see loadTasks).
+        val updated = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.updateTask(taskId, title, description, assigneeIds, priority, dueAtIso, owner.token as? com.example.chat.data.api.ApiAccountScope)
+        } ?: return false
         synchronized(lock) {
             // Previously applied the response even after an account switch.
             requireCurrent(owner)
@@ -192,7 +241,10 @@ class TasksController(
     /** Dart deleteTask: remove locally only on 200. */
     suspend fun deleteTask(taskId: String): Boolean {
         val owner = mutationOwner()
-        if (!client.deleteTask(taskId, owner.token as? com.example.chat.data.api.ApiAccountScope)) return false
+        // TAS-NET-1: blocking client call moved to IO (see loadTasks).
+        if (!kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.deleteTask(taskId, owner.token as? com.example.chat.data.api.ApiAccountScope)
+        }) return false
         // Previous completion removed from whichever cache was current.
         synchronized(lock) { requireCurrent(owner); _tasks.removeAll { it.id == taskId } }
         notifyListeners()

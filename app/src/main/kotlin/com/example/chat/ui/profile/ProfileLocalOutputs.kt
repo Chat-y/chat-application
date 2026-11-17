@@ -21,6 +21,8 @@ internal object ProfileLocalOutputs {
                 val f = File(path)
                 val parent = f.parentFile?.canonicalFile ?: return false
                 return (parent == cache && f.name.matches(Regex("(?:chaty_pick_|cropped_avatar_|cropped_banner_)[a-zA-Z0-9-]+\\.(?:jpg|png)"))) ||
+                    // New video outputs use a dedicated bounded-picker prefix, not arbitrary cache files.
+                    (parent == cache && f.name.matches(Regex("chaty_banner_[0-9]+\\.(?:mp4|gif)"))) ||
                     (parent == terminal.canonicalFile && f.name.matches(Regex("capture_[a-f0-9-]+\\.jpg")))
             }
             val restored = prefs.getStringSet("paths", emptySet())!!.filter(::allowed).toSet()

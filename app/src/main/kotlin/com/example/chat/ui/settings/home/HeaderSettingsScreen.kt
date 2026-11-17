@@ -513,7 +513,10 @@ private fun HeaderReferenceSettingRow(
                 )
             }
         } else if (showChevron) {
-            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
+
+//Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
+//                tint = colors.primary, modifier = Modifier.padding(horizontal = 8.dp).size(20.dp))
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight, Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
                 tint = colors.primary, modifier = Modifier.padding(horizontal = 8.dp).size(20.dp))
         }
     }

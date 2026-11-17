@@ -138,10 +138,12 @@ fun ChatyNavigationRenderer(
                     NavItemWrapper(item.onTap, reducedMotion) {
                         val fill by animateColorAsState(if (item.isSelected) active else Color.Transparent, tween(fastMs, easing = enter), label = "cr")
                         Row(Modifier.background(fill, RoundedCornerShape(16.dp)).padding(horizontal = 18.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                            BadgeAnchor(item.badgeCount) { NavigationItemIcon(item, null, Modifier.size(20.dp), tint = if (item.isSelected) Color.White else inactive) }
+                            // Previous: BadgeAnchor(item.badgeCount) { NavigationItemIcon(item, null, Modifier.size(20.dp), tint = if (item.isSelected) Color.White else inactive) }
+                            BadgeAnchor(item.badgeCount) { NavigationItemIcon(item, null, Modifier.size(20.dp), tint = if (item.isSelected) com.example.chat.ui.kit.chatyReadableOn(active, c.onPrimary, c.foreground) else inactive) }
                             if (item.isSelected) {
                                 Spacer(Modifier.width(6.dp))
-                                Text(item.label, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.W700)
+                                // Previous: Text(item.label, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.W700)
+                                Text(item.label, color = com.example.chat.ui.kit.chatyReadableOn(active, c.onPrimary, c.foreground), fontSize = 12.5.sp, fontWeight = FontWeight.W700)
                             }
                         }
                     }
@@ -317,7 +319,8 @@ private fun BadgeAnchor(count: Int, child: @Composable () -> Unit) {
                 .padding(horizontal = 4.5.dp, vertical = 1.5.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(display, color = Color.White, fontSize = 9.5.sp, fontWeight = FontWeight.W800, lineHeight = 9.5.sp)
+            // Previous: Text(display, color = Color.White, fontSize = 9.5.sp, fontWeight = FontWeight.W800, lineHeight = 9.5.sp)
+            Text(display, color = LocalAppColors.current.onError, fontSize = 9.5.sp, fontWeight = FontWeight.W800, lineHeight = 9.5.sp)
         }
     }
 }

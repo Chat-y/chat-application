@@ -122,40 +122,64 @@ fun ChatFolderChips(
     ) {
         item {
             Row {
-                TextButton(
+                // Previous stock text action:
+                // TextButton(
+                //                     enabled = selectedFolderIndex > 0,
+                //                     onClick = {
+                //                         onSelect(folders.getOrNull(selectedFolderIndex - 2)?.id)
+                //                     },
+                //                 ) { Text("Previous folder", color = if (selectedFolderIndex > 0) foreground else foreground.copy(alpha = 0.38f)) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Previous folder",
                     enabled = selectedFolderIndex > 0,
                     onClick = {
                         onSelect(folders.getOrNull(selectedFolderIndex - 2)?.id)
                     },
-                ) { Text("Previous folder", color = if (selectedFolderIndex > 0) foreground else foreground.copy(alpha = 0.38f)) }
-                TextButton(
+                    color = if (selectedFolderIndex > 0) foreground else foreground.copy(alpha = 0.38f),
+                )
+                // Previous stock text action:
+                // TextButton(
+                //                     enabled = selectedFolderIndex < folders.size,
+                //                     onClick = {
+                //                         folders.getOrNull(selectedFolderIndex)?.let { onSelect(it.id) }
+                //                     },
+                //                 ) { Text("Next folder", color = if (selectedFolderIndex < folders.size) foreground else foreground.copy(alpha = 0.38f)) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Next folder",
                     enabled = selectedFolderIndex < folders.size,
                     onClick = {
                         folders.getOrNull(selectedFolderIndex)?.let { onSelect(it.id) }
                     },
-                ) { Text("Next folder", color = if (selectedFolderIndex < folders.size) foreground else foreground.copy(alpha = 0.38f)) }
+                    color = if (selectedFolderIndex < folders.size) foreground else foreground.copy(alpha = 0.38f),
+                )
             }
         }
         item { FolderChip("All folders", selectedFolderId == null, accent, card, surface, foreground, onAccent) { onSelect(null) } }
         items(folders,key={it.id}) { folder ->
-            Box(
-                Modifier
-                    .background(if (folder.id == selectedFolderId) accent else card, RoundedCornerShape(16.dp))
-                    .border(1.dp, surface, RoundedCornerShape(16.dp))
-                    .heightIn(min=48.dp)
-                    .semantics {selected=folder.id==selectedFolderId}
-                    .combinedClickable(role=Role.Tab,
-                        onClick={onSelect(if(selectedFolderId==folder.id) null else folder.id)},
-                        onLongClickLabel="Manage folder",onLongClick={manageFolder=folder})
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            ) {
-                Column {
-                Text(folder.name, color = if (folder.id == selectedFolderId) onAccent else foreground, fontSize = 13.sp)
-                    badgeFor?.invoke(folder.id)?.takeIf { it.isNotBlank() }?.let { badge ->
-                        Text(badge, color = if (folder.id == selectedFolderId) onAccent else foreground, fontSize = 11.sp)
-                    }
-                }
-            }
+            // Box(
+            // Modifier
+            // .background(if (folder.id == selectedFolderId) accent else card, RoundedCornerShape(16.dp))
+            // .border(1.dp, surface, RoundedCornerShape(16.dp))
+            // .heightIn(min=48.dp)
+            // .semantics {selected=folder.id==selectedFolderId}
+            // .combinedClickable(role=Role.Tab,
+            // onClick={onSelect(if(selectedFolderId==folder.id) null else folder.id)},
+            // onLongClickLabel="Manage folder",onLongClick={manageFolder=folder})
+            // .padding(horizontal = 12.dp, vertical = 6.dp),
+            // ) {
+            // Column {
+            // Text(folder.name, color = if (folder.id == selectedFolderId) onAccent else foreground, fontSize = 13.sp)
+            // badgeFor?.invoke(folder.id)?.takeIf { it.isNotBlank() }?.let { badge ->
+            // Text(badge, color = if (folder.id == selectedFolderId) onAccent else foreground, fontSize = 11.sp)
+            // }
+            // }
+            // }
+            com.example.chat.ui.kit.ChatyChoiceTile(
+                label = folder.name, selected = folder.id == selectedFolderId, role = Role.Tab,
+                onClick = { onSelect(if (selectedFolderId == folder.id) null else folder.id) },
+                onLongClick = { manageFolder = folder }, onLongClickLabel = "Manage folder",
+                supportingText = badgeFor?.invoke(folder.id)?.takeIf { it.isNotBlank() },
+            )
         }
         item {FolderChip("+ New folder", false, accent, card, surface, foreground, onAccent) { createOpen = true }}
         item { FolderChip("Find folder", false, accent, card, surface, foreground, onAccent) { pickerOpen = true } }
@@ -173,21 +197,39 @@ fun ChatFolderChips(
             title = { Text("Find a local folder") },
             text = {
                 Column {
-                    OutlinedTextField(value = query, onValueChange = { query = it.take(100) },
-                        label = { Text("Folder name, not messages") }, singleLine = true)
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,value = query, onValueChange = { query = it.take(100) },
+                        label = "Folder name, not messages", singleLine = true)
+                    // OutlinedTextField(value = query, onValueChange = { query = it.take(100) },
+                    // label = { Text("Folder name, not messages") }, singleLine = true)
                     Text("Current: ${folders.firstOrNull { it.id == selectedFolderId }?.name ?: "All folders"}")
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
                         items(matches, key = { it.id }) { folder ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = { onSelect(folder.id); pickerOpen = false }) { Text(folder.name) }
-                                TextButton(onClick = { manageFolder = folder; pickerOpen = false }) { Text("Manage") }
+                                // Previous stock text action:
+                                // TextButton(onClick = { onSelect(folder.id); pickerOpen = false }) { Text(folder.name) }
+                                com.example.chat.ui.kit.ChatyTextButton(
+                                    label = folder.name,
+                                    onClick = { onSelect(folder.id); pickerOpen = false },
+                                )
+                                // Previous stock text action:
+                                // TextButton(onClick = { manageFolder = folder; pickerOpen = false }) { Text("Manage") }
+                                com.example.chat.ui.kit.ChatyTextButton(
+                                    label = "Manage",
+                                    onClick = { manageFolder = folder; pickerOpen = false },
+                                )
                             }
                         }
                         if (matches.isEmpty()) item { Text("No local folders match.") }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { pickerOpen = false }) { Text("Close") } },
+            confirmButton = { // Previous stock text action:
+            // TextButton(onClick = { pickerOpen = false }) { Text("Close") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Close",
+                onClick = { pickerOpen = false },
+            ) },
         )
     }
 
@@ -215,8 +257,11 @@ fun ChatFolderChips(
             title = { Text("Duplicate local folder") },
             text = {
                 Column {
-                    OutlinedTextField(value = copyName, onValueChange = { copyName = it; copyError = null },
-                        label = { Text("New folder name (24 characters)") }, singleLine = true, enabled = !writer.locked)
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,value = copyName, onValueChange = { copyName = it; copyError = null },
+                        label = "New folder name (24 characters)", singleLine = true, enabled = !writer.locked)
+                    // OutlinedTextField(value = copyName, onValueChange = { copyName = it; copyError = null },
+                    // label = { Text("New folder name (24 characters)") }, singleLine = true, enabled = !writer.locked)
                     Text("Copy ${copiedIds.size} member references to a new local folder. No chats are created, invited or synced.")
                     Text("${copiedIds.size - visibleMembers.size} references are not shown; hidden or locked names stay private.")
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
@@ -228,16 +273,35 @@ fun ChatFolderChips(
                 }
             },
             confirmButton = {
-                TextButton(enabled = !writer.locked, onClick = {
+                // Previous stock text action:
+                // TextButton(enabled = !writer.locked, onClick = {
+                //                     if ((if (resolvedConversationIds == null) folders else writer.snapshot.folders).none { it.id == source.id }) {
+                //                         copyError = "The source is no longer available. Close and choose again."
+                //                     } else {
+                //                         writer.save(chipsScope, listOf(FolderDraft(null, copyName, copiedIds)),
+                //                             resolvedConversationIds) { id -> duplicateFolder = null; onSelect(id) }
+                //                     }
+                //                 }) { Text("Create local copy") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Create local copy",
+                    enabled = !writer.locked,
+                    onClick = {
                     if ((if (resolvedConversationIds == null) folders else writer.snapshot.folders).none { it.id == source.id }) {
                         copyError = "The source is no longer available. Close and choose again."
                     } else {
                         writer.save(chipsScope, listOf(FolderDraft(null, copyName, copiedIds)),
                             resolvedConversationIds) { id -> duplicateFolder = null; onSelect(id) }
                     }
-                }) { Text("Create local copy") }
+                },
+                )
             },
-            dismissButton = { TextButton(enabled = !writer.busy, onClick = { duplicateFolder = null }) { Text("Cancel") } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(enabled = !writer.busy, onClick = { duplicateFolder = null }) { Text("Cancel") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                enabled = !writer.busy,
+                onClick = { duplicateFolder = null },
+            ) },
         )
     }
 
@@ -250,20 +314,39 @@ fun ChatFolderChips(
             text = {
                 Column {
                     Text("Folders are stored on this device only.")
-                    OutlinedTextField(value = name, onValueChange = { name = it },
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,value = name, onValueChange = { name = it },
                         enabled = !writer.locked,
-                        label = { Text("Folder name (24 characters)") }, singleLine = true)
+                        label = "Folder name (24 characters)", singleLine = true)
+                    // OutlinedTextField(value = name, onValueChange = { name = it },
+                    // enabled = !writer.locked,
+                    // label = { Text("Folder name (24 characters)") }, singleLine = true)
                     FolderSaveFeedback(writer, chipsScope, { resolvedConversationIds },
                         onSaved = { id -> onSelect(id); createOpen = false })
                 }
             },
             confirmButton = {
-                TextButton(enabled = !writer.locked, onClick = {
+                // Previous stock text action:
+                // TextButton(enabled = !writer.locked, onClick = {
+                //                     writer.save(chipsScope, listOf(FolderDraft(null, name, emptySet(), writeMembers = false)),
+                //                         resolvedConversationIds) { id -> onSelect(id); createOpen = false }
+                //                 }) { Text("Create") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Create",
+                    enabled = !writer.locked,
+                    onClick = {
                     writer.save(chipsScope, listOf(FolderDraft(null, name, emptySet(), writeMembers = false)),
                         resolvedConversationIds) { id -> onSelect(id); createOpen = false }
-                }) { Text("Create") }
+                },
+                )
             },
-            dismissButton = { TextButton(enabled = !writer.busy, onClick = { createOpen = false }) { Text("Cancel") } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(enabled = !writer.busy, onClick = { createOpen = false }) { Text("Cancel") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                enabled = !writer.busy,
+                onClick = { createOpen = false },
+            ) },
         )
     }
 
@@ -280,8 +363,18 @@ fun ChatFolderChips(
         val candidates = inspectable.filter { it.title.contains(memberQuery.trim(), ignoreCase = true) }
         if(confirmDelete) AlertDialog(onDismissRequest={confirmDelete=false},
             title={Text("Delete folder?")},text={Text("This removes the folder only. Your chats are kept.")},
-            confirmButton={TextButton(onClick={store.deleteFolder(folder.id);if(selectedFolderId==folder.id) onSelect(null);manageFolder=null}) {Text("Delete")}},
-            dismissButton={TextButton(onClick={confirmDelete=false}) {Text("Cancel")}})
+            confirmButton={// Previous stock text action:
+            // TextButton(onClick={store.deleteFolder(folder.id);if(selectedFolderId==folder.id) onSelect(null);manageFolder=null}) {Text("Delete")}
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Delete",
+                onClick = {store.deleteFolder(folder.id);if(selectedFolderId==folder.id) onSelect(null);manageFolder=null},
+            )},
+            dismissButton={// Previous stock text action:
+            // TextButton(onClick={confirmDelete=false}) {Text("Cancel")}
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = {confirmDelete=false},
+            )})
         AlertDialog(
             onDismissRequest = { if (!writer.busy) manageFolder = null },
             title = { Text("Manage folder") },
@@ -298,18 +391,38 @@ fun ChatFolderChips(
                             reviewStale = false
                         }, onSaved = { manageFolder = null })
                     Text("Manual membership: chats were explicitly included in this local folder. No rule evaluator is active.", fontSize = 12.sp)
-                    TextButton(enabled = !writer.locked, onClick = { duplicateFolder = folder; manageFolder = null }) { Text("Duplicate folder") }
+                    // Previous stock text action:
+                    // TextButton(enabled = !writer.locked, onClick = { duplicateFolder = folder; manageFolder = null }) { Text("Duplicate folder") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Duplicate folder",
+                        enabled = !writer.locked,
+                        onClick = { duplicateFolder = folder; manageFolder = null },
+                    )
                     if (staleIds == null) Text("Missing-member count unavailable until this account's complete chat IDs are loaded.", fontSize = 12.sp)
                     else {
                         Text("Missing members: ${staleIds.size}", fontSize = 12.sp)
-                        if (staleIds.isNotEmpty()) TextButton(enabled = !writer.locked, onClick = { reviewStale = true }) { Text("Review stale reference removal") }
+                        if (staleIds.isNotEmpty()) // Previous stock text action:
+                        // TextButton(enabled = !writer.locked, onClick = { reviewStale = true }) { Text("Review stale reference removal") }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = "Review stale reference removal",
+                            enabled = !writer.locked,
+                            onClick = { reviewStale = true },
+                        )
                     }
-                    OutlinedTextField(value = name, enabled = !writer.locked, onValueChange = { name = it },
-                        label = { Text("Folder name (24 characters)") }, singleLine = true,
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,value = name, enabled = !writer.locked, onValueChange = { name = it },
+                        label = "Folder name (24 characters)", singleLine = true,
                         modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = memberQuery, onValueChange = { memberQuery = it.take(100) },
-                        label = { Text("Add chats") }, singleLine = true,
+                    // OutlinedTextField(value = name, enabled = !writer.locked, onValueChange = { name = it },
+                    // label = { Text("Folder name (24 characters)") }, singleLine = true,
+                    // modifier = Modifier.fillMaxWidth())
+                    com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,value = memberQuery, onValueChange = { memberQuery = it.take(100) },
+                        label = "Add chats", singleLine = true,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                    // OutlinedTextField(value = memberQuery, onValueChange = { memberQuery = it.take(100) },
+                    // label = { Text("Add chats") }, singleLine = true,
+                    // modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                     Text(
                         "Pending changes: ${(members - originalMembers).size} added, ${(originalMembers - members).size} removed. Cancel closes without undoing any already accepted save.",
                         color = foreground,
@@ -337,17 +450,40 @@ fun ChatFolderChips(
                 }
             },
             confirmButton = {
-                TextButton(enabled = !writer.locked, onClick = {
+                // Previous stock text action:
+                // TextButton(enabled = !writer.locked, onClick = {
+                //                     writer.save(chipsScope, listOf(FolderDraft(folder.id, name, members)),
+                //                         resolvedConversationIds) { manageFolder = null }
+                //                 }) { Text("Done") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Done",
+                    enabled = !writer.locked,
+                    onClick = {
                     writer.save(chipsScope, listOf(FolderDraft(folder.id, name, members)),
                         resolvedConversationIds) { manageFolder = null }
-                }) { Text("Done") }
+                },
+                )
             },
             dismissButton = {
                 Row {
-                    TextButton(enabled = !writer.busy, onClick = { manageFolder = null }) { Text("Cancel") }
-                TextButton(enabled = !writer.locked, onClick = {
+                    // Previous stock text action:
+                    // TextButton(enabled = !writer.busy, onClick = { manageFolder = null }) { Text("Cancel") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Cancel",
+                        enabled = !writer.busy,
+                        onClick = { manageFolder = null },
+                    )
+                // Previous stock text action:
+                // TextButton(enabled = !writer.locked, onClick = {
+                //                     confirmDelete=true
+                //                 }) { Text("Delete") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Delete",
+                    enabled = !writer.locked,
+                    onClick = {
                     confirmDelete=true
-                }) { Text("Delete") }
+                },
+                )
                 }
             },
         )
@@ -355,8 +491,18 @@ fun ChatFolderChips(
             onDismissRequest = { reviewStale = false },
             title = { Text("Remove stale references?") },
             text = { Text("Remove ${staleIds.size} references that do not resolve in this active account. This does not mean chats were deleted remotely. Changes remain pending until Done.") },
-            confirmButton = { TextButton(onClick = { members = members - staleIds; reviewStale = false }) { Text("Stage removal") } },
-            dismissButton = { TextButton(onClick = { reviewStale = false }) { Text("Cancel") } },
+            confirmButton = { // Previous stock text action:
+            // TextButton(onClick = { members = members - staleIds; reviewStale = false }) { Text("Stage removal") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Stage removal",
+                onClick = { members = members - staleIds; reviewStale = false },
+            ) },
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { reviewStale = false }) { Text("Cancel") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = { reviewStale = false },
+            ) },
         )
     }
 }
@@ -372,16 +518,19 @@ private fun FolderChip(
     onAccent: Color,
     onTap: () -> Unit,
 ) {
-    Box(
-        Modifier
-            .background(if (selected) accent else card, RoundedCornerShape(16.dp))
-            .border(1.dp, surface, RoundedCornerShape(16.dp))
-            .heightIn(min=48.dp)
-            .selectable(selected=selected,role=Role.Tab,onClick=onTap)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    ) {
-        Text(label, color = if (selected) onAccent else foreground, fontSize = 13.sp)
-    }
+    // Box(
+    // Modifier
+    // .background(if (selected) accent else card, RoundedCornerShape(16.dp))
+    // .border(1.dp, surface, RoundedCornerShape(16.dp))
+    // .heightIn(min=48.dp)
+    // .selectable(selected=selected,role=Role.Tab,onClick=onTap)
+    // .padding(horizontal = 12.dp, vertical = 6.dp),
+    // ) {
+    // Text(label, color = if (selected) onAccent else foreground, fontSize = 13.sp)
+    // }
+    com.example.chat.ui.kit.ChatyChoiceTile(
+        label = label, selected = selected, onClick = onTap, role = Role.Tab,
+    )
 }
 
 /** Local references only. The caller has already removed protected chats from this list. */
@@ -427,25 +576,47 @@ private fun FolderMembershipToolsDialog(
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
                 Row(Modifier.horizontalScroll(rememberScrollState())) {
                     listOf("Inspect", "Unfiled", "Edit memberships").forEach { value ->
-                        TextButton(onClick = { mode = value; error = null }) { Text(if (mode == value) "[$value]" else value) }
+                        // Previous stock text action:
+                        // TextButton(onClick = { mode = value; error = null }) { Text(if (mode == value) "[$value]" else value) }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = if (mode == value) "[$value]" else value,
+                            onClick = { mode = value; error = null },
+                        )
                     }
                 }
                 Text("Only caller-authorized visible chats are shown. Folder labels are local metadata, not unread counts.", fontSize = 12.sp)
-                OutlinedTextField(value = chatQuery, onValueChange = { chatQuery = it.take(100) },
-                    label = { Text("Visible chat names") }, singleLine = true)
+                com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,value = chatQuery, onValueChange = { chatQuery = it.take(100) },
+                    label = "Visible chat names", singleLine = true)
+                // OutlinedTextField(value = chatQuery, onValueChange = { chatQuery = it.take(100) },
+                // label = { Text("Visible chat names") }, singleLine = true)
                 if (mode == "Edit memberships") {
                     Text("${chosenIds.size} selected chats; ${targetFolderIds.size} target folders", fontSize = 12.sp)
                     if (unavailableSelection.isNotEmpty()) Text("Selection includes unavailable or protected chats. Clear it before choosing visible chats.", fontSize = 12.sp)
-                    TextButton(onClick = { chosenIds = emptySet(); error = null }) { Text("Clear selection") }
+                    // Previous stock text action:
+                    // TextButton(onClick = { chosenIds = emptySet(); error = null }) { Text("Clear selection") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Clear selection",
+                        onClick = { chosenIds = emptySet(); error = null },
+                    )
                     Row(Modifier.horizontalScroll(rememberScrollState())) {
                         listOf("Add these chats", "Replace folder members", "Remove from this folder").forEach { value ->
-                            TextButton(enabled = value != "Remove from this folder" || currentFolder != null,
-                                onClick = { action = value; error = null }) { Text(if (action == value) "[$value]" else value) }
+                            // Previous stock text action:
+                            // TextButton(enabled = value != "Remove from this folder" || currentFolder != null,
+                            //                                 onClick = { action = value; error = null }) { Text(if (action == value) "[$value]" else value) }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = if (action == value) "[$value]" else value,
+                                enabled = value != "Remove from this folder" || currentFolder != null,
+                                onClick = { action = value; error = null },
+                            )
                         }
                     }
                     if (action == "Remove from this folder") Text("Current folder: ${currentFolder?.name ?: "None"}")
-                    else OutlinedTextField(value = folderQuery, onValueChange = { folderQuery = it.take(100) },
-                        label = { Text("Find target folders by name") }, singleLine = true)
+                    else com.example.chat.ui.kit.ChatyTaskField(
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,value = folderQuery, onValueChange = { folderQuery = it.take(100) },
+                        label = "Find target folders by name", singleLine = true)
+                    // OutlinedTextField(value = folderQuery, onValueChange = { folderQuery = it.take(100) },
+                    // label = { Text("Find target folders by name") }, singleLine = true)
                 }
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
                     if (mode == "Edit memberships" && action != "Remove from this folder") {
@@ -464,7 +635,12 @@ private fun FolderMembershipToolsDialog(
                                 if (mode == "Edit memberships") Checkbox(checked = chat.id in chosenIds,
                                     onCheckedChange = { checked -> chosenIds = if (checked) chosenIds + chat.id else chosenIds - chat.id })
                                 Text(chat.title, modifier = Modifier.weight(1f))
-                                if (mode == "Unfiled" && onOpenConversation != null) TextButton(onClick = { onDismiss(); onOpenConversation(chat.id) }) { Text("Open") }
+                                if (mode == "Unfiled" && onOpenConversation != null) // Previous stock text action:
+                                // TextButton(onClick = { onDismiss(); onOpenConversation(chat.id) }) { Text("Open") }
+                                com.example.chat.ui.kit.ChatyTextButton(
+                                    label = "Open",
+                                    onClick = { onDismiss(); onOpenConversation(chat.id) },
+                                )
                             }
                             if (mode == "Inspect") {
                                 val labels = folders.filter { chat.id in membershipByFolder[it.id].orEmpty() }.map { it.name }
@@ -480,7 +656,28 @@ private fun FolderMembershipToolsDialog(
             }
         },
         confirmButton = {
-            if (mode == "Edit memberships") TextButton(
+            if (mode == "Edit memberships") // Previous stock text action:
+            // TextButton(
+            //                 enabled = chosenIds.isNotEmpty() && unavailableSelection.isEmpty() && targetFolderIds.isNotEmpty() && !store.isCorrupted(),
+            //                 onClick = {
+            //                     val activeFolders = store.folders().map { it.id }.toSet()
+            //                     if (!activeFolders.containsAll(targetFolderIds)) error = "A target folder is no longer available. Choose again."
+            //                     else {
+            //                         writer = FolderWriteSession(store)
+            //                         expected = targetFolderIds.associateWith { if (knownConversationIds == null) store.memberIds(it) else writer.snapshot.members[it].orEmpty() }
+            //                         reviewedIds = chosenIds.toSet()
+            //                         pending = expected.mapValues { (_, before) ->
+            //                             when (action) {
+            //                                 "Replace folder members" -> chosenIds.toSet()
+            //                                 "Remove from this folder" -> before - chosenIds
+            //                                 else -> before + chosenIds
+            //                             }
+            //                         }
+            //                     }
+            //                 },
+            //             ) { Text("Preview changes") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Preview changes",
                 enabled = chosenIds.isNotEmpty() && unavailableSelection.isEmpty() && targetFolderIds.isNotEmpty() && !store.isCorrupted(),
                 onClick = {
                     val activeFolders = store.folders().map { it.id }.toSet()
@@ -498,10 +695,21 @@ private fun FolderMembershipToolsDialog(
                         }
                     }
                 },
-            ) { Text("Preview changes") }
-            else TextButton(onClick = { mode = "Edit memberships" }) { Text("Edit memberships") }
+            )
+            else // Previous stock text action:
+            // TextButton(onClick = { mode = "Edit memberships" }) { Text("Edit memberships") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Edit memberships",
+                onClick = { mode = "Edit memberships" },
+            )
         },
-        dismissButton = { TextButton(enabled = !writer.busy, onClick = onDismiss) { Text("Close") } },
+        dismissButton = { // Previous stock text action:
+        // TextButton(enabled = !writer.busy, onClick = onDismiss) { Text("Close") }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = "Close",
+            enabled = !writer.busy,
+            onClick = onDismiss,
+        ) },
     )
     pending?.let { changes ->
         AlertDialog(
@@ -529,7 +737,36 @@ private fun FolderMembershipToolsDialog(
                 }
             },
             confirmButton = {
-                TextButton(enabled = !writer.locked && writer.result == null, onClick = {
+                // Previous stock text action:
+                // TextButton(enabled = !writer.locked && writer.result == null, onClick = {
+                //                     if (!visibleIds.containsAll(reviewedIds)) {
+                //                         error = "The visible chat scope changed. Review your selection again."
+                //                         pending = null
+                //                     } else if (knownConversationIds == null && changes.keys.any { id ->
+                //                         store.folders().none { it.id == id } || store.memberIds(id) != expected[id]
+                //                     }) {
+                //                         error = "Folder membership changed while reviewing. Nothing was changed; review again."
+                //                         pending = null
+                //                     } else if (knownConversationIds != null && changes.keys.any { id ->
+                //                         val name = writer.snapshot.folders.firstOrNull { it.id == id }?.name
+                //                         name == null || boundedEditorName(name) != name
+                //                     }) {
+                //                         error = "A target folder needs an explicit name review before membership can be saved. Manage that folder first."
+                //                         pending = null
+                //                     } else {
+                //                         writer.save(scope, changes.map { (id, ids) ->
+                //                             FolderDraft(id, (if (knownConversationIds == null) folders else writer.snapshot.folders).firstOrNull { it.id == id }?.name.orEmpty(), ids, rename = false)
+                //                         }, knownConversationIds) {
+                //                             error = if (writer.durableConfirmed) "All ${changes.size} local folder saves are confirmed durable."
+                //                                 else "Updated local folders in memory only. Durable storage and complete member validation are not confirmed."
+                //                             pending = null
+                //                         }
+                //                     }
+                //                 }) { Text(if (action == "Replace folder members") "Confirm replacement" else "Confirm local changes") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = if (action == "Replace folder members") "Confirm replacement" else "Confirm local changes",
+                    enabled = !writer.locked && writer.result == null,
+                    onClick = {
                     if (!visibleIds.containsAll(reviewedIds)) {
                         error = "The visible chat scope changed. Review your selection again."
                         pending = null
@@ -553,9 +790,16 @@ private fun FolderMembershipToolsDialog(
                             pending = null
                         }
                     }
-                }) { Text(if (action == "Replace folder members") "Confirm replacement" else "Confirm local changes") }
+                },
+                )
             },
-            dismissButton = { TextButton(enabled = !writer.busy, onClick = { pending = null }) { Text("Cancel") } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(enabled = !writer.busy, onClick = { pending = null }) { Text("Cancel") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                enabled = !writer.busy,
+                onClick = { pending = null },
+            ) },
         )
     }
 
@@ -719,13 +963,25 @@ private fun FolderSaveFeedback(
     message?.let { Text(it, fontSize = 12.sp) }
     if (status != null && status != FolderSaveStatus.DURABLE) {
         Text("${writer.completed} folder saves confirmed durable in this operation.", fontSize = 12.sp)
-        if (status == FolderSaveStatus.STORAGE_FAILURE) TextButton(
+        if (status == FolderSaveStatus.STORAGE_FAILURE) // Previous stock text action:
+        // TextButton(
+        //             enabled = !writer.busy && knownIds() != null && writer.result?.retryToken != null,
+        //             onClick = { writer.retry(scope, knownIds(), onSaved) },
+        //         ) { Text("Retry exact save") }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = "Retry exact save",
             enabled = !writer.busy && knownIds() != null && writer.result?.retryToken != null,
             onClick = { writer.retry(scope, knownIds(), onSaved) },
-        ) { Text("Retry exact save") }
-        TextButton(enabled = !writer.busy, onClick = { writer.reload(); onReload() }) {
-            Text("Reload current data and review")
-        }
+        )
+        // Previous stock text action:
+        // TextButton(enabled = !writer.busy, onClick = { writer.reload(); onReload() }) {
+        //             Text("Reload current data and review")
+        //         }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = "Reload current data and review",
+            enabled = !writer.busy,
+            onClick = { writer.reload(); onReload() },
+        )
     }
 }
 
@@ -751,3 +1007,19 @@ private fun rememberFolderWriteScope(store: ChatFolderStore): CoroutineScope {
     DisposableEffect(scope) { onDispose { scope.cancel() } }
     return scope
 }
+
+// Complete original-line retention for review (inactive).
+            //             confirmButton = { TextButton(onClick = { pickerOpen = false }) { Text("Close") } },
+            //             dismissButton = { TextButton(enabled = !writer.busy, onClick = { duplicateFolder = null }) { Text("Cancel") } },
+            //             dismissButton = { TextButton(enabled = !writer.busy, onClick = { createOpen = false }) { Text("Cancel") } },
+            //             confirmButton={TextButton(onClick={store.deleteFolder(folder.id);if(selectedFolderId==folder.id) onSelect(null);manageFolder=null}) {Text("Delete")}},
+            //             dismissButton={TextButton(onClick={confirmDelete=false}) {Text("Cancel")}})
+                        //                         if (staleIds.isNotEmpty()) TextButton(enabled = !writer.locked, onClick = { reviewStale = true }) { Text("Review stale reference removal") }
+            //             confirmButton = { TextButton(onClick = { members = members - staleIds; reviewStale = false }) { Text("Stage removal") } },
+            //             dismissButton = { TextButton(onClick = { reviewStale = false }) { Text("Cancel") } },
+                                //                                 if (mode == "Unfiled" && onOpenConversation != null) TextButton(onClick = { onDismiss(); onOpenConversation(chat.id) }) { Text("Open") }
+            //             if (mode == "Edit memberships") TextButton(
+            //             else TextButton(onClick = { mode = "Edit memberships" }) { Text("Edit memberships") }
+        //         dismissButton = { TextButton(enabled = !writer.busy, onClick = onDismiss) { Text("Close") } },
+            //             dismissButton = { TextButton(enabled = !writer.busy, onClick = { pending = null }) { Text("Cancel") } },
+        //         if (status == FolderSaveStatus.STORAGE_FAILURE) TextButton(

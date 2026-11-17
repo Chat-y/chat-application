@@ -281,9 +281,14 @@ fun ConversationMoreOptionsScreen(preferences: ChatyPreferencesController, onBac
             }
             val emojiPresetContent: @Composable () -> Unit = {
                 if (extraOptions) {
-                androidx.compose.material3.TextButton(onClick = { model.onEvent(MoreOptionsEvent.ResetEmojiStyle) }) {
-                    Text(strings.getString(com.example.chat.R.string.conv_proposal_reset_emoji_style))
-                }
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = { model.onEvent(MoreOptionsEvent.ResetEmojiStyle) }) {
+                //                     Text(strings.getString(com.example.chat.R.string.conv_proposal_reset_emoji_style))
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = strings.getString(com.example.chat.R.string.conv_proposal_reset_emoji_style),
+                    onClick = { model.onEvent(MoreOptionsEvent.ResetEmojiStyle) },
+                )
                 ConversationEmojiPresets(preferences, onPreset = { header, icons, background ->
                 model.onEvent(MoreOptionsEvent.ColorsChanged(mapOf(
                     ConversationExtraColor.emojiHeaderColor to header,
@@ -352,13 +357,24 @@ fun ConversationMoreOptionsScreen(preferences: ChatyPreferencesController, onBac
                 onApplySelection = { selected, colour -> model.onEvent(MoreOptionsEvent.ColorsChanged(
                     selected.associate { option -> ConversationExtraColor.entries.first { it.key == option.id } to colour }
                 )) })
-            if (extraOptions) androidx.compose.material3.TextButton(onClick = {
+            if (extraOptions) // Previous stock text action:
+            // androidx.compose.material3.TextButton(onClick = {
+            //                 /* Previous reset: preferences.editConversation { latest -> latest.copy(emojiHeaderColor = null, emojiHeaderIconsColor = null,
+            //                     emojiPickerBgColor = null, hyperlinksColor = null, infoBalloonsTextColor = null,
+            //                     infoBalloonsBgColor = null, groupParticipantNameColor = null, voiceNotePlayingBarColor = null,
+            //                     voiceNotePlayButtonColor = null) } */
+            //                 model.onEvent(MoreOptionsEvent.ResetColors)
+            //             }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_extras_colours_fd382e)) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(com.example.chat.R.string.conv_ui_reset_all_extras_colours_fd382e),
+                onClick = {
                 /* Previous reset: preferences.editConversation { latest -> latest.copy(emojiHeaderColor = null, emojiHeaderIconsColor = null,
                     emojiPickerBgColor = null, hyperlinksColor = null, infoBalloonsTextColor = null,
                     infoBalloonsBgColor = null, groupParticipantNameColor = null, voiceNotePlayingBarColor = null,
                     voiceNotePlayButtonColor = null) } */
                 model.onEvent(MoreOptionsEvent.ResetColors)
-            }) { Text(strings.getString(com.example.chat.R.string.conv_ui_reset_all_extras_colours_fd382e)) }
+            },
+            )
             Text(strings.getString(com.example.chat.R.string.conv_ui_these_appearance_settings_ar_9572c0), color = secondaryText, fontSize = 12.sp)
             ConversationSupportCopy(moreOptionsSupportValues(p))
             /* Previous inline support mapping:
@@ -384,3 +400,6 @@ fun ConversationMoreOptionsScreen(preferences: ChatyPreferencesController, onBac
     }
     pickers.Host()
 }
+
+// Complete original-line retention for review (inactive).
+            //             if (extraOptions) androidx.compose.material3.TextButton(onClick = {

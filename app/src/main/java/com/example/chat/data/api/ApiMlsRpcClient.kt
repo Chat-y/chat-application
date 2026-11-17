@@ -89,6 +89,8 @@ class ApiMlsRpcClient(
                 "delete_conversation" -> return@withContext deleteConversation(params)
                 "mark_conversation_read" -> return@withContext markConversationRead(params)
                 "get_conversation_members" -> return@withContext conversationMembers(params)
+                "lookup_own_mls_message" -> return@withContext lookupOwnMessage(params)
+                "get_mls_message_revisions" -> return@withContext messageRevisions(params)
             }
             val path = endpointFor(function)
             val headers = mutableMapOf(
@@ -145,6 +147,32 @@ class ApiMlsRpcClient(
             throw IllegalStateException("$method $path failed (${response.first})")
         }
         return response
+    }
+
+    /** Local backend contract: all three constraints are mandatory.404 is not non-acceptance. */
+    private suspend fun lookupOwnMessage(params: Map<String, Any?>): Any? {
+        val required = listOf("p_conversation_id", "p_client_message_id", "p_sender_device_id")
+        require(required.all { (params[it] as? String)?.isNotBlank() == true }) { "Own-send lookup needs room, client key and original device." }
+        val base = baseUrl().trimEnd('/')
+        var response = transport.execute("POST", "$base/e2ee/messages/lookup", headers(), bodyFor(params))
+        if (response.first == 404) {
+            val code = runCatching { JSONObject(response.second).optJSONObject("detail")?.optString("code") }.getOrNull()
+            if (code == "MESSAGE_NOT_FOUND") return null
+            response = transport.execute("POST", "$base/api/v1/e2ee/messages/lookup", headers(), bodyFor(params))
+        }
+        if (response.first == 404 && runCatching { JSONObject(response.second).optJSONObject("detail")?.optString("code") }.getOrNull() == "MESSAGE_NOT_FOUND") return null
+        check(response.first == 200) { "Own-send lookup is unavailable or ambiguous (${response.first}). No resend was authorized." }
+        val root = JSONObject(response.second)
+        check(root.optBoolean("success", false)) { "Own-send lookup was not verified." }
+        return fromJson(root.get("data"))
+    }
+
+    private suspend fun messageRevisions(params: Map<String, Any?>): Any? {
+        val id = ApiPathSegments.safe(params["p_message_id"] as? String ?: "") ?: error("Invalid message ID.")
+        val response = executeWithFallback("GET", "e2ee/messages/$id/revisions", null)
+        val root = JSONObject(response.second)
+        check(root.optBoolean("success", false)) { "Revision chain response was not verified." }
+        return fromJson(root.get("data"))
     }
 
     /** delete_conversation -> DELETE /chat/rooms/{id}. */

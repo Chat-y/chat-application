@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.focusGroup
@@ -340,7 +342,8 @@ fun ChatDetailScreen(
     quickContacts: List<QuickContactEntry> = emptyList(),
     onOpenConversation: (String) -> Unit = {},
     homeAvatarShape: String = "circle",
-    universalEmojiStyle: String = "Chaty Motion",
+    // Previous default: "Chaty Motion". Explicit saved custom styles remain supported.
+    universalEmojiStyle: String = "Android system",
     translateOption: String = "Server + No outside apps",
     translationLanguage: String = "Show All",
     onMediaTap: (ChatMessage) -> Unit = {},
@@ -620,7 +623,9 @@ fun ChatDetailScreen(
     val selectedMessages = remember(messages, selectedIds) { messages.filter { it.id in selectedIds } }
     val isSelectionMode = selectedMessages.isNotEmpty()
     val selectionActions = remember(selectedMessages) { com.example.chat.ui.chats.detail.SelectionActionPolicy.available(selectedMessages) }
-    androidx.activity.compose.BackHandler(isSelectionMode) { selectedIds = emptySet() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(conversation.id to isSelectionMode)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(isSelectionMode) { selectedIds = emptySet() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, enabled = isSelectionMode) { selectedIds = emptySet() }
     val currentSelectionIds by rememberUpdatedState(selectedIds)
 
     fun currentPermittedMessage(id: String, action: com.example.chat.ui.chats.detail.SelectionAction): ChatMessage? {
@@ -693,6 +698,19 @@ fun ChatDetailScreen(
     DisposableEffect(localOverrideAccountKey, conversation.id) {
         onDispose { com.example.chat.ui.chats.detail.ReadAlertCenter.clearScreenListener(localOverrideAccountKey, conversation.id) }
     }
+    var onlinePresenceToastJob by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var typingPresenceToastJob by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    DisposableEffect(conversation.id, currentUserId, messageSessionIdentity) {
+        val p = com.example.chat.ServiceLocator.preferencesController
+        fun allowed(master: Boolean) = com.example.chat.domain.notifications.PresenceToastEnablement.allows(
+            master, p.notification.enableGlobalNotifications, p.universal.disableHeadsUpNotification)
+        val listener: () -> Unit = {
+            if (!allowed(p.toasts.onlineToastEnabled)) onlinePresenceToastJob?.cancel()
+            if (!allowed(p.toasts.typingToastEnabled)) typingPresenceToastJob?.cancel()
+        }
+        p.addListener(listener)
+        onDispose { p.removeListener(listener); onlinePresenceToastJob?.cancel(); typingPresenceToastJob?.cancel() }
+    }
     // Transition-guarded presence toasts: the initial snapshot (was == null) never toasts,
     // only a real false->true flip does. Typing toasts are direct-chat only.
     var lastPresenceOnline by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Boolean?>(null) }
@@ -702,7 +720,15 @@ fun ChatDetailScreen(
         if (presenceIsOnline && was == false && conversation.isDirect) {
             val event = com.example.chat.ui.chats.detail.PresenceEvent(conversation.id, conversation.title, com.example.chat.ui.chats.detail.PresenceEventType.online, java.time.Instant.now())
             com.example.chat.ui.chats.detail.PresenceFeed.forAccount(localOverrideAccountKey).record(event)
-            com.example.chat.ui.chats.detail.PresenceToastPolicy.text(event)?.let { text -> scope.launch { snackbarHostState.showSnackbar(text) } }
+            com.example.chat.ui.chats.detail.PresenceToastPolicy.text(event)?.let { text ->
+                onlinePresenceToastJob?.cancel()
+                onlinePresenceToastJob = scope.launch {
+                // Preserve real event/feed recording, but gate the separate bottom snackbar too.
+                val p = com.example.chat.ServiceLocator.preferencesController
+                if (com.example.chat.domain.notifications.PresenceToastEnablement.allows(
+                    p.toasts.onlineToastEnabled, p.notification.enableGlobalNotifications, p.universal.disableHeadsUpNotification,
+                )) snackbarHostState.showSnackbar(text)
+            } }
         }
     }
     var lastPeerTyping by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<Boolean?>(null) }
@@ -712,7 +738,15 @@ fun ChatDetailScreen(
         if (peerTyping && was == false && conversation.isDirect) {
             val event = com.example.chat.ui.chats.detail.PresenceEvent(conversation.id, conversation.title, com.example.chat.ui.chats.detail.PresenceEventType.typing, java.time.Instant.now())
             com.example.chat.ui.chats.detail.PresenceFeed.forAccount(localOverrideAccountKey).record(event)
-            com.example.chat.ui.chats.detail.PresenceToastPolicy.text(event)?.let { text -> scope.launch { snackbarHostState.showSnackbar(text) } }
+            com.example.chat.ui.chats.detail.PresenceToastPolicy.text(event)?.let { text ->
+                typingPresenceToastJob?.cancel()
+                typingPresenceToastJob = scope.launch {
+                // Preserve real event/feed recording, but gate the separate bottom snackbar too.
+                val p = com.example.chat.ServiceLocator.preferencesController
+                if (com.example.chat.domain.notifications.PresenceToastEnablement.allows(
+                    p.toasts.typingToastEnabled, p.notification.enableGlobalNotifications, p.universal.disableHeadsUpNotification,
+                )) snackbarHostState.showSnackbar(text)
+            } }
         }
     }
     val senderClusters = remember(timelineRows, timelineZone) { com.example.chat.ui.chats.detail.SenderClusterPolicy.forRows(timelineRows, timelineZone) }
@@ -1287,7 +1321,7 @@ fun ChatDetailScreen(
         )
     }
 
-    Row(Modifier.fillMaxSize().then(swipeExitModifier)) {
+    Row(Modifier.chatyPredictiveBack(predictiveBack).fillMaxSize().then(swipeExitModifier)) {
         // Dart :2287-2292 - rail side comes from convPrefs.sidebarPosition;
         // quickContactSidebarPosition only anchors contacts top/bottom.
         if (showQuickRail && convPrefs.sidebarPosition == "Left") {
@@ -1535,6 +1569,7 @@ fun ChatDetailScreen(
                                 conversation.adminIds.contains(message.senderId),
                             makeTextSelectable = convPrefs.makeTextSelectable,
             enableAnimatedEmojis = convPrefs.enableAnimatedEmojis,
+            reduceReactionMotion = viewerAnchorReduceMotion,
             emojiStyle = universalEmojiStyle,
                             groupAdminIcon = convPrefs.groupAdminIcon,
                             hideAdminNameIcon = convPrefs.hideAdminNameIcon,
@@ -1569,7 +1604,8 @@ fun ChatDetailScreen(
                                         toggleCurrentReaction(item.id, doubleTapReactionEmoji)
                                     }))
                             }) else null,
-                            onSwipeReply = if (row.messages.size > 1) null else ({ replyTarget = message }),
+                            // Previous swipe reply stayed active while selecting: if (row.messages.size > 1) null else ...
+                            onSwipeReply = if (isSelectionMode || row.messages.size > 1) null else ({ replyTarget = message }),
                             onDoubleTap = if (disableDoubleTapReaction || !ReleaseFeatures.MESSAGE_REACTIONS || row.messages.size > 1 || com.example.chat.ui.chats.detail.SelectionAction.star !in com.example.chat.ui.chats.detail.SelectionActionPolicy.available(listOf(message))) {
                                 null
                             } else {
@@ -1713,8 +1749,14 @@ fun ChatDetailScreen(
                         .then(if (!fabVisible) Modifier.clearAndSetSemantics { } else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Rounded.KeyboardArrowDown,
+
+//Icon(
+//                        Icons.Rounded.KeyboardArrowDown,
+//                        contentDescription = "Scroll to bottom",
+//                        tint = Color(theme.primaryTextColor),
+//                        modifier = Modifier.size(27.dp),
+//                    )
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronDown, Icons.Rounded.KeyboardArrowDown,
                         contentDescription = "Scroll to bottom",
                         tint = Color(theme.primaryTextColor),
                         modifier = Modifier.size(27.dp),
@@ -1748,10 +1790,28 @@ fun ChatDetailScreen(
                 Column(Modifier.fillMaxWidth().background(Color(theme.cardColor)).padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Text("New sender", color = Color(theme.primaryTextColor), fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        TextButton(onClick = onContinueUnknownSender, modifier = Modifier.heightIn(min = 48.dp)) { Text("Continue") }
-                        TextButton(onClick = onReportUnknownSender, modifier = Modifier.heightIn(min = 48.dp)) { Text("Report") }
+                        // Previous stock text action:
+                        // TextButton(onClick = onContinueUnknownSender, modifier = Modifier.heightIn(min = 48.dp)) { Text("Continue") }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = "Continue",
+                            onClick = onContinueUnknownSender,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                        // Previous stock text action:
+                        // TextButton(onClick = onReportUnknownSender, modifier = Modifier.heightIn(min = 48.dp)) { Text("Report") }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = "Report",
+                            onClick = onReportUnknownSender,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
                         if (onBlockContact != null) {
-                            TextButton(onClick = onBlockContact, modifier = Modifier.heightIn(min = 48.dp)) { Text("Block") }
+                            // Previous stock text action:
+                            // TextButton(onClick = onBlockContact, modifier = Modifier.heightIn(min = 48.dp)) { Text("Block") }
+                            com.example.chat.ui.kit.ChatyTextButton(
+                                label = "Block",
+                                onClick = onBlockContact,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
                         }
                     }
                 }
@@ -1828,11 +1888,20 @@ fun ChatDetailScreen(
             if (recoveredViewOnceNeedsChoice && composerText.isNotEmpty()) {
                 Text("Recovered view-once text: choose Send as view once again, or explicitly use regular send.",
                     color = Color(theme.secondaryTextColor), modifier = Modifier.padding(horizontal = 16.dp))
-                TextButton(onClick = {
+                // Previous stock text action:
+                // TextButton(onClick = {
+                //                     if (currentDraftOwner == draftOwner && isMessageSessionCurrent() && editingMessage == null) {
+                //                         recoveredViewOnceNeedsChoice = false
+                //                     }
+                //                 }) { Text("Use regular send for recovered text") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Use regular send for recovered text",
+                    onClick = {
                     if (currentDraftOwner == draftOwner && isMessageSessionCurrent() && editingMessage == null) {
                         recoveredViewOnceNeedsChoice = false
                     }
-                }) { Text("Use regular send for recovered text") }
+                },
+                )
             }
             // Reply banner (Dart _replyTarget section).
             replyTarget?.let { target ->
@@ -2015,7 +2084,9 @@ fun ChatDetailScreen(
             // GB-style emoji panel: docked under the message box at half height;
             // the composer stays on top and picks append into it directly.
             if (emojiComposerOpen) {
-                androidx.activity.compose.BackHandler { emojiComposerOpen = false }
+                com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = messageSessionIdentity, fillAvailable = false) {
+                // Previous registration retained inactive: androidx.activity.compose.BackHandler { emojiComposerOpen = false }
+                com.example.chat.ui.kit.ChatyPredictiveBackHandler { emojiComposerOpen = false }
                 ChatyEmojiPickerSheet(
                     theme = theme,
                     reactionMode = false,
@@ -2032,6 +2103,7 @@ fun ChatDetailScreen(
                     },
                     onComposerDone = { emojiComposerOpen = false },
                 )
+                            } // Emoji-panel presentation only.
             }
         }
 
@@ -2113,7 +2185,12 @@ fun ChatDetailScreen(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { viewOnceOpenErrorId = null },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { viewOnceOpenErrorId = null }) { Text("OK") }
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = { viewOnceOpenErrorId = null }) { Text("OK") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "OK",
+                    onClick = { viewOnceOpenErrorId = null },
+                )
             },
             title = { Text("Couldn't open view-once message") },
             text = { Text("The message could not be saved as viewed on this device, so it was not opened and nothing was revealed. Try again.") },
@@ -2123,7 +2200,20 @@ fun ChatDetailScreen(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { viewOnceNuxPending = null },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = {
+                //                     // Stale-callback guard: act only while this dialog is the
+                //                     // current pending request token (account, session or
+                //                     // conversation may have changed while it was visible).
+                //                     if (viewOnceNuxPending?.first == requestToken) {
+                //                         viewOnceNuxStore.markReceiverSeen()
+                //                         viewOnceNuxPending = null
+                //                         openViewOnceMessage(pending)
+                //                     }
+                //                 }) { Text("Open") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Open",
+                    onClick = {
                     // Stale-callback guard: act only while this dialog is the
                     // current pending request token (account, session or
                     // conversation may have changed while it was visible).
@@ -2132,10 +2222,16 @@ fun ChatDetailScreen(
                         viewOnceNuxPending = null
                         openViewOnceMessage(pending)
                     }
-                }) { Text("Open") }
+                },
+                )
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { viewOnceNuxPending = null }) { Text("Not now") }
+                // Previous stock text action:
+                // androidx.compose.material3.TextButton(onClick = { viewOnceNuxPending = null }) { Text("Not now") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Not now",
+                    onClick = { viewOnceNuxPending = null },
+                )
             },
             title = { Text("View once message") },
             text = {
@@ -2162,7 +2258,12 @@ fun ChatDetailScreen(
                 onDismissRequest = { translateMessage = null },
                 title = { Text("Translation unavailable") },
                 text = { Text("Your translation setting does not allow this online provider. Nothing was sent. On-device translation is not available here.") },
-                confirmButton = { TextButton(onClick = { translateMessage = null }) { Text("Close") } },
+                confirmButton = { // Previous stock text action:
+                // TextButton(onClick = { translateMessage = null }) { Text("Close") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Close",
+                    onClick = { translateMessage = null },
+                ) },
             )
         } else {
             val language = com.example.chat.core.translate.ChatTranslationPolicy.languages
@@ -2430,7 +2531,46 @@ fun ChatDetailScreen(
             title = { Text("Clear conversation?") },
             text = { Text("All messages will be removed from this chat for you.") },
             confirmButton = {
-                TextButton(
+                // Previous stock text action:
+                // TextButton(
+                //                     onClick = {
+                //                         if (!clearBusy && isMessageSessionCurrent()) {
+                //                             clearConfirmOpen = false
+                //                             clearBusy = true
+                //                             scope.launch {
+                //                                 try {
+                //                                     val confirmed = onClearConversation()
+                //                                     if (isMessageSessionCurrent()) {
+                //                                         // Consumed IDs remain append-only even on confirmed deletion.
+                //                                         // A later sync/restore must never resurrect view-once content.
+                //                                         if (confirmed) {
+                //                                             selectedIds = emptySet(); replyTarget = null; editingMessage = null
+                //                                             viewOnceTextTarget = null; viewOnceNuxPending = null
+                //                                         }
+                //                                         snackbarHostState.showSnackbar(if (confirmed) "Conversation cleared."
+                //                                             else "Clear was not confirmed. Check the chat before trying again.")
+                //                                     }
+                //                                 } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                //                                 catch (_: Exception) {
+                //                                     // An exception can follow a server/local commit; do not promise rollback.
+                //                                     // if (isMessageSessionCurrent()) snackbarHostState.showSnackbar("Clear was not confirmed. Your messages are kept on this device.")
+                //                                     if (isMessageSessionCurrent()) snackbarHostState.showSnackbar("Clear was not confirmed. Check the chat before trying again.")
+                //                                 } finally { clearBusy = false }
+                //                             }
+                //                         }
+                //                         /* Previous Unit callback retained.
+                //                         clearConfirmOpen = false
+                //                         onClearConversation()
+                //                         // Unit callback starts async host work, not a confirmed clear.
+                //                         // Retain view-once consumed state until a future confirmed-result contract.
+                //                         scope.launch { snackbarHostState.showSnackbar("Clear requested. Check the chat for the result.") }
+                //                         */
+                //                     },
+                //                 ) {
+                //                     Text("Clear", color = Color(theme.dangerColor))
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Clear",
                     onClick = {
                         if (!clearBusy && isMessageSessionCurrent()) {
                             clearConfirmOpen = false
@@ -2464,14 +2604,18 @@ fun ChatDetailScreen(
                         scope.launch { snackbarHostState.showSnackbar("Clear requested. Check the chat for the result.") }
                         */
                     },
-                ) {
-                    Text("Clear", color = Color(theme.dangerColor))
-                }
+                    color = Color(theme.dangerColor),
+                )
             },
             dismissButton = {
-                TextButton(onClick = { clearConfirmOpen = false }) {
-                    Text("Cancel")
-                }
+                // Previous stock text action:
+                // TextButton(onClick = { clearConfirmOpen = false }) {
+                //                     Text("Cancel")
+                //                 }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Cancel",
+                    onClick = { clearConfirmOpen = false },
+                )
             },
         )
     }
@@ -2895,31 +3039,29 @@ private fun AnchoredMessageContextMenu(
     } else null
     var extraActions by remember(menuMessage?.id) { mutableStateOf(false) }
     if (menuMessage != null) {
+        com.example.chat.ui.kit.ChatyPredictiveBackSurface(resetKey = menuMessage.id) {
         val available = MessageActionRegistry.getAvailableActions(
             message = menuMessage, isMe = menuMessage.senderId == currentUserId,
         )
+        // Reference primary order; availability still comes from the existing registry.
         val order = listOf(
-            MessageActionType.reply,
-            MessageActionType.select,
-            MessageActionType.forward,
-            MessageActionType.copy,
-            MessageActionType.edit,
-            MessageActionType.deleteForMe,
-            MessageActionType.info,
-            MessageActionType.report,
-            MessageActionType.blockUser,
+            MessageActionType.reply, MessageActionType.forward, MessageActionType.deleteForMe,
+            MessageActionType.info, MessageActionType.pin, MessageActionType.star,
+            MessageActionType.copy, MessageActionType.edit, MessageActionType.select,
+            MessageActionType.report, MessageActionType.blockUser,
         )
         val primary = order.mapNotNull { type -> available.firstOrNull { it.type == type } }
         val secondary = available.filter { it.type !in order }
         val actions = if (extraActions) secondary else primary
-        androidx.activity.compose.BackHandler { messageState.value = null }
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler { messageState.value = null }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler { messageState.value = null }
         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
             val colors = com.example.chat.ui.theme.LocalAppColors.current
             val density = androidx.compose.ui.platform.LocalDensity.current.density
             val surface = androidx.compose.ui.graphics.lerp(colors.surface, colors.primary, 0.035f)
             Box(
                 Modifier.fillMaxSize()
-                    .background(colors.foreground.copy(alpha = 0.25f))
+                    .background(colors.foreground.copy(alpha = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageMenuScrimAlpha))
                     .clickable { messageState.value = null },
             )
 
@@ -2939,6 +3081,7 @@ private fun AnchoredMessageContextMenu(
                 viewportHeightDp = maxHeight,
                 density = density,
                 isOutgoing = menuMessage.senderId == currentUserId,
+                railHeightDp = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionRailHeightDp.dp,
             )
 
             // 1. WhatsApp/Telegram-style Reaction Rail (Anchored above bubble or fallback below)
@@ -2950,15 +3093,15 @@ private fun AnchoredMessageContextMenu(
                         .heightIn(max = placement.reactionRailMaxHeightDp)
                         .clip(CircleShape)
                         .background(surface, CircleShape)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                        .shadow(elevation = 6.dp, shape = CircleShape)
+                        .padding(horizontal = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionRailHorizontalPaddingDp.dp, vertical = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionRailVerticalPaddingDp.dp)
+                        .shadow(elevation = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionRailShadowDp.dp, shape = CircleShape, ambientColor = colors.shadow, spotColor = colors.shadow)
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionRailGapDp.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { emoji ->
                         Box(
-                            Modifier.size(42.dp).clickable {
+                            Modifier.size(com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionTargetSizeDp.dp).clickable {
                                 onToggleReaction(menuMessage.id, emoji)
                                 messageState.value = null
                             },
@@ -2966,7 +3109,7 @@ private fun AnchoredMessageContextMenu(
                         ) {
                             com.example.chat.ui.chats.detail.AnimatedEmojiView(
                                 unicode = emoji,
-                                size = 22f,
+                                size = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionEmojiSizeDp.toFloat(),
                                 animate = false,
                                 mode = com.example.chat.ui.chats.detail.EmojiDisplayMode.reaction,
                             )
@@ -2977,7 +3120,7 @@ private fun AnchoredMessageContextMenu(
                             reactionTargetState.value = menuMessage
                             messageState.value = null
                         },
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageReactionTargetSizeDp.dp),
                     ) {
                         com.example.chat.ui.icons.ChatyIcon(
                             com.example.chat.ui.icons.ChatyIconId.add,
@@ -2989,22 +3132,23 @@ private fun AnchoredMessageContextMenu(
             }
 
             // 2. Contextual Action Menu (Anchored below bubble)
-            Column(
+            com.example.chat.ui.kit.GbCardContainer(
                 Modifier
                     .offset(x = placement.menuLeftDp, y = placement.menuTopDp)
                     .widthIn(max = placement.menuMaxWidthDp)
                     .heightIn(max = placement.menuMaxHeightDp)
-                    .shadow(elevation = 12.dp, shape = com.example.chat.ui.kit.ChatyModalShape)
-                    .clip(com.example.chat.ui.kit.ChatyModalShape)
-                    .background(surface),
+                    .verticalScroll(rememberScrollState()),
+                margin = androidx.compose.foundation.layout.PaddingValues(com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageMenuOuterMarginDp.dp),
+                padding = androidx.compose.foundation.layout.PaddingValues(com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageMenuInnerPaddingDp.dp),
             ) {
                 Text(
                     "Message options",
-                    Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    fontWeight = FontWeight.Bold,
+                    Modifier.padding(horizontal = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageMenuTitleHorizontalPaddingDp.dp, vertical = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageMenuTitleVerticalPaddingDp.dp),
+                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
                     color = colors.foreground,
                 )
-                Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                // One scroll viewport for title, actions, More and Close. No weighted zero-height body.
+                Column(Modifier.fillMaxWidth()) {
                     if (extraActions) {
                         com.example.chat.ui.kit.ChatyDropdownMenuItem(
                             text = { Text("Back") },
@@ -3039,15 +3183,13 @@ private fun AnchoredMessageContextMenu(
                         onClick = { extraActions = true },
                     )
                 }
-                androidx.compose.material3.Button(
-                    onClick = { messageState.value = null },
-                    shape = CircleShape,
-                    modifier = Modifier.padding(10.dp).fillMaxWidth().heightIn(min = 44.dp),
-                ) {
-                    Text("Close")
-                }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    onClick = { messageState.value = null }, label = "Close",
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
+        } // Message action presentation.
     }
 }
 
@@ -3212,8 +3354,14 @@ private fun SearchHeader(
             )
             // Previous enabled-at-boundary action: IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp))
             IconButton(onClick = onPrevious, enabled = matchIndex > 1, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    Icons.Rounded.KeyboardArrowUp,
+
+//Icon(
+//                    Icons.Rounded.KeyboardArrowUp,
+//                    contentDescription = "Previous match",
+//                    tint = Color(if (matchIndex > 1) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex > 1) 1f else 0.5f),
+//                    modifier = Modifier.size(22.dp),
+//                )
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronUp, Icons.Rounded.KeyboardArrowUp,
                     contentDescription = "Previous match",
                     tint = Color(if (matchIndex > 1) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex > 1) 1f else 0.5f),
                     modifier = Modifier.size(22.dp),
@@ -3221,8 +3369,14 @@ private fun SearchHeader(
             }
             // Previous enabled-at-boundary action: IconButton(onClick = onNext, modifier = Modifier.size(48.dp))
             IconButton(onClick = onNext, enabled = matchIndex in 1 until matchCount, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    Icons.Rounded.KeyboardArrowDown,
+
+//Icon(
+//                    Icons.Rounded.KeyboardArrowDown,
+//                    contentDescription = "Next match",
+//                    tint = Color(if (matchIndex in 1 until matchCount) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex in 1 until matchCount) 1f else 0.5f),
+//                    modifier = Modifier.size(22.dp),
+//                )
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronDown, Icons.Rounded.KeyboardArrowDown,
                     contentDescription = "Next match",
                     tint = Color(if (matchIndex in 1 until matchCount) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex in 1 until matchCount) 1f else 0.5f),
                     modifier = Modifier.size(22.dp),
@@ -6656,3 +6810,75 @@ private fun parseHexColor(hex: String): Color? {
 //                             if (!conversation.isDirect || secureChannelEnabled) scope.launch {
 //                         if (recoveredViewOnceNeedsChoice) {
 //     val moveCallsToOverflow = com.example.chat.ui.chats.detail.conversationHeaderCallsInOverflow(showHeaderCalls, appearance.callsInOverflow)
+
+// Previous anchored action order and menu retained (inactive):
+//         val order = listOf(
+//             MessageActionType.reply,
+//             MessageActionType.select,
+//             MessageActionType.forward,
+//             MessageActionType.copy,
+//             MessageActionType.edit,
+//             MessageActionType.deleteForMe,
+//             MessageActionType.info,
+//             MessageActionType.report,
+//             MessageActionType.blockUser,
+//         )
+//             // 2. Contextual Action Menu (Anchored below bubble)
+//             Column(
+//                 Modifier
+//                     .offset(x = placement.menuLeftDp, y = placement.menuTopDp)
+//                     .widthIn(max = placement.menuMaxWidthDp)
+//                     .heightIn(max = placement.menuMaxHeightDp)
+//                     .shadow(elevation = 12.dp, shape = com.example.chat.ui.kit.ChatyModalShape)
+//                     .clip(com.example.chat.ui.kit.ChatyModalShape)
+//                     .background(surface),
+//             ) {
+//                 Text(
+//                     "Message options",
+//                     Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+//                     fontWeight = FontWeight.Bold,
+//                     color = colors.foreground,
+//                 )
+//                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+//                     if (extraActions) {
+//                         com.example.chat.ui.kit.ChatyDropdownMenuItem(
+//                             text = { Text("Back") },
+//                             onClick = { extraActions = false },
+//                         )
+//                     }
+//                     actions.forEach { act ->
+//                         com.example.chat.ui.kit.ChatyDropdownMenuItem(
+//                             text = {
+//                                 Text(
+//                                     if (act.type == MessageActionType.deleteForMe) "Delete for me" else act.label,
+//                                     color = if (act.isDestructive) Color(theme.dangerColor) else colors.foreground,
+//                                 )
+//                             },
+//                             leadingIcon = {
+//                                 com.example.chat.ui.icons.ChatyIcon(
+//                                     com.example.chat.ui.chats.detail.actionIconId(act, menuMessage),
+//                                     color = if (act.isDestructive) Color(theme.dangerColor) else colors.foreground,
+//                                 )
+//                             },
+//                             onClick = {
+//                                 messageState.value = null
+//                                 onAction(menuMessage, act.type)
+//                             },
+//                         )
+//                     }
+//                 }
+//                 if (!extraActions && secondary.isNotEmpty()) {
+//                     com.example.chat.ui.kit.ChatyDropdownMenuItem(
+//                         text = { Text("More") },
+//                         trailingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.chevronRight) },
+//                         onClick = { extraActions = true },
+//                     )
+//                 }
+//                 androidx.compose.material3.Button(
+//                     onClick = { messageState.value = null },
+//                     shape = CircleShape,
+//                     modifier = Modifier.padding(10.dp).fillMaxWidth().heightIn(min = 44.dp),
+//                 ) {
+//                     Text("Close")
+//                 }
+//             }

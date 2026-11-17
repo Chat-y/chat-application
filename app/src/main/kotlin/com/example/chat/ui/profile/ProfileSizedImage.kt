@@ -28,6 +28,8 @@ internal fun ProfileSizedImage(
                 modifier = Modifier.matchParentSize(), contentScale = contentScale,
                 placeholder = placeholder, error = error,
                 requestSize = coil.size.Size(pixels.width, pixels.height),
+                profileMediaBase = com.example.chat.ServiceLocator.apiBackend.config.restApiBaseUrl
+                    .trimEnd('/').replace(Regex("/api/v[0-9]+$"), ""),
                 // The shared loader gates this opt-in on app and current Android animation settings.
                 crossfadeMillis = 120,
             )

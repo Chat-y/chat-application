@@ -70,6 +70,8 @@ import com.example.chat.ui.theme.LocalAppColors
  * UNCOMPILED (Compose) - verified only by reading against the Dart.
  */
 object ChatyMotionTokens {
+    const val RECORDER_MIC_BASE_SCALE = 1.04f
+    const val RECORDER_MIC_LEVEL_SCALE = 0.08f
     const val INSTANT_MS = 80   // chaty_motion.dart instant
     const val FAST_MS = 140
     const val BASE_MS = 220

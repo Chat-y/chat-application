@@ -58,10 +58,26 @@ object MessageInteractionAnchorPolicy {
         val railTop = (if (railAbove) top - railHeight - margin else bottom + margin)
             .coerceIn(margin, (height - railHeight - margin).coerceAtLeast(margin))
         // 120dp is a preferred room allocation, never a minimum larger than the viewport.
-        val preferredMenuHeight = 120f.coerceAtMost((height - 2f * margin).coerceAtLeast(0f))
+        // Previous preferredMenuHeight = 120f: title/More/Close could consume the entire body.
+        val preferredMenuHeight = com.example.chat.ui.navigation.ReferenceLayoutMetrics.messageMenuPreferredHeightDp.toFloat().coerceAtMost((height - 2f * margin).coerceAtLeast(0f))
         val idealMenuTop = if (railAbove) bottom + margin else railTop + railHeight + margin
-        val menuTop = idealMenuTop.coerceIn(margin, (height - preferredMenuHeight - margin).coerceAtLeast(margin))
-        val availableMenuHeight = (height - menuTop - margin).coerceAtLeast(0f)
+        // For the last bubble, put the action body ABOVE the rail rather than overlapping it.
+        // Previous menuTop always clamped toward the bottom, leaving only a 120dp action allocation.
+        // val menuTop = idealMenuTop.coerceIn(margin, (height - preferredMenuHeight - margin).coerceAtLeast(margin))
+        // val availableMenuHeight = (height - menuTop - margin).coerceAtLeast(0f)
+        // Never overlap the rail, even in landscape/IME. The menu may cover the selected bubble.
+        val aboveEnd = (railTop - margin).coerceAtLeast(margin)
+        val aboveRoom = (aboveEnd - margin).coerceAtLeast(0f)
+        val belowStart = (railTop + railHeight + margin).coerceAtMost((height - margin).coerceAtLeast(margin))
+        val belowRoom = (height - margin - belowStart).coerceAtLeast(0f)
+        val desiredBelow = maxOf(idealMenuTop, belowStart)
+        val fullBelowFits = height - margin - desiredBelow >= preferredMenuHeight
+        val placeAbove = !fullBelowFits && (aboveRoom >= preferredMenuHeight || aboveRoom > belowRoom)
+        val availableMenuHeight = if (placeAbove) minOf(preferredMenuHeight, aboveRoom)
+            else (height - margin - (if (fullBelowFits) desiredBelow else belowStart)).coerceAtLeast(0f)
+        val menuTop = if (placeAbove) aboveEnd - availableMenuHeight
+            else if (fullBelowFits) desiredBelow else belowStart
+
 
         return MessageInteractionPlacement(
             reactionRailTopDp = railTop.dp,
@@ -128,3 +144,10 @@ object MessageInteractionAnchorPolicy {
             menuMaxHeightDp = availableMenuHeight,
         )
 */
+
+// Previous large-viewport-only placement retained (inactive):
+//         val fitAboveRail = height - idealMenuTop - margin < preferredMenuHeight &&
+//             railTop - margin * 2 >= preferredMenuHeight
+//         val menuTop = if (fitAboveRail) railTop - margin - preferredMenuHeight
+//             else idealMenuTop.coerceIn(margin, (height - preferredMenuHeight - margin).coerceAtLeast(margin))
+//         val availableMenuHeight = ((if (fitAboveRail) railTop - margin else height - margin) - menuTop).coerceAtLeast(0f)

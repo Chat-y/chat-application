@@ -38,9 +38,12 @@ fun SpecularGlassCard(
     content: @Composable () -> Unit,
 ) {
     val isDark = LocalThemeConfig.current.isDark
-    val baseTint = tintColor ?: if (isDark) Color.White else Color.Black
+    // Previous: val baseTint = tintColor ?: if (isDark) Color.White else Color.Black
+    val colors = com.example.chat.ui.theme.LocalAppColors.current
+    val baseTint = tintColor ?: colors.foreground
     val shape = RoundedCornerShape(borderRadius)
-    val border = borderColor ?: if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+// Previous: val border = borderColor ?: if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+    val border = borderColor ?: colors.borderSubtle
     val shadowColor = if (isDark) Color.Black.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.04f)
     Box(
         modifier

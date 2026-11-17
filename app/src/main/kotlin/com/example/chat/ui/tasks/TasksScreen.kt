@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.example.chat.ui.effects.iosItemEntrance
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -39,10 +39,15 @@ import androidx.compose.material.icons.rounded.ViewKanban
 import com.example.chat.ui.kit.ChatyDropdownMenu as DropdownMenu
 import com.example.chat.ui.kit.ChatyTextButton
 import com.example.chat.ui.kit.ChatyDropdownMenuItem as DropdownMenuItem
-import androidx.compose.material3.FilterChip
+import com.example.chat.ui.kit.ChatyChoiceTile
+import com.example.chat.ui.kit.ChatyTaskField
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.MaterialTheme
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -61,6 +66,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -105,6 +114,9 @@ fun TasksScreen(
     onOpenDetail: (ChatTask) -> Unit,
     onEditTask: (ChatTask) -> Unit,
     onCreateTask: () -> Unit,
+    // TAS-SEARCH-1: bumped when the top-bar search is tapped on this destination.
+    searchTick: Int = 0,
+    onSearchTickConsumed: () -> Unit = {},
 ) {
     @Suppress("UNUSED_EXPRESSION") tasksRevision
     val theme = LocalThemeConfig.current
@@ -116,6 +128,15 @@ fun TasksScreen(
     var priorityFilter by remember { mutableStateOf("All") }
     var searchQuery by remember { mutableStateOf("") }
     var historyTask by remember { mutableStateOf<ChatTask?>(null) }
+    // TAS-SEARCH-1: focus the search field when the top-bar search ticks. AppRoot
+    // consumes the tick back to 0, so leaving and returning never refocuses.
+    val searchFocusRequester = remember { FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(searchTick) {
+        if (searchTick > 0) {
+            runCatching { searchFocusRequester.requestFocus() }
+            onSearchTickConsumed()
+        }
+    }
     var pendingDelete by remember { mutableStateOf<ChatTask?>(null) }
 
     fun moveTask(task: ChatTask, target: TaskStatus) {
@@ -153,22 +174,29 @@ fun TasksScreen(
                     fontWeight = FontWeight.ExtraBold,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(
-                    onClick = onCreateTask,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(colors.surfaceSecondary),
-                ) {
-                    com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.add, semanticLabel = "Create task", color = colors.primary)
-                }
+                // TAS-UI-1: header create-task button removed per Bandi 2026-11-17; the add action
+                // stays on the host shell contextual FAB (AppRoot, outside this lane).
+                // IconButton(
+                //     onClick = onCreateTask,
+                //     modifier = Modifier
+                //         .clip(CircleShape)
+                //         .background(colors.surfaceSecondary),
+                // ) {
+                //     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.add, semanticLabel = "Create task", color = colors.primary)
+                // }
             }
-            // A dedicated row leaves the input usable alongside the add action.
-            OutlinedTextField(
+            // A dedicated row keeps the input full width now that the header add action is gone.
+            // TAS-UI-2 (revised x2): the shared ChatyTaskField now owns the clear affordance in
+            // its trailing slot (reserved space, 48dp target, no overlap) and the keyboard shows
+            // the search action.
+            ChatyTaskField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                label = { Text("Search tasks") },
+                placeholder = "Search tasks",
+                enabled = true,
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                    .focusRequester(searchFocusRequester),
                 leadingIcon = {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.search,
                         semanticLabel = null, color = colors.foregroundSecondary)
@@ -181,16 +209,24 @@ fun TasksScreen(
                         }
                     }
                 },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = colors.foreground,
-                    unfocusedTextColor = colors.foreground,
-                    cursorColor = colors.primary,
-                    focusedBorderColor = colors.primary,
-                    unfocusedBorderColor = colors.border,
-                    focusedLabelColor = colors.primary,
-                    unfocusedLabelColor = colors.foregroundSecondary,
-                ),
+                // Canonical field API; legacy imeAction is still accepted for compatibility.
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Search),
             )
+            // Prior interim: Box overlay with the clear IconButton aligned end over the field
+            // (obstructed the editable area; superseded by the ChatyTaskField trailing slot).
+            // Prior stock field (pill CircleShape, soft shadow, per-field colors), retained for reference:
+            // OutlinedTextField(
+            //     value = searchQuery,
+            //     onValueChange = { searchQuery = it },
+            //     label = { Text("Search tasks") },
+            //     singleLine = true,
+            //     shape = CircleShape,
+            //     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).shadow(2.dp, CircleShape)
+            //         .focusRequester(searchFocusRequester),
+            //     leadingIcon = { ChatyIcon(ChatyIconId.search, null, colors.foregroundSecondary) },
+            //     trailingIcon = { if (searchQuery.isNotEmpty()) IconButton({ searchQuery = "" }) { ChatyIcon(ChatyIconId.close, "Clear task search", colors.foregroundSecondary) } },
+            //     colors = OutlinedTextFieldDefaults.colors(focused/unfocused text, cursor, borders, labels from colors.*),
+            // )
             // Tabs
             TabRow(
                 selectedTabIndex = tabIndex,
@@ -208,7 +244,9 @@ fun TasksScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(vertical = 10.dp),
                     ) {
-                        Icon(Icons.Rounded.ListAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.ListAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.list, Icons.Rounded.ListAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Task List")
                     }
@@ -223,33 +261,41 @@ fun TasksScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(vertical = 10.dp),
                     ) {
-                        Icon(Icons.Rounded.ViewKanban, contentDescription = null, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.ViewKanban, contentDescription = null, modifier = Modifier.size(18.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.kanban, Icons.Rounded.ViewKanban, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Kanban Board")
                     }
                 }
             }
-            // Priority filter chips
+            // Priority filter: selectableGroup exposes the row as one single-select group.
             Row(
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
+                    .selectableGroup()
                     .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 4.dp),
             ) {
                 for (p in listOf("All", "Urgent", "High", "Med", "Low")) {
                     val selected = priorityFilter == p
-                    FilterChip(
-                        selected = selected,
+                    // TAS-UI-3 (revised): shared ChatyChoiceTile replaces the stock FilterChip
+                    // (Bandi 2026-11-17); RadioButton role keeps the single-select semantics.
+                    // widthIn keeps the 48dp touch width on short labels ("All", "Med", "Low").
+                    ChatyChoiceTile(
+                        label = p,
                         onClick = { priorityFilter = p },
-                        label = {
-                            Text(
-                                p,
-                                color = if (selected) colors.primary else colors.foregroundSecondary,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                fontSize = 12.sp,
-                            )
-                        },
-                        modifier = Modifier.padding(end = 8.dp),
+                        selected = selected,
+                        compact = true,
+                        role = Role.RadioButton,
+                        modifier = Modifier.padding(end = 8.dp).widthIn(min = 48.dp),
                     )
+                    // Prior stock chip, retained for reference:
+                    // FilterChip(
+                    //     selected = selected,
+                    //     onClick = { priorityFilter = p },
+                    //     label = { Text(p, color/weight by selected, fontSize = 12.sp) },
+                    //     modifier = Modifier.padding(end = 8.dp).shadow(2.dp, RoundedCornerShape(16.dp)),
+                    // )
                 }
             }
 
@@ -268,17 +314,23 @@ fun TasksScreen(
             // }
             // }
             // }
-            val filtered = remember(tasks, priorityFilter, searchQuery) {
-                filterTasks(tasks, priorityFilter, searchQuery)
-            }
+            // Resolve names on recomposition too: user profiles can change without task equality changing.
+            val filtered = filterTasks(tasks, priorityFilter, searchQuery, getUser)
 
             // Both tabs use the same results and the same no-match recovery.
             // First-load state does not turn a failed load into a claimed success.
             if (!controller.hasLoadedOnce && tasks.isEmpty()) {
                 Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center) {
-                    Text("Tasks have not loaded yet.", color = colors.foregroundSecondary, fontSize = 14.sp)
-                    androidx.compose.material3.TextButton(onClick = { scope.launch { controller.loadTasks() } }) { Text("Retry") }
+                    Text("Tasks have not loaded yet.", color = colors.foregroundSecondary, style = MaterialTheme.typography.bodyMedium)
+                    // P5 (Bandi 2026-11-17): show the real load failure instead of silence.
+                    controller.lastLoadError?.let { loadError ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(loadError, color = colors.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    // Shared Chaty button replaces the stock TextButton (Bandi 2026-11-17).
+                    ChatyTextButton(onClick = { scope.launch { controller.loadTasks() } }, label = "Retry")
+                    // Prior: androidx.compose.material3.TextButton(onClick = { scope.launch { controller.loadTasks() } }) { Text("Retry") }
                 }
             } else if (tabIndex == 0 || filtered.isEmpty()) {
                 TaskListView(
@@ -293,6 +345,8 @@ fun TasksScreen(
                     onEditTask = onEditTask,
                     onCreateTask = onCreateTask,
                     onDeleteTask = { task -> pendingDelete = task },
+                    // P6 (Bandi 2026-11-17): pull-to-refresh on the list.
+                    onRefresh = { controller.loadTasks() },
                 )
             } else {
                 KanbanBoard(
@@ -334,6 +388,7 @@ fun TasksScreen(
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskListView(
     filtered: List<ChatTask>,
@@ -346,6 +401,7 @@ private fun TaskListView(
     onEditTask: (ChatTask) -> Unit,
     onCreateTask: () -> Unit,
     onDeleteTask: (ChatTask) -> Unit,
+    onRefresh: suspend () -> Unit,
 ) {
     if (filtered.isEmpty()) {
         // Dart _emptyState.
@@ -404,7 +460,34 @@ private fun TaskListView(
     // R2/R3: task cards capped at 720dp centered on larger windows
     // (approved responsive plan 8 Nov 2026).
                     // Prior: onDragStart = { offset -> onDragStart(offset) },
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    // P6: pull-to-refresh wraps the list; the spinner ends when the load completes.
+    var refreshing by remember { mutableStateOf(false) }
+    val refreshScope = rememberCoroutineScope()
+    // P6 (revised): indicator colors come from app tokens (surface/accent), not Material defaults.
+    val refreshState = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            if (!refreshing) {
+                refreshing = true
+                refreshScope.launch {
+                    try { onRefresh() } finally { refreshing = false }
+                }
+            }
+        },
+        state = refreshState,
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = refreshState,
+                isRefreshing = refreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+                containerColor = colors.surface,
+                color = colors.primary,
+            )
+        },
+    ) {
     LazyColumn(
         modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -414,6 +497,9 @@ private fun TaskListView(
         // to the right task when the list reorders or a card completes.
         items(filtered.size, key = { index -> filtered[index].id }) { index ->
             val task = filtered[index]
+            // Row 9 (iOS-style content motion): staggered entrance per card; stable key = task id.
+// Previous implementation retained:             TaskListCard(
+            Box(Modifier.iosItemEntrance(index, task.id)) {
             TaskListCard(
                 task = task,
                 colors = colors,
@@ -422,6 +508,7 @@ private fun TaskListView(
                 onEditTask = { onEditTask(task) },
                 onDeleteTask = { onDeleteTask(task) },
             )
+            }
         }
     }
     }
@@ -440,17 +527,21 @@ private fun TaskListCard(
     var menuOpen by remember { mutableStateOf(false) }
     val zone = ZoneId.systemDefault()
     val due = task.dueAt?.atZone(zone)
+    // TAS-UI-4 (revised): card radius from the theme, shadow color from tokens (Bandi 2026-11-17).
+    val cardShape = RoundedCornerShape(LocalThemeConfig.current.cornerRadius.toFloat().dp)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .shadow(4.dp, cardShape, ambientColor = colors.shadow, spotColor = colors.shadow)
+            .clip(cardShape)
             .background(colors.surfaceElevated)
             .border(
                 width = 1.dp,
                 color = if (isOverdue) colors.error.copy(alpha = 0.4f) else colors.borderSubtle,
-                shape = RoundedCornerShape(18.dp),
+                shape = cardShape,
             )
+            // Prior: .shadow(4.dp, RoundedCornerShape(18.dp)) .clip(RoundedCornerShape(18.dp)) border shape 18.dp
             .clickable(onClick = onOpenDetail)
             .padding(16.dp),
     ) {
@@ -476,7 +567,10 @@ private fun TaskListCard(
                 DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
                         text = { Text("Edit Task") },
-                        leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.history, semanticLabel = null, modifier = Modifier.size(18.dp)) },
+                        // TAS-AUD-1: the Edit row showed the history glyph; the kanban edit button and the
+                        // detail screen both use ChatyIconId.edit.
+                        // Prior: leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.history, semanticLabel = null, modifier = Modifier.size(18.dp)) },
+                        leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = null, modifier = Modifier.size(18.dp)) },
                         onClick = { menuOpen = false; onEditTask() },
                     )
                     DropdownMenuItem(
@@ -521,9 +615,19 @@ private fun TaskListCard(
                     TaskAvatar(contact?.avatarInitials ?: "U", contact?.avatarColorHex, 24, colors)
                 }
             }
+            // P7 (Bandi 2026-11-17): overflow count like the detail screen (TAS-049).
+            if (task.assigneeIds.size > 4) {
+                Text(
+                    "+${task.assigneeIds.size - 4}",
+                    color = colors.foregroundSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
             Spacer(Modifier.weight(1f))
             Text(
-                if (due == null) "No due date" else "Due ${due.dayOfMonth}/${due.monthValue}",
+                // P7: zero-padded to match the detail screen's date format.
+                // Prior: "Due ${due.dayOfMonth}/${due.monthValue}"
+                if (due == null) "No due date" else "Due ${due.dayOfMonth.toString().padStart(2, '0')}/${due.monthValue.toString().padStart(2, '0')}",
                 color = if (isOverdue) colors.error else colors.foregroundSecondary,
                 fontSize = 12.sp,
                 fontWeight = if (isOverdue) FontWeight.Bold else FontWeight.Medium,
@@ -588,18 +692,23 @@ private fun KanbanBoard(
                         if (isDropTarget) colors.primary.copy(alpha = 0.1f) else colors.surfaceSecondary,
                         label = "kanban-column-bg",
                     )
+                    // TAS-UI-6 (revised): column radius from the theme, shadow color from tokens.
+                    val columnShape = RoundedCornerShape(LocalThemeConfig.current.cornerRadius.toFloat().dp)
                     Column(
                         modifier = Modifier
                             // Prior: .heightIn(min = with(density) { (maxHeightPx - 24).toDp() })
                             .width(columnWidthDp)
                             .height(with(density) { (maxHeightPx - 24).coerceAtLeast(0f).toDp() }) // TAS-025: bounded so the stage list can be a LazyColumn
-                            .clip(RoundedCornerShape(18.dp))
+                            // TAS-UI-6: soft shadow on the kanban column that holds the cards.
+                            .shadow(3.dp, columnShape, ambientColor = colors.shadow, spotColor = colors.shadow)
+                            .clip(columnShape)
                             .background(targetBg)
                             .border(
                                 width = if (isDropTarget) 1.5.dp else 1.dp,
                                 color = if (isDropTarget) colors.primary else colors.border,
-                                shape = RoundedCornerShape(18.dp),
+                                shape = columnShape,
                             )
+                            // Prior: .shadow(3.dp, RoundedCornerShape(18.dp)) .clip(RoundedCornerShape(18.dp)) border shape 18.dp
                             .onGloballyPositioned { coords ->
                                 columnBounds.value = columnBounds.value + (status to coords.boundsInRoot())
                         // Prior: for (task in columnTasks) {
@@ -777,12 +886,16 @@ private fun KanbanCardBody(
 ) {
     val previous = TaskWorkflow.previous(task.status)
     val next = TaskWorkflow.next(task.status)
+    // TAS-UI-5 (revised): card radius from the theme, shadow color from tokens (Bandi 2026-11-17).
+    val cardShape = RoundedCornerShape(LocalThemeConfig.current.cornerRadius.toFloat().dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .shadow(3.dp, cardShape, ambientColor = colors.shadow, spotColor = colors.shadow)
+            .clip(cardShape)
             .background(colors.surface)
-            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
+            .border(1.dp, colors.border, cardShape)
+            // Prior: .shadow(3.dp, RoundedCornerShape(12.dp)) .clip(RoundedCornerShape(12.dp)) border shape 12.dp
             .clickable(enabled = showActions, onClick = onOpenDetail)
             .padding(12.dp),
     ) {
@@ -803,7 +916,9 @@ private fun KanbanCardBody(
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.edit, semanticLabel = "Edit task", color = colors.primary, modifier = Modifier.size(18.dp))
                 }
                 IconButton(onClick = onShowHistory, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Rounded.History, contentDescription = "History", tint = colors.primary, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.History, contentDescription = "History", tint = colors.primary, modifier = Modifier.size(18.dp))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.history, Icons.Rounded.History, contentDescription = "History", tint = colors.primary, modifier = Modifier.size(18.dp))
                 }
                 if (previous != null) {
                     IconButton(onClick = { onMove(task, previous) }, modifier = Modifier.size(48.dp)) {
@@ -853,7 +968,9 @@ private fun TaskHistoryDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(vertical = 4.dp),
                         ) {
-                            Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(18.dp))
+
+//Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.history, Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(entries[i], fontSize = 13.sp)
                         }
@@ -868,8 +985,14 @@ private fun TaskHistoryDialog(
     )
 }
 
-/** Local title/description search only; no network request or task mutation. */
-internal fun filterTasks(tasks: List<ChatTask>, priorityFilter: String, query: String): List<ChatTask> {
+/** Local search only; no network request or task mutation. P7/P8 (Bandi 2026-11-17):
+ *  assignee display names are searchable in addition to title and description. */
+internal fun filterTasks(
+    tasks: List<ChatTask>,
+    priorityFilter: String,
+    query: String,
+    getUser: (String) -> UserProfile? = { null },
+): List<ChatTask> {
     val term = query.trim()
     return tasks.filter { task ->
         val matchesPriority = when (priorityFilter) {
@@ -880,6 +1003,7 @@ internal fun filterTasks(tasks: List<ChatTask>, priorityFilter: String, query: S
             else -> true
         }
         matchesPriority && (term.isEmpty() || task.title.contains(term, ignoreCase = true) ||
-            task.description.contains(term, ignoreCase = true))
+            task.description.contains(term, ignoreCase = true) ||
+            task.assigneeIds.any { id -> getUser(id)?.displayName?.contains(term, ignoreCase = true) == true })
     }
 }

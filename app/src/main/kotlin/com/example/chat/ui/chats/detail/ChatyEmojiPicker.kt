@@ -125,7 +125,8 @@ fun ChatyEmojiPickerSheet(
     }
     var stickerTab by remember { mutableStateOf(false) }
     var gifTab by remember { mutableStateOf(false) }
-    var newsSection by remember { mutableStateOf(false) }
+    // Previous custom News selection: var newsSection by remember { mutableStateOf(false) }
+    val newsSection = false
     var searchQuery by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf(0) } // 0 = recents
@@ -210,7 +211,10 @@ fun ChatyEmojiPickerSheet(
                 IconButton(onClick = {
                     onComposerDone(ChatyEmojiComposerResult("", ChatyEmojiComposerAction.keyboard))
                 }) {
-                    Icon(Icons.Rounded.Keyboard, contentDescription = "Return to keyboard",
+
+//Icon(Icons.Rounded.Keyboard, contentDescription = "Return to keyboard",
+//                        tint = headerForeground)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.keyboard, Icons.Rounded.Keyboard, contentDescription = "Return to keyboard",
                         tint = headerForeground)
                 }
             }
@@ -227,9 +231,24 @@ fun ChatyEmojiPickerSheet(
 
         if (composerMode && !reactionMode) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                TextButton(onClick = { stickerTab = false; gifTab = false }) { Text(if (!stickerTab && !gifTab) "EMOJI •" else "EMOJI") }
-                TextButton(onClick = { stickerTab = true; gifTab = false }) { Text(if (stickerTab && !gifTab) "STICKER •" else "STICKER") }
-                TextButton(onClick = { stickerTab = false; gifTab = true }) { Text(if (gifTab) "GIF •" else "GIF") }
+                // Previous stock text action:
+                // TextButton(onClick = { stickerTab = false; gifTab = false }) { Text(if (!stickerTab && !gifTab) "EMOJI •" else "EMOJI") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = if (!stickerTab && !gifTab) "EMOJI •" else "EMOJI",
+                    onClick = { stickerTab = false; gifTab = false },
+                )
+                // Previous stock text action:
+                // TextButton(onClick = { stickerTab = true; gifTab = false }) { Text(if (stickerTab && !gifTab) "STICKER •" else "STICKER") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = if (stickerTab && !gifTab) "STICKER •" else "STICKER",
+                    onClick = { stickerTab = true; gifTab = false },
+                )
+                // Previous stock text action:
+                // TextButton(onClick = { stickerTab = false; gifTab = true }) { Text(if (gifTab) "GIF •" else "GIF") }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = if (gifTab) "GIF •" else "GIF",
+                    onClick = { stickerTab = false; gifTab = true },
+                )
             }
         }
         if (gifTab && composerMode && !reactionMode) {
@@ -414,7 +433,7 @@ fun ChatyEmojiPickerSheet(
         }
         }
         if (composerMode && !reactionMode) {
-            CustomEmojiPackStrip(theme, newsSection, onSelect = { newsSection = it })
+            // Removed custom pack strip: CustomEmojiPackStrip(theme, newsSection, onSelect = { newsSection = it })
         }
         }
     }

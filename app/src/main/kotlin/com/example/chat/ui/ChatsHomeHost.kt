@@ -69,6 +69,8 @@ fun ChatsHomeHost(
     expandedListDetail: Boolean = false,
     paneConversation: Conversation? = null,
     chatPane: (@Composable (Conversation) -> Unit)? = null,
+    homeToolRequest: com.example.chat.ui.chats.home.HomeToolRequest? = null,
+    onHomeToolConsumed: (com.example.chat.ui.chats.home.HomeToolRequest) -> Unit = {},
 ) {
     val api = ServiceLocator.apiBackend
     val prefs = ServiceLocator.preferencesController
@@ -242,6 +244,8 @@ fun ChatsHomeHost(
         }
     }
     ChatsHomeScreen(
+        homeToolRequest = homeToolRequest?.takeIf { it.owner === owner },
+        onHomeToolConsumed = onHomeToolConsumed,
         opState = opState,
         onRetry = onRetryOp,
         onRefreshHome = { refreshHome() },
@@ -249,37 +253,39 @@ fun ChatsHomeHost(
         accountSessionIdentity = api.authSnapshot(),
         folderAccountKey = api.currentAccountHash().orEmpty(),
         headerBottom = headerBottom,
-        // Email-verification nudge (research 4a.4): signed-in but unverified
-        // users get a banner with one-tap resend; verification is never forced
-        // and the banner lives only in this composition (reappears next launch).
-        connectionBanner = if (me != null && !me!!.emailVerified) {
-            {
-                EmailVerificationBanner(
-                    email = me?.email ?: "",
-                    busy = verificationBusy,
-                    retrySeconds = verificationWait,
-                    onResend = {
-                        if(!verificationBusy && verificationWait==0) {
-                        verificationBusy=true
-                        scope.launch {
-                            val address = me?.email ?: ""
-                            try {
-                                val message = api.sendEmailVerification(address)
-                                if(ownsRequest()) onVerifyEmail(address, message)
-                            } catch(cancel:kotlinx.coroutines.CancellationException) { throw cancel
-                            } catch (e: Exception) {
-                                if(ownsRequest()) {
-                                    if(e is com.example.chat.data.api.AuthRateLimitException)
-                                        verificationRetryAt=android.os.SystemClock.elapsedRealtime()+e.retryAfterSeconds*1000L
-                                    toast(com.example.chat.ui.auth.OtpVerificationLogic.displayError(e))
-                                }
-                            } finally { if(ownsRequest()) verificationBusy=false }
-                        }
-                        }
-                    },
-                )
-            }
-        } else null,
+        // Home-only banner retired at the owner's request; registration verification is unchanged.
+        connectionBanner = null,
+//         // Email-verification nudge (research 4a.4): signed-in but unverified
+//         // users get a banner with one-tap resend; verification is never forced
+//         // and the banner lives only in this composition (reappears next launch).
+//         connectionBanner = if (me != null && !me!!.emailVerified) {
+//             {
+//                 EmailVerificationBanner(
+//                     email = me?.email ?: "",
+//                     busy = verificationBusy,
+//                     retrySeconds = verificationWait,
+//                     onResend = {
+//                         if(!verificationBusy && verificationWait==0) {
+//                         verificationBusy=true
+//                         scope.launch {
+//                             val address = me?.email ?: ""
+//                             try {
+//                                 val message = api.sendEmailVerification(address)
+//                                 if(ownsRequest()) onVerifyEmail(address, message)
+//                             } catch(cancel:kotlinx.coroutines.CancellationException) { throw cancel
+//                             } catch (e: Exception) {
+//                                 if(ownsRequest()) {
+//                                     if(e is com.example.chat.data.api.AuthRateLimitException)
+//                                         verificationRetryAt=android.os.SystemClock.elapsedRealtime()+e.retryAfterSeconds*1000L
+//                                     toast(com.example.chat.ui.auth.OtpVerificationLogic.displayError(e))
+//                                 }
+//                             } finally { if(ownsRequest()) verificationBusy=false }
+//                         }
+//                         }
+//                     },
+//                 )
+//             }
+//         } else null,
         templates = com.example.chat.ui.chats.home.resolveHomeTemplates(templateController.config, com.example.chat.core.preferences.HomePresentationPolicy.isDefault(prefs.home.homeStyle), templateController.chatList),
         conversations = conversations,
         requiresSubscription = api.requiresSubscription,

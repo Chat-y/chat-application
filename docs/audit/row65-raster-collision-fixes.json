@@ -1,0 +1,37 @@
+[
+  {
+    "theme": "phosphorRegular",
+    "id": "speaker",
+    "resource": "ic_phr_speaker"
+  },
+  {
+    "theme": "phosphorRegular",
+    "id": "deleteOutline",
+    "resource": "ic_phr_delete_outline"
+  },
+  {
+    "theme": "phosphorRegular",
+    "id": "editOutline",
+    "resource": "ic_phr_edit_outline"
+  },
+  {
+    "theme": "phosphorRegular",
+    "id": "cameraSwitch",
+    "resource": "ic_phr_camera_switch"
+  },
+  {
+    "theme": "phosphorRegular",
+    "id": "videoCam",
+    "resource": "ic_phr_video_cam"
+  },
+  {
+    "theme": "phosphorRegular",
+    "id": "checkDouble",
+    "resource": "ic_phr_check_double"
+  },
+  {
+    "theme": "phosphorRegular",
+    "id": "schedule",
+    "resource": "ic_phr_schedule"
+  }
+]

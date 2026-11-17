@@ -1,5 +1,7 @@
 package com.example.chat.ui.media
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import com.example.chat.ui.kit.ChatyHapticsPort
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -154,9 +156,12 @@ fun ChatyAudioPlayerScreen(
     }
 
     var showQueue by remember { mutableStateOf(false) }
-    androidx.activity.compose.BackHandler { if (showQueue) showQueue = false else onClose() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(showQueue)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler { if (showQueue) showQueue = false else onClose() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) { if (showQueue) showQueue = false else onClose() }
 
     Scaffold(
+        modifier = Modifier.chatyPredictiveBack(predictiveBack),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
@@ -165,8 +170,13 @@ fun ChatyAudioPlayerScreen(
                     // MV-R5-024 previous tooltip: AudioPlayerTooltip("Close player") {
                     AudioPlayerTooltip("Close") {
                         IconButton(onClick = onClose) {
-                            Icon(
-                                Icons.Rounded.KeyboardArrowDown,
+
+//Icon(
+//                                Icons.Rounded.KeyboardArrowDown,
+//                                contentDescription = "Close",
+//                                modifier = Modifier.size(30.dp),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.close, Icons.Rounded.KeyboardArrowDown,
                                 contentDescription = "Close",
                                 modifier = Modifier.size(30.dp),
                             )

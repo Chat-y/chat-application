@@ -26,6 +26,9 @@ interface VoiceRecorderPort {
     suspend fun start(config: VoiceRecordConfig, path: String)
     /** record stop(): the recorded path, or null to fall back to the staged one. */
     suspend fun stop(): String?
+    /** Non-blocking generation-bound stop request. Null means this adapter has no split stop seam.
+     * Finalization must still use stop(); a request alone never makes the file sendable. */
+    fun captureStopRequest(): (() -> Unit)? = null
     /** record getAmplitude().current (dBFS, roughly -60..0). */
     suspend fun currentAmplitudeDbfs(): Double
     /** Unsupported recorders must fail explicitly, never simulate a paused capture. */
@@ -51,6 +54,9 @@ interface VoiceStagingPort {
  *    displayName, mimeType "audio/mp4", durationSeconds) after reading bytes.
  *  - sendAudioMessage <- the backend send-with-attachment seam
  *    (Dart dataStore.sendMessage(text: '', type: MessageType.audio, attachment:)). */
+/** Recorder guarantees native handles are released, but the output is invalid and must not upload. */
+class VoiceFinalizationException(cause: Exception) : IllegalStateException(cause.message, cause)
+
 class VoiceCaptureBlockedException : IllegalStateException("A call owns audio. Finish the call, then tap Resume.")
 
 class VoiceNoteController(
@@ -115,7 +121,15 @@ class VoiceNoteController(
     private suspend fun stopNative(): String? = withContext(NonCancellable) {
         nativeMutex.withLock {
             nativeUncertain = true
-            val result = recorder.stop()
+            // Previous: val result = recorder.stop()
+            val result = try { recorder.stop() } catch (error: VoiceFinalizationException) {
+                // Output validity and microphone ownership are separate facts.
+                nativeUncertain = false
+                recorderActive = false
+                captureReservation?.release()
+                captureReservation = null
+                throw error
+            }
             nativeUncertain = false
             recorderActive = false
             captureReservation?.release()
@@ -252,6 +266,17 @@ class VoiceNoteController(
                 }
             }
         } finally { leaveBusy(operation) }
+    }
+
+    /** Reserve cutoff in the event callback, before launch/dispatch. The adapter returns a
+     * closure bound to the current native generation, never a future recording. */
+    fun requestSendStop() {
+        check(isRecording && !isBusy && !disposed && !callInterrupted) { "Recording cannot be sent now." }
+        requireActive()
+        recorder.captureStopRequest()?.let { stopCurrent ->
+            stopCurrent()
+            clock.pause() // Duration stops at Send, not at coroutine dispatch or network completion.
+        }
     }
 
     /** Dart stopAndSend(): stops, enforces the 1s floor, uploads, sends.

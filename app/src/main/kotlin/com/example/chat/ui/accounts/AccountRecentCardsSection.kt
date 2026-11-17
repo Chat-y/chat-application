@@ -189,8 +189,14 @@ fun AccountRecentCardsSection(
                                 enabled = !busy && index > 0,
                                 modifier = Modifier.size(48.dp),
                             ) {
-                                Icon(
-                                    Icons.Outlined.ArrowUpward,
+
+//Icon(
+//                                    Icons.Outlined.ArrowUpward,
+//                                    contentDescription = "Move ${meta.displayName} card earlier",
+//                                    tint = if (index > 0) colors.foregroundSecondary else colors.disabledForeground,
+//                                    modifier = Modifier.size(18.dp),
+//                                )
+                                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.arrowUp, Icons.Outlined.ArrowUpward,
                                     contentDescription = "Move ${meta.displayName} card earlier",
                                     tint = if (index > 0) colors.foregroundSecondary else colors.disabledForeground,
                                     modifier = Modifier.size(18.dp),
@@ -325,8 +331,14 @@ fun AccountRecentCardsSection(
                                             }
                                         }
                                         if (item.isMuted) {
-                                            Icon(
-                                                Icons.Outlined.NotificationsOff,
+
+//Icon(
+//                                                Icons.Outlined.NotificationsOff,
+//                                                contentDescription = null,
+//                                                tint = colors.foregroundSecondary,
+//                                                modifier = Modifier.size(15.dp).padding(end = 4.dp),
+//                                            )
+                                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.notificationsOff, Icons.Outlined.NotificationsOff,
                                                 contentDescription = null,
                                                 tint = colors.foregroundSecondary,
                                                 modifier = Modifier.size(15.dp).padding(end = 4.dp),

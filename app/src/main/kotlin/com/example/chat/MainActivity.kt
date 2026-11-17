@@ -73,6 +73,11 @@ class MainActivity : FragmentActivity() {
     private fun handleNotificationIntent(intent: android.content.Intent?) {
         val N = com.example.chat.notifications.ChatyNotifications
         when (intent?.action) {
+            com.example.chat.notifications.ChatyNotificationPolicy.ACTION_ACCEPT -> {
+                // Normal Activity startup keeps auth/app-lock/permission UI in control.
+                ServiceLocator.notificationCoordinator.requestNotificationAccept(
+                    intent.getStringExtra(com.example.chat.notifications.ChatyNotificationPolicy.EXTRA_NONCE))
+            }
             N.ACTION_OPEN_ACCOUNT_CALL -> {
                 val hash = intent.getStringExtra("account_hash") ?: return
                 val call = intent.getStringExtra(N.EXTRA_CALL_ID) ?: return

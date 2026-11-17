@@ -123,9 +123,16 @@ internal fun ConversationColorRow(
             trailing = {
                 Row {
                     Box(Modifier.padding(12.dp).size(24.dp).background(effectiveColor, CircleShape))
-                    TextButton(onClick = onReset, enabled = enabled && colorValue != null, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(strings.getString(com.example.chat.R.string.conv_helper_reset))
-                    }
+                    // Previous stock text action:
+                    // TextButton(onClick = onReset, enabled = enabled && colorValue != null, modifier = Modifier.heightIn(min = 48.dp)) {
+                    //                         Text(strings.getString(com.example.chat.R.string.conv_helper_reset))
+                    //                     }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = strings.getString(com.example.chat.R.string.conv_helper_reset),
+                        onClick = onReset,
+                        enabled = enabled && colorValue != null,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
                 }
             })
     }
@@ -137,12 +144,22 @@ internal fun ConversationSupportCopy(values: Map<String, Any?>) {
     val strings = androidx.compose.ui.platform.LocalContext.current.resources
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var copied by remember(values) { mutableStateOf(false) }
-    TextButton(onClick = {
+    // Previous stock text action:
+    // TextButton(onClick = {
+    //         val json = org.json.JSONObject()
+    //         values.forEach { (key, value) -> json.put(key, value ?: org.json.JSONObject.NULL) }
+    //         clipboard.setText(androidx.compose.ui.text.AnnotatedString(json.toString(2)))
+    //         copied = true
+    //     }) { Text(if (copied) strings.getString(com.example.chat.R.string.conv_helper_appearance_copied) else strings.getString(com.example.chat.R.string.conv_helper_copy_appearance_support)) }
+    com.example.chat.ui.kit.ChatyTextButton(
+        label = if (copied) strings.getString(com.example.chat.R.string.conv_helper_appearance_copied) else strings.getString(com.example.chat.R.string.conv_helper_copy_appearance_support),
+        onClick = {
         val json = org.json.JSONObject()
         values.forEach { (key, value) -> json.put(key, value ?: org.json.JSONObject.NULL) }
         clipboard.setText(androidx.compose.ui.text.AnnotatedString(json.toString(2)))
         copied = true
-    }) { Text(if (copied) strings.getString(com.example.chat.R.string.conv_helper_appearance_copied) else strings.getString(com.example.chat.R.string.conv_helper_copy_appearance_support)) }
+    },
+    )
 }
 
 /** Saveable screen-local disclosure, not a new persistent chat behaviour setting. */
@@ -151,9 +168,17 @@ internal fun ConversationSettingsSection(title: String, content: @Composable () 
     val strings = androidx.compose.ui.platform.LocalContext.current.resources
     var expanded by androidx.compose.runtime.saveable.rememberSaveable(title) { mutableStateOf(true) }
     com.example.chat.ui.kit.GbCardContainer {
-        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.semantics {
+        // Previous stock text action:
+        // TextButton(onClick = { expanded = !expanded }, modifier = Modifier.semantics {
+        //             stateDescription = if (expanded) strings.getString(com.example.chat.R.string.conv_helper_expanded) else strings.getString(com.example.chat.R.string.conv_helper_collapsed)
+        //         }) { Text(if (expanded) "▾ $title" else "▸ $title") }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = if (expanded) "▾ $title" else "▸ $title",
+            onClick = { expanded = !expanded },
+            modifier = Modifier.semantics {
             stateDescription = if (expanded) strings.getString(com.example.chat.R.string.conv_helper_expanded) else strings.getString(com.example.chat.R.string.conv_helper_collapsed)
-        }) { Text(if (expanded) "▾ $title" else "▸ $title") }
+        },
+        )
         if (expanded) content()
     }
 }

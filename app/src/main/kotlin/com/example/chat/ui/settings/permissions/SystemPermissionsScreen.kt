@@ -660,7 +660,9 @@ fun SystemPermissionsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
 // Superseded source retained below per additive-only review rule.
 //                     Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = colors.error)
-                    Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = colors.primary)
+
+//Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = colors.primary)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.location, Icons.Rounded.LocationOn, contentDescription = null, tint = colors.primary)
                     Spacer(Modifier.width(8.dp))
                     Text("Current device location")
                 }
@@ -719,7 +721,9 @@ fun SystemPermissionsScreen(
                 trailingHeaderWidget = {
                     // IconButton(modifier = Modifier.semantics { ... }, onClick = { scope.launch { refreshAll(); ... } }, enabled = !loading) {
                     IconButton(modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics { stateDescription = if (loading) "Checking" else "Ready" }, onClick = { scope.launch { refreshAll(); snack("Permission status refreshed.") } }, enabled = !loading) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Re-check permissions")
+
+//Icon(Icons.Rounded.Refresh, contentDescription = "Re-check permissions")
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = "Re-check permissions")
                     }
                 },
             ) {

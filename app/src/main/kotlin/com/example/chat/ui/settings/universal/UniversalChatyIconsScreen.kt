@@ -153,7 +153,9 @@ fun UniversalChatyIconsScreen(
         onBack = onBack,
         actions = {
             TextButton(onClick = { resetTheme = true; showThemeSelector = true }) {
-                Icon(Icons.Rounded.Refresh, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
+
+//Icon(Icons.Rounded.Refresh, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Reset", color = accent, fontSize = 12.5.sp)
             }
@@ -181,7 +183,8 @@ fun UniversalChatyIconsScreen(
                         letterSpacing = 1.1.sp,
                     )
                     Spacer(Modifier.height(2.dp))
-                    Text(activeTheme.title, color = primaryText, fontSize = 18.sp, fontWeight = FontWeight.W800)
+//                    Text(activeTheme.title, color = primaryText, fontSize = 18.sp, fontWeight = FontWeight.W800)
+                    Text(iconPackDisplayLabel(activeTheme, activeTheme), color = primaryText, fontSize = 18.sp, fontWeight = FontWeight.W800)
                 }
                 Row(
                     Modifier.background(accent, RoundedCornerShape(20.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
@@ -251,14 +254,106 @@ fun UniversalChatyIconsScreen(
         // Available families share the same selector. Owner decision (2026-11-04):
         // unavailable packs are removed from the picker, so only selectable themes are counted.
         Text(
-            "${ChatyIconThemeId.entries.size} ICON PACK OPTIONS",
+//            "${ChatyIconThemeId.entries.size} ICON PACK OPTIONS",
+            "ICON PACK",
             color = secondaryText,
             fontSize = 11.5.sp,
             fontWeight = FontWeight.W800,
             letterSpacing = 0.8.sp,
         )
         Spacer(Modifier.height(10.dp))
-        ChatyIconThemeId.entries.forEachIndexed { index, itemTheme ->
+        // Previous enum order retained: ChatyIconThemeId.entries.forEachIndexed { index, itemTheme ->
+        // Previous expanded pack list retained in full; only the applied pack row is shown initially.
+//        iconPackDisplayOrder(activeTheme).forEachIndexed { index, itemTheme ->
+//            if (index > 0) Spacer(Modifier.height(10.dp))
+//            val isSelected = activeTheme == itemTheme
+//            val packInfo = ChatyIconPackCatalog.info(itemTheme)
+//            val selectable = packInfo?.available ?: true
+//            val groupIconColor = if (isSelected) accent else if (previewIsDark) Color.White else Color.Black
+//            Column(
+//                Modifier.fillMaxWidth()
+//                    .clip(RoundedCornerShape(16.dp))
+//                    .clickable(enabled = selectable) { resetTheme = false; showThemeSelector = true }
+//                    .background(
+//                        if (isSelected) accent.copy(alpha = 0.12f) else surface,
+//                        RoundedCornerShape(16.dp),
+//                    )
+//                    .border(
+//                        width = if (isSelected) 2.dp else 1.dp,
+//                        color = if (isSelected) accent else secondaryText.copy(alpha = 0.25f),
+//                        shape = RoundedCornerShape(16.dp),
+//                    )
+//                    .padding(14.dp),
+//            ) {
+//                Row(verticalAlignment = Alignment.CenterVertically) {
+//                    Row(
+//                        Modifier.background(
+//                            if (previewIsDark) Color.Black.copy(alpha = 0.45f) else Color.White,
+//                            RoundedCornerShape(12.dp),
+//                        )
+//                            .border(1.dp, if (previewIsDark) White10 else Black12, RoundedCornerShape(12.dp))
+//                            .padding(horizontal = 10.dp, vertical = 8.dp),
+//                        verticalAlignment = Alignment.CenterVertically,
+//                    ) {
+//                        if (packInfo == null || com.example.chat.ui.icons.ChatyAssetIcons.hasPreview(itemTheme)) {
+//                            ChatyIcon(ChatyIconId.chats, size = previewSize * 0.9f, color = groupIconColor, themeOverride = itemTheme)
+//                            Spacer(Modifier.width(8.dp))
+//                            ChatyIcon(ChatyIconId.settings, size = previewSize * 0.9f, color = groupIconColor, themeOverride = itemTheme)
+//                        } else {
+//                            Text("No verified preview", color = secondaryText, fontSize = 10.sp)
+//                        }
+//                    }
+//                    Spacer(Modifier.width(14.dp))
+//                    Column(Modifier.weight(1f)) {
+//                        Row(verticalAlignment = Alignment.CenterVertically) {
+//                            Text(
+//                                // Previous label: itemTheme.title
+//                                iconPackDisplayLabel(itemTheme, activeTheme),
+//                                color = primaryText,
+//                                fontSize = 15.sp,
+//                                fontWeight = if (isSelected) FontWeight.W800 else FontWeight.W600,
+//                            )
+////                            // Previous factory-default badge: itemTheme == ChatyIconThemeId.hugeiconsFree
+////                            if (itemTheme == activeTheme) {
+////                                Spacer(Modifier.width(6.dp))
+////                                Text(
+////                                    // Preserve the actual pack name beside its Default display label.
+////                                    itemTheme.title,
+////                                    Modifier.background(secondaryText.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+////                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+////                                    fontSize = 9.5.sp,
+////                                    color = secondaryText,
+////                                    fontWeight = FontWeight.W600,
+////                                )
+////                            }
+//                        }
+//                        Spacer(Modifier.height(2.dp))
+//                        Text(
+//                            itemTheme.description,
+//                            color = secondaryText,
+//                            fontSize = 12.sp,
+//                            maxLines = 2,
+//                            overflow = TextOverflow.Ellipsis,
+//                        )
+//                        if (packInfo?.reason != null) {
+//                            Spacer(Modifier.height(2.dp))
+//                            Text(packInfo.reason, color = secondaryText, fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+//                        }
+//                    }
+//                    Spacer(Modifier.width(8.dp))
+//                    if (isSelected) {
+//
+////Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))
+//                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircle, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))
+//                    } else if (!selectable) {
+//                        Text("Unavailable", color = secondaryText, fontSize = 10.sp, fontWeight = FontWeight.W700)
+//                    } else {
+//                        Icon(com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.radioOff), contentDescription = null, tint = secondaryText.copy(alpha = 0.45f), modifier = Modifier.size(24.dp))
+//                    }
+//                }
+//            }
+//        }
+        listOf(activeTheme).forEachIndexed { index, itemTheme ->
             if (index > 0) Spacer(Modifier.height(10.dp))
             val isSelected = activeTheme == itemTheme
             val packInfo = ChatyIconPackCatalog.info(itemTheme)
@@ -301,22 +396,25 @@ fun UniversalChatyIconsScreen(
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                itemTheme.title,
+                                // Previous label: itemTheme.title
+                                iconPackDisplayLabel(itemTheme, activeTheme),
                                 color = primaryText,
                                 fontSize = 15.sp,
                                 fontWeight = if (isSelected) FontWeight.W800 else FontWeight.W600,
                             )
-                            if (itemTheme == ChatyIconThemeId.hugeiconsFree) {
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "Default",
-                                    Modifier.background(secondaryText.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                                    fontSize = 9.5.sp,
-                                    color = secondaryText,
-                                    fontWeight = FontWeight.W600,
-                                )
-                            }
+//                            // Previous factory-default badge: itemTheme == ChatyIconThemeId.hugeiconsFree
+//                            if (itemTheme == activeTheme) {
+//                                Spacer(Modifier.width(6.dp))
+//                                Text(
+//                                    // Preserve the actual pack name beside its Default display label.
+//                                    itemTheme.title,
+//                                    Modifier.background(secondaryText.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+//                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+//                                    fontSize = 9.5.sp,
+//                                    color = secondaryText,
+//                                    fontWeight = FontWeight.W600,
+//                                )
+//                            }
                         }
                         Spacer(Modifier.height(2.dp))
                         Text(
@@ -333,7 +431,9 @@ fun UniversalChatyIconsScreen(
                     }
                     Spacer(Modifier.width(8.dp))
                     if (isSelected) {
-                        Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))
+
+//Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircle, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))
                     } else if (!selectable) {
                         Text("Unavailable", color = secondaryText, fontSize = 10.sp, fontWeight = FontWeight.W700)
                     } else {
@@ -510,8 +610,8 @@ fun UniversalChatyIconsScreen(
     if (showThemeSelector) {
         com.example.chat.ui.kit.ChatySingleChoiceModal(
             title = if (resetTheme) "Reset icons" else "Select icons", value = activeTheme,
-            options = if (resetTheme) listOf(ChatyIconThemeId.hugeiconsFree) else ChatyIconThemeId.entries.filter(ChatyIconPackCatalog::isSelectable),
-            labelBuilder = { it.title }, onDismiss = { showThemeSelector = false },
+            options = if (resetTheme) listOf(ChatyIconThemeId.hugeiconsFree) else iconPackDisplayOrder(activeTheme).filter(ChatyIconPackCatalog::isSelectable),
+            labelBuilder = { iconPackDisplayLabel(it, activeTheme) }, onDismiss = { showThemeSelector = false },
             onApply = { chosen -> applyTheme(chosen); showThemeSelector = false },
             previewBuilder = { theme ->
                 Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
@@ -571,7 +671,8 @@ fun UniversalChatyIconsScreen(
                 }
                 Spacer(Modifier.height(20.dp))
                 FixedGrid(
-                    items = ChatyIconThemeId.entries.filter(ChatyIconPackCatalog::isSelectable),
+                    // Previous enum order: ChatyIconThemeId.entries.filter(ChatyIconPackCatalog::isSelectable)
+                    items = iconPackDisplayOrder(activeTheme).filter(ChatyIconPackCatalog::isSelectable),
                     columns = 5,
                     horizontalSpacing = 10.dp,
                     verticalSpacing = 12.dp,
@@ -596,7 +697,8 @@ fun UniversalChatyIconsScreen(
                         }
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            if (isApplied) "${theme.title} ✓" else theme.title,
+                            // Previous title: if (isApplied) "${theme.title} ✓" else theme.title
+                            if (isApplied) "${iconPackDisplayLabel(theme, activeTheme)} ✓" else iconPackDisplayLabel(theme, activeTheme),
                             color = if (isApplied) scheme.primary else scheme.onSurfaceVariant,
                             fontSize = 9.5.sp,
                             fontWeight = if (isApplied) FontWeight.W700 else FontWeight.W500,
@@ -611,3 +713,16 @@ fun UniversalChatyIconsScreen(
         }
     }
 }
+
+/** Display only. Persistence retains the original theme name/title and all overrides. */
+// Prior applied-pack presentation retained; clarified request names the factory-default pack instead.
+//internal fun iconPackDisplayOrder(applied: ChatyIconThemeId): List<ChatyIconThemeId> =
+//    listOf(applied) + ChatyIconThemeId.entries.filter { it != applied }
+//
+//internal fun iconPackDisplayLabel(theme: ChatyIconThemeId, applied: ChatyIconThemeId): String =
+//    if (theme == applied) "Default" else theme.title
+internal fun iconPackDisplayOrder(@Suppress("UNUSED_PARAMETER") applied: ChatyIconThemeId): List<ChatyIconThemeId> =
+    listOf(ChatyIconThemeId.hugeiconsFree) + ChatyIconThemeId.entries.filter { it != ChatyIconThemeId.hugeiconsFree }
+
+internal fun iconPackDisplayLabel(theme: ChatyIconThemeId, @Suppress("UNUSED_PARAMETER") applied: ChatyIconThemeId): String =
+    if (theme == ChatyIconThemeId.hugeiconsFree) "Default" else theme.title

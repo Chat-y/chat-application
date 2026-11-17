@@ -1,5 +1,7 @@
 package com.example.chat.ui.accounts
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -310,8 +312,10 @@ fun AccountSwitcherHost(
     )
 
     if (addingAccount) {
-        BackHandler { addingAccount = false }
-        Box(Modifier.fillMaxSize()) {
+        val addingBack = com.example.chat.ui.kit.rememberChatyBackPresentation()
+        // Previous registration retained inactive: BackHandler { addingAccount = false }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = addingBack) { addingAccount = false }
+        Box(Modifier.chatyPredictiveBack(addingBack).fillMaxSize()) {
             LoginScreen(
                 onBack = { addingAccount = false },
                 onLoggedIn = { _ ->

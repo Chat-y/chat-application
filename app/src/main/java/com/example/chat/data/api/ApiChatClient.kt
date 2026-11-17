@@ -354,15 +354,19 @@ class ApiChatClient(
 
     fun markRoomDelivered(roomId: String): Boolean = acknowledgeRoomPages(roomId, "delivered") != null
 
-    fun markRoomRead(roomId: String): List<String>? = acknowledgeRoomPages(roomId, "read")
+    // Previous: fun markRoomRead(roomId: String): List<String>? = acknowledgeRoomPages(roomId, "read")
+    fun markRoomRead(roomId: String, mayContinue: () -> Boolean = { true }): List<String>? =
+        acknowledgeRoomPages(roomId, "read", mayContinue)
 
     /** Server caps each acknowledgement at 500 rows. Do not mistake one page for completion. */
-    private fun acknowledgeRoomPages(roomId: String, kind: String): List<String>? {
+    // Previous signature: private fun acknowledgeRoomPages(roomId: String, kind: String): List<String>?
+    private fun acknowledgeRoomPages(roomId: String, kind: String, mayContinue: () -> Boolean = { true }): List<String>? {
         val capturedToken = token()?.takeIf { it.isNotBlank() } ?: return null
         val capturedBase = base(); val capturedTenant = tenantId()
         val roomPath = safePathSegment(roomId) ?: return null
         val headers = mapOf("Authorization" to "Bearer $capturedToken", "Content-Type" to "application/json", "x-tenant-id" to capturedTenant)
-        fun current() = token() == capturedToken && base() == capturedBase && tenantId() == capturedTenant
+        // Previous current() checked routing only; each read page must also honor current privacy.
+        fun current() = token() == capturedToken && base() == capturedBase && tenantId() == capturedTenant && mayContinue()
         val accepted = linkedSetOf<String>()
         return try {
             repeat(20) { // Bounded work per wake. An unfinished 10,000+ receipt backlog is not reported complete.

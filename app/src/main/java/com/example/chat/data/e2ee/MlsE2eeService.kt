@@ -61,6 +61,7 @@ class MlsE2eeService(
     private val dbPathForUser: (String) -> String,
     private val notifyChanged: () -> Unit = {},
     private val accountNamespaceProvider: (() -> String?)? = null,
+    private val assertNamespaceActive: suspend (String) -> Unit = {},
 ) {
     companion object {
         const val protocolSuite = "mls-rfc9420-v1"
@@ -74,6 +75,20 @@ class MlsE2eeService(
         private fun zero(bytes: ByteArray?) {
             bytes?.fill(0)
         }
+    }
+
+    private val keyTrust = DeviceKeyTrustStore(secureStorage)
+    val deviceKeyReviews get() = keyTrust.reviews
+    val deviceKeyFingerprints get() = keyTrust.observed
+
+    suspend fun approveDeviceKey(review: DeviceKeyTrustStore.Review, ownerIsCurrent: () -> Boolean) = initializationMutex.withLock {
+        check(ownerIsCurrent()) { "Account changed during device-key approval." }
+        val ns = accountNamespaceProvider?.invoke() ?: currentAuthUserId()
+        check(ns == review.namespace) { "Account changed during device-key review." }
+        assertNamespaceActive(review.namespace)
+        check(ownerIsCurrent()) { "Account changed before device-key approval." }
+        keyTrust.approve(review, ownerIsCurrent)
+        check(ownerIsCurrent()) { "Account changed after device-key approval." }
     }
 
     private val random = SecureRandom()
@@ -116,14 +131,15 @@ class MlsE2eeService(
     private suspend fun initializeLocked() {
         val user = currentAuthUserId()
         if (user == null) {
-            close()
+            closeLocked()
             return
         }
         val ns = accountNamespaceProvider?.invoke()?.takeIf { it.isNotBlank() } ?: user
+        assertNamespaceActive(ns)
         if (isReady && userId == user && activeNamespace == ns) return
 
         try {
-            close()
+            closeLocked()
             val uid = user
             val prefix = "chaty.mls.$ns"
             val did = loadOrCreateDeviceId(prefix)
@@ -160,18 +176,19 @@ class MlsE2eeService(
             registerAndReplenishDevice()
             notifyChanged()
         } catch (e: Throwable) {
-            close()
+            closeLocked()
             throw e
         }
     }
 
     /** Retries device registration and key package replenishment if MLS is not
      *  currently ready or missing active server-side enrollment. */
-    suspend fun retryDeviceEnrollment() {
-        val user = currentAuthUserId() ?: return
+    suspend fun retryDeviceEnrollment() = initializationMutex.withLock {
+        val user = currentAuthUserId() ?: return@withLock
         val ns = accountNamespaceProvider?.invoke()?.takeIf { it.isNotBlank() } ?: user
+        assertNamespaceActive(ns)
         if (!isReady || userId != user || activeNamespace != ns) {
-            initializeForCurrentSession()
+            initializeLocked()
         }
         if (isReady && userId == user && activeNamespace == ns) {
             try {
@@ -186,14 +203,24 @@ class MlsE2eeService(
      *  MLS group for [conversationId]. Never creates a plaintext fallback;
      *  throws [MlsMembershipPendingException] when another device must publish
      *  a membership commit first. */
-    suspend fun ensureConversationReady(conversationId: String): MlsConversationState {
-        initializeForCurrentSession()
-        return gate(conversationId).withLock { ensureConversationReadyLocked(conversationId) }
+    suspend fun ensureConversationReady(conversationId: String): MlsConversationState = initializationMutex.withLock {
+        initializeLocked()
+        gate(conversationId).withLock { ensureConversationReadyLocked(conversationId) }
     }
 
-    suspend fun encryptPayload(conversationId: String, payload: Map<String, Any?>): MlsEncryptedPayload {
-        initializeForCurrentSession()
-        return gate(conversationId).withLock {
+    suspend fun assertStoredCipherReady(conversationId: String, cipher: MlsEncryptedPayload) = initializationMutex.withLock {
+        initializeLocked()
+        gate(conversationId).withLock {
+            val state = ensureConversationReadyLocked(conversationId)
+            if (state.group?.groupId != cipher.groupId || state.group?.epoch != cipher.epoch ||
+                requireEngine().groupEpoch(Base64.decode(cipher.groupId, Base64.DEFAULT)).toInt() != cipher.epoch)
+                throw com.example.chat.core.crypto.StoredCipherMembershipDrift("Stored ciphertext epoch changed.")
+        }
+    }
+
+    suspend fun encryptPayload(conversationId: String, payload: Map<String, Any?>): MlsEncryptedPayload = initializationMutex.withLock {
+        initializeLocked()
+        gate(conversationId).withLock {
             val state = ensureConversationReadyLocked(conversationId)
             val group = state.group
                 ?: throw MlsE2eeException("MLS group is not initialized.")
@@ -226,10 +253,10 @@ class MlsE2eeService(
     }
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun decryptPayload(conversationId: String, ciphertext: String): Map<String, Any?> {
-        initializeForCurrentSession()
-        return gate(conversationId).withLock {
-            val state = ensureConversationReadyLocked(conversationId)
+    suspend fun decryptPayload(conversationId: String, ciphertext: String): Map<String, Any?> = initializationMutex.withLock {
+        initializeLocked()
+        gate(conversationId).withLock {
+            val state = ensureConversationReadyLocked(conversationId, sendReady = false)
             val group = state.group
                 ?: throw MlsE2eeException("MLS group is not initialized.")
             val result = requireEngine().processMessage(
@@ -245,7 +272,15 @@ class MlsE2eeService(
             ) {
                 throw MlsE2eeException("Encrypted payload failed Chaty context validation.")
             }
-            jsonObjectToMap(decoded.getJSONObject("payload"))
+            // OpenMLS returns the credential authenticated in this message's epoch.
+            // Never infer the actor from a current-epoch leaf index.
+            val identity = String(result.authenticatedSenderIdentity, Charsets.UTF_8)
+            val separator = identity.indexOf(':')
+            check(separator > 0 && separator < identity.lastIndex) { "MLS sender identity is malformed." }
+            jsonObjectToMap(decoded.getJSONObject("payload")) + mapOf(
+                "_authenticated_sender_user_id" to identity.substring(0, separator),
+                "_authenticated_sender_device_id" to identity.substring(separator + 1),
+            )
         }
     }
 
@@ -254,9 +289,9 @@ class MlsE2eeService(
 
     /** Derives an MLS exporter secret for encrypted attachment key material.
      *  Phase 2 uses this method to AES-GCM encrypt bytes before Storage upload. */
-    suspend fun exportAttachmentSecret(conversationId: String, attachmentId: String): ByteArray {
-        initializeForCurrentSession()
-        return gate(conversationId).withLock {
+    suspend fun exportAttachmentSecret(conversationId: String, attachmentId: String): ByteArray = initializationMutex.withLock {
+        initializeLocked()
+        gate(conversationId).withLock {
             val state = ensureConversationReadyLocked(conversationId)
             val group = state.group
                 ?: throw MlsE2eeException("MLS group is not initialized.")
@@ -269,15 +304,13 @@ class MlsE2eeService(
         }
     }
 
-    suspend fun close() {
+    suspend fun close() = initializationMutex.withLock { closeLocked() }
+
+    private suspend fun closeLocked() {
         val eng = engine
+        // Retain the handle on failure so a later cleanup can retry shutdown.
+        eng?.close()
         engine = null
-        if (eng != null) {
-            try {
-                eng.close()
-            } catch (_: Throwable) {
-            }
-        }
         zero(signerBytes)
         zero(signerPublicKey)
         signerBytes = null
@@ -295,33 +328,47 @@ class MlsE2eeService(
      *  only that namespace's derived secrets from secure storage. */
     suspend fun purgeLocalIdentityForUser(uid: String) = purgeLocalIdentityForNamespace(uid)
 
-    suspend fun purgeLocalIdentityForNamespace(namespace: String) {
-        val prefix = "chaty.mls.$namespace"
-        close()
-
+// Previous unscoped shutdown retained:     suspend fun purgeLocalIdentityForNamespace(namespace: String) {
+// Previous unscoped shutdown retained:         val prefix = "chaty.mls.$namespace"
+// Previous unscoped shutdown retained:         close()
+// Previous unscoped shutdown retained: 
+// Previous unscoped shutdown retained:         val safeNs = namespace.replace(Regex("[^A-Za-z0-9_-]"), "_")
+// Previous unscoped shutdown retained:         val basePath = "${dbPathForUser(safeNs)}/chaty_mls_$safeNs"
+// Previous unscoped shutdown retained:         val candidates = listOf(
+// Previous unscoped shutdown retained:             "$basePath.db", "$basePath.db-wal", "$basePath.db-shm",
+// Previous unscoped shutdown retained:             basePath, "$basePath-wal", "$basePath-shm",
+// Previous unscoped shutdown retained:         )
+// Previous unscoped shutdown retained:         for (path in candidates) {
+// Previous unscoped shutdown retained:             try {
+// Previous unscoped shutdown retained:                 val file = java.io.File(path)
+// Previous unscoped shutdown retained:                 if (file.exists()) file.delete()
+// Previous unscoped shutdown retained:             } catch (_: Throwable) {
+// Previous unscoped shutdown retained:             }
+// Previous unscoped shutdown retained:         }
+// Previous unscoped shutdown retained: 
+// Previous unscoped shutdown retained:         for (suffix in listOf(".db_key.v1", ".device_id.v1", ".signer_private.v1", ".signer_public.v1")) {
+// Previous unscoped shutdown retained:             try {
+// Previous unscoped shutdown retained:                 secureStorage.delete("$prefix$suffix")
+// Previous unscoped shutdown retained:             } catch (_: Throwable) {
+// Previous unscoped shutdown retained:             }
+// Previous unscoped shutdown retained:         }
+// Previous unscoped shutdown retained:     }
+// Previous unscoped shutdown retained: 
+    suspend fun purgeLocalIdentityForNamespace(namespace: String) = initializationMutex.withLock {
+        require(namespace.isNotBlank())
+        // Never close a different account's live engine during recovery.
+        if (activeNamespace == namespace) closeLocked()
         val safeNs = namespace.replace(Regex("[^A-Za-z0-9_-]"), "_")
-        val basePath = "${dbPathForUser(safeNs)}/chaty_mls_$safeNs"
-        val candidates = listOf(
-            "$basePath.db", "$basePath.db-wal", "$basePath.db-shm",
-            basePath, "$basePath-wal", "$basePath-shm",
-        )
-        for (path in candidates) {
-            try {
-                val file = java.io.File(path)
-                if (file.exists()) file.delete()
-            } catch (_: Throwable) {
-            }
+        val dir = java.io.File(dbPathForUser(safeNs))
+        val base = java.io.File(dir, "chaty_mls_$safeNs").path
+        for (path in listOf("$base.db", "$base.db-wal", "$base.db-shm", base, "$base-wal", "$base-shm")) {
+            val file = java.io.File(path)
+            check(!file.exists() || file.delete()) { "MLS identity file cleanup failed." }
         }
-
-        for (suffix in listOf(".db_key.v1", ".device_id.v1", ".signer_private.v1", ".signer_public.v1")) {
-            try {
-                secureStorage.delete("$prefix$suffix")
-            } catch (_: Throwable) {
-            }
-        }
+        secureStorage.deletePrefix("chaty.mls.$namespace.")
     }
 
-    private suspend fun ensureConversationReadyLocked(conversationId: String): MlsConversationState {
+    private suspend fun ensureConversationReadyLocked(conversationId: String, sendReady: Boolean = true): MlsConversationState {
         if (conversationId.trim().isEmpty()) {
             throw MlsE2eeException("Conversation id is required.")
         }
@@ -335,6 +382,9 @@ class MlsE2eeService(
         }
 
         state = reconcileMembership(conversationId, state)
+        // Catch-up may temporarily retain historically pinned leaves. Send/export
+        // readiness is stricter and uses fresh active devices plus the actual tree.
+        state = fetchState(conversationId, afterEpoch = state.group?.epoch ?: 0)
         val group = state.group
             ?: throw MlsE2eeException("MLS group initialization failed.")
 
@@ -354,12 +404,30 @@ class MlsE2eeService(
                 "MLS synchronization incomplete: local=${epoch.toInt()} server=${group.epoch}."
             )
         }
+        if (!sendReady) return state // Reading history does not require exact current active membership.
+        val activeApproved = state.serverDevices.associateBy { it.key }
+        val actualIdentities = HashSet<String>()
+        for (member in requireEngine().groupMembers(groupId)) {
+            val identity = String(MlsNativeStatics.require().credentialIdentity(member.credential), Charsets.UTF_8)
+            check(actualIdentities.add(identity)) { "Duplicate native MLS identity. Sending is blocked." }
+            val current = activeApproved[identity]
+                ?: throw com.example.chat.core.crypto.StoredCipherMembershipDrift("A removed or revoked device remains in the actual MLS group. Sending and attachment key export are blocked until membership is repaired.")
+            val currentKey = Base64.decode(current.signaturePublicKey, Base64.DEFAULT)
+            check(currentKey.contentEquals(member.signatureKey)) { "Native MLS key differs from the current active device. Sending is blocked." }
+            keyTrust.assertMember(checkNotNull(activeNamespace), identity, member.signatureKey)
+        }
+        if (actualIdentities != activeApproved.keys) throw com.example.chat.core.crypto.StoredCipherMembershipDrift(
+            "Active devices are missing from the actual MLS group. Sending is blocked until membership is repaired.")
         return state
     }
 
     private suspend fun createInitialGroup(conversationId: String): MlsConversationState {
+        fetchState(conversationId, afterEpoch = 0) // rejects known-unapproved device keys BEFORE consuming packages
         val claimed = claimPackages(conversationId)
         val packages = claimed
+        // Validate the actual signed KeyPackage leaf against the approved pin
+        // before createGroup/addMembers can alter any local membership.
+        for (entry in packages) assertKeyPackagePinned(entry)
         val eng = requireEngine()
         val created = eng.createGroup(
             config = groupConfig,
@@ -428,15 +496,20 @@ class MlsE2eeService(
             localGroupExists = false
         }
 
+        val pinIdentities = state.serverDevices.map { it.key.toByteArray(Charsets.UTF_8) }
+        val pinKeys = state.serverDevices.map { Base64.decode(it.signaturePublicKey, Base64.DEFAULT) }
+        for ((index, device) in state.serverDevices.withIndex())
+            keyTrust.assertMember(checkNotNull(activeNamespace), device.key, pinKeys[index])
         if (!localGroupExists) {
             val welcome = state.welcome
                 ?: throw MlsE2eeException(
                     "This device has no recoverable MLS Welcome. Re-link the device to restore encrypted chat access."
                 )
-            val joined = eng.joinGroupFromWelcome(
+            val joined = eng.joinGroupFromWelcomePinned(
                 config = groupConfig,
                 welcomeBytes = Base64.decode(welcome.welcomePayload, Base64.DEFAULT),
-                signerBytes = requireSigner(),
+                signerBytes = requireSigner(), pinIdentities = pinIdentities, pinKeys = pinKeys,
+                expectedGroupId = groupId, expectedEpoch = welcome.epoch.toLong(),
             )
             if (Base64.encodeToString(joined.groupId, Base64.DEFAULT) != group.groupId) {
                 throw MlsE2eeException("MLS Welcome group id mismatch.")
@@ -462,13 +535,28 @@ class MlsE2eeService(
                     "Missing MLS membership commit before epoch ${control.epoch}."
                 )
             }
-            val result = eng.processMessage(
-                groupIdBytes = groupId,
-                messageBytes = Base64.decode(control.commitPayload, Base64.DEFAULT),
-            )
-            if (result.messageType != ProcessedMessageType.stagedCommit) {
-                throw MlsE2eeException("MLS control stream contained a non-commit message.")
+            // Refresh approvals for this control step. Include still-pinned current
+            // members so an intermediate removal can be applied after server revocation.
+            val stepState = fetchState(conversationId, afterEpoch = localEpoch)
+            val stepIdentities = mutableListOf<ByteArray>()
+            val stepKeys = mutableListOf<ByteArray>()
+            for (member in eng.groupMembers(groupId)) {
+                val identity = String(MlsNativeStatics.require().credentialIdentity(member.credential), Charsets.UTF_8)
+                keyTrust.assertCatchUpMember(checkNotNull(activeNamespace), identity, member.signatureKey)
+                stepIdentities.add(identity.toByteArray(Charsets.UTF_8)); stepKeys.add(member.signatureKey)
             }
+            for (device in stepState.serverDevices) {
+                val key = Base64.decode(device.signaturePublicKey, Base64.DEFAULT)
+                keyTrust.assertMember(checkNotNull(activeNamespace), device.key, key)
+                val bytes = device.key.toByteArray(Charsets.UTF_8)
+                if (stepIdentities.indices.none { stepIdentities[it].contentEquals(bytes) && stepKeys[it].contentEquals(key) }) {
+                    stepIdentities.add(bytes); stepKeys.add(key)
+                }
+            }
+            eng.processMembershipCommitPinned(groupIdBytes = groupId,
+                messageBytes = Base64.decode(control.commitPayload, Base64.DEFAULT),
+                pinIdentities = stepIdentities, pinKeys = stepKeys,
+                expectedEpoch = control.epoch.toLong())
             localEpoch = eng.groupEpoch(groupIdBytes = groupId).toInt()
             if (localEpoch != control.epoch) {
                 throw MlsE2eeException("MLS commit application failed at epoch ${control.epoch}.")
@@ -504,6 +592,7 @@ class MlsE2eeService(
             )
         }
 
+        if (additions.isNotEmpty()) keyTrust.inspect(checkNotNull(activeNamespace), state.serverDevices)
         val claimed = if (additions.isEmpty()) emptyList() else claimPackages(conversationId)
         val claimedByKey = claimed.associateBy { it.key }
         if (!additions.all { claimedByKey.containsKey(it) }) {
@@ -527,6 +616,7 @@ class MlsE2eeService(
         }
 
         val orderedAdditions = additions.sorted()
+        for (key in orderedAdditions) assertKeyPackagePinned(claimedByKey.getValue(key))
         val commit = requireEngine().flexibleCommit(
             groupIdBytes = groupIdBytes,
             signerBytes = requireSigner(),
@@ -536,7 +626,7 @@ class MlsE2eeService(
                 },
                 removeIndices = removalIndices.toIntArray(),
                 forceSelfUpdate = false,
-                consumePendingProposals = true,
+                consumePendingProposals = false,
                 createGroupInfo = true,
                 useRatchetTreeExtension = true,
             ),
@@ -574,6 +664,13 @@ class MlsE2eeService(
         return fetchState(conversationId, afterEpoch = newEpoch)
     }
 
+    private suspend fun assertKeyPackagePinned(entry: MlsKeyPackageDescriptor) {
+        val actual = requireEngine().inspectKeyPackagePin(Base64.decode(entry.keyPackage, Base64.DEFAULT))
+        val identity = String(MlsNativeStatics.require().credentialIdentity(actual.credential), Charsets.UTF_8)
+        check(identity == entry.key) { "KeyPackage credential does not match its claimed device." }
+        keyTrust.assertMember(checkNotNull(activeNamespace), identity, actual.signatureKey)
+    }
+
     @Suppress("UNCHECKED_CAST")
     private suspend fun claimPackages(conversationId: String): List<MlsKeyPackageDescriptor> {
         val raw = rpc.rpc(
@@ -600,7 +697,9 @@ class MlsE2eeService(
                 "p_after_epoch" to maxOf(afterEpoch, 0),
             ),
         )
-        return MlsConversationState.fromJson(requireMlsMap(raw))
+        val state = MlsConversationState.fromJson(requireMlsMap(raw))
+        keyTrust.inspect(checkNotNull(activeNamespace), state.serverDevices)
+        return state
     }
 
     private suspend fun registerAndReplenishDevice() {
@@ -743,3 +842,56 @@ class MlsE2eeService(
             return out
         }
 }
+
+// Previous implementation retained inactive (unified v4):
+//             close()
+//             close()
+//             close()
+//     suspend fun retryDeviceEnrollment() {
+//         val user = currentAuthUserId() ?: return
+//             initializeForCurrentSession()
+//     suspend fun ensureConversationReady(conversationId: String): MlsConversationState {
+//         initializeForCurrentSession()
+//         return gate(conversationId).withLock { ensureConversationReadyLocked(conversationId) }
+//     suspend fun encryptPayload(conversationId: String, payload: Map<String, Any?>): MlsEncryptedPayload {
+//         initializeForCurrentSession()
+//         return gate(conversationId).withLock {
+//     suspend fun decryptPayload(conversationId: String, ciphertext: String): Map<String, Any?> {
+//         initializeForCurrentSession()
+//         return gate(conversationId).withLock {
+//     suspend fun exportAttachmentSecret(conversationId: String, attachmentId: String): ByteArray {
+//         initializeForCurrentSession()
+//         return gate(conversationId).withLock {
+//     suspend fun close() {
+//         if (eng != null) {
+//             try {
+//                 eng.close()
+//             } catch (_: Throwable) {
+//             }
+//         }
+//     suspend fun purgeLocalIdentityForNamespace(namespace: String) {
+//         val prefix = "chaty.mls.$namespace"
+//         close()
+// 
+//         val basePath = "${dbPathForUser(safeNs)}/chaty_mls_$safeNs"
+//         val candidates = listOf(
+//             "$basePath.db", "$basePath.db-wal", "$basePath.db-shm",
+//             basePath, "$basePath-wal", "$basePath-shm",
+//         )
+//         for (path in candidates) {
+//             try {
+//                 val file = java.io.File(path)
+//                 if (file.exists()) file.delete()
+//             } catch (_: Throwable) {
+//             }
+// 
+//         for (suffix in listOf(".db_key.v1", ".device_id.v1", ".signer_private.v1", ".signer_public.v1")) {
+//             try {
+//                 secureStorage.delete("$prefix$suffix")
+//             } catch (_: Throwable) {
+//             }
+//         }
+
+// Previous implementation retained inactive (v5 review):
+//             jsonObjectToMap(decoded.getJSONObject("payload"))
+//         return MlsConversationState.fromJson(requireMlsMap(raw))

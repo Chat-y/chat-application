@@ -27,7 +27,8 @@ fun ChatyReviewModal(title: String, subtitle: String, onDismiss: () -> Unit, bod
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.padding(horizontal = 16.dp).widthIn(max = 480.dp).fillMaxWidth()
             .heightIn(max = maxHeight)
-            .shadow(12.dp, ChatyModalShape).clip(ChatyModalShape).background(colors.surface)) {
+            // Previous (default black shadow): .shadow(12.dp, ChatyModalShape).clip(ChatyModalShape).background(colors.surface)) {
+            .chatyDepth(12.dp, ChatyModalShape).clip(ChatyModalShape).background(colors.surface)) {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 Text(title, color = colors.foreground, fontSize = 21.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
@@ -36,10 +37,17 @@ fun ChatyReviewModal(title: String, subtitle: String, onDismiss: () -> Unit, bod
             HorizontalDivider(color = colors.borderSubtle)
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp), content = body)
             HorizontalDivider(color = colors.borderSubtle)
-            Button(onClick = onDismiss, modifier = Modifier.padding(16.dp).fillMaxWidth().heightIn(min = 48.dp),
-                shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)) {
-                Text("Close", fontWeight = FontWeight.Bold)
-            }
+// Previous:             Button(onClick = onDismiss, modifier = Modifier.padding(16.dp).fillMaxWidth().heightIn(min = 48.dp),
+// Previous:                 shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)) {
+// Previous:                 Text("Close", fontWeight = FontWeight.Bold)
+// Previous:             }
+            ChatyActionButton(onClick = onDismiss,
+                modifier = Modifier.padding(16.dp).fillMaxWidth().heightIn(min = 48.dp),
+                containerColor = colors.primary, contentColor = colors.onPrimary,
+                label = "Close")
         }
     }
 }
+
+// Complete original-line retention for review (inactive).
+            //             .shadow(12.dp, ChatyModalShape).clip(ChatyModalShape).background(colors.surface)) {

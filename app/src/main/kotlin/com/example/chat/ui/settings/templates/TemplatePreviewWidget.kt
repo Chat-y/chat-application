@@ -250,7 +250,9 @@ private fun StreamLayout(colors: AppColors, accent: Color) {
             Spacer(Modifier.width(5.dp))
             PreviewChip("GROUPS", accent)
             Spacer(Modifier.weight(1f))
-            Icon(Icons.Rounded.FilterList, contentDescription = null, modifier = Modifier.size(14.dp), tint = colors.foregroundSecondary)
+
+//Icon(Icons.Rounded.FilterList, contentDescription = null, modifier = Modifier.size(14.dp), tint = colors.foregroundSecondary)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.filter, Icons.Rounded.FilterList, contentDescription = null, modifier = Modifier.size(14.dp), tint = colors.foregroundSecondary)
         }
         Spacer(Modifier.height(3.dp))
         Column(Modifier.weight(1f)) {
@@ -436,7 +438,9 @@ private fun PowerChatLayout(colors: AppColors, accent: Color) {
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.AddCircleOutline, contentDescription = null, modifier = Modifier.size(10.dp), tint = accent)
+
+//Icon(Icons.Rounded.AddCircleOutline, contentDescription = null, modifier = Modifier.size(10.dp), tint = accent)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.addCircle, Icons.Rounded.AddCircleOutline, contentDescription = null, modifier = Modifier.size(10.dp), tint = accent)
             Spacer(Modifier.width(5.dp))
             Text(
                 "Message or command…",

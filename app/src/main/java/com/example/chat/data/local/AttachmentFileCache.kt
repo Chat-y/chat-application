@@ -27,10 +27,10 @@ import java.util.concurrent.ConcurrentHashMap
  *    and on every read of a returned stream; logout/account switch mid-operation => the entry is
  *    discarded / the read fails. Logged out ([identity] null) => everything is closed.
  *  - view-once/restricted attachments are never stored.
- *  - entry bytes are written under the final name (EncryptedFile binds the file name as associated
+ *  - entry bytes are written under the finalCopy name (EncryptedFile binds the file name as associated
  *    data) while a ".w" marker exists; the marker is removed only after a complete, still-valid write.
  *    In-flight names are tracked so purge/eviction never touches another writer's partial file.
- *  - streaming AEAD can yield an authenticated PREFIX before the final segment is verified, so
+ *  - streaming AEAD can yield an authenticated PREFIX before the finalCopy segment is verified, so
  *    consumers get only fully verified bytes ([readVerified]) or a fully verified temp copy ([lease]).
  *  - any decrypt/auth failure deletes the entry and reads as a miss. Never plaintext, never partial.
  *  - one atomic [SessionEpoch] snapshot (tenant, user, seq, generation) is captured by every operation and re-checked
@@ -71,7 +71,8 @@ class AttachmentFileCache(
     init { require(maxEntryBytes > 0) }
 
     private fun snap(): SessionEpoch.Snap = epoch.current { purgeTransient() }
-    private fun valid(s: SessionEpoch.Snap) = epoch.valid(s) { purgeTransient() }
+    private fun valid(s: SessionEpoch.Snap) = s.tenant != null && s.uid != null &&
+        AttachmentCachePolicy.accountPath(s.tenant, s.uid) !in retiredOwners && epoch.valid(s) { purgeTransient() }
     private fun dirFor(s: SessionEpoch.Snap) = File(root, AttachmentCachePolicy.accountPath(s.tenant!!, s.uid!!))
     private fun tmpDirFor(s: SessionEpoch.Snap) = File(tmpRoot, AttachmentCachePolicy.accountPath(s.tenant!!, s.uid!!))
     private fun outDirFor(s: SessionEpoch.Snap) = File(outRoot, AttachmentCachePolicy.accountPath(s.tenant!!, s.uid!!))
@@ -89,15 +90,43 @@ class AttachmentFileCache(
     /** True when an account is signed in (view-once callers use it to refuse the network while signed out). */
     override fun isOpen(): Boolean = snap().uid != null
 
-    override fun isEpochCurrent(expected: String): Boolean = epoch.peek().let { it.uid != null && it.stamp == expected }
+    override fun isEpochCurrent(expected: String): Boolean = epoch.peek().let { it.uid != null && it.tenant != null && it.stamp == expected &&
+        AttachmentCachePolicy.accountPath(it.tenant, it.uid) !in retiredOwners }
 
     override fun session(): String? { val s = snap(); if (s.uid == null) return null; sweepExpiredExports(); return s.stamp }
     private fun enc(file: File) =
         EncryptedFile.Builder(app, file, masterKey, EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB).build()
 
+    private fun <T> withOwnerWriter(denied: T, operation: (SessionEpoch.Snap) -> T): T =
+        withOwnerSnapshot(snap(), denied, operation)
+
+    private fun <T> withOwnerSnapshot(snap: SessionEpoch.Snap, denied: T, operation: (SessionEpoch.Snap) -> T): T {
+        if (snap.tenant == null || snap.uid == null) return denied
+        val path = AttachmentCachePolicy.accountPath(snap.tenant, snap.uid)
+        val read = writerGate(path).readLock(); read.lock()
+        try {
+            if (path in retiredOwners || !valid(snap)) return denied
+            return operation(snap)
+        } finally { read.unlock() }
+    }
+
+    private val ownerWriters = ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantReadWriteLock>()
+    private fun writerGate(path: String) = ownerWriters.getOrPut(path) { java.util.concurrent.locks.ReentrantReadWriteLock(true) }
+
     override fun put(ref: AttachmentRef, source: InputStream, viewOnce: Boolean, restricted: Boolean, expectedSession: String): StorePut {
+        val captured = snap()
+        if (captured.tenant == null || captured.uid == null) return StorePut.Closed
+        val path = AttachmentCachePolicy.accountPath(captured.tenant, captured.uid)
+        val read = writerGate(path).readLock()
+        read.lock()
+        try {
+            if (path in retiredOwners) return StorePut.Closed
+            return putActive(ref, source, viewOnce, restricted, expectedSession, captured)
+        } finally { read.unlock() }
+    }
+
+    private fun putActive(ref: AttachmentRef, source: InputStream, viewOnce: Boolean, restricted: Boolean, expectedSession: String, ep: SessionEpoch.Snap): StorePut {
         if (!AttachmentCachePolicy.mayPersist(viewOnce, restricted)) return StorePut.NotAllowed
-        val ep = snap()
         if (ep.uid == null) return StorePut.Closed
         // The caller's authorization belongs to the session it started in. If that is no longer the current one,
         // nothing is written (no dir, no marker, no byte), so old-account bytes cannot reach the new namespace.
@@ -109,8 +138,9 @@ class AttachmentFileCache(
         val marker = File(dir, "$name.w")
         if (!inFlight.add(key)) return StorePut.Error  // same entry already being written
         try {
+            if (!valid(ep)) throw IOException("revoked")
             synchronized(lock) {
-                if (!valid(ep)) throw IOException("revoked")
+                if (!epoch.stillCurrent(ep)) throw IOException("revoked")
                 dir.mkdirs()
                 purgePartials(dir)
                 file.delete()
@@ -129,11 +159,19 @@ class AttachmentFileCache(
                 }
             }
             if (total == 0L) throw IOException("empty")
+            if (!valid(ep)) throw IOException("revoked")
             synchronized(lock) {
-                if (!valid(ep) || !file.exists()) throw IOException("revoked")
-                marker.delete()
-                inFlight.remove(key)   // The finished entry counts toward the cap; finally removal is idempotent.
+                if (!epoch.stillCurrent(ep) || !file.exists()) throw IOException("revoked")
+                java.io.RandomAccessFile(file, "rw").use { it.fd.sync() }
+                check(marker.delete()) { "Encrypted media publish marker could not be removed." }
+                val directoryFd = android.system.Os.open(dir.absolutePath, android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_DIRECTORY, 0)
+                try { android.system.Os.fsync(directoryFd) } finally { android.system.Os.close(directoryFd) }
+                val publishedLength = file.length()
+                check(publishedLength > 0 && publishedLength <= maxBytes().coerceAtLeast(0)) { "Encrypted cache cannot retain this attachment." }
+                // Keep this writer pinned through eviction; include its bytes in the total.
                 evict(dir)
+                check(file.isFile && file.length() == publishedLength) { "Encrypted cache publish was evicted." }
+                inFlight.remove(key)
             }
             return StorePut.Stored
         } catch (t: Throwable) {
@@ -171,8 +209,14 @@ class AttachmentFileCache(
         }
     }
 
-    override fun lease(ref: AttachmentRef): StoreRead<LeasedFile> {
-        val ep = snap()
+    override fun lease(ref: AttachmentRef): StoreRead<LeasedFile> = withOwnerWriter<StoreRead<LeasedFile>>(StoreRead.Closed) { ep -> leaseActive(ref, ep) }
+
+    override fun leaseForSession(ref: AttachmentRef, expectedSession: String): StoreRead<LeasedFile> =
+        withOwnerWriter<StoreRead<LeasedFile>>(StoreRead.Closed) { ep ->
+            if (ep.stamp != expectedSession) StoreRead.Closed else leaseActive(ref, ep)
+        }
+
+    private fun leaseActive(ref: AttachmentRef, ep: SessionEpoch.Snap): StoreRead<LeasedFile> {
         if (ep.uid == null) return StoreRead.Closed
         val file = completeEntry(ep, ref) ?: return StoreRead.Miss
         val dir = tmpDirFor(ep)
@@ -199,9 +243,11 @@ class AttachmentFileCache(
     }
 
     override fun exportCopy(ref: AttachmentRef, expectedSession: String, purpose: ExportPurpose, extension: String,
-                            viewOnce: Boolean, restricted: Boolean, maxLifetimeMs: Long): ExportResult {
+                            viewOnce: Boolean, restricted: Boolean, maxLifetimeMs: Long): ExportResult = withOwnerWriter<ExportResult>(ExportResult.Denied("owner retired")) { ep -> exportCopyActive(ref, expectedSession, purpose, extension, viewOnce, restricted, maxLifetimeMs, ep) }
+
+    private fun exportCopyActive(ref: AttachmentRef, expectedSession: String, purpose: ExportPurpose, extension: String,
+                            viewOnce: Boolean, restricted: Boolean, maxLifetimeMs: Long, ep: SessionEpoch.Snap): ExportResult {
         if (!AttachmentCachePolicy.mayPersist(viewOnce, restricted)) return ExportResult.Denied("view-once or restricted")
-        val ep = snap()
         if (ep.uid == null) return ExportResult.Denied("signed out")
         if (ep.stamp != expectedSession) return ExportResult.Denied("session changed")
         val file = completeEntry(ep, ref) ?: return ExportResult.Miss
@@ -232,14 +278,19 @@ class AttachmentFileCache(
     private fun dropExport(id: String) = exportRegistry.remove(id)   // remove() also revokes the URI grant
 
     private class EditState(val session: EditSession, val ref: AttachmentRef, val stamp: String, val inputId: String,
-                            val inputUri: String, val dir: File, val deadline: Long)
+                            val inputUri: String, val dir: File, val deadline: Long, val owner: SessionEpoch.Snap)
     private val edits = ConcurrentHashMap<String, EditState>()
 
     override fun beginEdit(ref: AttachmentRef, expectedSession: String, kind: EditKind, viewOnce: Boolean, restricted: Boolean,
-                           maxLifetimeMs: Long): EditResult {
-        val ep = snap()
+                           maxLifetimeMs: Long): EditResult = withOwnerWriter<EditResult>(EditResult.Denied("owner retired")) { ep ->
+        beginEditActive(ref, expectedSession, kind, viewOnce, restricted, maxLifetimeMs, ep)
+    }
+
+    private fun beginEditActive(ref: AttachmentRef, expectedSession: String, kind: EditKind, viewOnce: Boolean, restricted: Boolean,
+                           maxLifetimeMs: Long, ep: SessionEpoch.Snap): EditResult {
         if (ep.uid == null) return EditResult.Denied("signed out")
-        val exp = exportCopy(ref, expectedSession, ExportPurpose.EDIT, kind.extension, viewOnce, restricted, maxLifetimeMs)
+        // Reuse this operation's captured owner, never enter an ambient nested gate.
+        val exp = exportCopyActive(ref, expectedSession, ExportPurpose.EDIT, kind.extension, viewOnce, restricted, maxLifetimeMs, ep)
         val token = when (exp) {
             is ExportResult.Granted -> exp.token
             is ExportResult.Denied -> return EditResult.Denied(exp.reason)
@@ -255,7 +306,7 @@ class AttachmentFileCache(
             if (!valid(ep)) { token.release(); part.delete(); return EditResult.Denied("session changed") }
             synchronized(publishLock) {
                 if (!epoch.stillCurrent(ep)) { token.release(); part.delete(); return EditResult.Denied("session changed") }
-                edits[id] = EditState(session, ref, ep.stamp, id, token.uri, dir, now() + maxLifetimeMs)
+                edits[id] = EditState(session, ref, ep.stamp, id, token.uri, dir, now() + maxLifetimeMs, ep)
                 inputTokens[id] = token
             }
             EditResult.Started(session)
@@ -277,6 +328,14 @@ class AttachmentFileCache(
      * Limit: a process or user with the same Unix uid/root could still modify files; that is outside this model.
      */
     override fun commitEdit(session: EditSession, purpose: ExportPurpose, maxLifetimeMs: Long): ExportResult {
+        val original = edits[session.id] ?: return ExportResult.Denied("unknown edit owner")
+        if (original.session !== session) return ExportResult.Denied("edit identity mismatch")
+        return withOwnerSnapshot<ExportResult>(original.owner, ExportResult.Denied("original edit owner retired")) { ep ->
+            commitEditActive(session, purpose, maxLifetimeMs, ep)
+        }
+    }
+
+    private fun commitEditActive(session: EditSession, purpose: ExportPurpose, maxLifetimeMs: Long, ep: SessionEpoch.Snap): ExportResult {
         val st = edits[session.id]
         if (st == null || st.session !== session) return ExportResult.Denied("unknown edit session")   // not minted here
         if (!edits.remove(session.id, st)) return ExportResult.Denied("edit already finished")           // claim
@@ -286,7 +345,6 @@ class AttachmentFileCache(
             inputTokens.remove(session.id)?.release()
             return ExportResult.Denied(r)
         }
-        val ep = snap()
         if (ep.uid == null) return fail("signed out")
         if (ep.stamp != st.stamp || now() >= st.deadline) return fail("expired or session changed")
         if (!exportPolicy.invoke(st.ref)) return fail("source no longer allowed")
@@ -295,11 +353,11 @@ class AttachmentFileCache(
         val dirCanon = runCatching { st.dir.canonicalFile }.getOrNull() ?: return fail("bad output")
         if (canon.parentFile != dirCanon || canon.name != "e_${session.id}.part" ||
             java.nio.file.Files.isSymbolicLink(out.toPath()) || !canon.isFile) return fail("output not owned")
-        val final = File(st.dir, "x_" + UUID.randomUUID() + "." + session.kind.extension)
-        copy = final
+        val finalCopy = File(st.dir, "x_" + UUID.randomUUID() + "." + session.kind.extension)
+        copy = finalCopy
         val size = try {
             var total = 0L
-            canon.inputStream().use { i -> final.outputStream().use { o ->
+            canon.inputStream().use { i -> finalCopy.outputStream().use { o ->
                 val buf = ByteArray(16 * 1024)
                 while (true) {
                     val n = i.read(buf); if (n < 0) break
@@ -312,8 +370,8 @@ class AttachmentFileCache(
         } catch (_: Throwable) { return fail("copy failed or too large") }
         canon.delete()                                                  // editor output no longer needed
         if (size <= 0L) return fail("bad size")
-        if (!magicMatches(final, session.kind)) return fail("content does not match type")
-        if (!runCatching { editedOutputValidator.isValid(final, session.kind) }.getOrDefault(false)) return fail("content failed validation")
+        if (!magicMatches(finalCopy, session.kind)) return fail("content does not match type")
+        if (!runCatching { editedOutputValidator.isValid(finalCopy, session.kind) }.getOrDefault(false)) return fail("content failed validation")
         val tokenId: String
         // Owner callbacks (identity source, trusted lookup) may take their own locks, so they run BEFORE publishLock.
         if (!valid(ep) || ep.stamp != st.stamp || now() >= st.deadline) return fail("expired or session changed")
@@ -322,12 +380,12 @@ class AttachmentFileCache(
             // Inside the lock only lock-free checks: a transition installs its snapshot BEFORE its purge, and the purge
             // needs this lock, so either we see the new snapshot here or the purge revokes the token we register.
             if (!epoch.stillCurrent(ep)) return fail("expired or session changed")
-            if (!final.isFile || final.length() != size) return fail("output changed")
-            tokenId = exportRegistry.register(final, session.kind.mime, st.ref, st.stamp, now() + maxLifetimeMs)
+            if (!finalCopy.isFile || finalCopy.length() != size) return fail("output changed")
+            tokenId = exportRegistry.register(finalCopy, session.kind.mime, st.ref, st.stamp, now() + maxLifetimeMs)
         }
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ dropExport(tokenId) }, maxLifetimeMs.coerceAtLeast(0))
         inputTokens.remove(session.id)?.release()    // input export released, output kept, original untouched
-        return ExportResult.Granted(ExportToken(final, uriFor(tokenId), purpose, { exportRegistry.isLive(tokenId) }) { dropExport(tokenId) })
+        return ExportResult.Granted(ExportToken(finalCopy, uriFor(tokenId), purpose, { exportRegistry.isLive(tokenId) }) { dropExport(tokenId) })
     }
 
     override fun abortEdit(session: EditSession) {
@@ -406,6 +464,43 @@ class AttachmentFileCache(
         outRoot.listFiles()?.forEach { File(it, name).deleteRecursively() }
     }
 
+    /** New MLS buckets use the exact backend account namespace as the tenant key.
+     * Ambiguous pre-isolation tenant+UID buckets are never inferred or removed. */
+    private val retiredOwners = ConcurrentHashMap.newKeySet<String>()
+
+    fun retireOwnerNamespace(namespace: String, userId: String) {
+        val owner = AttachmentCachePolicy.accountPath("owner-$namespace", userId)
+        retiredOwners.add(owner)
+        val snap = epoch.peek()
+        if (snap.tenant == "owner-$namespace" && snap.uid == userId) epoch.bump()
+    }
+
+    fun restorePendingOwnerNamespace(namespace: String, userId: String) {
+        retiredOwners.remove(AttachmentCachePolicy.accountPath("owner-$namespace", userId))
+        val current = epoch.peek()
+        if (current.tenant == "owner-$namespace" && current.uid == userId) epoch.bump() // do not invalidate another account
+    }
+
+    fun deleteOwnerNamespace(namespace: String, userId: String) {
+        require(namespace.isNotBlank() && userId.isNotBlank())
+        retireOwnerNamespace(namespace, userId)
+        val tenant = "owner-$namespace"
+        val path = AttachmentCachePolicy.accountPath(tenant, userId)
+        val s = snap()
+        if (s.tenant == tenant && s.uid == userId) epoch.bump()
+        val targets = listOf(File(root, path), File(tmpRoot, path), File(outRoot, path))
+        revokeHandedOut { file -> targets.any { target ->
+            generateSequence(file) { it.parentFile }.any { it == target }
+        } }
+        val write = writerGate(path).writeLock()
+        write.lock() // all in-flight puts for this exact bucket have exited before deletion
+        try {
+            synchronized(lock) {
+                for (target in targets) check(!target.exists() || target.deleteRecursively()) { "Account media cleanup failed." }
+            }
+        } finally { write.unlock() }
+    }
+
     /** Full wipe, every account. */
     fun deleteAll() {
         epoch.bump()
@@ -442,11 +537,72 @@ class AttachmentFileCache(
         }
     }
 
-    /** Caller holds [lock]. Only complete entries are candidates. */
+    private val retentionPins = ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
+
+    /** Pin a retained encrypted cache object across delivery confirmation. Caller
+     * releases in finally. Clear/deletion can still revoke it; policy checks remain. */
+    fun pinForDelivery(ref: AttachmentRef): MediaRetentionPin? {
+        val ep = snap()
+        if (ep.uid == null || !valid(ep)) return null
+        val dir = dirFor(ep); val key = "${dir.path}/${AttachmentCachePolicy.entryName(ref)}"
+        synchronized(lock) {
+            val file = completeEntry(ep, ref) ?: return null
+            // Lock-free epoch check only: never call identity/auth while cache lock is held.
+            if (file.length() <= 0 || !epoch.stillCurrent(ep) || !isEpochCurrent(ep.stamp)) return null
+            val counter = retentionPins.getOrPut(key) { java.util.concurrent.atomic.AtomicInteger(0) }; counter.incrementAndGet()
+            return MediaRetentionPin(
+                live = { valid(ep) && isEpochCurrent(ep.stamp) && file.isFile && file.length() > 0 },
+                release = { counter.decrementAndGet() },
+            )
+        }
+    }
+
+    /** Caller holds [lock]. Count pinned and new bytes, but never evict them.
+     * Failure to fit rejects publish; it is not a durable receipt. */
     private fun evict(dir: File) {
-        val entries = dir.listFiles { f ->
-            f.name.endsWith(".bin") && !File(dir, f.name + ".w").exists() && !inFlight.contains("${dir.path}/${f.name}")
-        }?.associate { it.name to (it.length() to it.lastModified()) } ?: return
-        AttachmentCachePolicy.evictionOrder(entries, maxBytes()).forEach { File(dir, it).delete() }
+        val entries = dir.listFiles { f -> f.name.endsWith(".bin") && !File(dir, f.name + ".w").exists() }.orEmpty()
+        val cap = maxBytes().coerceAtLeast(0); var total = entries.sumOf { it.length() }
+        for (file in entries.sortedBy { it.lastModified() }) {
+            if (total <= cap) break
+            val key = file.path
+            if (key in inFlight || (retentionPins[key]?.get() ?: 0) > 0) continue
+            val size = file.length()
+            check(file.delete()) { "Encrypted cache eviction failed." }; total -= size
+        }
+        check(total <= cap) { "Encrypted cache cannot retain the new attachment." }
     }
 }
+
+// Previous implementation retained inactive (unified v4):
+//  *  - entry bytes are written under the final name (EncryptedFile binds the file name as associated
+//  *  - streaming AEAD can yield an authenticated PREFIX before the final segment is verified, so
+//     private fun valid(s: SessionEpoch.Snap) = epoch.valid(s) { purgeTransient() }
+//     override fun isEpochCurrent(expected: String): Boolean = epoch.peek().let { it.uid != null && it.stamp == expected }
+//                 marker.delete()
+//                 inFlight.remove(key)   // The finished entry counts toward the cap; finally removal is idempotent.
+//     override fun lease(ref: AttachmentRef): StoreRead<LeasedFile> {
+//     override fun commitEdit(session: EditSession, purpose: ExportPurpose, maxLifetimeMs: Long): ExportResult {
+//         val final = File(st.dir, "x_" + UUID.randomUUID() + "." + session.kind.extension)
+//         copy = final
+//             canon.inputStream().use { i -> final.outputStream().use { o ->
+//         if (!magicMatches(final, session.kind)) return fail("content does not match type")
+//         if (!runCatching { editedOutputValidator.isValid(final, session.kind) }.getOrDefault(false)) return fail("content failed validation")
+//             if (!final.isFile || final.length() != size) return fail("output changed")
+//             tokenId = exportRegistry.register(final, session.kind.mime, st.ref, st.stamp, now() + maxLifetimeMs)
+//         return ExportResult.Granted(ExportToken(final, uriFor(tokenId), purpose, { exportRegistry.isLive(tokenId) }) { dropExport(tokenId) })
+//     /** Caller holds [lock]. Only complete entries are candidates. */
+//         val entries = dir.listFiles { f ->
+//             f.name.endsWith(".bin") && !File(dir, f.name + ".w").exists() && !inFlight.contains("${dir.path}/${f.name}")
+//         }?.associate { it.name to (it.length() to it.lastModified()) } ?: return
+//         AttachmentCachePolicy.evictionOrder(entries, maxBytes()).forEach { File(dir, it).delete() }
+
+// Previous implementation retained inactive (v5 review):
+//         val ep = snap()
+//         val ep = snap()
+//                             viewOnce: Boolean, restricted: Boolean, maxLifetimeMs: Long): ExportResult {
+//         val ep = snap()
+//                             val inputUri: String, val dir: File, val deadline: Long)
+//                            maxLifetimeMs: Long): EditResult {
+//         val ep = snap()
+//                 edits[id] = EditState(session, ref, ep.stamp, id, token.uri, dir, now() + maxLifetimeMs)
+//         val ep = snap()

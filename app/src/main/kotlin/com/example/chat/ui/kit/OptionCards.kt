@@ -89,8 +89,12 @@ fun ChatyOptionCard(
         Box(Modifier.fillMaxWidth().height(previewHeight)) {
             Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) { preview() }
             if (selected) {
-                Icon(
-                    Icons.Rounded.CheckCircle, null, tint = colors.primary,
+
+//Icon(
+//                    Icons.Rounded.CheckCircle, null, tint = colors.primary,
+//                    modifier = Modifier.align(Alignment.TopEnd).width(18.dp).height(18.dp),
+//                )
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.checkCircle, Icons.Rounded.CheckCircle, null, tint = colors.primary,
                     modifier = Modifier.align(Alignment.TopEnd).width(18.dp).height(18.dp),
                 )
             }

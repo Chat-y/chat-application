@@ -1,5 +1,7 @@
 package com.example.chat.ui.media
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.runtime.Composable
@@ -45,9 +47,11 @@ fun MediaWorkspaceHost(
         } else false
     }
 
-    BackHandler(enabled = stack.size > 1) { pop() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(stack.last())
+    // Previous registration retained inactive: BackHandler(enabled = stack.size > 1) { pop() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, enabled = stack.size > 1) { pop() }
 
-    AnimatedContent(targetState = stack.last(), label = "mediaNav") { dest ->
+    AnimatedContent(targetState = stack.last(), modifier = androidx.compose.ui.Modifier.chatyPredictiveBack(predictiveBack), label = "mediaNav") { dest ->
         when (dest) {
             is MediaDestination.Workspace -> MediaWorkspaceScreen(
                 playerCoordinator = playerCoordinator,

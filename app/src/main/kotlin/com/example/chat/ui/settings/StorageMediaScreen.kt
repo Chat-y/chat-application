@@ -277,10 +277,23 @@ fun StorageMediaScreen(
                     "This frees ${storageSizeLabel(cacheUsedBytes)} on this device. Media saved only here, such as expiring or view-once items, is removed too. Server copies are untouched.",
                 )
             },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel", color = colors.primary) } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { confirmClear = false }) { Text("Cancel", color = colors.primary) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = { confirmClear = false },
+                color = colors.primary,
+            ) },
             confirmButton = {
                 // Previous optimistic result: confirmClear = false; onClearCache(); clearedNotice = true
-                TextButton(onClick = { confirmClear = false; clearCache() }, enabled = !clearingCache) { Text("Clear", color = colors.error) }
+                // Previous stock text action:
+                // TextButton(onClick = { confirmClear = false; clearCache() }, enabled = !clearingCache) { Text("Clear", color = colors.error) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Clear",
+                    onClick = { confirmClear = false; clearCache() },
+                    enabled = !clearingCache,
+                    color = colors.error,
+                )
             },
         )
     }
@@ -293,10 +306,26 @@ fun StorageMediaScreen(
                     "The cache uses ${storageSizeLabel(cacheUsedBytes)}. Setting ${storageSizeLabel(newMb * 1024L * 1024L)} removes the oldest local media now. Server copies are untouched.",
                 )
             },
-            dismissButton = { TextButton(onClick = { pendingLimitMb = null }) { Text("Cancel", color = colors.primary) } },
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { pendingLimitMb = null }) { Text("Cancel", color = colors.primary) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = { pendingLimitMb = null },
+                color = colors.primary,
+            ) },
             confirmButton = {
-                TextButton(onClick = { pendingLimitMb = null; onCacheLimitChange(newMb) }) { Text("Lower limit", color = colors.error) }
+                // Previous stock text action:
+                // TextButton(onClick = { pendingLimitMb = null; onCacheLimitChange(newMb) }) { Text("Lower limit", color = colors.error) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = "Lower limit",
+                    onClick = { pendingLimitMb = null; onCacheLimitChange(newMb) },
+                    color = colors.error,
+                )
             },
         )
     }
 }
+
+// Complete original-line retention for review (inactive).
+            //             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel", color = colors.primary) } },
+            //             dismissButton = { TextButton(onClick = { pendingLimitMb = null }) { Text("Cancel", color = colors.primary) } },

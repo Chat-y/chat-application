@@ -150,7 +150,12 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                 // Previous value: Color(0x44FFFFFF)
                 Box(Modifier.align(Alignment.Center).padding(horizontal=trackPad).fillMaxWidth().height(2.dp).background(rememberCameraOverlayColors().contentDisabled))
                 // Previous value: Color(0xFFFFD54F)
-                Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad).fillMaxWidth(f).height(2.dp).background(rememberCameraOverlayColors().accent))
+                // Centering fix (measured): the fill had only a start inset, so at f=1 it
+                // ran 30dp past the track's right end (track spans [30, W-30]). With the
+                // symmetric inset the fill spans [30, 30+f*(W-60)] and ends exactly on the
+                // track end and thumb path at every zoom. Looks-only, gesture math untouched.
+                // Previous: .padding(start=trackPad).fillMaxWidth(f)
+                Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad, end=trackPad).fillMaxWidth(f).height(2.dp).background(rememberCameraOverlayColors().accent))
                 // Previous value: Color(0xFFFFD54F)
                 Box(Modifier.align(Alignment.CenterStart).padding(start=trackPad+(maxWidth-trackPad*2-14.dp)*f).size(14.dp).clip(CircleShape).background(rememberCameraOverlayColors().accent))
             }

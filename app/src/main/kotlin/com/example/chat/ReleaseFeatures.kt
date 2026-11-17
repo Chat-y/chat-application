@@ -13,7 +13,8 @@ object ReleaseFeatures {
     /** Device heuristics are advisory. No app lockout until reviewed and device-tested. */
     const val ENFORCE_TAMPER_GUARD = false
     /** Experimental routing only. No verified MLS setup, encrypted media or cross-device proof yet. */
-    const val EXPERIMENTAL_MLS_CHAT_ROUTING = false
+    // Previous default retained inactive: const val EXPERIMENTAL_MLS_CHAT_ROUTING = false
+    const val EXPERIMENTAL_MLS_CHAT_ROUTING = true
 
     /** Prepared only: needs deployed explicit-ID endpoint, DB privacy/race tests,
      *  and two-device verification. Never fall back to room-wide receipts. */

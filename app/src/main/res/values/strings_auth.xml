@@ -643,4 +643,5 @@
     <string name="auth_copy_a0d3ad210271">This invitation was already used. Ask for a new one.</string>
     <string name="auth_copy_c298722380d7">This invitation could not be verified.</string>
     <string name="auth_copy_2664057cfca3">This invitation has expired or belongs to another workspace. Verify it again before registering.</string>
+    <string name="auth_reset_success_explicit_login">Password updated. Sign in with your new password.</string>
 </resources>

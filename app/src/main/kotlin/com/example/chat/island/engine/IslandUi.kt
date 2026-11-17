@@ -135,7 +135,11 @@ fun DynamicIslandUi(
     val paddingY = (if (expanded) 18f * style.cardH else 10f * style.h) * heightScale
     val animatedCorner by animateFloatAsState(
         targetValue = (if (expanded) 30f else 50f) * effectiveRoundness,
-        animationSpec = if (reducedMotion) snap() else spring(dampingRatio = 1f, stiffness = 380f * animSpeed.coerceIn(.5f, 2f)),
+        // Previous implementation retained:
+        // animationSpec = if (reducedMotion) snap() else spring(dampingRatio = 1f, stiffness = 380f * animSpeed.coerceIn(.5f, 2f)),
+        // Bandi 2026-11-14: open must be smoother motion, "not like a slow" - lightly
+        // under-damped spring with a faster settle gives the fluid water-type feel.
+        animationSpec = if (reducedMotion) snap() else spring(dampingRatio = .75f, stiffness = 520f * animSpeed.coerceIn(.5f, 2f)),
         label = "islandCorner",
     )
     // An expanded media card draws the real session artwork behind the whole card.
@@ -145,7 +149,9 @@ fun DynamicIslandUi(
             Box(
                 modifier
                     // Place animation before width so both width and height share one surface.
-                    .animateContentSize(if (reducedMotion) snap() else spring(dampingRatio = 1f, stiffness = 380f * animSpeed.coerceIn(.5f, 2f)))
+                    // Previous implementation retained:
+                    // .animateContentSize(if (reducedMotion) snap() else spring(dampingRatio = 1f, stiffness = 380f * animSpeed.coerceIn(.5f, 2f)))
+                    .animateContentSize(if (reducedMotion) snap() else spring(dampingRatio = .75f, stiffness = 520f * animSpeed.coerceIn(.5f, 2f)))
                     .width(width.dp)
                     .clip(RoundedCornerShape(animatedCorner))
                     .background(panelInk)
@@ -284,7 +290,15 @@ private fun SmallContent(mode: IslandMode, banner: Boolean, waiting: Int, accent
             is IslandMode.Charging -> positive
             else -> accent
         })
-        Column(Modifier.weight(1f)) {
+        // Approved compact media (Bandi 2026-11-14): "island width only display the left
+        // album and the right wave" - title text stays in the expanded card only.
+        // Superseded source retained below per additive-only review rule.
+        // Column(Modifier.weight(1f)) {
+        //     Text(title, color = panelText, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        //         style = MaterialTheme.typography.labelLarge)
+        //     if (banner) Caption(detail, maxLines = 2)
+        // }
+        if (mode is IslandMode.Media) Spacer(Modifier.weight(1f)) else Column(Modifier.weight(1f)) {
             Text(title, color = panelText, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelLarge)
             if (banner) Caption(detail, maxLines = 2)
@@ -332,14 +346,17 @@ private fun ExpandedContent(mode: IslandMode, large: Boolean, controls: Controls
         is IslandMode.Notification -> {
             Text(detail, color = panelText, style = MaterialTheme.typography.bodyMedium,
                 maxLines = if (large) 12 else 5, overflow = TextOverflow.Ellipsis)
-            if (!controls.editing) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = controls.openNotification, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.swipe_act_open), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                OutlinedButton(onClick = controls.dismiss, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.swipe_act_dismiss), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
+            // Bandi 2026-11-14: "Open dismiss remove and only mark as read and the reply".
+            // Open still happens on island tap; dismiss still happens on swipe up.
+            // Superseded source retained below per additive-only review rule.
+            // if (!controls.editing) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            //     OutlinedButton(onClick = controls.openNotification, modifier = Modifier.weight(1f)) {
+            //         Text(stringResource(R.string.swipe_act_open), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            //     }
+            //     OutlinedButton(onClick = controls.dismiss, modifier = Modifier.weight(1f)) {
+            //         Text(stringResource(R.string.swipe_act_dismiss), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            //     }
+            // }
             if (!controls.editing) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (mode.canMarkRead) OutlinedButton(onClick = controls.read, shape = CircleShape, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.island_mark_read)) }
                 if (mode.canReply) Button(onClick = controls.reply, shape = CircleShape, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.island_reply)) }

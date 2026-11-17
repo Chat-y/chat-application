@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chat.ui.navigation.ReferenceLayoutMetrics
 import com.example.chat.core.theme.ThemeConfig
 import com.example.chat.core.theme.argbWithAlpha
 import com.example.chat.domain.models.Conversation
@@ -137,6 +138,27 @@ fun ConversationRow(
     modifier: Modifier = Modifier,
     clockMinute: Long = System.currentTimeMillis()/60000,
 ) {
+    val photoCard = androidx.compose.runtime.remember(conversation.id, locked, selected) {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    if (photoCard.value && !locked && !selected) {
+        com.example.chat.ui.kit.ChatyConfirmationDialog(
+            onDismissRequest = { photoCard.value = false },
+            title = { Text(displayTitle) },
+            text = {
+                HomeAvatar(initials = conversation.avatarInitials ?: displayTitle.take(2).uppercase(),
+                    color = parseAvatarColorHex(conversation.avatarColorHex, Color(theme.accentColor)),
+                    size = com.example.chat.ui.navigation.ReferenceLayoutMetrics.expandedIdentityHeightDp.toFloat(),
+                    shape = homePrefs.avatarShape, url = conversation.avatarUrl)
+            },
+            confirmButton = {
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { photoCard.value = false; onTap() }, label = "Message")
+            },
+            dismissButton = {
+                com.example.chat.ui.kit.ChatyTextButton(onClick = { photoCard.value = false }, label = "Close")
+            },
+        )
+    }
     val displayNow = java.time.Instant.ofEpochMilli(clockMinute*60000)
     // R1-44: honour the system 12/24-hour clock preference for every clock
     // this row renders (timestamp, spoken summary, last-seen line). The
@@ -163,7 +185,7 @@ fun ConversationRow(
                 presence?.isRecording == true -> "recording…"
                 presence?.isTyping == true -> "typing…"
                 presence?.isOnline == true -> "online"
-                else -> HomeFormatters.formatLastSeen(presence?.lastSeenAt, is24Hour = is24Hour)
+                else -> HomeFormatters.formatLastSeen(presence?.lastSeenAt, now = displayNow, is24Hour = is24Hour)
             }
         } else {
             ""
@@ -196,7 +218,11 @@ fun ConversationRow(
         else -> Color.Transparent
     }
 
-    val avatarSize = (if (referenceRows) 48f else 50f) * effectiveDensity.toFloat()
+    // Previous oversized geometry retained: (if (referenceRows) 48f else 50f) * effectiveDensity.toFloat()
+    val avatarSize = (if (chatList.compactDefault) ReferenceLayoutMetrics.homeChatAvatarSizeDp.toFloat()
+        else if (referenceRows) ReferenceLayoutMetrics.homeChatReferenceAvatarSizeDp.toFloat()
+        else ReferenceLayoutMetrics.homeChatTemplateAvatarSizeDp.toFloat()) * effectiveDensity.toFloat()
+    val avatarGap = if (referenceRows) ReferenceLayoutMetrics.homeChatReferenceAvatarGapDp else ReferenceLayoutMetrics.homeChatAvatarGapDp
     val avatarShape = if (homePrefs.avatarShape == "circle") chatList.avatarShape else homePrefs.avatarShape
     val subtitleActive = presence?.isTyping == true || presence?.isRecording == true
 
@@ -206,12 +232,15 @@ fun ConversationRow(
         locked -> "Locked conversation"
         conversation.draftText.isNotEmpty() -> "Draft: ${conversation.draftText}"
         subtitleActive -> presenceText
-        conversation.lastMessageText.isEmpty() -> presenceText
+        // Presence is shown once in the right metadata column, not repeated as a subtitle.
+        conversation.lastMessageText.isEmpty() -> ""
         else -> conversation.lastMessageText
     }
     val rowDescription = conversationRowA11ySummary(
         displayTitle = displayTitle,
-        subtitle = rowSubtitle + if(locked) "" else ", " + HomeFormatters.formatConversationTimestamp(conversation.lastMessageTime,displayNow, is24Hour = is24Hour) +
+        subtitle = rowSubtitle + if(locked) "" else
+            (if (presenceText.isNotEmpty() && presenceText != rowSubtitle) ", " + presenceText else "") +
+            ", " + HomeFormatters.formatConversationTimestamp(conversation.lastMessageTime,displayNow, is24Hour = is24Hour) +
             (lastOwnMessageState?.let {", " + it.name} ?: ""),
         unreadCount = conversation.unreadCount,
         isPinned = conversation.isPinned,
@@ -254,8 +283,10 @@ fun ConversationRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    // Previous minimum: chatList.itemHeight * effectiveDensity; padding: 10.dp each axis.
                     .heightIn(min = (chatList.itemHeight * effectiveDensity).dp)
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                    .padding(horizontal = ReferenceLayoutMetrics.homeChatRowHorizontalPaddingDp.dp,
+                        vertical = if (chatList.compactDefault) ReferenceLayoutMetrics.homeChatRowVerticalPaddingDp.dp else ReferenceLayoutMetrics.homeChatTemplateVerticalPaddingDp.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box {
@@ -266,6 +297,9 @@ fun ConversationRow(
                         size = avatarSize,
                         shape = avatarShape,
                         url = conversation.avatarUrl,
+                        modifier = Modifier.combinedClickable(enabled = !locked && !selected,
+                            onClickLabel = "Preview photo", onClick = { photoCard.value = true },
+                            onLongClickLabel = "Select conversation", onLongClick = onLongPress),
                     )
                     if (selected) {
                         Box(
@@ -290,15 +324,18 @@ fun ConversationRow(
                         Box(Modifier.align(Alignment.BottomEnd).offset(x = 1.dp, y = 1.dp)) {
                             HomeOnlineDot(
                                 active = true,
-                                avatarSize = 50f * density.toFloat(),
+                                // Previous dot sizing: 50f * density.toFloat()
+                                avatarSize = avatarSize,
                                 color = onlineDotColor,
                                 ringColor = Color(theme.backgroundColor),
                             )
                         }
                     }
                 }
-                Spacer(Modifier.width(if (referenceRows) 8.dp else 12.dp))
-                Column(Modifier.weight(1f)) {
+                // Previous gap: if (referenceRows) 8.dp else 12.dp
+                Spacer(Modifier.width(avatarGap.dp))
+                // Previous content weight retained: Column(Modifier.weight(1f))
+                Column(Modifier.weight(ReferenceLayoutMetrics.homeRowContentWeight)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                             if (locked) {
@@ -330,8 +367,15 @@ fun ConversationRow(
                                         ),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(
-                                        Icons.Rounded.AlternateEmail,
+
+//Icon(
+//                                        Icons.Rounded.AlternateEmail,
+//                                        contentDescription = null,
+//                                        tint = homePrefs.mentionIconColor?.let { Color(it) }
+//                                            ?: Color(theme.accentColor),
+//                                        modifier = Modifier.size(12.dp),
+//                                    )
+                                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.atSign, Icons.Rounded.AlternateEmail,
                                         contentDescription = null,
                                         tint = homePrefs.mentionIconColor?.let { Color(it) }
                                             ?: Color(theme.accentColor),
@@ -340,17 +384,6 @@ fun ConversationRow(
                                 }
                             }
                         }
-                        Spacer(Modifier.width(8.dp))
-                        HomeTimeLabel(
-                            text = if (elapsedTime) {
-                                HomeFormatters.formatElapsedTime(conversation.lastMessageTime,displayNow)
-                            } else {
-                                HomeFormatters.formatConversationTimestamp(conversation.lastMessageTime,displayNow, is24Hour = is24Hour)
-                            },
-                            highlight = conversation.unreadCount > 0,
-                            color = Color(theme.secondaryTextColor),
-                            highlightColor = Color(theme.accentColor),
-                        )
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -398,18 +431,18 @@ fun ConversationRow(
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        if (!locked && presenceText.isNotEmpty() && conversation.lastMessageText.isNotEmpty() && !subtitleActive) {
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                presenceText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = if (online) onlineColor else lastSeenColor,
-                                fontSize = (9.5 * textSizeScale).sp,
-                                fontWeight = FontWeight.W600,
-                                modifier = Modifier.widthIn(max = 105.dp),
-                            )
-                        }
+//                         if (!locked && presenceText.isNotEmpty() && conversation.lastMessageText.isNotEmpty() && !subtitleActive) {
+//                             Spacer(Modifier.width(8.dp))
+//                             Text(
+//                                 presenceText,
+//                                 maxLines = 1,
+//                                 overflow = TextOverflow.Ellipsis,
+//                                 color = if (online) onlineColor else lastSeenColor,
+//                                 fontSize = (9.5 * textSizeScale).sp,
+//                                 fontWeight = FontWeight.W600,
+//                                 modifier = Modifier.widthIn(max = 105.dp),
+//                             )
+//                         }
                         if (conversation.isMuted) {
                             Spacer(Modifier.width(6.dp))
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.mute,
@@ -418,14 +451,14 @@ fun ConversationRow(
                                 modifier = Modifier.size(14.dp),
                             )
                         }
-                        if (conversation.isPinned) {
-                            Spacer(Modifier.width(6.dp))
-                            com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.pin,
-                                semanticLabel = null,
-                                color = Color(theme.secondaryTextColor),
-                                modifier = Modifier.size(14.dp),
-                            )
-                        }
+//                         if (conversation.isPinned) {
+//                             Spacer(Modifier.width(6.dp))
+//                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.pin,
+//                                 semanticLabel = null,
+//                                 color = Color(theme.secondaryTextColor),
+//                                 modifier = Modifier.size(14.dp),
+//                             )
+//                         }
                         if (conversation.unreadCount > 0) {
                             Spacer(Modifier.width(7.dp))
                             HomeCountBadge(
@@ -436,12 +469,39 @@ fun ConversationRow(
                         }
                     }
                 }
+                Spacer(Modifier.width(com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeChatReferenceAvatarGapDp.dp))
+                        Column(Modifier.weight(com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeRowMetadataWeight),
+                            horizontalAlignment = Alignment.End) {
+                        HomeTimeLabel(
+                            text = if (elapsedTime) {
+                                HomeFormatters.formatElapsedTime(conversation.lastMessageTime,displayNow)
+                            } else {
+                                HomeFormatters.formatConversationTimestamp(conversation.lastMessageTime,displayNow, is24Hour = is24Hour)
+                            },
+                            highlight = conversation.unreadCount > 0,
+                            color = Color(theme.secondaryTextColor),
+                            highlightColor = Color(theme.accentColor),
+                        )
+                            if (!locked && presenceText.isNotEmpty() && presenceText != rowSubtitle && !subtitleActive) {
+                                Text(presenceText, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    color = if (online) onlineColor else lastSeenColor,
+                                    fontSize = (com.example.chat.ui.navigation.ReferenceLayoutMetrics.homePresenceTextSp * textSizeScale * theme.fontScale).sp,
+                                    modifier = Modifier.widthIn(max = com.example.chat.ui.navigation.ReferenceLayoutMetrics.homePresenceMaxWidthDp.dp))
+                            }
+                            if (conversation.isPinned) {
+                                com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.pin,
+                                    semanticLabel = null, color = Color(theme.secondaryTextColor),
+                                    modifier = Modifier.size(com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeRowMetadataIconDp.dp))
+                            }
+                        }
+
             }
         }
         if (chatList.showDivider && !homePrefs.hideChatsDivider) {
             Box(
                 Modifier
-                    .padding(start = if (referenceRows) 70.dp else 76.dp, end = 16.dp)
+                    .padding(start = (ReferenceLayoutMetrics.homeChatRowHorizontalPaddingDp + avatarGap).dp + avatarSize.dp, end = ReferenceLayoutMetrics.homeChatDividerEndPaddingDp.dp)
+                    // Previous divider inset: if (referenceRows) 70.dp else 76.dp
                     .fillMaxWidth()
                     .height(0.5.dp)
                     .background(Color(theme.dividerColor)),

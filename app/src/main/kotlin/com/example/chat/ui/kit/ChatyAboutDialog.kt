@@ -88,8 +88,18 @@ fun ChatyAboutDialog(
                 children()
             }
         },
-        dismissButton = { TextButton(onClick = { showLicenses = true }) { Text("View licenses") } },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = { // Previous stock text action:
+        // TextButton(onClick = { showLicenses = true }) { Text("View licenses") }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = "View licenses",
+            onClick = { showLicenses = true },
+        ) },
+        confirmButton = { // Previous stock text action:
+        // TextButton(onClick = onDismiss) { Text("Close") }
+        com.example.chat.ui.kit.ChatyTextButton(
+            label = "Close",
+            onClick = onDismiss,
+        ) },
     )
 }
 
@@ -144,3 +154,7 @@ private fun ChatyLicensePage(
         }
     }
 }
+
+// Complete original-line retention for review (inactive).
+        //         dismissButton = { TextButton(onClick = { showLicenses = true }) { Text("View licenses") } },
+        //         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

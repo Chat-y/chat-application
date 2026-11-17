@@ -1,5 +1,7 @@
 package com.example.chat.ui.camera
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.ui.res.stringResource
 import androidx.camera.core.CameraSelector
 import androidx.camera.view.PreviewView
@@ -52,7 +54,9 @@ fun VideoCaptureHost(
     var retakePrompt by remember { mutableStateOf(false) }
     fun stopReader() { stopPlayback?.invoke(); stopPlayback = null }
     fun requestExit() { if (session?.hasDraft() == true) exitPrompt = true else onBackToPhoto() }
-    androidx.activity.compose.BackHandler { requestExit() }
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(auth)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler { requestExit() }
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack) { requestExit() }
     LaunchedEffect(auth) {
         for (ignored in signal) {
             stopReader(); session?.close(); invalidated()
@@ -77,7 +81,7 @@ fun VideoCaptureHost(
         video?.bind()
         onDispose { stopReader(); video?.close(); if (session === video) session = null }
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).windowInsetsPadding(WindowInsets.safeDrawing),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.chatyPredictiveBack(predictiveBack).fillMaxSize().background(MaterialTheme.colorScheme.surface).windowInsetsPadding(WindowInsets.safeDrawing),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
             // CAM-R4-004 prior: TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick={requestExit()},modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text("Back to photo") }
             TextButton(shape = com.example.chat.ui.kit.ChatyActionShape, onClick={requestExit()},modifier=Modifier.cameraActionFocusRing().heightIn(min=48.dp)) { Text(stringResource(com.example.chat.R.string.camera_video_back_photo)) }

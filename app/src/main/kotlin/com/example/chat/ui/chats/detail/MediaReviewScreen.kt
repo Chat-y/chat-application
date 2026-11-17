@@ -1,5 +1,7 @@
 package com.example.chat.ui.chats.detail
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -284,7 +286,9 @@ internal fun MediaReviewScreen(items: List<MediaReviewItem>, conversationId: Str
     fun requestCancel() {
         if (anyEdits || captions.values.any { it.isNotBlank() } || viewOnceIds.isNotEmpty()) discardPrompt = true else onCancel()
     }
-    androidx.activity.compose.BackHandler(onBack = ::requestCancel)
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(conversationId)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(onBack = ::requestCancel)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, onBack = ::requestCancel)
     if (discardPrompt) AlertDialog(
         onDismissRequest = { discardPrompt = false },
         title = { Text(stringResource(com.example.chat.R.string.media_released_review_discard_edits_title)) },
@@ -576,7 +580,7 @@ internal fun MediaReviewScreen(items: List<MediaReviewItem>, conversationId: Str
             chromeVisible = false
         }
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+    Column(Modifier.chatyPredictiveBack(predictiveBack).fillMaxSize().background(MaterialTheme.colorScheme.surface)
         .graphicsLayer {
             translationY = dismissOffset.value
             alpha = (1f - dismissOffset.value / 1200f).coerceIn(0.4f, 1f)
@@ -638,7 +642,9 @@ internal fun MediaReviewScreen(items: List<MediaReviewItem>, conversationId: Str
                         state = rememberTooltipState(),
                     ) {
                         // MR-R4-043 prior: IconButton(onClick = { overflow = true }, modifier = Modifier.size(48.dp).reviewHeaderFocusRing()) { Icon(Icons.Rounded.MoreVert, "More actions") }
-                        IconButton(onClick = { overflow = true }, modifier = Modifier.size(48.dp).reviewHeaderFocusRing()) { Icon(Icons.Rounded.MoreVert, stringResource(com.example.chat.R.string.media_released_review_more)) }
+                        IconButton(onClick = { overflow = true }, modifier = Modifier.size(48.dp).reviewHeaderFocusRing()) {
+//Icon(Icons.Rounded.MoreVert, stringResource(com.example.chat.R.string.media_released_review_more))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.moreOptions, Icons.Rounded.MoreVert, stringResource(com.example.chat.R.string.media_released_review_more)) }
                     }
                     DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         if (item.mediaType == ReviewMediaType.VIDEO) DropdownMenuItem(
@@ -654,7 +660,9 @@ internal fun MediaReviewScreen(items: List<MediaReviewItem>, conversationId: Str
                         DropdownMenuItem(
                             // MR-R4-043 prior: text = { Text("Reorder attachments") },
                             text = { Text(stringResource(com.example.chat.R.string.media_released_review_reorder)) },
-                            leadingIcon = { Icon(Icons.Rounded.KeyboardArrowUp, null) },
+                            leadingIcon = {
+//Icon(Icons.Rounded.KeyboardArrowUp, null)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronUp, Icons.Rounded.KeyboardArrowUp, null) },
                             enabled = current.size > 1,
                             onClick = { overflow = false; reorderDialog = true },
                         )
@@ -679,9 +687,13 @@ internal fun MediaReviewScreen(items: List<MediaReviewItem>, conversationId: Str
                             // MR-R4-043 prior: Text("${position + 1}. ${media.file.name}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(stringResource(com.example.chat.R.string.media_released_review_reorder_item, position + 1, media.file.name), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             // MR-R4-043 prior: IconButton(onClick = { moveItem(position, position - 1) }, enabled = position > 0) { Icon(Icons.Rounded.KeyboardArrowUp, "Move ${media.file.name} earlier") }
-                            IconButton(onClick = { moveItem(position, position - 1) }, enabled = position > 0) { Icon(Icons.Rounded.KeyboardArrowUp, stringResource(com.example.chat.R.string.media_released_review_move_earlier, media.file.name)) }
+                            IconButton(onClick = { moveItem(position, position - 1) }, enabled = position > 0) {
+//Icon(Icons.Rounded.KeyboardArrowUp, stringResource(com.example.chat.R.string.media_released_review_move_earlier, media.file.name))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.arrowUp, Icons.Rounded.KeyboardArrowUp, stringResource(com.example.chat.R.string.media_released_review_move_earlier, media.file.name)) }
                             // MR-R4-043 prior: IconButton(onClick = { moveItem(position, position + 1) }, enabled = position < current.size - 1) { Icon(Icons.Rounded.KeyboardArrowDown, "Move ${media.file.name} later") }
-                            IconButton(onClick = { moveItem(position, position + 1) }, enabled = position < current.size - 1) { Icon(Icons.Rounded.KeyboardArrowDown, stringResource(com.example.chat.R.string.media_released_review_move_later, media.file.name)) }
+                            IconButton(onClick = { moveItem(position, position + 1) }, enabled = position < current.size - 1) {
+//Icon(Icons.Rounded.KeyboardArrowDown, stringResource(com.example.chat.R.string.media_released_review_move_later, media.file.name))
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.moveDown, Icons.Rounded.KeyboardArrowDown, stringResource(com.example.chat.R.string.media_released_review_move_later, media.file.name)) }
                         }
                     }
                 }

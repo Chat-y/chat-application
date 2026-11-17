@@ -320,13 +320,25 @@ object IslandController {
                     if (item != null) begin(item.copy(lifetime = 7000, presentation = IslandLevel.Expanded, seen = false))
                     else setLevel(IslandLevel.Expanded)
                 } else {
-                    openCurrent()
-                    finishNotice()
+                    // Previous implementation retained:
+                    // openCurrent()
+                    // finishNotice()
+                    // Guarded like the retired Open button: a failed PendingIntent keeps the card.
+                    openNotification()
                 }
             }
             else -> {
-                openCurrent()
-                if (notice == null) setLevel(IslandLevel.Compact) else finishNotice()
+                if (display.value is IslandMode.Notification) {
+                    // Previous implementation retained:
+                    // openCurrent()
+                    // if (notice == null) setLevel(IslandLevel.Compact) else finishNotice()
+                    // Guarded open: a failed PendingIntent keeps the card.
+                    openNotification()
+                    if (notice == null) setLevel(IslandLevel.Compact)
+                } else {
+                    openCurrent()
+                    if (notice == null) setLevel(IslandLevel.Compact) else finishNotice()
+                }
             }
         }
     }

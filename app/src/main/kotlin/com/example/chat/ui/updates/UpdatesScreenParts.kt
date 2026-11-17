@@ -666,7 +666,9 @@ private fun ViewsControl(
                 .clickable(onClick = onOpen)
                 .padding(horizontal = 18.dp, vertical = 8.dp),
         ) {
-            Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
+
+//Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chevronUp, Icons.Rounded.KeyboardArrowUp, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
             Spacer(Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.eye, semanticLabel = null, color = colors.primary, modifier = Modifier.size(16.dp))
@@ -1078,7 +1080,9 @@ internal fun StatusAudioPlayer(url: String, name: String, colors: ChatyColors) {
                     .background(colors.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = colors.primary, modifier = Modifier.size(30.dp))
+
+//Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = colors.primary, modifier = Modifier.size(30.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.waveform, Icons.Rounded.GraphicEq, contentDescription = null, tint = colors.primary, modifier = Modifier.size(30.dp))
             }
             Spacer(Modifier.height(12.dp))
             Text(

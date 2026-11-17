@@ -85,6 +85,7 @@ object SnapshotCodec {
                 url = attachmentRaw["url"]?.toString(),
                 durationSeconds = (attachmentRaw["duration_seconds"] ?: 0)
                     .toString().toIntOrNull() ?: 0,
+                encryptedFile = attachmentRaw["encrypted_file"] as? Map<String, Any?>,
             )
         } else {
             null
@@ -117,6 +118,17 @@ object SnapshotCodec {
             text = json["text"]?.toString() ?: "",
             attachment = attachment,
             metadata = metadata,
+            authenticatedMlsRevision = (json["authenticated_mls_revision"] as? Map<*, *>)?.let {
+                val id = it["message_id"] as? String; val room = it["conversation_id"] as? String
+                val seq = (it["seq"] as? Number)?.toInt(); val hash = it["hash"] as? String
+                if (id != json["id"] || room != json["conversation_id"] || seq == null || seq <= 0 || hash?.matches(Regex("[0-9a-f]{64}")) != true) null
+                else com.example.chat.domain.models.AuthenticatedMlsRevision(checkNotNull(id), checkNotNull(room), seq, hash)
+            },
+            authenticatedMlsSender = (json["authenticated_mls_sender"] as? Map<*, *>)?.let {
+                val uid = it["user_id"] as? String; val did = it["device_id"] as? String
+                if (uid.isNullOrBlank() || did.isNullOrBlank() || uid != json["sender_id"]) null
+                else com.example.chat.domain.models.AuthenticatedMlsSender(uid, did)
+            },
             replyToMessageId = json["reply_to_message_id"]?.toString(),
             replyToPreviewText = json["reply_to_preview_text"]?.toString(),
             replyToSenderName = json["reply_to_sender_name"]?.toString(),
@@ -161,10 +173,14 @@ object SnapshotCodec {
                         put("size", a.size)
                         a.url?.let { put("url", it) }
                         put("duration_seconds", a.durationSeconds)
+                        a.encryptedFile?.let { put("encrypted_file", it) }
                     },
                 )
             }
             put("metadata", message.metadata)
+            message.authenticatedMlsRevision?.let { put("authenticated_mls_revision", mapOf("message_id" to it.messageId,
+                "conversation_id" to it.conversationId, "seq" to it.seq, "hash" to it.hash)) }
+            message.authenticatedMlsSender?.let { put("authenticated_mls_sender", mapOf("user_id" to it.userId, "device_id" to it.deviceId)) }
             message.replyToMessageId?.let { put("reply_to_message_id", it) }
             message.replyToPreviewText?.let { put("reply_to_preview_text", it) }
             message.replyToSenderName?.let { put("reply_to_sender_name", it) }

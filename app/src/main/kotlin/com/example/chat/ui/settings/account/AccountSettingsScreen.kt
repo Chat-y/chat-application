@@ -105,7 +105,8 @@ fun AccountSettingsScreen(
     updateRegistrationSupport: suspend (organizationIdOrTenantId: String, allow: Boolean) -> Boolean,
     updateProfile: suspend (displayName: String, about: String, username: String, avatarUrl: String?) -> Unit,
     uploadProfilePhoto: suspend (filename: String, bytes: ByteArray) -> String,
-    deleteAccountData: suspend (userId: String) -> Unit,
+    deleteAccountData: suspend (userId: String, password: String) -> Unit,
+    recoverAccountDeletion: suspend () -> String = { "Deletion recovery is unavailable." },
     logout: suspend () -> Unit,
 ) {
     val colors = LocalAppColors.current
@@ -128,26 +129,51 @@ fun AccountSettingsScreen(
         }
     }
 
+    var deletionPassword by remember { mutableStateOf("") }
+    var recoveryVisible by remember { mutableStateOf(false) }
+    var recoveryResult by remember { mutableStateOf("Recovery checks only the saved deletion receipt. Local data is kept unless the server confirms deletion.") }
+    var recovering by remember { mutableStateOf(false) }
+    if (recoveryVisible) {
+        AlertDialog(onDismissRequest = { if (!recovering) recoveryVisible = false },
+            title = { Text("Account deletion recovery") },
+            text = { Text(recoveryResult) },
+            confirmButton = { TextButton(enabled = !recovering, onClick = {
+                recovering = true
+                scope.launch {
+                    try { recoveryResult = recoverAccountDeletion() }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { recoveryResult = "Outcome indeterminate. Local data is retained. Retry recovery later." }
+                    finally { recovering = false }
+                }
+            }) { Text(if (recovering) "Checking..." else "Check saved receipt") } },
+            dismissButton = { TextButton(onClick = { recoveryVisible = false }, enabled = !recovering) { Text("Close") } })
+    }
     // Dart _confirmDeleteAccount: confirm dialog -> deleteUser + local purge
     // -> confirmChatyLogout. The logout confirm is a second dialog, exactly
     // like the source.
     if (showDeleteDialog) {
         AlertDialog(shape = com.example.chat.ui.kit.ChatyModalShape,
-            onDismissRequest = { showDeleteDialog = false },
+            onDismissRequest = { showDeleteDialog = false; deletionPassword = "" },
             title = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_delete_title)) },
             text = {
-                Text(
-                    androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_delete_body),
-                )
+                Column {
+                    Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_delete_body))
+                    OutlinedTextField(value = deletionPassword, onValueChange = { deletionPassword = it },
+                        label = { Text("Current password") }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                    TextButton(onClick = { showDeleteDialog = false; deletionPassword = ""; recoveryVisible = true }) { Text("Recover a previous deletion") }
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
+                        val password = deletionPassword
+                        deletionPassword = ""
                         showDeleteDialog = false
                         isDeleting = true
                         scope.launch {
                             try {
-                                deleteAccountData(user.id)
+                                deleteAccountData(user.id, password)
                                 // AC1-10 / AC2-13: end in one signed-out state; do not chain a second "log out" dialog.
                                 // (previously: isDeleting = false; showLogoutDialog = true)
                                 try {
@@ -164,11 +190,11 @@ fun AccountSettingsScreen(
                             } finally { isDeleting = false }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.error),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.error), enabled = deletionPassword.isNotBlank(),
                 ) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_delete_confirm)) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_cancel)) }
+                TextButton(onClick = { showDeleteDialog = false; deletionPassword = "" }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.accounts_cancel)) }
             },
         )
     }

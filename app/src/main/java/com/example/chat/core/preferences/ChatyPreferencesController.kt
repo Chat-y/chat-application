@@ -120,6 +120,10 @@ class ChatyPreferencesController(
     val scopeGeneration: Long
         get() = loadGeneration.get()
 
+    /** Privacy-sensitive effects must not use defaults or another account's still-loading settings. */
+    fun isReadyForUser(userId: String?): Boolean =
+        preferencesReady && !userId.isNullOrBlank() && scopeUserId == userId && auth.currentUserId() == userId
+
     init {
         scope.launch { initLoad() }
         auth.addListener(authListener)
@@ -323,8 +327,16 @@ class ChatyPreferencesController(
         automation = MessageAutomationPreferences()
         effects = NavigationEffectPreferences()
         gbFeatures = GbFeatureCatalog.defaults
+        synchronizePresenceToastFlags(false, false)
         starredFavorites.clear()
         historyEntries.clear()
+    }
+
+    /** Keep legacy readers and dedicated controls consistent without removing stored fields. */
+    private fun synchronizePresenceToastFlags(online: Boolean, typing: Boolean) {
+        toasts = toasts.copy(onlineToastEnabled = online, typingToastEnabled = typing)
+        notification = notification.copy(notifyContactOnline = online, notifyTypingStarted = typing)
+        gbFeatures = gbFeatures + mapOf("abu_saleh_toast_online" to online, "abu_saleh_toast_typing" to typing)
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -355,6 +367,11 @@ class ChatyPreferencesController(
         if (gb is Map<*, *>) {
             gbFeatures = GbFeatureCatalog.defaults + (gb as Map<String, Any?>)
         }
+        // Canonicalize only enablement. Existing typed choices beat conflicting historical flags.
+        val restoredToastFlags = com.example.chat.domain.notifications.PresenceToastEnablement.restore(
+            data[PreferenceKeys.toasts] as? Map<*, *>, data[PreferenceKeys.notification] as? Map<*, *>, gb as? Map<*, *>,
+        )
+        synchronizePresenceToastFlags(restoredToastFlags.online, restoredToastFlags.typing)
         // One-time heal: the header/list visibility keys (PicProf, NameProf, …)
         // were exposed as Feature-Center toggles BEFORE they had consumers, so
         // devices can carry stored `false` values that hide the contact name /
@@ -577,9 +594,11 @@ class ChatyPreferencesController(
             "fall_effect_enabled" -> effects = effects.copy(enableFallingParticles = flag)
             "fall_emoji" -> effects = effects.copy(fallingParticleObject = text)
             "Pop_Heds" -> notification = notification.copy(enableGlobalNotifications = flag)
-            "abu_saleh_toast_online" -> notification = notification.copy(notifyContactOnline = flag)
+            // Previous: notification = notification.copy(notifyContactOnline = flag)
+            "abu_saleh_toast_online" -> synchronizePresenceToastFlags(flag, toasts.typingToastEnabled)
             "abu_saleh_toast_status" -> notification = notification.copy(notifyStatusViewed = flag)
-            "abu_saleh_toast_typing" -> notification = notification.copy(notifyTypingStarted = flag)
+            // Previous: notification = notification.copy(notifyTypingStarted = flag)
+            "abu_saleh_toast_typing" -> synchronizePresenceToastFlags(toasts.onlineToastEnabled, flag)
         }
     }
 
@@ -648,7 +667,13 @@ class ChatyPreferencesController(
     }
 
     fun updateNotification(newPrefs: NotificationPreferences, logTitle: String? = null, prevVal: Any? = null, newVal: Any? = null) {
+        val onlineChanged = newPrefs.notifyContactOnline != notification.notifyContactOnline
+        val typingChanged = newPrefs.notifyTypingStarted != notification.notifyTypingStarted
         notification = newPrefs
+        if (onlineChanged || typingChanged) synchronizePresenceToastFlags(
+            if (onlineChanged) newPrefs.notifyContactOnline else toasts.onlineToastEnabled,
+            if (typingChanged) newPrefs.notifyTypingStarted else toasts.typingToastEnabled,
+        )
         if (logTitle != null) logHistory("notification", logTitle, prevVal, newVal)
         persist(explicitGroup = PreferenceKeys.notification); notifyListeners()
     }
@@ -673,6 +698,7 @@ class ChatyPreferencesController(
 
     fun updateToasts(newPrefs: NotificationToastPreferences, logTitle: String? = null, prevVal: Any? = null, newVal: Any? = null) {
         toasts = newPrefs
+        synchronizePresenceToastFlags(newPrefs.onlineToastEnabled, newPrefs.typingToastEnabled)
         if (logTitle != null) logHistory("toasts", logTitle, prevVal, newVal)
         persist(explicitGroup = PreferenceKeys.toasts); notifyListeners()
     }
@@ -770,9 +796,17 @@ class ChatyPreferencesController(
     fun resetPrivacy() { privacy = PrivacyPreferences(); persist(); notifyListeners() }
     fun resetHome() { home = HomePreferences(); persist(); notifyListeners() }
     fun resetConversation() { conversation = ConversationPreferences(); persist(); notifyListeners() }
-    fun resetNotifications() { notification = NotificationPreferences(); persist(); notifyListeners() }
+    fun resetNotifications() {
+        notification = NotificationPreferences()
+        synchronizePresenceToastFlags(notification.notifyContactOnline, notification.notifyTypingStarted)
+        persist(); notifyListeners()
+    }
     fun resetEffects() { effects = NavigationEffectPreferences(); persist(); notifyListeners() }
-    fun resetGbFeatures() { gbFeatures = GbFeatureCatalog.defaults; persist(); notifyListeners() }
+    fun resetGbFeatures() {
+        gbFeatures = GbFeatureCatalog.defaults
+        synchronizePresenceToastFlags(false, false)
+        persist(); notifyListeners()
+    }
 
     fun resetAll() {
         privacy = PrivacyPreferences()
@@ -783,6 +817,8 @@ class ChatyPreferencesController(
         automation = MessageAutomationPreferences()
         effects = NavigationEffectPreferences()
         gbFeatures = GbFeatureCatalog.defaults
+        toasts = toasts.copy(storyToastEnabled = false, profileToastEnabled = false)
+        synchronizePresenceToastFlags(false, false)
         starredFavorites.clear()
         historyEntries.clear()
         persist()

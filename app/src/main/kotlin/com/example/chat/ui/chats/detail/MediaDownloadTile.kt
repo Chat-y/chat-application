@@ -52,6 +52,7 @@ internal fun MediaDownloadTile(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val scheme = MaterialTheme.colorScheme
     val scrim = scheme.scrim.copy(alpha = 0.55f)
     val fraction = when (state) {
@@ -116,6 +117,17 @@ internal fun MediaDownloadTile(
                 }
                 ChatyIcon(actionIcon, size = if (compact) 20.dp else 24.dp, color = if (state == S.Done) accent else Color.White,
                     modifier = if (state == S.Done) Modifier.graphicsLayer { scaleX = 0.6f + 0.4f * tick; scaleY = 0.6f + 0.4f * tick; alpha = tick } else Modifier)
+            }
+            // Optional text only. Original primary/Cancel placement and gestures are unchanged.
+            val compactLabelFits = maxHeight >= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMinHeightDp.dp &&
+                maxWidth >= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMinWidthDp.dp &&
+                density.fontScale <= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMaxFontScale
+            if (compact && compactLabelFits) compactDownloadLabel(state)?.let { compactLabel ->
+                Text(compactLabel, color = scheme.onSurface, style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.Center, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelGapDp.dp)
+                        .background(scheme.surface.copy(alpha = com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelSurfaceAlpha), CircleShape)
+                        .padding(horizontal = com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelHorizontalPaddingDp.dp))
             }
             if (!compact) {
                 Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))

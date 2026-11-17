@@ -57,11 +57,25 @@ internal fun ClusteredStickerPicker(
     selected?.let { sticker ->
         ChatyConfirmationDialog(onDismissRequest = { selected = null }, title = { Text(sticker.label) },
             text = { Column { StickerArtwork(sticker, 180f); Text("Preview from ${packs.firstOrNull { it.id == sticker.packId }?.title.orEmpty()}") } },
-            confirmButton = { TextButton(enabled = onConfirmSend != null, onClick = {
+            confirmButton = { // Previous stock text action:
+            // TextButton(enabled = onConfirmSend != null, onClick = {
+            //                 if (packs.any { it.id == sticker.packId && sticker in it.stickers }) onConfirmSend?.invoke(sticker)
+            //                 selected = null
+            //             }) { Text("Send sticker") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Send sticker",
+                enabled = onConfirmSend != null,
+                onClick = {
                 if (packs.any { it.id == sticker.packId && sticker in it.stickers }) onConfirmSend?.invoke(sticker)
                 selected = null
-            }) { Text("Send sticker") } },
-            dismissButton = { TextButton(onClick = { selected = null }) { Text("Cancel") } })
+            },
+            ) },
+            dismissButton = { // Previous stock text action:
+            // TextButton(onClick = { selected = null }) { Text("Cancel") }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = { selected = null },
+            ) })
     }
 }
 
@@ -72,3 +86,8 @@ private fun StickerArtwork(sticker: StickerAsset, size: Float) {
     else if (sticker.animated && android.os.Build.VERSION.SDK_INT >= 28) IosAnimatedEmoji(sticker.assetPath, size, onUnavailable = { failed = true })
     else StaticAssetEmoji(sticker.assetPath, size, onUnavailable = { failed = true })
 }
+
+// Complete original-line retention for review (inactive).
+            //             confirmButton = { TextButton(enabled = onConfirmSend != null, onClick = {
+            //             }) { Text("Send sticker") } },
+            //             dismissButton = { TextButton(onClick = { selected = null }) { Text("Cancel") } })

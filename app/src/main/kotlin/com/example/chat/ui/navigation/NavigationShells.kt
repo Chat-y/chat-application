@@ -1,5 +1,7 @@
 package com.example.chat.ui.navigation
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import com.example.chat.core.templates.ChatyNavigationDestinationIds
 import com.example.chat.core.templates.NavigationTemplate
 
@@ -96,8 +98,28 @@ internal fun TopWhatsAppShell(
     homeHeaderTabsSlot: ((@Composable () -> Unit)?) -> Unit,
     fab: @Composable () -> Unit,
     content: @Composable () -> Unit,
-    rootHeaderActions: @Composable () -> Unit = {},
+    /** Optional root-owned content, never a page slot; reserved as one action lane. */
+    rootHeaderExtension: (@Composable () -> Unit)? = null,
+    homeHeaderController: HomeHeaderController? = null,
+    // TAS-SEARCH-1: destination-aware header actions (see MainNavigationShell).
+    // Prior: rootHeaderActions: @Composable () -> Unit = {},
+    rootHeaderActions: @Composable (String) -> Unit = { _ -> },
 ) {
+    val controller = homeHeaderController
+    if (controller == null) {
+        // Non-runtime previews retain the original standalone title path.
+        Column(Modifier.fillMaxSize()) {
+            OldUiDestinationTitleHeader(colors, NavigationCatalog.labelFor(activeDestinationId)) {
+                if (activeDestinationId != "settings") rootHeaderActions(activeDestinationId)
+            }
+            HomeHeaderTabsBar(colors, navItemIds, selectedIndex, ReferenceLayoutMetrics.homeTabsHeightDp.toFloat(), onSelect)
+            Box(Modifier.weight(1f)) { content() }
+        }
+    } else {
+        AccountHomeHeaderShell(controller, colors, navItemIds, selectedIndex, activeDestinationId,
+            onSelect, rootHeaderActions, fab, content, rootHeaderExtension)
+    }
+    /* Previous page-owned tab placement, retained for review:
     val tabsBelongUnderHomeHeader =
         activeDestinationId == ChatyNavigationDestinationIds.chats ||
             activeDestinationId == ChatyNavigationDestinationIds.groups
@@ -117,7 +139,8 @@ internal fun TopWhatsAppShell(
             if (!underHeaderPublished) {
                 OldUiDestinationTitleHeader(colors, NavigationCatalog.labelFor(activeDestinationId)) {
                     // Settings already owns its search/QR actions; keep the title and tabs.
-                    if (activeDestinationId != "settings") rootHeaderActions()
+                    // Prior: if (activeDestinationId != "settings") rootHeaderActions()
+                    if (activeDestinationId != "settings") rootHeaderActions(activeDestinationId)
                 }
                 HomeHeaderTabsBar(colors, navItemIds, selectedIndex, heightDp, onSelect)
             }
@@ -125,6 +148,7 @@ internal fun TopWhatsAppShell(
         }
         Box(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { fab() }
     }
+    */
 }
 
 /** Port of _buildFloatingIslandRailShell: 68-wide floating rail with
@@ -154,7 +178,9 @@ internal fun FloatingIslandRailShell(
                 // User directive: slim floating rail - the decorative three-dot
                 // traffic-light row and the bottom avatar are removed.
                 Spacer(Modifier.height(14.dp))
-                Icon(Icons.Rounded.Bolt, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))
+
+//Icon(Icons.Rounded.Bolt, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.bolt, Icons.Rounded.Bolt, contentDescription = null, tint = colors.primary, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.height(16.dp))
                 Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(1.dp).background(colors.divider))
                 Spacer(Modifier.height(12.dp))
@@ -229,9 +255,11 @@ internal fun ModernSideMenuShell(
         else if (rawName.isNotEmpty() && rawName != "Chaty User" && rawName != "Bandi Maya") rawName
         else currentUser?.username?.ifEmpty { "User" } ?: "User"
 
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(colors.background)) {
+    val drawerBack = com.example.chat.ui.kit.rememberChatyBackPresentation(drawerOpen)
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.chatyPredictiveBack(drawerBack).fillMaxSize().background(colors.background)) {
         val panelWidth = DrawerLayoutMetrics.modernWidth(maxWidth.value).dp
-        androidx.activity.compose.BackHandler(enabled = drawerOpen) { drawerOpen = false }
+        // Previous registration retained inactive: androidx.activity.compose.BackHandler(enabled = drawerOpen) { drawerOpen = false }
+        com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = drawerBack, enabled = drawerOpen) { drawerOpen = false }
         Column(Modifier.fillMaxSize()) {
             // TemplateShellHeader equivalent.
             Row(
@@ -242,7 +270,9 @@ internal fun ModernSideMenuShell(
                     .padding(horizontal = 4.dp, vertical = 4.dp),
             ) {
                 IconButton(onClick = { drawerOpen = true }) {
-                    Icon(Icons.Rounded.Menu, contentDescription = "Open menu", tint = colors.foreground)
+
+//Icon(Icons.Rounded.Menu, contentDescription = "Open menu", tint = colors.foreground)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.menu, Icons.Rounded.Menu, contentDescription = "Open menu", tint = colors.foreground)
                 }
                 Text(
                     NavigationCatalog.labelFor(navItemIds.getOrElse(selectedIndex) { "" }),

@@ -175,7 +175,12 @@ fun StarredMessagesScreen(
                 Text(stringResource(R.string.social_starred_sign_in_again), style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Assertive })
                 Text(stringResource(R.string.social_starred_session_expired), textAlign = TextAlign.Center)
-                TextButton(onClick = onBack) { Text(stringResource(R.string.social_starred_back)) }
+                // Previous stock text action:
+                // TextButton(onClick = onBack) { Text(stringResource(R.string.social_starred_back)) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = stringResource(R.string.social_starred_back),
+                    onClick = onBack,
+                )
             }
         }
         return
@@ -379,8 +384,12 @@ fun StarredMessagesScreen(
                 },
                 actions = {
                     IconButton(onClick = { refresh() }, enabled = !loading) {
-                        Icon(
-                            Icons.Rounded.Refresh,
+
+//Icon(
+//                            Icons.Rounded.Refresh,
+//                            contentDescription = stringResource(R.string.social_starred_refresh),
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.refresh, Icons.Rounded.Refresh,
                             contentDescription = stringResource(R.string.social_starred_refresh),
                         )
                     }
@@ -401,7 +410,10 @@ fun StarredMessagesScreen(
                     containerColor = colors.secondaryContainer,
                     contentColor = colors.onSecondaryContainer,
                 ) {
-                    Icon(Icons.Rounded.ArrowUpward,
+
+//Icon(Icons.Rounded.ArrowUpward,
+//                        contentDescription = stringResource(R.string.social_starred_back_to_top))
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.arrowUp, Icons.Rounded.ArrowUpward,
                         contentDescription = stringResource(R.string.social_starred_back_to_top))
                 }
             }
@@ -460,17 +472,32 @@ fun StarredMessagesScreen(
                         unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                     ),
                 )
-                TextButton(onClick = {
+                // Previous stock text action:
+                // TextButton(onClick = {
+                //                     sortOrder = when (sortOrder) {
+                //                         "Newest first" -> "Oldest first"
+                //                         "Oldest first" -> "By conversation"
+                //                         else -> "Newest first"
+                //                     }
+                //                 }) { Text(stringResource(R.string.social_starred_sort, stringResource(when (sortOrder) {
+                //                     "Oldest first" -> R.string.social_starred_oldest
+                //                     "By conversation" -> R.string.social_starred_by_conversation
+                //                     else -> R.string.social_starred_newest
+                //                 }))) }
+                com.example.chat.ui.kit.ChatyTextButton(
+                    label = stringResource(R.string.social_starred_sort, stringResource(when (sortOrder) {
+                    "Oldest first" -> R.string.social_starred_oldest
+                    "By conversation" -> R.string.social_starred_by_conversation
+                    else -> R.string.social_starred_newest
+                })),
+                    onClick = {
                     sortOrder = when (sortOrder) {
                         "Newest first" -> "Oldest first"
                         "Oldest first" -> "By conversation"
                         else -> "Newest first"
                     }
-                }) { Text(stringResource(R.string.social_starred_sort, stringResource(when (sortOrder) {
-                    "Oldest first" -> R.string.social_starred_oldest
-                    "By conversation" -> R.string.social_starred_by_conversation
-                    else -> R.string.social_starred_newest
-                }))) }
+                },
+                )
     // Prior batch source retained:
     //                 if (loading || indexing) {
                 if (loading || indexing || filtering) {
@@ -493,8 +520,13 @@ fun StarredMessagesScreen(
                             .padding(horizontal = 16.dp, vertical = 4.dp)
                             .semantics { liveRegion = LiveRegionMode.Assertive },
                     ) {
-                        Icon(
-                            Icons.Rounded.SyncProblem,
+
+//Icon(
+//                            Icons.Rounded.SyncProblem,
+//                            contentDescription = null,
+//                            tint = colors.onSurfaceVariant,
+//                        )
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.syncProblem, Icons.Rounded.SyncProblem,
                             contentDescription = null,
                             tint = colors.onSurfaceVariant,
                         )
@@ -510,7 +542,12 @@ fun StarredMessagesScreen(
                         )
                         // Previous source retained (superseded below):
                         // TextButton(onClick = { refresh() }) { Text(stringResource(R.string.social_starred_retry)) }
-                        TextButton(onClick = { refresh(retryFailedOnly = true) }) { Text(stringResource(R.string.social_starred_retry)) }
+                        // Previous stock text action:
+                        // TextButton(onClick = { refresh(retryFailedOnly = true) }) { Text(stringResource(R.string.social_starred_retry)) }
+                        com.example.chat.ui.kit.ChatyTextButton(
+                            label = stringResource(R.string.social_starred_retry),
+                            onClick = { refresh(retryFailedOnly = true) },
+                        )
                     }
                 }
                 PullToRefreshBox(

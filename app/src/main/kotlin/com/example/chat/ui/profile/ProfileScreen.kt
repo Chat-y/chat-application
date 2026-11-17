@@ -7,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.example.chat.ui.effects.iosItemEntrance
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -126,6 +127,9 @@ fun ProfileScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
+            // Row 9 (iOS-style content motion): staggered entrance per profile block.
+// Previous implementation retained:             ProfileHeader(
+            Box(Modifier.iosItemEntrance(0, "profile-header")) {
             ProfileHeader(
                 initials = user.avatarInitials,
                 colorHex = user.avatarColorHex,
@@ -139,29 +143,37 @@ fun ProfileScreen(
                 onEdit = onEditProfile,
                 onEditBanner = onEditBanner,
             )
+            }
 
             if (showStatsGrid) {
                 Spacer(Modifier.height(8.dp))
+                Box(Modifier.iosItemEntrance(1, "profile-stats")) {
                 ProfileStatsGrid(chats = chatsCount, groups = groupsCount, contacts = contactsCount)
+                }
                 Spacer(Modifier.height(12.dp))
             }
 
             // GB profile rows: one flat list with hairline dividers, no
             // section headers or cards. Only existing destinations.
+            Box(Modifier.iosItemEntrance(2, "profile-tile-username")) {
             SettingsTile(
                 icon = Icons.Outlined.AlternateEmail,
                 title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_username),
                 subtitle = "@${user.username}",
             )
+            }
             if (user.about.isNotEmpty()) {
                 ProfileRowDivider()
+                Box(Modifier.iosItemEntrance(3, "profile-tile-about")) {
                 SettingsTile(
                     icon = Icons.Outlined.Info,
                     title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_about),
                     subtitle = user.about,
                 )
+                }
             }
             ProfileRowDivider()
+            Box(Modifier.iosItemEntrance(4, "profile-tile-settings")) {
             SettingsTile(
                 icon = Icons.Outlined.Settings,
                 title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_settings),
@@ -169,7 +181,9 @@ fun ProfileScreen(
                 showChevron = true,
                 onClick = onOpenSettings,
             )
+            }
             ProfileRowDivider()
+            Box(Modifier.iosItemEntrance(5, "profile-tile-notifications")) {
             SettingsTile(
                 icon = Icons.Outlined.NotificationsNone,
                 title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_notifications),
@@ -177,7 +191,9 @@ fun ProfileScreen(
                 showChevron = true,
                 onClick = onOpenNotifications,
             )
+            }
             ProfileRowDivider()
+            Box(Modifier.iosItemEntrance(6, "profile-tile-privacy")) {
             SettingsTile(
                 icon = Icons.Outlined.VisibilityOff,
                 title = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_privacy),
@@ -185,7 +201,9 @@ fun ProfileScreen(
                 showChevron = true,
                 onClick = onOpenPrivacyCenter,
             )
+            }
             ProfileRowDivider()
+            Box(Modifier.iosItemEntrance(7, "profile-tile-logout")) {
             SettingsTile(
                 icon = Icons.AutoMirrored.Rounded.Logout,
                 iconTint = Color(theme.dangerColor),
@@ -193,6 +211,7 @@ fun ProfileScreen(
                 subtitle = androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_home_logout_desc),
                 onClick = { showLogoutConfirm = true },
             )
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -584,7 +603,8 @@ internal fun BannerSurface(bannerUrl: String?, height: Int) {
             .background(Color(theme.cardColor))
             .border(1.dp, LocalAppColors.current.borderSubtle, RoundedCornerShape(18.dp)),
     ) {
-        ProfileSizedImage(
+        // Previous banner renderer: ProfileSizedImage
+        ProfileBannerMedia(
             url = bannerUrl,
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),

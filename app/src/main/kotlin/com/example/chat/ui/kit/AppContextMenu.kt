@@ -40,6 +40,8 @@ import androidx.compose.ui.window.DialogProperties
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import com.example.chat.ui.effects.IosContentMotion
+import com.example.chat.ui.effects.iosReactionPopIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -292,12 +294,18 @@ private fun ReactionRailRow(rail: ReactionRail, onDismiss: () -> Unit) {
         horizontalArrangement = Arrangement.SpaceAround,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        rail.emojis.forEach { e ->
-            Box(Modifier.clip(CircleShape).clickable { onDismiss(); rail.onReact(e) }.padding(5.dp)) { Text(e, fontSize = 22.sp) }
+        // Row 9 (iOS-style reactions): staggered spring pop-in per emoji + spring press feedback.
+// Previous implementation retained:         rail.emojis.forEach { e ->
+// Previous implementation retained:             Box(Modifier.clip(CircleShape).clickable { onDismiss(); rail.onReact(e) }.padding(5.dp)) { Text(e, fontSize = 22.sp) }
+// Previous implementation retained:         }
+        rail.emojis.forEachIndexed { index, e ->
+            Box(Modifier.iosReactionPopIn(IosContentMotion.staggerDelayMs(index)).springInteractiveScale(scaleDownFactor = 0.85f).clip(CircleShape).clickable { onDismiss(); rail.onReact(e) }.padding(5.dp)) { Text(e, fontSize = 22.sp) }
         }
         rail.onAdd?.let { add ->
             Box(
-                Modifier.padding(horizontal = 2.dp).size(32.dp).clip(CircleShape)
+                // Row 9: pops in after the last emoji.
+// Previous implementation retained:                 Modifier.padding(horizontal = 2.dp).size(32.dp).clip(CircleShape)
+                Modifier.iosReactionPopIn(IosContentMotion.staggerDelayMs(rail.emojis.size)).springInteractiveScale(scaleDownFactor = 0.85f).padding(horizontal = 2.dp).size(32.dp).clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
                     .clickable { onDismiss(); add() },
                 contentAlignment = Alignment.Center,

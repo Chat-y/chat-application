@@ -213,14 +213,66 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
 
     */
     val controller = remember(conversationId, attachmentAccount) {
+        // Captured at attachment start (OpenCode 610): retention journaling must
+        // use THIS account's key, so an account switch during an upload can never
+        // journal into the switched-to account's bucket. Never the ambient account.
+        val retainedAccountKey = com.example.chat.data.messaging.ConversationDispatchLocks.accountKey(
+            attachmentAccount.userId, attachmentAccount.tenantId, attachmentAccount.baseUrl)
         ChatAttachmentActionController(
             conversationId = conversationId,
+            // Track captured finals that outlive their send call (submitted or
+            // failed). Registry never deletes; retention policy is an owner decision.
+            onLocalFinalRetained = { retainedPath ->
+                // audit-05 v1 (replaced in v3, kept inactive per standing rule):
+                // record used the ambient account via the registry at record time:
+                // com.example.chat.ui.camera.CameraRetainedFinals.record(context, conversationId, retainedPath)
+                com.example.chat.ui.camera.CameraRetainedFinals.record(context, retainedAccountKey, conversationId, retainedPath)
+            },
             backend = object : AttachmentBackendPort {
                 override suspend fun upload(type: String, file: PickedFile, durationSeconds: Int): MessageAttachment {
                     requireAttachmentOwner()
                     // A secure chat never uploads plaintext media; encrypted media
                     // (SecureImageSendService) is Phase 2 and not wired yet.
-                    if (secureChannelNow()) throw IllegalStateException("Encrypted media is not wired yet, so media is not sent in an encrypted chat.")
+                    if (secureChannelNow()) {
+                        check(com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING &&
+                            ServiceLocator.conversationsRepository.isSecureChannel(conversationId)) { "Secure routing is unresolved." }
+                        requireAttachmentOwner()
+                        var ownedSource: java.io.File? = null
+                        var primaryFailure: Throwable? = null
+                        try {
+                        val source = file.path?.takeIf { !it.startsWith("content:") }?.let { java.io.File(it) } ?: withContext(Dispatchers.IO) {
+                            val staged = java.io.File.createTempFile("chaty-outgoing-secure-", ".part", context.cacheDir)
+                            ownedSource = staged
+                            try {
+                                val bytes = file.bytes
+                                require(bytes == null || bytes.size.toLong() <= com.example.chat.data.media.SecureAttachmentFileCodec.MAX_CIPHERTEXT)
+                                val input = if (bytes != null) java.io.ByteArrayInputStream(bytes)
+                                    else context.contentResolver.openInputStream(android.net.Uri.parse(checkNotNull(file.path))) ?: error("Selected attachment is unavailable.")
+                                input.use { stream -> staged.outputStream().use { output ->
+                                    val buffer = ByteArray(65_536); var total = 0L
+                                    while (true) {
+                                        coroutineContext.ensureActive(); requireAttachmentOwner()
+                                        val count = stream.read(buffer); if (count < 0) break
+                                        require(total + count <= com.example.chat.data.media.SecureAttachmentFileCodec.MAX_CIPHERTEXT)
+                                        output.write(buffer, 0, count); total += count
+                                    }
+                                } }
+                                staged
+                            } catch (failure: Throwable) { if (staged.exists() && !staged.delete()) failure.addSuppressed(java.io.IOException("Private staging cleanup failed.")); throw failure }
+                        }
+                            return ServiceLocator.secureAttachmentFiles.upload(attachmentAccount, conversationId, source, type,
+                                file.name, file.mimeType ?: "application/octet-stream", durationSeconds)
+                        } catch (failure: Throwable) { primaryFailure = failure; throw failure }
+                        finally {
+                            ownedSource?.let {
+                                if (it.exists() && !it.delete()) {
+                                    val cleanup = java.io.IOException("Private staging cleanup failed.")
+                                    if (primaryFailure != null) primaryFailure.addSuppressed(cleanup) else throw cleanup
+                                }
+                            }
+                        }
+                    }
+
                     // Camera captures arrive as a file path (no picker bytes): read them here,
                     // matching Dart ChatMediaService.uploadFile(sourcePath:).
                     val stagedFile = file.path?.let { java.io.File(it) }
@@ -327,7 +379,19 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
                     */
                 }
                 override suspend fun sendMessage(text: String, type: MessageType, attachment: MessageAttachment?, extraMetadata: Map<String, Any?>?) {
-                    if (secureChannelNow()) throw IllegalStateException("Encrypted media is not wired yet, so media is not sent in an encrypted chat.")
+                    if (secureChannelNow()) {
+                        requireAttachmentOwner()
+                        check(com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING &&
+                            ServiceLocator.conversationsRepository.isSecureChannel(conversationId)) { "Secure routing is unresolved." }
+                        check(attachment?.encryptedFile != null) { "Encrypted media descriptor is required." }
+                        check(!com.example.chat.data.local.AttachmentCachePolicy.viewOnceRestricted(extraMetadata.orEmpty())) {
+                            "Encrypted view-once media is unavailable until authenticated consume support is ready."
+                        }
+                        ServiceLocator.conversationsRepository.sendMessage(conversationId, text, type, attachment,
+                            extraMetadata = extraMetadata, expectedScope = attachmentAccount)
+                        return
+                    }
+
                     requireAttachmentOwner()
                     api.sendMessage(conversationId, text, type, attachment, extraMetadata, expectedScope = attachmentAccount)
                 }
@@ -355,8 +419,9 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
                     ServiceLocator.gbFeatures.votePoll(messageId, optionId)
                 }
                 override suspend fun reloadConversation() {
-                    check(!secureChannelNow()) { "Message reload blocked until secure routing is verified." }
-                    api.loadMessages(conversationId)
+                    requireAttachmentOwner()
+                    if (secureChannelNow()) ServiceLocator.conversationsRepository.loadMessages(conversationId, attachmentAccount)
+                    else api.loadMessages(conversationId)
                 }
             },
             toast = { toast(it) },
@@ -612,3 +677,9 @@ fun rememberChatAttachments(conversationId: String, afterSend: () -> Unit, secur
                     controller.sendReviewedMedia(result.items.map { it.file }, type, result.caption, result.viewOnce)
                 controller.sendReviewedMedia(result.items.map { it.file }, "image", result.caption, result.viewOnce)
 */
+
+// Previous E2EE media wiring retained inactive:
+//                     if (secureChannelNow()) throw IllegalStateException("Encrypted media is not wired yet, so media is not sent in an encrypted chat.")
+//                     if (secureChannelNow()) throw IllegalStateException("Encrypted media is not wired yet, so media is not sent in an encrypted chat.")
+//                     check(!secureChannelNow()) { "Message reload blocked until secure routing is verified." }
+//                     api.loadMessages(conversationId)

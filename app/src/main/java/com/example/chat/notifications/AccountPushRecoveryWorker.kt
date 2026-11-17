@@ -19,7 +19,16 @@ class AccountPushRecoveryWorker(context: Context, params: WorkerParameters) : Co
         try {
             val complete = withTimeoutOrNull(45_000L) {
                 ServiceLocator.ensurePushReady(applicationContext)
+                // Prior source: initialize, then only retry the same binding without repairing registration.
                 ServiceLocator.apiBackend.initialize()
+                // A locally lost mapping otherwise retries the same unknown hint until expiry.
+                // Only the first sync execution requests registration recovery. No call-path change.
+                if (UnknownBindingRecoveryPolicy.shouldRequestRegistration(
+                        isCall = callId != null, attempt = runAttemptCount,
+                        mappingKnown = ServiceLocator.hasRetainedPushBindingMapping(binding))) {
+                    PushRegistrationRecoveryWorker.enqueue(applicationContext)
+                }
+                // Registration does not authenticate this hint. The router still performs own-JWT validation.
                 ServiceLocator.recoverAccountPush(binding, callId)
             } == true
             if (complete || runAttemptCount >= 4 || System.currentTimeMillis() >= until) Result.success() else Result.retry()

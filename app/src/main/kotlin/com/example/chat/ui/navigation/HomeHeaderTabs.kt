@@ -36,6 +36,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -103,13 +104,18 @@ fun HomeHeaderTabsBar(
 ) {
     // Content-space left/right of each tab, filled by layout. Scrolling the selected tab in uses these numbers
     // directly (no relocation request), so a selection change from outside the strip scrolls it too.
-    val tabSpan = remember(ids) { mutableStateMapOf<Int, IntRange>() }
+    val reduceMotion = com.example.chat.ui.kit.rememberChatyReduceMotion() ||
+        com.example.chat.ui.kit.LocalReferenceLayoutPresentation.current.animationsDisabled
+    val tabDensity = androidx.compose.ui.platform.LocalDensity.current
+    val tabLocale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val tabSpan = remember(ids, tabDensity.density, tabDensity.fontScale, tabLocale) { mutableStateMapOf<Int, IntRange>() }
     BoxWithConstraints(Modifier.fillMaxWidth().background(colors.background)) {
         val viewportPx by rememberUpdatedState(constraints.maxWidth)
         // Diagnostics only (no-op with the default callback): every change of the strip position, so a later reset to 0
         // after a completed animateScrollTo shows up with its max value.
         LaunchedEffect(scroll) { snapshotFlow { scroll.value to scroll.maxValue }.collect { onScrollLog("v=${it.first}/${it.second}") } }
-        LaunchedEffect(selectedIndex, ids) {
+        LaunchedEffect(selectedIndex, ids, reduceMotion, constraints.maxWidth,
+            tabDensity.density, tabDensity.fontScale, tabLocale, tabSpan.toMap(), scroll.maxValue) {
             // Let the new (bold) selection lay out first, then centre it in the viewport, clamped to the scroll range.
             repeat(2) { withFrameNanos { } }
             val span = snapshotFlow { tabSpan[selectedIndex] }.filterNotNull().first()
@@ -117,7 +123,11 @@ fun HomeHeaderTabsBar(
             onScrollTarget(target, scroll.maxValue)
             onScrollLog("start target=$target max=${scroll.maxValue} from=${scroll.value}")
             try {
-                scroll.animateScrollTo(target)
+                if (reduceMotion) scroll.scrollTo(target)
+                else scroll.animateScrollTo(target, animationSpec = androidx.compose.animation.core.tween(
+                    com.example.chat.ui.kit.ChatyMotionTokens.BASE_MS,
+                    easing = com.example.chat.ui.kit.ChatyMotionTokens.enter,
+                ))
                 onScrollLog("done value=${scroll.value}")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 onScrollLog("cancelled at value=${scroll.value} inProgress=${scroll.isScrollInProgress}")
@@ -125,15 +135,36 @@ fun HomeHeaderTabsBar(
             }
         }
         val share = if (ids.isEmpty()) maxWidth else maxWidth / ids.size
+        val targetSpan = tabSpan[selectedIndex]
+        val indicatorLeft by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = targetSpan?.first?.toFloat() ?: 0f,
+            animationSpec = androidx.compose.animation.core.tween(
+                if (reduceMotion) 0 else com.example.chat.ui.kit.ChatyMotionTokens.BASE_MS,
+                easing = com.example.chat.ui.kit.ChatyMotionTokens.enter), label = "tab-indicator-left")
+        val indicatorRight by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = targetSpan?.last?.toFloat() ?: 0f,
+            animationSpec = androidx.compose.animation.core.tween(
+                if (reduceMotion) 0 else com.example.chat.ui.kit.ChatyMotionTokens.BASE_MS,
+                easing = com.example.chat.ui.kit.ChatyMotionTokens.enter), label = "tab-indicator-right")
         Row(
             modifier = Modifier
                 .testTag("home-tabs-scroll")
                 .horizontalScroll(scroll)
+                .drawWithContent {
+                    drawContent()
+                    if (targetSpan != null) {
+                        val thickness = ReferenceLayoutMetrics.homeTabIndicatorDp.dp.toPx()
+                        drawRect(colors.primary,
+                            topLeft = androidx.compose.ui.geometry.Offset(indicatorLeft, size.height - thickness),
+                            size = androidx.compose.ui.geometry.Size((indicatorRight - indicatorLeft).coerceAtLeast(0f), thickness))
+                    }
+                }
                 .height(IntrinsicSize.Min)
                 .heightIn(min = maxOf(heightDp, 48f).dp),
         ) {
             ids.forEachIndexed { index, id ->
                 val selected = index == selectedIndex
+                // One strip-level moving indicator replaces per-tab color fades.
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
@@ -160,8 +191,8 @@ fun HomeHeaderTabsBar(
                             .fillMaxWidth()
                             // R1-58: stronger selected marker (was 2.dp), same theme token.
                             // .height(2.dp)
-                            .height(3.dp)
-                            .background(if (selected) colors.foreground else Color.Transparent),
+                            .height(ReferenceLayoutMetrics.homeTabIndicatorDp.dp)
+                            .background(Color.Transparent),
                     )
                 }
             }

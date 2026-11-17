@@ -191,7 +191,13 @@ private fun NotificationPermissionSheet(
                     .background(colors.primary.copy(alpha = 0.12f), CircleShape)
                     .padding(20.dp),
             ) {
-                Icon(Icons.Rounded.NotificationsActive,
+
+//Icon(Icons.Rounded.NotificationsActive,
+//                    contentDescription = null,
+//                    tint = colors.primary,
+//                    modifier = Modifier.size(40.dp),
+//                )
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.notifications, Icons.Rounded.NotificationsActive,
                     contentDescription = null,
                     tint = colors.primary,
                     modifier = Modifier.size(40.dp),

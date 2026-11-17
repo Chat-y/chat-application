@@ -13,6 +13,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
 /** Explicit typed states for the WebRTC & signaling state machine.
  *  Exact port of lib/domain/models/call_state.dart (CallSessionState). */
@@ -61,6 +62,7 @@ data class ChatyCallSession(
     val isDemo: Boolean = false,
     val isLocallyHeld: Boolean = false,
     val isRemotelyHeld: Boolean = false,
+    val healthIssue: CallHealthIssue? = null,
 ) {
     /** Whether the session is currently active or establishing media. */
     val isActive: Boolean
@@ -70,6 +72,8 @@ data class ChatyCallSession(
             state == CallSessionState.initiating ||
             (state == CallSessionState.ringing && isOutgoing)
 }
+
+enum class CallHealthIssue { setupTimedOut, microphoneUnavailable }
 
 /** Peer-connection transport states mapped from org.webrtc (kept webrtc-free
  *  so the state machine is JVM-testable). Mirrors the Dart switch on
@@ -153,6 +157,7 @@ interface CallMediaController {
     suspend fun dispose()
     /** Optional for JVM fakes; native controllers report loss without retrying media. */
     fun setOnForegroundExecutionLost(listener: (() -> Unit)?) {}
+    fun setOnMicrophoneUnavailable(listener: (() -> Unit)?) {}
 
     /** Local ICE candidate produced by the peer connection. */
     var onLocalIceCandidate: ((candidate: String, sdpMid: String?, sdpMLineIndex: Int?) -> Unit)?
@@ -222,14 +227,17 @@ class CallSignalingService(
     private val monotonicMillis: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     private val remoteNameFor: (String) -> String? = { null },
     private val canInitiateCall: () -> Boolean = { true },
+    private val onFailureStage: (CallFailureStage) -> Unit = {},
 ) {
     private fun remoteName(userId: String, supplied: String?): String =
-        remoteNameFor(userId)?.trim()?.takeIf { it.isNotEmpty() }
-            ?: supplied?.trim()?.takeIf { it.isNotEmpty() } ?: "Contact"
+// Previous implementation retained: remoteNameFor(userId)?.trim()?.takeIf { it.isNotEmpty() }
+// Previous implementation retained:     ?: supplied?.trim()?.takeIf { it.isNotEmpty() } ?: "Contact"
+        CallContactName.first(remoteNameFor(userId), supplied) ?: "Contact"
 
     /** Incoming display metadata is not identity evidence. Never trust a push/offer's name. */
     private fun incomingName(userId: String): String =
-        CallIncomingIdentity.displayName(remoteNameFor(userId))
+// Previous implementation retained: CallIncomingIdentity.displayName(remoteNameFor(userId))
+        CallIncomingIdentity.displayName(CallContactName.meaningful(remoteNameFor(userId)))
 
     var currentSession: ChatyCallSession? = null
         private set
@@ -242,6 +250,25 @@ class CallSignalingService(
     // bounded retries, reset when the connection recovers or a new call starts.
     private var iceRestartAttempts = 0
     private var iceRestartJob: Job? = null
+    private fun recordSetupHealth(error: Throwable) {
+        val issue = when (error) {
+            is CallOperationTimedOut -> CallHealthIssue.setupTimedOut
+            is CallMicrophoneUnavailable -> CallHealthIssue.microphoneUnavailable
+            else -> return
+        }
+        currentSession = currentSession?.copy(healthIssue = issue)
+        CallFailureDiagnostics.report(if (issue == CallHealthIssue.setupTimedOut)
+            CallFailureStage.SETUP_DEADLINE else CallFailureStage.MICROPHONE_UNAVAILABLE)
+    }
+    private val peerIceRefreshRequests = CallIceRefreshRequestGate()
+    private var outgoingRestartOwner: Any? = null
+    private val nativeSdpMutex = kotlinx.coroutines.sync.Mutex()
+    private var pendingRestartId: String? = null
+    private var pendingRestartOffer: Map<String, Any?>? = null
+    private var applyingRestartAnswer = false
+    private var connectedDuringRestartAnswer = false
+    private val seenRestartOffers = linkedSetOf<String>()
+    private val cachedRestartAnswers = linkedMapOf<String, Map<String, Any?>>()
     private var lastNetworkTransport: String? = null
     private var lastAppliedNetworkProfile: CallNetworkProfile? = null
     private var callAccountScope: Any? = null
@@ -352,6 +379,10 @@ class CallSignalingService(
     private var lastLocalReactionMillis = Long.MIN_VALUE
     private var lastPeerReactionMillis = Long.MIN_VALUE
     private val seenPeerReactions = linkedSetOf<String>()
+    /** A completed send attempt is not delivery acknowledgement. Never claim the peer saw this notice. */
+    var localHoldNoticeAttempted: Boolean = false; private set
+    var lastWaitingCallerName: String? = null; private set
+    private val waitingOffers = linkedSetOf<Triple<String, String, String>>()
     private var localHoldRevision = 0L
     private var remoteHoldRevision = -1L
     val canHoldLocally: Boolean get() = currentSession?.let { it.state == CallSessionState.connected && !it.isSharingScreen } == true && media?.supportsLocalHold == true
@@ -378,12 +409,26 @@ class CallSignalingService(
                 return@guardCall
             }
             currentSession = active.copy(isLocallyHeld = held)
-            if (callExtrasCapability(active.callId, active.remoteUserId, "hold_v1")) {
-                localHoldRevision++
-                signalSender.sendCallSignal(active.remoteUserId, mapOf("signal_type" to "call_hold", "call_id" to active.callId,
-                    "protocol_version" to 1, "held" to held, "revision" to localHoldRevision))
-            }
-            applied = true; notifyChanged()
+// Previous implementation retained: if (callExtrasCapability(active.callId, active.remoteUserId, "hold_v1")) {
+// Previous implementation retained:     localHoldRevision++
+// Previous implementation retained:     signalSender.sendCallSignal(active.remoteUserId, mapOf("signal_type" to "call_hold", "call_id" to active.callId,
+// Previous implementation retained:         "protocol_version" to 1, "held" to held, "revision" to localHoldRevision))
+// Previous implementation retained: }
+// Previous implementation retained: applied = true; notifyChanged()
+            // Media has already changed. A rejected/throwing optional notice must not hide that state.
+            applied = true
+            localHoldNoticeAttempted = false
+            try {
+                if (callExtrasCapability(active.callId, active.remoteUserId, "hold_v1")) {
+                    localHoldRevision++
+                    signalSender.sendCallSignal(active.remoteUserId,
+                        mapOf("signal_type" to "call_hold", "call_id" to active.callId,
+                            "protocol_version" to 1, "held" to held, "revision" to localHoldRevision))
+                    localHoldNoticeAttempted = true
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Local media state remains authoritative. */ }
+            finally { notifyChanged() }
         }
         return applied
     }
@@ -422,6 +467,11 @@ class CallSignalingService(
         reactionExpiry?.cancel(); reactionExpiry = null; callReaction = null
         lastLocalReactionMillis = Long.MIN_VALUE; lastPeerReactionMillis = Long.MIN_VALUE; seenPeerReactions.clear()
         localHoldRevision = 0; remoteHoldRevision = -1
+        peerIceRefreshRequests.reset()
+        pendingRestartId = null; pendingRestartOffer = null; seenRestartOffers.clear(); cachedRestartAnswers.clear()
+        applyingRestartAnswer = false; connectedDuringRestartAnswer = false
+        localHoldNoticeAttempted = false
+        lastWaitingCallerName = null; waitingOffers.clear()
     }
 
     /** Run under the captured account/call/peer guard, after offer/answer enqueue. */
@@ -430,8 +480,8 @@ class CallSignalingService(
         val pending = pendingLocalCandidates.toList()
         pendingLocalCandidates.clear()
         pending.forEach { candidate ->
-            signalSender.sendCallSignal(session.remoteUserId,
-                CallSignalCodec.outgoingCandidate(session.callId, candidate.candidate, candidate.sdpMid, candidate.sdpMLineIndex))
+            atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(session.remoteUserId,
+                CallSignalCodec.outgoingCandidate(session.callId, candidate.candidate, candidate.sdpMid, candidate.sdpMLineIndex)) }
         }
     }
 
@@ -489,6 +539,7 @@ class CallSignalingService(
         closeVideoUpgrade()
         val old = media
         media = null; currentSession = null; callAccountScope = next
+        iceRestartJob?.cancel(); iceRestartJob = null; outgoingRestartOwner = null
         ringingIce?.result?.cancel(); ringingIce = null
         acceptingCallId = null
         cachedRemoteOfferSdp = null; remoteDescriptionReady = false; queuedRemoteCandidates.clear()
@@ -598,6 +649,21 @@ class CallSignalingService(
             return
         }
         when (signalType) {
+            "ice_refresh_request" -> {
+                // Non-offer preflight above requires the current call ID and exact remote sender.
+                receiveGuard {
+                    val active = currentSession
+                    if (active?.isOutgoing == true && media != null && outgoingRestartOwner == null &&
+                        (active.state == CallSessionState.connected || active.state == CallSessionState.reconnecting) &&
+                        peerIceRefreshRequests.tryAcquire(monotonicMillis())) {
+// Previous implementation retained:                         media?.let { attemptIceRestart(expectedAccount, callId, it) }
+                        val resend = pendingRestartOffer
+                        if (pendingRestartId != null && resend != null)
+                            signalSender.sendCallSignal(active.remoteUserId, resend)
+                        else media?.let { attemptIceRestart(expectedAccount, callId, it) }
+                    }
+                }
+            }
             "offer" -> {
                 var abandonedPeer: CallMediaController? = null
                 receiveGuard offerGuard@{
@@ -633,8 +699,16 @@ class CallSignalingService(
                             "reason" to "already_in_call",
                         ))
 // Previous implementation retained: onCallWaiting(remoteName(senderId, signal["caller_name"]?.toString()))
-                        onCallWaiting(incomingName(senderId))
-                        callWaitingListeners.forEach { it() }
+// Previous implementation retained: onCallWaiting(incomingName(senderId))
+// Previous implementation retained: callWaitingListeners.forEach { it() }
+                        // Busy is sent for each delivery, but WS/REST duplicates alert only once.
+                        // Never hold or replace the current session for a second caller.
+                        if (waitingOffers.add(Triple(active.callId, callId, senderId))) {
+                            if (waitingOffers.size > 64) waitingOffers.remove(waitingOffers.first())
+                            lastWaitingCallerName = incomingName(senderId)
+                            runCatching { onCallWaiting(lastWaitingCallerName ?: "Unknown caller") }
+                            callWaitingListeners.forEach { listener -> runCatching { listener() } }
+                        }
                         return@offerGuard
                     }
                 }
@@ -644,26 +718,51 @@ class CallSignalingService(
                 if (active?.callId == callId) {
                     // ICE-restart renegotiation (calls matrix): same call id with a
                     // fresh offer. Apply it and answer; keep the session alive.
-                    if (signal["ice_restart"] == true &&
+// Previous implementation retained:                     if (signal["ice_restart"] == true &&
+// Previous implementation retained:                         (active.state == CallSessionState.connected ||
+                    if (signal["ice_restart"] == true && !active.isOutgoing &&
                         (active.state == CallSessionState.connected ||
                             active.state == CallSessionState.reconnecting)
                     ) {
+                        val restartId = signal["restart_id"] as? String ?: return@offerGuard
+                        if (restartId.isBlank() || restartId.length > 128) return@offerGuard
+                        if (!seenRestartOffers.add(restartId)) {
+                            cachedRestartAnswers[restartId]?.let { signalSender.sendCallSignal(senderId, it) }
+                            return@offerGuard
+                        }
+                        if (seenRestartOffers.size > 64) seenRestartOffers.remove(seenRestartOffers.first())
                         val restartOfferSdp = CallSignalCodec.sdp(signal["sdp"] ?: signal["offer"])
                         val peer = media
                         if (restartOfferSdp.isNotBlank() && peer != null) {
                             val restartAccount = captureAccountScope()
                             scope.launch {
+                                nativeSdpMutex.withLock {
                                 runCatching {
-                                    peer.setRemoteDescription(restartOfferSdp, "offer")
-                                    val restartAnswer = peer.createAnswer(active.isVideo)
+                                    requireCallIdentity(restartAccount, callId, peer)
+                                    atCallStage(CallFailureStage.REMOTE_DESCRIPTION) { peer.setRemoteDescription(restartOfferSdp, "offer") }
+                                    requireCallIdentity(restartAccount, callId, peer)
+                                    val restartAnswer = atCallStage(CallFailureStage.SDP_ANSWER) { peer.createAnswer(active.isVideo) }
+                                    requireCallIdentity(restartAccount, callId, peer)
                                     guardCall(restartAccount, callId, peer) {
-                                        signalSender.sendCallSignal(senderId, mapOf(
-                                            "signal_type" to "answer",
-                                            "call_id" to callId,
-                                            "ice_restart" to true,
-                                            "sdp" to restartAnswer,
-                                        ))
+// Previous implementation retained:                                         atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(senderId, mapOf(
+// Previous implementation retained:                                             "signal_type" to "answer",
+// Previous implementation retained:                                             "sdp" to restartAnswer,
+                                        val payload = mapOf("signal_type" to "answer", "call_id" to callId,
+                                            "ice_restart" to true, "restart_id" to restartId, "sdp" to restartAnswer)
+                                        cachedRestartAnswers[restartId] = payload
+                                        if (cachedRestartAnswers.size > 64) cachedRestartAnswers.remove(cachedRestartAnswers.keys.first())
+                                        atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(senderId, payload) }
                                     }
+                                }.onFailure { failure ->
+// Previous implementation retained:                                     if (failure !is kotlinx.coroutines.CancellationException)
+                                    if (failure !is kotlinx.coroutines.CancellationException) {
+                                        CallFailureDiagnostics.report(CallFailureStage.ICE_RESTART)
+                                        guardCall(restartAccount, callId, peer) {
+                                            recordSetupHealth(failure)
+                                            markTransportFailed("Call renegotiation failed.", CallFailureStage.ICE_RESTART)
+                                        }
+                                    }
+                                }
                                 }
                             }
                         }
@@ -715,8 +814,31 @@ class CallSignalingService(
                     if (answerSdp.isNotEmpty() && peer != null && (!remoteDescriptionReady || isRestartAnswer)) {
                         ringTimeoutJob?.cancel()
                         if (!receiveValid()) return
-                        peer.setRemoteDescription(answerSdp, "answer")
-                        if (!receiveValid()) return
+// Previous implementation retained:                         atCallStage(CallFailureStage.REMOTE_DESCRIPTION) { peer.setRemoteDescription(answerSdp, "answer") }
+                        var descriptionApplied = false
+                        nativeSdpMutex.withLock {
+                            if (!receiveValid()) return@withLock
+                            if (isRestartAnswer && (signal["restart_id"] as? String) != pendingRestartId) return@withLock
+                            if (isRestartAnswer && pendingRestartId == null) return@withLock
+                            if (isRestartAnswer) { applyingRestartAnswer = true; connectedDuringRestartAnswer = false }
+                            try {
+                                atCallStage(CallFailureStage.REMOTE_DESCRIPTION) {
+                                    callOperationDeadline(CallOperationDeadline.SDP_MILLIS) { peer.setRemoteDescription(answerSdp, "answer") }
+                                }
+                            } catch (failure: Throwable) {
+                                guardCall(expectedAccount, callId, peer) {
+                                    recordSetupHealth(failure)
+                                    markTransportFailed("Remote answer setup failed.", CallFailureStage.REMOTE_DESCRIPTION)
+                                }
+                                throw failure
+                            } finally { applyingRestartAnswer = false }
+                            if (isRestartAnswer) {
+                                pendingRestartId = null; pendingRestartOffer = null
+                                if (connectedDuringRestartAnswer) handlePeerConnectionState(CallTransportState.connected)
+                            }
+                            descriptionApplied = true
+                        }
+                        if (!descriptionApplied || !receiveValid()) return
                         if (!receiveGuard {
                             if (currentSession?.callId == callId && media === peer) {
                                 remoteDescriptionReady = true
@@ -923,18 +1045,23 @@ class CallSignalingService(
         }) return
 
         try {
-            previousPeer?.dispose()
+            atCallStage(CallFailureStage.CLEANUP) { previousPeer?.dispose() }
             requireCallIdentity(expectedAccount, callId)
             val peer = createMediaTransport(isVideo, expectedAccount, callId)
             requireCallIdentity(expectedAccount, callId, peer)
-            val offerSdp = peer.createOffer(isVideo)
+            // Previous implementation retained: val offerSdp = atCallStage(CallFailureStage.SDP_OFFER) {
+// Previous implementation retained:                 peer.createOffer(isVideo)
+// Previous implementation retained:             }
+val offerSdp = atCallStage(CallFailureStage.SDP_OFFER) {
+                callOperationDeadline(CallOperationDeadline.SDP_MILLIS) { peer.createOffer(isVideo) }
+            }
             requireCallIdentity(expectedAccount, callId, peer)
             if (offerSdp.isEmpty()) {
                 throw IllegalStateException("WebRTC did not produce an SDP offer.")
             }
 
             if (!guardCall(expectedAccount, callId, peer) {
-            signalSender.sendCallSignal(remoteUserId, mapOf(
+            atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(remoteUserId, mapOf(
                 "signal_type" to "offer",
                 "call_id" to callId,
                 "call_type" to if (isVideo) "video" else "voice",
@@ -944,7 +1071,7 @@ class CallSignalingService(
                 "caller_avatar_color_hex" to currentUserAvatarColorHex(),
                 "is_video" to isVideo,
                 "sdp" to offerSdp,
-            ))
+            )) }
 
             currentSession?.let { flushLocalCandidates(it) }
             currentSession = currentSession?.copy(state = CallSessionState.ringing)
@@ -967,7 +1094,11 @@ class CallSignalingService(
             }
             }) return
         } catch (error: Throwable) {
-            guardCall(expectedAccount, callId) { markTransportFailed(error.toString()) }
+            // Previous implementation retained: guardCall(expectedAccount, callId) { markTransportFailed("Call setup failed.", CallFailureDiagnostics.stageOf(error)) }
+guardCall(expectedAccount, callId) {
+                recordSetupHealth(error)
+                markTransportFailed("Call setup failed.", CallFailureDiagnostics.stageOf(error))
+            }
             throw error
         }
     }
@@ -1007,30 +1138,39 @@ class CallSignalingService(
             try {
                 val offerSdp = cachedRemoteOfferSdp
                 if (offerSdp.isNullOrEmpty()) {
+                    CallFailureDiagnostics.report(CallFailureStage.INCOMING_SDP_MISSING)
                     throw IllegalStateException("Incoming call has no SDP offer.")
                 }
 
                 val peer = createMediaTransport(session.isVideo, expectedAccount, session.callId)
                 requireCallIdentity(expectedAccount, session.callId, peer)
-                peer.setRemoteDescription(offerSdp, "offer")
+                // Previous implementation retained: atCallStage(CallFailureStage.REMOTE_DESCRIPTION) { peer.setRemoteDescription(offerSdp, "offer") }
+atCallStage(CallFailureStage.REMOTE_DESCRIPTION) {
+                    callOperationDeadline(CallOperationDeadline.SDP_MILLIS) { peer.setRemoteDescription(offerSdp, "offer") }
+                }
                 requireCallIdentity(expectedAccount, session.callId, peer)
                 if (!guardCall(expectedAccount, session.callId, peer) { remoteDescriptionReady = true }) return
                 flushRemoteCandidates({ runCatching { requireCallIdentity(expectedAccount, session.callId, peer) }.isSuccess },
                     { action -> guardCall(expectedAccount, session.callId, peer, action) })
                 requireCallIdentity(expectedAccount, session.callId, peer)
-                val answerSdp = peer.createAnswer(session.isVideo)
+                // Previous implementation retained: val answerSdp = atCallStage(CallFailureStage.SDP_ANSWER) {
+// Previous implementation retained:                     peer.createAnswer(session.isVideo)
+// Previous implementation retained:                 }
+val answerSdp = atCallStage(CallFailureStage.SDP_ANSWER) {
+                    callOperationDeadline(CallOperationDeadline.SDP_MILLIS) { peer.createAnswer(session.isVideo) }
+                }
                 requireCallIdentity(expectedAccount, session.callId, peer)
                 if (answerSdp.isEmpty()) {
                     throw IllegalStateException("WebRTC did not produce an SDP answer.")
                 }
 
                 if (!guardCall(expectedAccount, session.callId, peer) {
-                signalSender.sendCallSignal(session.remoteUserId, mapOf(
+                atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(session.remoteUserId, mapOf(
                     "signal_type" to "answer",
                     "call_id" to session.callId,
                     "callee_id" to currentUserId(),
                     "sdp" to answerSdp,
-                ))
+                )) }
 
                 flushLocalCandidates(session)
                 val live = currentSession!!
@@ -1040,7 +1180,11 @@ class CallSignalingService(
                 notifyChanged()
                 }) return
             } catch (error: Throwable) {
-                guardCall(expectedAccount, session.callId) { markTransportFailed(error.toString()) }
+                // Previous implementation retained: guardCall(expectedAccount, session.callId) { markTransportFailed("Call setup failed.", CallFailureDiagnostics.stageOf(error)) }
+guardCall(expectedAccount, session.callId) {
+                    recordSetupHealth(error)
+                    markTransportFailed("Call setup failed.", CallFailureDiagnostics.stageOf(error))
+                }
                 throw error
             }
         } finally {
@@ -1465,7 +1609,10 @@ class CallSignalingService(
 
     private suspend fun createMediaTransport(isVideo: Boolean, expectedAccount: Any?, callId: String): CallMediaController {
         requireCallIdentity(expectedAccount, callId)
-        val iceServers = iceForCall(expectedAccount, callId)
+        // Previous implementation retained: val iceServers = atCallStage(CallFailureStage.ICE_CONFIG) { iceForCall(expectedAccount, callId) }
+val iceServers = atCallStage(CallFailureStage.ICE_CONFIG) {
+            callOperationDeadline(CallOperationDeadline.SDP_MILLIS) { iceForCall(expectedAccount, callId) }
+        }
         requireCallIdentity(expectedAccount, callId)
         var previous: CallMediaController? = null
         if (!guardCall(expectedAccount, callId) {
@@ -1475,9 +1622,9 @@ class CallSignalingService(
             previous = detachMediaTransport()
             queuedRemoteCandidates.addAll(pending)
         }) throw kotlinx.coroutines.CancellationException("Call changed")
-        previous?.dispose()
+        atCallStage(CallFailureStage.CLEANUP) { previous?.dispose() }
         requireCallIdentity(expectedAccount, callId)
-        val peer = mediaFactory()
+        val peer = atCallStage(CallFailureStage.NATIVE_FACTORY) { mediaFactory() }
         lastAppliedNetworkProfile = null
         peer.setOnScreenShareStopped {
             guardCall(expectedAccount, callId, peer) {
@@ -1495,8 +1642,8 @@ class CallSignalingService(
                 val session = currentSession!!
                 val item = QueuedCandidate(candidate, sdpMid, sdpMLineIndex)
                 if (localDescriptionSignaled) {
-                    signalSender.sendCallSignal(session.remoteUserId,
-                        CallSignalCodec.outgoingCandidate(callId, candidate, sdpMid, sdpMLineIndex))
+                    atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(session.remoteUserId,
+                        CallSignalCodec.outgoingCandidate(callId, candidate, sdpMid, sdpMLineIndex)) }
                 } else if (pendingLocalCandidates.size < 128) {
                     pendingLocalCandidates.add(item)
                 }
@@ -1505,10 +1652,16 @@ class CallSignalingService(
         peer.onRemoteStream = { guardCall(expectedAccount, callId, peer) { notifyChanged() } }
         peer.onConnectionState = { state -> guardCall(expectedAccount, callId, peer) { handlePeerConnectionState(state) } }
         peer.setOnForegroundExecutionLost {
-            guardCall(expectedAccount, callId, peer) { markTransportFailed("Call foreground execution was lost.") }
+            guardCall(expectedAccount, callId, peer) { markTransportFailed("Call foreground execution was lost.", CallFailureStage.FOREGROUND) }
         }
         peer.onIceFailed = { guardCall(expectedAccount, callId, peer) { attemptIceRestart(expectedAccount, callId, peer) } }
-        peer.prepare(isVideo, lowDataUsageEnabled(), iceServers)
+        peer.setOnMicrophoneUnavailable {
+            guardCall(expectedAccount, callId, peer) {
+                currentSession = currentSession?.copy(healthIssue = CallHealthIssue.microphoneUnavailable)
+                markTransportFailed("Call microphone unavailable.", CallFailureStage.MICROPHONE_UNAVAILABLE)
+            }
+        }
+        atCallStage(CallFailureStage.LOCAL_CAPTURE) { peer.prepare(isVideo, lowDataUsageEnabled(), iceServers) }
         try { requireCallIdentity(expectedAccount, callId, peer) }
         catch (cancelled: kotlinx.coroutines.CancellationException) { peer.dispose(); throw cancelled }
         (peer as? CallVideoSurfaceProvider)?.let { surfaces ->
@@ -1517,7 +1670,7 @@ class CallSignalingService(
                 notifyChanged()
             }
         }
-        peer.setSpeakerphoneOn(isVideo)
+        atCallStage(CallFailureStage.INITIAL_ROUTE) { peer.setSpeakerphoneOn(isVideo) }
         requireCallIdentity(expectedAccount, callId, peer)
         return peer
     }
@@ -1526,6 +1679,11 @@ class CallSignalingService(
         val session = currentSession ?: return
         when (state) {
             CallTransportState.connected -> {
+                if (pendingRestartId != null) {
+                    // An old transport's connected event must not cancel this negotiation's deadline.
+                    if (applyingRestartAnswer) connectedDuringRestartAnswer = true
+                    return
+                }
                 ringTimeoutJob?.cancel()
                 connectionTimeoutJob?.cancel()
                 iceRestartAttempts = 0
@@ -1553,7 +1711,7 @@ class CallSignalingService(
                 ) {
                     attemptIceRestart(callAccountScope, session.callId, peer)
                 } else {
-                    markTransportFailed("WebRTC peer connection failed.")
+                    markTransportFailed("WebRTC peer connection failed.", CallFailureStage.PEER_CONNECTION)
                 }
             }
             CallTransportState.closed -> stopDurationTimer()
@@ -1566,6 +1724,7 @@ class CallSignalingService(
      *  call. Bounded retries; the caller re-offers with ice_restart=true, the
      *  callee restarts locally and waits for that offer. */
     private fun attemptIceRestart(expectedAccount: Any?, callId: String, peer: CallMediaController) {
+        if (!guardCall(expectedAccount, callId, peer) {}) return
         val session = currentSession ?: return
         if (session.callId != callId) return
         if (session.state != CallSessionState.connected &&
@@ -1575,11 +1734,13 @@ class CallSignalingService(
             // ringing, connecting): there is no live media path to restart,
             // so the call itself has failed. Matches the Dart behaviour the
             // parity tests pin down.
-            if (!session.state.isTerminal) markTransportFailed("ICE negotiation failed.")
+            if (!session.state.isTerminal) markTransportFailed("ICE negotiation failed.", CallFailureStage.ICE_NEGOTIATION)
             return
         }
+// Previous implementation retained:         if (outgoingRestartOwner != null) return
+        if (outgoingRestartOwner != null || pendingRestartId != null) return
         if (iceRestartAttempts >= 3) {
-            markTransportFailed("ICE negotiation failed after restart attempts.")
+            markTransportFailed("ICE negotiation failed after restart attempts.", CallFailureStage.ICE_NEGOTIATION)
             return
         }
         iceRestartAttempts += 1
@@ -1588,29 +1749,81 @@ class CallSignalingService(
             startConnectionTimeout(callId)
             notifyChanged()
         }
-        if (!peer.restartIce()) return
-        if (!session.isOutgoing) return
-        iceRestartJob?.cancel()
-        iceRestartJob = scope.launch {
-            runCatching {
-                val offerSdp = peer.createOffer(session.isVideo)
-                guardCall(expectedAccount, callId, peer) {
+// Previous implementation retained:         // Previous call retained: if (!peer.restartIce()) return
+// Previous implementation retained:         if (!atCallStageSync(CallFailureStage.ICE_RESTART) { peer.restartIce() }) {
+// Previous implementation retained:             CallFailureDiagnostics.report(CallFailureStage.ICE_RESTART_REFUSED)
+// Previous implementation retained:             return
+// Previous implementation retained:         }
+// Previous implementation retained:         if (!session.isOutgoing) return
+// Previous implementation retained:         iceRestartJob?.cancel()
+// Previous implementation retained:         iceRestartJob = scope.launch {
+// Previous implementation retained:             runCatching {
+// Previous implementation retained:                 val offerSdp
+        // The callee cannot renegotiate by restartIce alone: it must ask the original caller.
+        if (!session.isOutgoing) {
+            guardCall(expectedAccount, callId, peer) {
+                atCallStageSync(CallFailureStage.SIGNALING) {
                     signalSender.sendCallSignal(session.remoteUserId, mapOf(
-                        "signal_type" to "offer",
-                        "call_id" to callId,
-                        "call_type" to if (session.isVideo) "video" else "voice",
-                        "ice_restart" to true,
-                        "is_video" to session.isVideo,
-                        "sdp" to offerSdp,
-                    ))
+                        "signal_type" to "ice_refresh_request", "call_id" to callId))
                 }
             }
+            return
+        }
+        if (!atCallStageSync(CallFailureStage.ICE_RESTART) { peer.restartIce() }) {
+            CallFailureDiagnostics.report(CallFailureStage.ICE_RESTART_REFUSED)
+            return
+        }
+        val restartOwner = Any()
+        outgoingRestartOwner = restartOwner
+        val restartId = UUID.randomUUID().toString()
+        pendingRestartId = restartId
+        iceRestartJob = scope.launch {
+            try {
+            nativeSdpMutex.withLock {
+            runCatching {
+                requireCallIdentity(expectedAccount, callId, peer)
+// Previous implementation retained:                 val offerSdp = atCallStage(CallFailureStage.SDP_OFFER) { peer.createOffer(session.isVideo) }
+                val offerSdp = atCallStage(CallFailureStage.SDP_OFFER) {
+                    callOperationDeadline(CallOperationDeadline.SDP_MILLIS) { peer.createOffer(session.isVideo) }
+                }
+                guardCall(expectedAccount, callId, peer) {
+// Previous implementation retained:                     atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(session.remoteUserId, mapOf(
+// Previous implementation retained:                         "signal_type" to "offer",
+// Previous implementation retained:                         "call_id" to callId,
+// Previous implementation retained:                         "call_type" to if (session.isVideo) "video" else "voice",
+// Previous implementation retained:                         "ice_restart" to true,
+// Previous implementation retained:                         "is_video" to session.isVideo,
+// Previous implementation retained:                         "sdp" to offerSdp,
+// Previous implementation retained:                     )) }
+                    val payload = mapOf("signal_type" to "offer", "call_id" to callId,
+                        "call_type" to if (session.isVideo) "video" else "voice",
+                        "ice_restart" to true, "restart_id" to restartId,
+                        "is_video" to session.isVideo, "sdp" to offerSdp)
+                    pendingRestartOffer = payload
+                    atCallStageSync(CallFailureStage.SIGNALING) { signalSender.sendCallSignal(session.remoteUserId, payload) }
+                }
+            }.onFailure { failure ->
+// Previous implementation retained:                 if (failure !is kotlinx.coroutines.CancellationException)
+                if (failure !is kotlinx.coroutines.CancellationException) {
+                    CallFailureDiagnostics.report(CallFailureStage.ICE_RESTART)
+                    guardCall(expectedAccount, callId, peer) {
+                        recordSetupHealth(failure)
+                        markTransportFailed("Call renegotiation failed.", CallFailureStage.ICE_RESTART)
+                    }
+                }
+            }
+            }
+            } finally { if (outgoingRestartOwner === restartOwner) outgoingRestartOwner = null }
         }
     }
 
     /** Network transport changed (Wi-Fi <-> cellular). While a call is active,
      *  restart ICE so the media path is re-established on the new network. */
+// Previous implementation retained:     fun onNetworkTransportChanged(transport: String) {
+// Previous implementation retained:         val session = currentSession ?: return
     fun onNetworkTransportChanged(transport: String) {
+        val last = lastNetworkTransport
+        lastNetworkTransport = transport
         val session = currentSession ?: return
         if (session.state != CallSessionState.connected &&
             session.state != CallSessionState.reconnecting
@@ -1618,14 +1831,16 @@ class CallSignalingService(
             lastNetworkTransport = transport
             return
         }
-        val last = lastNetworkTransport
-        lastNetworkTransport = transport
+// Previous implementation retained:         val last = lastNetworkTransport
+// Previous implementation retained:         lastNetworkTransport = transport
+// Previous implementation retained:         if (last != null && last != transport && transport != "unknown") {
         if (last != null && last != transport && transport != "unknown") {
             media?.let { attemptIceRestart(callAccountScope, session.callId, it) }
         }
     }
 
-    private fun markTransportFailed(message: String) {
+    // Raw message is deliberately not persisted, displayed or logged.
+    private fun markTransportFailed(@Suppress("UNUSED_PARAMETER") message: String, stage: CallFailureStage = CallFailureStage.UNKNOWN) {
         accountScopeGuard(callAccountScope) failed@{
 // Previous implementation retained:         val session = currentSession
 // Previous implementation retained:         if (session == null || session.state == CallSessionState.failed) return@failed
@@ -1652,6 +1867,8 @@ class CallSignalingService(
             ringTimeoutJob?.cancel(); connectionTimeoutJob?.cancel(); stopDurationTimer()
             currentSession = session.copy(state = CallSessionState.failed, endedAt = now())
             val oldPeer = detachMediaTransport()
+            // Debug observer runs only after native ownership has detached.
+            runCatching { onFailureStage(stage) }
             // Queue cleanup before notification/history work. A throwing sink cannot strand capture.
 // Previous implementation retained:             scope.launch(kotlinx.coroutines.NonCancellable) { oldPeer?.dispose() }
             // detachMediaTransport already queued uncancellable cleanup independently.
@@ -1666,7 +1883,7 @@ class CallSignalingService(
     }
 
     private suspend fun failCurrentCall(error: Throwable) {
-        markTransportFailed(error.toString())
+        markTransportFailed("Call setup failed.", CallFailureDiagnostics.stageOf(error))
     }
 
     private fun startConnectionTimeout(callId: String) {
@@ -1682,7 +1899,10 @@ class CallSignalingService(
             ) {
                 return@launch
             }
-            guardCall(expected, callId) { endCall(reason = "connection_timeout") }
+            guardCall(expected, callId) {
+                CallFailureDiagnostics.report(CallFailureStage.CONNECTION_TIMEOUT)
+                endCall(reason = "connection_timeout")
+            }
         }
     }
 
@@ -1751,6 +1971,7 @@ class CallSignalingService(
     private fun detachMediaTransport(): CallMediaController? {
         val peer = media
         media = null // Sever ownership before any callback, signaling or history effect can throw.
+        iceRestartJob?.cancel(); iceRestartJob = null; outgoingRestartOwner = null
         if (peer != null) scope.launch(kotlinx.coroutines.NonCancellable) {
             try { peer.dispose() }
 // Previous implementation retained:             catch (_: Exception) { onDebug("Call media cleanup could not be confirmed.") }

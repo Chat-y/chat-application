@@ -23,9 +23,13 @@ class IslandOverlayHostParityTest {
     }
 
     @Test
-    fun `spring damping ratio matches framer reference`() {
+    // Previous implementation retained:
+    // fun `spring damping ratio matches framer reference`() {
+    fun `spring damping ratio is the approved fluid value`() {
         // 36 / (2 * sqrt(380 * 0.9)) = 0.9733285
-        assertEquals(0.9733285, ISLAND_SPRING_DAMPING_RATIO.toDouble(), 1e-5)
+        // assertEquals(0.9733285, ISLAND_SPRING_DAMPING_RATIO.toDouble(), 1e-5)
+        // Retuned per Bandi 2026-11-14: tap-to-open must be smoother, "not like a slow".
+        assertEquals(0.75, ISLAND_SPRING_DAMPING_RATIO.toDouble(), 1e-5)
     }
 
     @Test

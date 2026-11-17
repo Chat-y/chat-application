@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
  * (implemented over the signed-in account's message repository), NEVER by the caller: callers cannot claim
  * "not restricted" or invent a conversation/message/attachment triple.
  */
-data class TrustedAttachment(val type: String, val viewOnce: Boolean, val restricted: Boolean)
+data class TrustedAttachment(val type: String, val viewOnce: Boolean, val restricted: Boolean, val encrypted: Boolean = false)
 
 /**
  * What a consumer asks for. The identity is conversationId + messageId + attachmentId (all non blank). The URL is
@@ -79,6 +79,8 @@ class AttachmentSourceResolver(
     /** Opens remote bytes (caller closes). Throws IOException on failure; must not log the URL. */
     private val download: suspend (url: String) -> InputStream,
     private val maxBytesInMemory: Int = 8 * 1024 * 1024,
+    /** Fetch + authenticate + encrypt-at-rest under the captured owner. No URL fallback. */
+    private val secureFetch: (suspend (AttachmentRef, String) -> Boolean)? = null,
 ) {
     /** The current store stamp (null when signed out). Capture it in the consumer's binding together with the identity. */
     fun currentSession(): String? = store.session()
@@ -128,7 +130,12 @@ class AttachmentSourceResolver(
         if (store.session() != expectedSession) return ExportResult.Denied("session changed")
         val t = lookup(ref) ?: return ExportResult.Denied("unknown or deleted")
         var res = store.exportCopy(ref, expectedSession, purpose, extension, t.viewOnce, t.restricted, maxLifetimeMs)
-        if (res is ExportResult.Miss && authorizedUrl != null && !t.viewOnce && !t.restricted) {
+        if (res is ExportResult.Miss && t.encrypted) {
+            val ok = secureFetch?.invoke(ref, expectedSession) == true
+            if (!ok) return ExportResult.Failed
+            res = store.exportCopy(ref, expectedSession, purpose, extension, t.viewOnce, t.restricted, maxLifetimeMs)
+        }
+        if (res is ExportResult.Miss && authorizedUrl != null && !t.viewOnce && !t.restricted && !t.encrypted) {
             if (!isOnline()) return ExportResult.Failed
             val url = try { authorizedUrl() } catch (e: CancellationException) { throw e } catch (_: Exception) { return ExportResult.Failed }
             if (store.session() != expectedSession) return ExportResult.Denied("session changed")
@@ -211,6 +218,9 @@ class AttachmentSourceResolver(
     /** null = stored OK; "denied..." / "failed..." otherwise. */
     private suspend fun fetchIntoStore(ref: AttachmentRef, expectedSession: String, authorizedUrl: suspend () -> String): String? {
         if (!isOnline()) return "failed offline"
+        if (lookup(ref)?.encrypted == true) {
+            return if (secureFetch?.invoke(ref, expectedSession) == true) null else "failed encrypted download"
+        }
         val url = try { authorizedUrl() } catch (e: CancellationException) { throw e } catch (_: Exception) { return "failed url" }
         if (store.session() != expectedSession) return "denied session"
         val cur = lookup(ref)
@@ -267,12 +277,29 @@ class AttachmentSourceResolver(
 
     private suspend fun resolveInner(r: AttachmentSourceRequest, stamp: String, t: TrustedAttachment): ResolvedSource {
         val online = isOnline()
+        if (t.encrypted) {
+            if (t.viewOnce || t.restricted) return un(ResolvedSource.Reason.NOT_ALLOWED)
+            when (val local = readLocal(r.ref, t.type, stamp)) {
+                is Local.Ok -> return local.src
+                Local.Closed -> return un(ResolvedSource.Reason.SIGNED_OUT)
+                Local.Corrupt -> if (!r.userInitiated) return un(ResolvedSource.Reason.CORRUPT)
+                Local.Miss -> Unit
+            }
+            val loaded = try { secureFetch?.invoke(r.ref, stamp) == true }
+                catch (e: CancellationException) { throw e } catch (_: Exception) { false }
+            if (!loaded) return un(if (online) ResolvedSource.Reason.DOWNLOAD_FAILED else ResolvedSource.Reason.OFFLINE)
+            return when (val local = readLocal(r.ref, t.type, stamp)) {
+                is Local.Ok -> local.src
+                Local.Closed -> un(ResolvedSource.Reason.SIGNED_OUT)
+                else -> un(ResolvedSource.Reason.CORRUPT)
+            }
+        }
         if (t.viewOnce || t.restricted) {
             if (!online) return un(ResolvedSource.Reason.OFFLINE)
             val url = signUrl(r) ?: return un(ResolvedSource.Reason.DOWNLOAD_FAILED)
             return ResolvedSource.Remote(url)
         }
-        return when (val local = readLocal(r.ref, t.type)) {
+        return when (val local = readLocal(r.ref, t.type, stamp)) {
             is Local.Ok -> local.src
             Local.Closed -> un(ResolvedSource.Reason.SIGNED_OUT)
             Local.Corrupt ->
@@ -301,7 +328,7 @@ class AttachmentSourceResolver(
         }
         if (store.session() != stamp) return un(ResolvedSource.Reason.SIGNED_OUT)
         return when (put) {
-            StorePut.Stored -> when (val again = readLocal(r.ref, t.type)) {
+            StorePut.Stored -> when (val again = readLocal(r.ref, t.type, stamp)) {
                 is Local.Ok -> again.src
                 Local.Closed -> un(ResolvedSource.Reason.SIGNED_OUT)
                 else -> un(ResolvedSource.Reason.CORRUPT)   // stored bytes failed verification
@@ -320,7 +347,7 @@ class AttachmentSourceResolver(
         object Closed : Local()
     }
 
-    private fun readLocal(ref: AttachmentRef, type: String): Local {
+    private fun readLocal(ref: AttachmentRef, type: String, expectedSession: String): Local {
         if (type == "image") {
             when (val b = store.readVerified(ref, maxBytesInMemory)) {
                 is StoreRead.Hit -> return Local.Ok(ResolvedSource.Bytes(b.value))
@@ -330,7 +357,7 @@ class AttachmentSourceResolver(
                 StoreRead.TooLarge -> Unit            // verified but big: fall through to a lease
             }
         }
-        return when (val l = store.lease(ref)) {
+        return when (val l = store.leaseForSession(ref, expectedSession)) {
             is StoreRead.Hit -> Local.Ok(ResolvedSource.Leased(l.value))
             StoreRead.Miss, StoreRead.TooLarge -> Local.Miss
             StoreRead.Corrupt -> Local.Corrupt
@@ -338,3 +365,13 @@ class AttachmentSourceResolver(
         }
     }
 }
+
+// Previous E2EE media wiring retained inactive:
+// data class TrustedAttachment(val type: String, val viewOnce: Boolean, val restricted: Boolean)
+//         if (res is ExportResult.Miss && authorizedUrl != null && !t.viewOnce && !t.restricted) {
+
+// Previous implementation retained inactive (v5 review):
+//         return when (val local = readLocal(r.ref, t.type)) {
+//             StorePut.Stored -> when (val again = readLocal(r.ref, t.type)) {
+//     private fun readLocal(ref: AttachmentRef, type: String): Local {
+//         return when (val l = store.lease(ref)) {

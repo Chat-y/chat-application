@@ -18,6 +18,8 @@ data class ChatListTemplate(
     val showDivider: Boolean = true,
     val itemHeight: Double = 72.0,
     val referenceDefault: Boolean = false,
+    // Presentation-only baseline flag; explicit template/row choices default to false.
+    val compactDefault: Boolean = false,
 )
 
 data class HomeTemplates(
@@ -29,11 +31,14 @@ data class HomeTemplates(
 val defaultHomeTemplates = HomeTemplates(
     headerStyle = HomeHeaderStyle.prominentIdentity,
     chatList = ChatListTemplate(
-        density = ChatListDensity.comfortable,
+        // Previous default density: ChatListDensity.comfortable
+        density = ChatListDensity.regular,
         avatarShape = "circle",
         showPresenceBadge = true,
         showDivider = false,
-        itemHeight = 76.0,
+        // Previous default minimum: 76.0
+        itemHeight = com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeChatRowMinHeightDp.toDouble(),
+        compactDefault = true,
     ),
 )
 
@@ -49,5 +54,7 @@ fun chatListDensityFactor(density: ChatListDensity): Double = when (density) {
 
 /** Supplied Default reference geometry; selected only at the uncustomized row baseline. */
 val referenceDefaultHomeTemplates = defaultHomeTemplates.copy(chatList = defaultHomeTemplates.chatList.copy(
-    density = ChatListDensity.regular, showDivider = true, itemHeight = 72.0, referenceDefault = true,
+    // Previous reference minimum: 72.0
+    density = ChatListDensity.regular, showDivider = true,
+    itemHeight = com.example.chat.ui.navigation.ReferenceLayoutMetrics.homeChatRowMinHeightDp.toDouble(), referenceDefault = true,
 ))

@@ -1,5 +1,7 @@
 package com.example.chat.ui.camera
 
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import kotlinx.coroutines.delay
 
 import androidx.compose.foundation.rememberScrollState
@@ -1416,19 +1418,23 @@ fun ChatyCameraCaptureScreen(
     // A new overlay must dismiss itself before either host handler runs. Never bypass the
     // unsaved-video prompt or discard a photo while its synchronous send handoff is busy.
     // PopScope: back with a staged capture discards instead of leaving.
-    BackHandler(enabled = !videoOpen && (capturedPath != null || documentReviewPath != null)) {
+    val captureBack = com.example.chat.ui.kit.rememberChatyBackPresentation(Triple(videoOpen, capturedPath, documentReviewPath))
+    // Previous registration retained inactive: BackHandler(enabled = !videoOpen && (capturedPath != null || documentReviewPath != null)) {
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = captureBack, enabled = !videoOpen && (capturedPath != null || documentReviewPath != null)) {
         if (documentReviewPath != null) { documentReviewPath = null; ownedFiles.discard() } else discard()
     }
 
     // Inline video: back leaves video mode; an unsaved draft confirms first
     // (pinned host prompt contract preserved).
-    BackHandler(enabled = videoOpen) {
+    // Previous registration retained inactive: BackHandler(enabled = videoOpen) {
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = captureBack, enabled = videoOpen) {
         if (videoSession?.hasDraft() == true) videoExitPrompt = true
         else { videoOpen = false; captureViewMode = CaptureViewMode.photo }
     }
 
     // The last enabled BackHandler wins: overlays dismiss before staged media or video.
-    BackHandler(enabled = lensBrowserOpen || optionsOpen || effectsOpen) {
+    // Previous registration retained inactive: BackHandler(enabled = lensBrowserOpen || optionsOpen || effectsOpen) {
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = captureBack, enabled = lensBrowserOpen || optionsOpen || effectsOpen) {
         when {
             lensBrowserOpen -> lensBrowserOpen = false
             optionsOpen -> optionsOpen = false
@@ -1461,7 +1467,7 @@ fun ChatyCameraCaptureScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.chatyPredictiveBack(captureBack).fillMaxSize()) {
         if (documentReviewPath != null) {
             InlineDocumentReview(documentReviewPath!!,
                 onRetake = { documentReviewPath = null; ownedFiles.discard() },

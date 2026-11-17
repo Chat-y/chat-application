@@ -400,7 +400,9 @@ fun GbSettingsScreen(
                             val c = (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip
                             c?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.let { input = it }
                         }) {
-                            Icon(Icons.Rounded.ContentPaste, null)
+
+//Icon(Icons.Rounded.ContentPaste, null)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.clipboard, Icons.Rounded.ContentPaste, null)
                             Spacer(Modifier.width(8.dp))
                             Text("Paste clipboard")
                         }

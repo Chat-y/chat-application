@@ -4,6 +4,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.example.chat.ui.effects.IosContentMotion
+import com.example.chat.ui.effects.iosItemEntrance
+import com.example.chat.ui.effects.iosReactionPopIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -99,9 +102,13 @@ fun MessageActionSheetContent(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            quickSheetEmojis.forEach { emoji ->
+// Previous implementation retained:             quickSheetEmojis.forEach { emoji ->
+            quickSheetEmojis.forEachIndexed { index, emoji ->
                 Box(
+                    // Row 9 (iOS-style reactions): staggered spring pop-in per quick emoji.
+// Previous implementation retained:                     Modifier
                     Modifier
+                        .iosReactionPopIn(IosContentMotion.staggerDelayMs(index))
                         .size(48.dp)
                         .clip(CircleShape)
                         .pointerInput(emoji) { detectTapGestures(onTap = { onReact(emoji) }) },
@@ -111,7 +118,9 @@ fun MessageActionSheetContent(
                 }
             }
             Box(
+// Previous implementation retained:                 Modifier
                 Modifier
+                    .iosReactionPopIn(IosContentMotion.staggerDelayMs(quickSheetEmojis.size))
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(Color(argbWithAlpha(theme.secondaryTextColor, 0.18)))
@@ -125,7 +134,11 @@ fun MessageActionSheetContent(
 
         // Primary + secondary actions (grouped card)
         ActionGroupCard(theme) {
-            actions.filter { !it.isDestructive }.forEach { action ->
+// Previous implementation retained:             actions.filter { !it.isDestructive }.forEach { action ->
+            actions.filter { !it.isDestructive }.forEachIndexed { index, action ->
+                // Row 9 (iOS-style content motion): staggered entrance per action row; keyed by action type.
+                androidx.compose.runtime.key(action.type) {
+                Box(Modifier.iosItemEntrance(index, action.type)) {
                 ActionRow(
                     icon = actionIconId(action, message),
                     label = actionSheetLabel(action),
@@ -138,12 +151,17 @@ fun MessageActionSheetContent(
                     textColor = foreground,
                     onTap = { onAction(action.type) },
                 )
+                }
+                }
             }
         }
         Box(Modifier.height(10.dp))
         // Destructive + report section
         ActionGroupCard(theme) {
-            actions.filter { it.isDestructive }.forEach { action ->
+// Previous implementation retained:             actions.filter { it.isDestructive }.forEach { action ->
+            actions.filter { it.isDestructive }.forEachIndexed { index, action ->
+                androidx.compose.runtime.key(action.type) {
+                Box(Modifier.iosItemEntrance(index, action.type)) {
                 ActionRow(
                     icon = actionIconId(action, message),
                     label = actionSheetLabel(action),
@@ -151,6 +169,8 @@ fun MessageActionSheetContent(
                     textColor = danger,
                     onTap = { onAction(action.type) },
                 )
+                }
+                }
             }
             ActionRow(
                 icon = com.example.chat.ui.icons.ChatyIconId.report,

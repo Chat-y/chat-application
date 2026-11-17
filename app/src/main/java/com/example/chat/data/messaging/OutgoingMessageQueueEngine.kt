@@ -33,6 +33,13 @@ class OutgoingMessageQueueEngine(
     private val deliver: suspend (PendingSecureSend) -> Unit,
     private val currentUserId: () -> String?,
     private val notifyChanged: () -> Unit = {},
+    /** Capture the exact authentication generation before reading its queue. */
+    private val storageNamespaceForOwner: (Any?, String) -> String = { _, uid -> uid },
+    private val ownerSnapshot: () -> Any? = { null },
+    private val ownerIsCurrent: (Any?) -> Boolean = { true },
+    /** Runtime wiring binds delivery to the captured owner, never current auth. */
+    private val deliverForOwner: (suspend (PendingSecureSend, Any?) -> Unit)? = null,
+    private val recoverOwnOperations: suspend (Any?, String, String) -> Unit = { _, _, _ -> },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val processingMutex = Mutex()
@@ -44,6 +51,18 @@ class OutgoingMessageQueueEngine(
         // Dart _init only wires listeners and refreshes the count; the
         // listeners here are the onHealthChanged/onSession entry points.
         scope.launch { updateQueuedCount() }
+    }
+
+    private fun requireOwner(owner: Any?, userId: String) {
+        check(ownerIsCurrent(owner) && currentUserId() == userId) {
+            "Account changed; encrypted queue remains with its original owner."
+        }
+    }
+    private suspend fun deliverOwned(send: PendingSecureSend, owner: Any?, userId: String) {
+        requireOwner(owner, userId)
+        val bound = deliverForOwner
+        if (bound != null) bound(send, owner) else deliver(send)
+        requireOwner(owner, userId)
     }
 
     /** Backoff with jitter: min(30s, 2^min(retries,5)) + 0..499ms. */
@@ -72,9 +91,15 @@ class OutgoingMessageQueueEngine(
 
     /** Refreshes the queued-message count into ConnectionHealthService. */
     suspend fun updateQueuedCount() {
-        val userId = currentUserId() ?: return
         runCatching {
-            val items = store.read(userId)
+            // Previous owner selection retained: val userId = currentUserId() ?: return
+            val owner = ownerSnapshot()
+            val userId = currentUserId() ?: return
+            requireOwner(owner, userId)
+// Previous namespace behavior retained inactive:             val items = store.read(userId)
+            val namespace = storageNamespaceForOwner(owner, userId)
+            val items = store.read(userId, namespace)
+            requireOwner(owner, userId)
             healthService?.updateQueuedCount(items.size)
             notifyChanged()
         }
@@ -82,8 +107,13 @@ class OutgoingMessageQueueEngine(
 
     /** Enqueues a message for offline sending or retry. */
     suspend fun enqueue(send: PendingSecureSend) {
+        // Previous owner selection retained: val userId = currentUserId() ?: return
+        val owner = ownerSnapshot()
         val userId = currentUserId() ?: return
-        store.put(userId, send)
+        requireOwner(owner, userId)
+// Previous namespace behavior retained inactive:         store.put(userId, send)
+        val namespace = storageNamespaceForOwner(owner, userId)
+        store.put(userId, send, namespace)
         updateQueuedCount()
         if (healthService?.isOnline != false) {
             scope.launch { processQueue() }
@@ -92,17 +122,28 @@ class OutgoingMessageQueueEngine(
 
     /** Manual retry by clientMessageId, bypassing the backoff timer. */
     suspend fun retryMessage(clientMessageId: String): Boolean {
+        // Previous owner selection retained: val userId = currentUserId() ?: return
+        val owner = ownerSnapshot()
         val userId = currentUserId() ?: return false
-        nextAllowedRetryByMessageId.remove(clientMessageId)
-        retryCountByMessageId[clientMessageId] = 0
-
-        val target = store.read(userId)
-            .firstOrNull { it.clientMessageId == clientMessageId } ?: return false
         return try {
-            deliver(target)
-            store.remove(userId, clientMessageId)
+            requireOwner(owner, userId)
+            nextAllowedRetryByMessageId.remove(clientMessageId)
+            retryCountByMessageId[clientMessageId] = 0
+// Previous namespace behavior retained inactive:             val target = store.read(userId)
+            val namespace = storageNamespaceForOwner(owner, userId)
+            val target = store.read(userId, namespace)
+                .firstOrNull { it.clientMessageId == clientMessageId } ?: return false
+            // Previous ambient call retained: deliver(target)
+            deliverOwned(target, owner, userId)
+// Previous namespace behavior retained inactive:             store.remove(userId, clientMessageId)
+            store.remove(userId, clientMessageId, namespace)
             updateQueuedCount()
             true
+        } catch (discarded: DiscardedSecureSendException) {
+            retryCountByMessageId.remove(clientMessageId)
+            nextAllowedRetryByMessageId.remove(clientMessageId)
+            updateQueuedCount()
+            false // Clean no-op: user already discarded it, no backoff or resurrection.
         } catch (e: Exception) {
             val retries = (retryCountByMessageId[clientMessageId] ?: 0) + 1
             retryCountByMessageId[clientMessageId] = retries
@@ -120,8 +161,17 @@ class OutgoingMessageQueueEngine(
             isProcessing = true
         }
         try {
+            // Previous owner selection retained: val userId = currentUserId() ?: return
+            val owner = ownerSnapshot()
             val userId = currentUserId() ?: return
-            val items = store.read(userId)
+            if (!ownerIsCurrent(owner) || currentUserId() != userId) return
+// Previous namespace behavior retained inactive:             val items = store.read(userId)
+            val namespace = try { storageNamespaceForOwner(owner, userId) }
+                catch (_: IllegalStateException) { return }
+            recoverOwnOperations(owner, userId, namespace)
+            if (!ownerIsCurrent(owner) || currentUserId() != userId) return
+            val items = store.read(userId, namespace)
+            if (!ownerIsCurrent(owner) || currentUserId() != userId) return
             if (items.isEmpty()) {
                 healthService?.updateQueuedCount(0)
                 return
@@ -143,10 +193,17 @@ class OutgoingMessageQueueEngine(
                         break
                     }
                     try {
-                        deliver(item)
-                        store.remove(userId, item.clientMessageId)
+                        // Previous ambient call retained: deliver(item)
+                        deliverOwned(item, owner, userId)
+// Previous namespace behavior retained inactive:                         store.remove(userId, item.clientMessageId)
+                        store.remove(userId, item.clientMessageId, namespace)
                         retryCountByMessageId.remove(item.clientMessageId)
                         nextAllowedRetryByMessageId.remove(item.clientMessageId)
+                    } catch (discarded: DiscardedSecureSendException) {
+                        // Admission already removed the stale queue row under its barrier.
+                        retryCountByMessageId.remove(item.clientMessageId)
+                        nextAllowedRetryByMessageId.remove(item.clientMessageId)
+                        continue
                     } catch (e: SecureSendPendingException) {
                         // Receiver MLS setup pending: preserve FIFO, stop
                         // hammering; a capability/key event re-triggers drain.

@@ -82,6 +82,8 @@ class WebRtcCallMediaController(
     private val microphoneCapture = CallMicrophoneCaptureMonitor()
     private var microphoneToken: CallMicrophoneCaptureMonitor.Token? = null
     override val microphoneCaptureState get() = microphoneCapture.state
+    @Volatile private var microphoneFailureListener: (() -> Unit)? = null
+    override fun setOnMicrophoneUnavailable(listener: (() -> Unit)?) { microphoneFailureListener = listener }
     private val audioSessionOwner = audioSessions?.newOwner()
     private var preparedInitialSpeakerMode: Boolean? = null
     private var foregroundLease: CallMediaForegroundLease? = null
@@ -211,16 +213,33 @@ class WebRtcCallMediaController(
         iceServers: List<Map<String, Any?>>,
     ) {
         check(!terminallyDisposed) { "Call media is closed." }
-        CallPermissionGate.ensure(appContext, isVideo)
+        // Previous unclassified call retained: CallPermissionGate.ensure(appContext, isVideo)
+        atCallStage(CallFailureStage.PERMISSION) { CallPermissionGate.ensure(appContext, isVideo) }
+        try {
+            callOperationDeadline(CallOperationDeadline.PREPARE_MILLIS) {
+                prepareAfterPermissions(isVideo, lowData, iceServers)
+            }
+        } catch (timeout: CallOperationTimedOut) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { disposeOwned() }
+            throw timeout
+        }
+    }
+
+    private suspend fun prepareAfterPermissions(
+        isVideo: Boolean, lowData: Boolean, iceServers: List<Map<String, Any?>>,
+    ) {
 // Previous implementation retained:         disposeInternal()
 // Previous implementation retained:         dispose()
-        disposeOwned()
+        // Previous unclassified cleanup retained: disposeOwned()
+        atCallStage(CallFailureStage.CLEANUP) { disposeOwned() }
         sessionCapturePreferences = capturePreferences()
         val generation = nativeGeneration
+        var setupStage = CallFailureStage.MEDIA_ARBITER
         try {
             checkNotNull(communicationOwnership) { "Call audio coordination is unavailable." }.acquire()
             // acquire checks mediaSuspended before any FGS/focus/native setup.
             // Permissions are checked above; foreground execution/focus precede any local capture.
+            setupStage = CallFailureStage.FOREGROUND
             foregroundLease = CallForegroundService.ensureCallMediaForeground(appContext, isVideo) {
                 foregroundStillExpected() && (audioSessions == null ||
                     audioSessions.isLatestOwner(checkNotNull(audioSessionOwner)))
@@ -251,13 +270,15 @@ class WebRtcCallMediaController(
                     }
                 }
             }
-            check(readyForeground.isActive) { "Call foreground execution was lost." }
+            atCallStageSync(CallFailureStage.FOREGROUND) { check(readyForeground.isActive) { "Call foreground execution was lost." } }
+            setupStage = CallFailureStage.AUDIO_FOCUS
             val focus = CallMediaAudioFocus(audioManager, ::applyFocusMayPlay)
             callFocus = focus
 // Previous implementation retained:             check(focus.acquire()) { "Call audio focus is unavailable. Try again from the call screen." }
             val focusGranted = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { focus.acquire() }
             check(focusGranted) { "Call audio focus is unavailable. Try again from the call screen." }
 
+        setupStage = CallFailureStage.NATIVE_FACTORY
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(appContext)
                 .setEnableInternalTracer(false)
@@ -268,6 +289,18 @@ class WebRtcCallMediaController(
 // Previous implementation retained:             .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglContext))
 // Previous implementation retained:             .createPeerConnectionFactory()
         val captureToken = microphoneCapture.begin()
+        val failureListenerForCapture = microphoneFailureListener
+        fun captureUnavailable() {
+            if (!microphoneCapture.unavailable(captureToken)) return
+            CallFailureDiagnostics.report(CallFailureStage.MICROPHONE_UNAVAILABLE)
+            try { failureListenerForCapture?.invoke() }
+            catch (_: Exception) { /* Never throw out of native recording callbacks. */ }
+            finally {
+                safetyCleanupScope.launch {
+                    try { dispose() } catch (_: Exception) { /* Cleanup uncertainty stays sticky. */ }
+                }
+            }
+        }
         microphoneToken = captureToken
         val audioModule = org.webrtc.audio.JavaAudioDeviceModule.builder(appContext)
             .setAudioRecordStateCallback(object : org.webrtc.audio.JavaAudioDeviceModule.AudioRecordStateCallback {
@@ -275,11 +308,14 @@ class WebRtcCallMediaController(
                 override fun onWebRtcAudioRecordStop() { microphoneCapture.stopped(captureToken) }
             })
             .setAudioRecordErrorCallback(object : org.webrtc.audio.JavaAudioDeviceModule.AudioRecordErrorCallback {
-                override fun onWebRtcAudioRecordInitError(errorMessage: String?) { microphoneCapture.unavailable(captureToken) }
+// Previous implementation retained:                 override fun onWebRtcAudioRecordInitError(errorMessage: String?) { microphoneCapture.unavailable(captureToken) }
+                override fun onWebRtcAudioRecordInitError(errorMessage: String?) { captureUnavailable() }
                 override fun onWebRtcAudioRecordStartError(
                     errorCode: org.webrtc.audio.JavaAudioDeviceModule.AudioRecordStartErrorCode?, errorMessage: String?,
-                ) { microphoneCapture.unavailable(captureToken) }
-                override fun onWebRtcAudioRecordError(errorMessage: String?) { microphoneCapture.unavailable(captureToken) }
+// Previous implementation retained:                 ) { microphoneCapture.unavailable(captureToken) }
+// Previous implementation retained:                 override fun onWebRtcAudioRecordError(errorMessage: String?) { microphoneCapture.unavailable(captureToken) }
+                ) { captureUnavailable() }
+                override fun onWebRtcAudioRecordError(errorMessage: String?) { captureUnavailable() }
             })
             .setEnableVolumeLogger(false)
             .createAudioDeviceModule()
@@ -320,7 +356,10 @@ class WebRtcCallMediaController(
 
                 val sdp = candidate?.sdp
                 if (!sdp.isNullOrEmpty()) {
-                    onLocalIceCandidate?.invoke(sdp, candidate.sdpMid, candidate.sdpMLineIndex)
+                    // Log callback failure without swallowing or changing its original throwable.
+                    atCallStageSync(CallFailureStage.CANDIDATE_CALLBACK) {
+                        onLocalIceCandidate?.invoke(sdp, candidate.sdpMid, candidate.sdpMLineIndex)
+                    }
                 }
 // Previous implementation retained
 
@@ -402,12 +441,13 @@ class WebRtcCallMediaController(
         peerConnection = peer
         trafficSessionPrepared = true
 
+        setupStage = CallFailureStage.LOCAL_CAPTURE
         LocalMediaPreparation.run(
 // Previous implementation retained:             initialize = { openLocalMedia(isVideo, lowData, factory, peer) },
             initialize = {
-                check(readyForeground.isActive) { "Call foreground execution was lost." }
+                atCallStageSync(CallFailureStage.FOREGROUND) { check(readyForeground.isActive) { "Call foreground execution was lost." } }
                 openLocalMedia(isVideo, lowData, factory, peer)
-                check(readyForeground.isActive) { "Call foreground execution was lost." }
+                atCallStageSync(CallFailureStage.FOREGROUND) { check(readyForeground.isActive) { "Call foreground execution was lost." } }
             },
             rollback = { disposeInternal() },
         )
@@ -417,16 +457,22 @@ class WebRtcCallMediaController(
 // Previous implementation retained:             val focus = CallMediaAudioFocus(audioManager, ::applyFocusMayPlay)
 // Previous implementation retained:             callFocus = focus
 // Previous implementation retained:             check(focus.acquire()) { "Call audio focus is unavailable. Try again from the call screen." }
+            setupStage = CallFailureStage.AUDIO_SESSION
             if (audioSessions?.start(checkNotNull(audioSessionOwner), isVideo) == false) {
                 throw IllegalStateException("Call audio could not be initialized.")
             }
-            check(readyForeground.isActive) { "Call foreground execution was lost." }
+            atCallStageSync(CallFailureStage.FOREGROUND) { check(readyForeground.isActive) { "Call foreground execution was lost." } }
+            if (microphoneCapture.state.value == CallMicrophoneCaptureState.unavailable)
+                throw CallMicrophoneUnavailable()
             preparedInitialSpeakerMode = if (audioSessions != null) isVideo else null
         } catch (failure: Throwable) {
             try {
 // Previous implementation retained:                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dispose() }
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { disposeOwned() }
             } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            // Previous unclassified rethrow retained: throw failure
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            CallFailureDiagnostics.record(failure, setupStage)
             throw failure
         }
     }
@@ -650,18 +696,27 @@ class WebRtcCallMediaController(
             if (type == "offer") SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER,
             sdp,
         )
-        suspendCancellableCoroutine<Unit> { cont ->
-            peer.setRemoteDescription(
-                object : SdpObserver {
-                    override fun onSetSuccess() { cont.resume(Unit) }
-                    override fun onSetFailure(error: String?) {
-                        cont.resumeWithException(IllegalStateException(error ?: "setRemoteDescription failed"))
-                    }
-                    override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onCreateFailure(p0: String?) {}
-                },
-                description,
-            )
+// Previous implementation retained:         suspendCancellableCoroutine<Unit> { cont ->
+// Previous implementation retained:             peer.setRemoteDescription(
+// Previous implementation retained:                 object : SdpObserver {
+// Previous implementation retained:                     override fun onSetSuccess() { cont.resume(Unit) }
+// Previous implementation retained:                     override fun onSetFailure(error: String?) {
+// Previous implementation retained:                         cont.resumeWithException(IllegalStateException(error ?: "setRemoteDescription failed"))
+// Previous implementation retained:                     }
+// Previous implementation retained:                     override fun onCreateSuccess(p0: SessionDescription?) {}
+// Previous implementation retained:                     override fun onCreateFailure(p0: String?) {}
+// Previous implementation retained:                 },
+// Previous implementation retained:                 description,
+// Previous implementation retained:             )
+// Previous implementation retained:         }
+// Previous implementation retained:     }
+        awaitCallNativeCallback<Unit> { complete ->
+            peer.setRemoteDescription(object : SdpObserver {
+                override fun onSetSuccess() { complete(Result.success(Unit)) }
+                override fun onSetFailure(error: String?) { complete(Result.failure(IllegalStateException("Remote SDP setup failed."))) }
+                override fun onCreateSuccess(description: SessionDescription?) {}
+                override fun onCreateFailure(error: String?) {}
+            }, description)
         }
     }
 
@@ -1259,45 +1314,71 @@ class WebRtcCallMediaController(
         return servers
     }
 
+// Previous implementation retained:     private suspend fun createSdp(
+// Previous implementation retained:         peer: PeerConnection,
+// Previous implementation retained:         constraints: MediaConstraints,
+// Previous implementation retained:         isOffer: Boolean,
+// Previous implementation retained:     ): SessionDescription = suspendCancellableCoroutine { cont ->
+// Previous implementation retained:         val observer = object : SdpObserver {
+// Previous implementation retained:             override fun onCreateSuccess(description: SessionDescription?) {
+// Previous implementation retained:                 if (description == null) {
+// Previous implementation retained:                     cont.resumeWithException(IllegalStateException("WebRTC returned no SDP."))
+// Previous implementation retained:                 } else {
+// Previous implementation retained:                     cont.resume(description)
+// Previous implementation retained:                 }
+// Previous implementation retained:             }
+// Previous implementation retained:             override fun onCreateFailure(error: String?) {
+// Previous implementation retained:                 cont.resumeWithException(IllegalStateException(error ?: "WebRTC SDP failure."))
+// Previous implementation retained:             }
+// Previous implementation retained:             override fun onSetSuccess() {}
+// Previous implementation retained:             override fun onSetFailure(p0: String?) {}
+// Previous implementation retained:         }
+// Previous implementation retained:         if (isOffer) {
+// Previous implementation retained:             peer.createOffer(observer, constraints)
+// Previous implementation retained:         } else {
+// Previous implementation retained:             peer.createAnswer(observer, constraints)
+// Previous implementation retained:         }
+// Previous implementation retained:     }
+// Previous implementation retained: 
+// Previous implementation retained:     private suspend fun setLocalDescription(peer: PeerConnection, description: SessionDescription) {
+// Previous implementation retained:         suspendCancellableCoroutine<Unit> { cont ->
+// Previous implementation retained:             peer.setLocalDescription(
+// Previous implementation retained:                 object : SdpObserver {
+// Previous implementation retained:                     override fun onSetSuccess() { cont.resume(Unit) }
+// Previous implementation retained:                     override fun onSetFailure(error: String?) {
+// Previous implementation retained:                         cont.resumeWithException(IllegalStateException(error ?: "setLocalDescription failed"))
+// Previous implementation retained:                     }
+// Previous implementation retained:                     override fun onCreateSuccess(p0: SessionDescription?) {}
+// Previous implementation retained:                     override fun onCreateFailure(p0: String?) {}
+// Previous implementation retained:                 },
+// Previous implementation retained:                 description,
+// Previous implementation retained:             )
+// Previous implementation retained:         }
+// Previous implementation retained:     }
     private suspend fun createSdp(
-        peer: PeerConnection,
-        constraints: MediaConstraints,
-        isOffer: Boolean,
-    ): SessionDescription = suspendCancellableCoroutine { cont ->
+        peer: PeerConnection, constraints: MediaConstraints, isOffer: Boolean,
+    ): SessionDescription = awaitCallNativeCallback { complete ->
         val observer = object : SdpObserver {
             override fun onCreateSuccess(description: SessionDescription?) {
-                if (description == null) {
-                    cont.resumeWithException(IllegalStateException("WebRTC returned no SDP."))
-                } else {
-                    cont.resume(description)
-                }
+                complete(if (description == null) Result.failure(IllegalStateException("WebRTC returned no SDP."))
+                    else Result.success(description))
             }
-            override fun onCreateFailure(error: String?) {
-                cont.resumeWithException(IllegalStateException(error ?: "WebRTC SDP failure."))
-            }
+            override fun onCreateFailure(error: String?) { complete(Result.failure(IllegalStateException("WebRTC SDP creation failed."))) }
             override fun onSetSuccess() {}
-            override fun onSetFailure(p0: String?) {}
+            override fun onSetFailure(error: String?) {}
         }
-        if (isOffer) {
-            peer.createOffer(observer, constraints)
-        } else {
-            peer.createAnswer(observer, constraints)
-        }
+        if (isOffer) peer.createOffer(observer, constraints) else peer.createAnswer(observer, constraints)
     }
 
     private suspend fun setLocalDescription(peer: PeerConnection, description: SessionDescription) {
-        suspendCancellableCoroutine<Unit> { cont ->
-            peer.setLocalDescription(
-                object : SdpObserver {
-                    override fun onSetSuccess() { cont.resume(Unit) }
-                    override fun onSetFailure(error: String?) {
-                        cont.resumeWithException(IllegalStateException(error ?: "setLocalDescription failed"))
-                    }
-                    override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onCreateFailure(p0: String?) {}
-                },
-                description,
-            )
+        awaitCallNativeCallback<Unit> { complete ->
+            peer.setLocalDescription(object : SdpObserver {
+                override fun onSetSuccess() { complete(Result.success(Unit)) }
+                override fun onSetFailure(error: String?) { complete(Result.failure(IllegalStateException("Local SDP setup failed."))) }
+                override fun onCreateSuccess(description: SessionDescription?) {}
+                override fun onCreateFailure(error: String?) {}
+            }, description)
         }
     }
+
 }

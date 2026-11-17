@@ -44,6 +44,7 @@ class ConversationsRepository(
     private val pendingStore: PendingSecureSendStore? = null,
     /** Mirrors the locator<ConnectionHealthService>().updateQueuedCount call. */
     private val onQueuedCountChanged: (Int) -> Unit = {},
+    private val onSecureSendHeld: () -> Unit = {},
     /** Mirrors the unawaited _retryPendingSecureSends kick after enqueueing. */
     private val onPendingEnqueued: () -> Unit = {},
     /** Mirrors the eventBus RealtimeEventType.messageCreated publish. */
@@ -108,6 +109,15 @@ class ConversationsRepository(
     private fun requireOwner(expectedScope: Any?) {
         var current = false
         check(withScope(expectedScope) { current = true } && current) { "Account changed; operation cancelled." }
+    }
+
+    fun forgetDiscardedQueuedMessage(conversationId: String, clientId: String, userId: String, expectedScope: Any?) {
+        requireOwner(expectedScope)
+        check(withScope(expectedScope) {
+            messagesByChatId[conversationId]?.removeAll { it.id == clientId && it.senderId == userId &&
+                (it.deliveryState == DeliveryState.queued || it.deliveryState == DeliveryState.sending) }
+            notifyChanged()
+        }) { "Account changed while removing discarded optimistic row." }
     }
 
     private fun notifyGone(refs: List<com.example.chat.data.local.AttachmentRef>) {
@@ -214,6 +224,11 @@ class ConversationsRepository(
         }
     }
 
+    /** DEFAULT-ALL-CHATS ACTIVATION. Couple this switch to backend activation,
+     * old-producer rejection and authenticated media send/receive. Never ship alone.
+     * Historical plaintext is not re-labelled or retroactively encrypted. */
+    private fun defaultEncryptionRequested(): Boolean = com.example.chat.ReleaseFeatures.EXPERIMENTAL_MLS_CHAT_ROUTING
+
     /** Whether this conversation's UI path uses the end-to-end encrypted plane.
      *  Throws when the flag cannot be read; callers must block sending in that
      *  case instead of assuming off. A true here is a routing request, not
@@ -228,7 +243,7 @@ class ConversationsRepository(
             var result = false
             current = false
             check(withScope(expectedScope) {
-                synchronized(stateLock) { result = secureChannelIds.contains(conversationId) }
+                synchronized(stateLock) { result = defaultEncryptionRequested() || secureChannelIds.contains(conversationId) }
                 current = true
             } && current) { "Account changed while checking secure routing." }
             result
@@ -248,7 +263,7 @@ class ConversationsRepository(
         check(secureChannelsLoaded && secureChannelsScope === expectedScope) {
             "Encryption setting not loaded for this account; warm it before the dispatch lock."
         }
-        return synchronized(stateLock) { secureChannelIds.contains(conversationId) }
+        return synchronized(stateLock) { defaultEncryptionRequested() || secureChannelIds.contains(conversationId) }
     }
 
     /** Outcome of one secure-routing toggle, for the host to surface: how
@@ -277,6 +292,15 @@ class ConversationsRepository(
         var stillCurrent = false
         check(withScope(expectedScope) { stillCurrent = true } && stillCurrent) { "Account changed while saving secure routing." }
         ensureSecureChannelsLoadedLocked()
+        // Once selected, encrypted routing cannot be changed back to the regular
+        // server-readable plane. Rollback may stop sending, never downgrade it.
+        if (!enabled) {
+            var wasSecure = true
+            check(withScope(expectedScope) {
+                synchronized(stateLock) { wasSecure = defaultEncryptionRequested() || secureChannelIds.contains(conversationId) }
+            }) { "Account changed while checking encrypted routing." }
+            check(!wasSecure) { "Encrypted chats cannot return to regular messaging. Nothing was changed." }
+        }
         val cache = snapshotCache
             ?: throw IllegalStateException("Secure settings storage is unavailable.")
         if (enabled) {
@@ -352,7 +376,13 @@ class ConversationsRepository(
                 }.isSuccess
                 var sameAccount = false
                 withScope(expectedScope) { sameAccount = true }
-                if (flagRestored && sameAccount) {
+                // Previous rollback release retained inactive:
+                // if (flagRestored && sameAccount) {
+                //     runCatching { releaseRestSends?.invoke(expectedScope, conversationId) }
+                // }
+                // A failed repeat-enable of an ALREADY encrypted chat must
+                // retain its prior REST quarantine even after flag rollback.
+                if (flagRestored && sameAccount && !previous.contains(conversationId)) {
                     runCatching { releaseRestSends?.invoke(expectedScope, conversationId) }
                 }
             }
@@ -418,6 +448,7 @@ class ConversationsRepository(
     @Suppress("UNCHECKED_CAST")
     suspend fun loadConversations(loadMembers: Boolean = true, expectedScope: Any? = scopeSnapshot()) {
         requireOwner(expectedScope)
+        sweepRevisionRetention(expectedScope)
         // Previous ambient read: val raw = rpc.rpc("get_my_conversations", emptyMap())
         val raw = rpc.forScope(expectedScope).rpc("get_my_conversations", emptyMap())
         requireOwner(expectedScope)
@@ -505,6 +536,7 @@ class ConversationsRepository(
     @Suppress("UNCHECKED_CAST")
     suspend fun loadMessages(conversationId: String, expectedScope: Any? = scopeSnapshot()) {
         requireOwner(expectedScope)
+        sweepRevisionRetention(expectedScope)
         var fromSnapshot = false
         val messages: MutableList<ChatMessage> = try {
             val raw = rpc.forScope(expectedScope).rpc(
@@ -517,15 +549,18 @@ class ConversationsRepository(
             requireOwner(expectedScope)
             val rows = raw as? List<*> ?: emptyList<Any?>()
             val hydratedRows = mutableListOf<Map<String, Any?>>()
+            val seenCanonicalIds = HashSet<String>()
             for (item in rows) {
                 val row = item as? Map<String, Any?> ?: continue
+                val canonicalId = row["id"] as? String ?: continue
+                if (!seenCanonicalIds.add(canonicalId)) continue
                 if (row["is_hidden"] == true) continue
                 requireOwner(expectedScope)
                 check(withScope(expectedScope) { noteSeq(conversationId, row) }) { "Account changed." }
                 hydratedRows.add(hydrateEncryptedMessageRow(conversationId, row, expectedScope))
                 requireOwner(expectedScope)
             }
-            hydratedRows.map { transport.messageFromRow(it, currentUserId()) }
+            hydratedRows.distinctBy { it["id"] }.map { transport.messageFromRow(it, currentUserId()) }
                 .sortedBy { it.createdAt }
                 .toMutableList()
         } catch (error: Exception) {
@@ -658,8 +693,11 @@ class ConversationsRepository(
         requireOwner(expectedScope)
         val rows = raw as? List<*> ?: return
         val applied = mutableListOf<ChatMessage>()
+        val seenCanonicalIds = HashSet<String>()
         for (item in rows) {
             val row = item as? Map<String, Any?> ?: continue
+            val canonicalId = row["id"] as? String ?: continue
+            if (!seenCanonicalIds.add(canonicalId)) continue
             if (row["is_hidden"] == true) continue
             requireOwner(expectedScope)
             check(withScope(expectedScope) { noteSeq(conversationId, row) }) { "Account changed." }
@@ -730,37 +768,33 @@ class ConversationsRepository(
      *  replacement ciphertext and update the local copy in place. */
     suspend fun applySecureEdit(data: Map<String, Any?>, expectedScope: Any? = scopeSnapshot()) {
         requireOwner(expectedScope)
-        val conversationId = data["room_id"]?.toString() ?: return
-        val id = data["id"]?.toString() ?: return
-        val row = mutableMapOf<String, Any?>(
-            "id" to id,
-            "conversation_id" to conversationId,
-            "sender_id" to data["sender_id"],
-            "created_at" to data["created_at"],
-            "edited_at" to data["edited_at"],
-            "msg_type" to (data["msg_type"] ?: "text"),
-            "encryption_version" to 2,
-            "encryption_protocol" to MlsE2eeService.protocolSuite,
-            "sender_device_id" to data["sender_device_id"],
-            "encrypted_payload" to data["encrypted_payload"],
-        )
-        val hydrated = hydrateEncryptedMessageRow(conversationId, row, expectedScope)
+        val room = data["room_id"] as? String ?: return
+        val id = data["id"] as? String ?: return
+        val existing = messagesByChatId[room]?.firstOrNull { it.id == id }
+        if (existing == null) { loadMessages(room, expectedScope); return }
+        // Pushes carry no trusted replacement body. Fetch by canonical ID even
+        // when the edited message is older than the list's newest100 rows.
+        val chain = revisionClient(expectedScope).chain(id)
+        val latest = chain.revisions.lastOrNull() ?: return
+        requireOwner(expectedScope)
+        val row = mapOf<String, Any?>("id" to id, "conversation_id" to room, "sender_id" to existing.senderId,
+            "sender_device_id" to latest.device, "created_at" to existing.createdAt.toString(), "edited_at" to data["edited_at"],
+            "encryption_protocol" to MlsE2eeService.protocolSuite, "encrypted_payload" to latest.ciphertext,
+            "metadata" to mapOf("mls_group_id" to latest.group, "mls_epoch" to latest.epoch),
+            "revision_seq" to latest.seq, "revision_hash" to latest.hash, "revision_hash_version" to "chaty-edit-v1")
+        val hydrated = hydrateEncryptedMessageRow(room, row, expectedScope)
         requireOwner(expectedScope)
         val message = transport.messageFromRow(hydrated, currentUserId())
-        withScope(expectedScope) {
-            val list = messagesByChatId[conversationId] ?: return@withScope
+        check(withScope(expectedScope) {
+            val list = messagesByChatId[room] ?: return@withScope
             val index = list.indexOfFirst { it.id == id }
             if (index >= 0) {
-                list[index] = message.copy(
-                    createdAt = list[index].createdAt,
-                    editedAt = message.editedAt ?: java.time.Instant.now(),
-                )
-                val capturedUser = currentUserId()
-                val snapshotCopy = list.toList()
-                snapshotScope?.launch { persistMessageSnapshot(conversationId, snapshotCopy, expectedScope, capturedUser) }
+                list[index] = message.copy(createdAt = existing.createdAt)
+                val snapshot = list.toList(); val uid = currentUserId()
+                snapshotScope?.launch { persistMessageSnapshot(room, snapshot, expectedScope, uid) }
+                notifyChanged()
             }
-        }
-        notifyChanged()
+        }) { "Account changed applying revision." }
     }
 
     /** Delete-for-everyone fan-out (48 h server window): tombstone the local
@@ -770,6 +804,10 @@ class ConversationsRepository(
         val conversationId = data["room_id"]?.toString() ?: return
         val id = data["id"]?.toString() ?: return
         if (data["for_everyone"] != true) return
+        var revisionNamespace: String? = null
+        check(withScope(expectedScope) { revisionNamespace = storageNamespace() }) { "Account changed." }
+        snapshotCache?.let { ImmutableMlsRevisions.forget(it, checkNotNull(revisionNamespace), id) }
+        requireOwner(expectedScope)
         val expectedDeleteScope = expectedScope
         withScope(expectedDeleteScope) {
             val list = messagesByChatId[conversationId] ?: return@withScope
@@ -843,14 +881,33 @@ class ConversationsRepository(
     /** Exact port of _hydrateEncryptedMessageRow: non-MLS rows pass through;
      *  own-device messages reuse local text; others decrypt or degrade to the
      *  "Unable to decrypt" system row. Never fabricates plaintext. */
+    // Fixed-size striped locks serialize concurrent same-row hydrations without
+    // keeping ciphertext, keys, projections, or an unbounded lock registry.
+    private val hydrationLocks = Array(64) { kotlinx.coroutines.sync.Mutex() }
+    suspend fun hydrateEncryptedMessageRow(conversationId: String, source: Map<String, Any?>,
+        expectedScope: Any? = scopeSnapshot()): Map<String, Any?> {
+        val stripe = Math.floorMod((conversationId + ":" + source["id"]).hashCode(), hydrationLocks.size)
+        val lock = hydrationLocks[stripe]
+        lock.lock()
+        try { return hydrateEncryptedMessageRowLocked(conversationId, source, expectedScope) }
+        finally { lock.unlock() }
+    }
+
     @Suppress("UNCHECKED_CAST")
-    suspend fun hydrateEncryptedMessageRow(
+    private suspend fun hydrateEncryptedMessageRowLocked(
         conversationId: String,
         source: Map<String, Any?>,
         expectedScope: Any? = scopeSnapshot(),
     ): Map<String, Any?> {
         requireOwner(expectedScope)
         val row = source.toMutableMap()
+        // This key is process-local typed proof, never accepted from wire maps.
+        row.remove("_verified_mls_sender")
+        row.remove("_verified_mls_revision")
+        val ingressMetadata = (row["metadata"] as? Map<*, *>)?.entries?.filterNot {
+            it.key.toString().startsWith("_mls") || it.key.toString().startsWith("_authenticated")
+        }?.associate { it.key.toString() to it.value }.orEmpty()
+        row["metadata"] = ingressMetadata
         if (row["view_once"] == true || (row["metadata"] as? Map<*, *>)?.get("view_once") == true) {
             row["body"] = com.example.chat.core.messages.ViewOnceTextPolicy.PLACEHOLDER
             row["encrypted_payload"] = null
@@ -858,8 +915,17 @@ class ConversationsRepository(
                 "encrypted" to (row["encryption_protocol"] == MlsE2eeService.protocolSuite))
             return row
         }
-        if (row["encryption_protocol"] != MlsE2eeService.protocolSuite) return row
-        if (row["deleted_at"] != null) return row
+        if (row["encryption_protocol"] != MlsE2eeService.protocolSuite) {
+            row["metadata"] = ingressMetadata - SecureControlEnvelope.KEY
+            return row
+        }
+        if (row["deleted_at"] != null) {
+            var namespace: String? = null
+            check(withScope(expectedScope) { namespace = storageNamespace() }) { "Account changed." }
+            snapshotCache?.let { ImmutableMlsRevisions.forget(it, checkNotNull(namespace), row["id"] as String) }
+            requireOwner(expectedScope)
+            return row
+        }
 
         val senderId = row["sender_id"]?.toString() ?: ""
         val senderDeviceId = row["sender_device_id"]?.toString() ?: ""
@@ -867,9 +933,43 @@ class ConversationsRepository(
         val service = mls()
         val currentDeviceId = service?.currentDeviceId
 
+        val knownAuthor = messagesByChatId[conversationId]?.firstOrNull { it.id == row["id"] }?.authenticatedMlsSender
+        if (knownAuthor != null && knownAuthor.userId != senderId) return decryptionFailureRow(row)
+        val revisionSeq = (row["revision_seq"] as? Number)?.toInt() ?: 0
+        if (revisionSeq > 0) {
+            return try {
+                check(row["revision_hash_version"] == "chaty-edit-v1") { "Unsupported revision hash." }
+                val (payload, proof) = revisionClient(expectedScope).project(conversationId, row["id"] as String, senderId,
+                    revisionSeq, row["revision_hash"] as? String, row["encrypted_payload"] as? String ?: "", senderDeviceId,
+                    ingressMetadata["mls_group_id"] as? String, (ingressMetadata["mls_epoch"] as? Number)?.toInt())
+                requireOwner(expectedScope)
+                val contextDevice = (payload["_authenticated_sender_device_id"] as? String) ?: senderDeviceId
+                check(contextDevice == senderDeviceId) { "Revision device mismatch." }
+                row["body"] = payload["text"] as? String ?: ""
+                row["type"] = payload["type"] as? String ?: "text"
+                val appMetadata = payload["metadata"] as? Map<String, Any?> ?: emptyMap()
+                row["metadata"] = appMetadata.filterKeys { !it.startsWith("_mls") && !it.startsWith("_authenticated") }
+                row["_verified_mls_sender"] = com.example.chat.domain.models.AuthenticatedMlsSender(senderId, senderDeviceId)
+                row["_verified_mls_revision"] = proof
+                row
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                requireOwner(expectedScope)
+                decryptionFailureRow(row)
+            }
+        }
+        var revisionNamespace: String? = null
+        check(withScope(expectedScope) { revisionNamespace = storageNamespace() }) { "Account changed." }
+        val seenRevision = snapshotCache?.readJsonStrict(checkNotNull(revisionNamespace), "revision_seen_${row["id"]}") as? Map<*, *>
+        if (((seenRevision?.get("seq") as? Number)?.toInt() ?: 0) > 0) return decryptionFailureRow(row)
+
         // If this message was sent by the current user from this local MLS
         // device, do not feed it back through processMessage(). Use the
         // existing local text / optimistic payload.
+        // Previous own-echo local-ID lookup is retained below but inactive: server IDs
+        // do not authenticate ciphertext. Until immutable ciphertext bindings exist,
+        // own echoes must fail closed rather than grant sender/control authority.
+        /*
         if (currentUser != null && senderId == currentUser &&
             currentDeviceId != null && senderDeviceId == currentDeviceId
         ) {
@@ -878,16 +978,64 @@ class ConversationsRepository(
                     it.id == row["id"] ||
                         (row["client_message_id"] != null && it.id == row["client_message_id"])
                 }
-            if (existing != null && existing.text.isNotEmpty()) {
+            if (existing != null && (existing.text.isNotEmpty() || existing.attachment != null || existing.metadata.containsKey(SecureControlEnvelope.KEY))) {
+                row["_verified_mls_sender"] = existing.authenticatedMlsSender
+                    ?: com.example.chat.domain.models.AuthenticatedMlsSender(senderId, senderDeviceId)
                 row["body"] = existing.text
                 row["type"] = messageTypeToDatabase(existing.type)
+                row["metadata"] = existing.metadata + mapOf("_mls_sender_verified" to true) + (existing.attachment?.let { attachment -> mapOf("attachment" to mapOf(
+                    "id" to attachment.id, "type" to attachment.type, "name" to attachment.name, "size" to attachment.size,
+                    "url" to attachment.url, "duration_seconds" to attachment.durationSeconds, "encrypted_file" to attachment.encryptedFile,
+                )) } ?: emptyMap())
                 return row
             }
-            // If we don't have it in memory, body may already be populated
-            // from a cached snapshot.
-            if (row["body"] != null && row["body"].toString().isNotEmpty()) {
-                return row
+            val ownClientId = (row["client_message_id"] ?: row["client_id"])?.toString()
+            if (!ownClientId.isNullOrBlank() && ownClientId.matches(Regex("[A-Za-z0-9_-]{1,128}"))) {
+                var ns: String? = null
+                check(withScope(expectedScope) { ns = storageNamespace() }) { "Account changed reading own message." }
+                val own = snapshotCache?.readJsonStrict(checkNotNull(ns), "own_mls_$ownClientId") as? Map<String, Any?>
+                requireOwner(expectedScope)
+                if (own != null && own["conversation_id"] == conversationId && own["client_message_id"] == ownClientId) {
+                    val saved = PendingSecureSend.fromJson(own)
+                    row["_verified_mls_sender"] = com.example.chat.domain.models.AuthenticatedMlsSender(senderId, senderDeviceId)
+                    row["body"] = saved.text; row["type"] = saved.type
+                    row["metadata"] = saved.metadata + mapOf("_mls_sender_verified" to true)
+                    return row
+                }
             }
+            // Never trust a server-supplied plaintext body as an own-device echo.
+            // Missing authenticated local state must show recovery/unavailable.
+
+        }
+
+        */
+        if (currentUser != null && senderId == currentUser && senderDeviceId == currentDeviceId) {
+            val client = (row["client_message_id"] ?: row["client_id"]) as? String
+            if (client == null || !client.matches(Regex("[A-Za-z0-9_-]{1,128}"))) return decryptionFailureRow(row)
+            var ns: String? = null
+            check(withScope(expectedScope) { ns = storageNamespace() }) { "Account changed." }
+            val cache = snapshotCache ?: return decryptionFailureRow(row)
+            val binding = cache.readJsonStrict(checkNotNull(ns), "own_binding_$client") as? Map<*, *> ?: return decryptionFailureRow(row)
+            val saved = cache.readJsonStrict(checkNotNull(ns), "own_mls_$client") as? Map<String, Any?> ?: return decryptionFailureRow(row)
+            requireOwner(expectedScope)
+            if (binding["user_id"] != senderId || binding["device_id"] != senderDeviceId ||
+                binding["conversation_id"] != conversationId || binding["client_id"] != client) return decryptionFailureRow(row)
+            val lookup = if (binding["canonical_id"] == null) lookupOwnAccepted(conversationId, client, senderDeviceId, expectedScope) else null
+            if (lookup != null && lookup.state != "sent") return decryptionFailureRow(row)
+            val resolvedCanonical = binding["canonical_id"] ?: lookup?.id
+            if (binding["user_id"] != senderId || binding["device_id"] != senderDeviceId ||
+                binding["conversation_id"] != conversationId || binding["client_id"] != client ||
+                resolvedCanonical != row["id"] || binding["ciphertext"] != row["encrypted_payload"] ||
+                binding["group_id"] != ingressMetadata["mls_group_id"] ||
+                (binding["epoch"] as? Number)?.toInt() != (ingressMetadata["mls_epoch"] as? Number)?.toInt() ||
+                saved["conversation_id"] != conversationId || saved["client_message_id"] != client) return decryptionFailureRow(row)
+            // Read-only recovery: canonical binding writes belong exclusively
+            // to dispatch+retirement admission, not a concurrent history load.
+            val payload = PendingSecureSend.fromJson(saved)
+            row["body"] = payload.text; row["type"] = payload.type
+            row["metadata"] = payload.metadata.filterKeys { !it.startsWith("_mls") && !it.startsWith("_authenticated") }
+            row["_verified_mls_sender"] = com.example.chat.domain.models.AuthenticatedMlsSender(senderId, senderDeviceId)
+            return row
         }
 
         val ciphertext = row["encrypted_payload"]?.toString() ?: ""
@@ -897,20 +1045,27 @@ class ConversationsRepository(
         return try {
             // Original owner check immediately before native work; no account recapture here.
             requireOwner(expectedScope)
-            val decrypted = service.decryptPayload(
-                conversationId = conversationId,
-                ciphertext = ciphertext,
-            )
+            // No durable decrypted-projection cache until retention, consumption,
+            // expiry and invalidation are typed and indexed. Never persist raw MLS maps.
+            val decrypted = service.decryptPayload(conversationId, ciphertext)
             requireOwner(expectedScope)
+            check(decrypted["_authenticated_sender_user_id"] == senderId &&
+                decrypted["_authenticated_sender_device_id"] == senderDeviceId) { "MLS sender does not match envelope attribution." }
+            check(decrypted["revision_context"] == null) { "An edit cannot be relabeled as an original message." }
             val decryptedMetadata = (decrypted["metadata"] as? Map<String, Any?>) ?: emptyMap()
             val serverMetadata = (row["metadata"] as? Map<String, Any?>) ?: emptyMap()
             row["body"] = decrypted["text"]?.toString() ?: ""
             row["type"] = decrypted["type"]?.toString() ?: "text"
-            row["metadata"] = decryptedMetadata + serverMetadata
+            // Untrusted server metadata must never override attachment keys, view-once
+            // restrictions, target IDs or any other authenticated application field.
+            row["metadata"] = decryptedMetadata.filterKeys { !it.startsWith("_mls") && !it.startsWith("_authenticated") }
+            row["_verified_mls_sender"] = com.example.chat.domain.models.AuthenticatedMlsSender(senderId, senderDeviceId)
             row
         } catch (error: Throwable) {
             if (error is kotlinx.coroutines.CancellationException) throw error
             requireOwner(expectedScope)
+            // No displayed-row fallback: native errors are not yet typed to prove
+            // replay, and a generic error must never hide pin/membership failure.
             decryptionFailureRow(row)
         }
     }
@@ -918,10 +1073,14 @@ class ConversationsRepository(
     @Suppress("UNCHECKED_CAST")
     private fun decryptionFailureRow(source: Map<String, Any?>): Map<String, Any?> {
         val row = source.toMutableMap()
+        row.remove("_verified_mls_sender")
+        row.remove("_verified_mls_revision")
         row["type"] = "system"
         row["body"] = "Unable to decrypt this message"
         row["metadata"] =
-            ((row["metadata"] as? Map<String, Any?>) ?: emptyMap()) + ("decryption_failed" to true)
+            ((row["metadata"] as? Map<String, Any?>) ?: emptyMap()).filterKeys {
+                !it.startsWith("_mls") && !it.startsWith("_authenticated") && it != SecureControlEnvelope.KEY
+            } + ("decryption_failed" to true)
         return row
     }
 
@@ -943,6 +1102,7 @@ class ConversationsRepository(
         expectedScope: Any? = scopeSnapshot(),
     ): ChatMessage {
         requireOwner(expectedScope)
+        check(attachment == null || attachment.encryptedFile != null) { "Secure media needs an authenticated encrypted-file descriptor." }
         val me = currentUserId() ?: throw Exception("Authentication required.")
         if (!conversationsById.containsKey(conversationId)) {
             // A secure-channel send can arrive before any conversation list
@@ -968,13 +1128,14 @@ class ConversationsRepository(
             replyToPreviewText = replyToPreviewText,
             replyToSenderName = replyToSenderName,
             linkedTaskId = linkedTaskId,
-            extraMetadata = extraMetadata,
+            extraMetadata = extraMetadata.orEmpty() + mapOf("_mls_sender_verified" to true),
             clientMessageId = clientMessageId,
         )
 
         try {
             return deliverAndResolve(pendingSend, fallbackType = type, expectedScope = expectedScope)
         } catch (error: Throwable) {
+            if (error is DiscardedSecureSendException) throw error
             if (error is kotlinx.coroutines.CancellationException) throw error
             requireOwner(expectedScope)
             if (error is MlsStorageInitializationException &&
@@ -986,7 +1147,12 @@ class ConversationsRepository(
             }
 
             val store = pendingStore ?: throw error
-            store.put(me, pendingSend)
+// Previous namespace behavior retained inactive:             store.put(me, pendingSend)
+            var capturedNamespace: String? = null
+            check(withScope(expectedScope) { capturedNamespace = storageNamespace() }) { "Account changed before encrypted queue save." }
+            val namespace = checkNotNull(capturedNamespace)
+            // Previous raw-user write retained: store.put(me, pendingSend)
+            store.put(me, pendingSend, namespace)
             requireOwner(expectedScope)
 
             val optimisticMsg = ChatMessage(
@@ -1001,10 +1167,12 @@ class ConversationsRepository(
                 replyToSenderName = replyToSenderName,
                 linkedTaskId = linkedTaskId,
                 metadata = pendingSend.metadata,
+                authenticatedMlsSender = mls()?.currentDeviceId?.let { com.example.chat.domain.models.AuthenticatedMlsSender(me, it) },
                 createdAt = pendingSend.createdAt,
                 deliveryState = DeliveryState.queued,
             )
-            val queuedCount = store.read(me).size
+// Previous namespace behavior retained inactive:             val queuedCount = store.read(me).size
+            val queuedCount = store.read(me, namespace).size
             check(withScope(expectedScope) {
                 val list = messagesByChatId.getOrPut(conversationId) { mutableListOf() }
                 if (list.none { it.id == pendingSend.clientMessageId }) list.add(optimisticMsg)
@@ -1022,7 +1190,7 @@ class ConversationsRepository(
             */
 
             if (transport.isMlsSetupPendingError(error)) {
-                throw SecureSendPendingException(SECURE_SETUP_PENDING_CODE)
+                throw SecureSendPendingException(SECURE_SETUP_PENDING_CODE, pendingSend.clientMessageId)
             }
             // Kick the background retry (Dart: unawaited _retryPendingSecureSends).
             onPendingEnqueued()
@@ -1032,9 +1200,12 @@ class ConversationsRepository(
 
     /** Exact port of retryPendingSecureMessage: redeliver a queued pending
      *  send without duplicating the optimistic message or re-enqueueing. */
-    suspend fun retryPendingSecureMessage(item: PendingSecureSend): ChatMessage {
+    // Previous ambient signature retained: suspend fun retryPendingSecureMessage(item: PendingSecureSend): ChatMessage
+    suspend fun retryPendingSecureMessage(item: PendingSecureSend, expectedScope: Any? = scopeSnapshot()): ChatMessage {
+        requireOwner(expectedScope)
         return try {
-            deliverAndResolve(item, fallbackType = messageTypeFromDatabase(item.type))
+            // Previous ambient dispatch retained: deliverAndResolve(item, fallbackType = messageTypeFromDatabase(item.type))
+            deliverAndResolve(item, fallbackType = messageTypeFromDatabase(item.type), expectedScope = expectedScope)
         } catch (error: Throwable) {
             if (transport.isMlsSetupPendingError(error)) {
                 throw SecureSendPendingException(SECURE_SETUP_PENDING_CODE)
@@ -1054,9 +1225,70 @@ class ConversationsRepository(
         // The single MLS dispatch point (direct sends AND queued retries):
         // takes the cross-plane lock so a toggle can never catch an MLS
         // delivery mid-flight.
+        var admittedNamespace: String? = null
+        check(withScope(expectedScope) { admittedNamespace = storageNamespace() }) { "Account changed before send admission." }
+        val admittedUser = checkNotNull(currentUserId())
+        val durableQueue = pendingStore ?: error("Durable send queue is unavailable.")
+        // Admission precedes encryption, HTTP, and every possible process-death window.
+        // Actual admission occurs inside dispatch+retirement barrier below.
+        requireOwner(expectedScope)
+        var acceptedState = "sent"
         val messageId = withDispatchLock(send.conversationId) {
             requireOwner(expectedScope)
-            transport.deliverEncryptedMessage(send, expectedScope) { requireOwner(expectedScope) }
+            var namespace: String? = null
+            check(withScope(expectedScope) { namespace = storageNamespace() }) { "Account changed before delivery." }
+            val uid = checkNotNull(currentUserId())
+            val store = pendingStore
+            if (store != null) store.withActiveNamespace(uid, checkNotNull(namespace), admission = send) {
+                // Persist the sender's own descriptor/control payload before a successful
+                // RPC can race process death. MLS senders cannot decrypt their own echo.
+                val cache = snapshotCache ?: error("Own encrypted message storage is unavailable.")
+                val key = "own_mls_${send.clientMessageId}"
+                val previous = cache.readJsonStrict(checkNotNull(namespace), key)
+                if (previous != null) {
+                    check(previous is Map<*, *>) { "Own encrypted message record is corrupt." }
+                    check(sameOwnPayload(previous.filterKeys { it != "created_at" }, send.toJson().filterKeys { it != "created_at" })) {
+                        "Message identity was reused with different content. Nothing was sent."
+                    }
+                } else cache.writeJsonStrict(checkNotNull(namespace), key, send.toJson())
+                requireOwner(expectedScope)
+                val bindingKey = "own_binding_${send.clientMessageId}"
+                val binding = cache.readJsonStrict(checkNotNull(namespace), bindingKey) as? Map<String, Any?>
+                val priorCipher = binding?.let {
+                    check(it["discarded"] != true) { "Encrypted send is held after membership changed. Start a fresh send after reviewing the conversation." }
+                    check(it["user_id"] == uid && it["conversation_id"] == send.conversationId && it["client_id"] == send.clientMessageId) { "Own message binding mismatch." }
+                    com.example.chat.core.crypto.MlsEncryptedPayload(
+                        groupId = it["group_id"] as String,
+                        epoch = (it["epoch"] as Number).toInt(), ciphertext = it["ciphertext"] as String)
+                }
+                var activeBinding: Map<String, Any?> = binding.orEmpty()
+                transport.deliverEncryptedMessage(send, expectedScope,
+                    requireCurrent = { requireOwner(expectedScope) }, previousCipher = priorCipher,
+                    beforeDispatch = { cipher, device ->
+                        check(binding == null || binding["device_id"] == device) { "Own send belongs to another device identity." }
+                        activeBinding = mapOf("user_id" to uid, "device_id" to device,
+                            "conversation_id" to send.conversationId, "client_id" to send.clientMessageId,
+                            "group_id" to cipher.groupId, "epoch" to cipher.epoch, "ciphertext" to cipher.ciphertext) +
+                            (binding?.get("canonical_id")?.let { mapOf("canonical_id" to it) } ?: emptyMap())
+                        cache.writeJsonStrict(checkNotNull(namespace), bindingKey, activeBinding)
+                        requireOwner(expectedScope)
+                    }, reconcileAccepted = {
+                        val originalDevice = binding?.get("device_id") as? String ?: error("Original sender device is missing.")
+                        val accepted = lookupOwnAccepted(send.conversationId, send.clientMessageId, originalDevice, expectedScope)
+                        if (accepted == null) check(binding["held"] != true) { "Held send was not reconciled.404 is not permission to resend." }
+                        acceptedState = accepted?.state ?: "sent"
+                        accepted?.id
+                    }, onStoredCipherHeld = {
+                        cache.writeJsonStrict(checkNotNull(namespace), bindingKey, activeBinding + ("held" to true))
+                        check(withScope(expectedScope) { onSecureSendHeld() }) { "Account changed after holding encrypted send." }
+                    }, onCanonicalId = { id ->
+                        check(activeBinding["canonical_id"] == null || activeBinding["canonical_id"] == id) { "Own message target changed." }
+                        cache.writeJsonStrict(checkNotNull(namespace), bindingKey, activeBinding + mapOf("canonical_id" to id, "held" to false, "accepted_state" to acceptedState))
+                        check(withScope(expectedScope) {
+                            messagesByChatId[send.conversationId]?.removeAll { it.id == send.clientMessageId && it.senderId == uid }
+                        }) { "Account changed resolving message identity." }
+                    })
+            } else error("Owner-bound encrypted send storage is unavailable.")
         }
         requireOwner(expectedScope)
         kotlinx.coroutines.coroutineScope {
@@ -1072,18 +1304,21 @@ class ConversationsRepository(
                 id = messageId,
                 conversationId = send.conversationId,
                 senderId = me ?: "",
-                type = fallbackType,
-                text = send.text,
-                attachment = attachmentFromPending(send.attachment),
+                type = if (acceptedState == "edited") MessageType.system else fallbackType,
+                text = when (acceptedState) { "deleted" -> "This message was deleted"; "edited" -> "Unable to decrypt this message"; else -> send.text },
+                attachment = if (acceptedState == "sent") attachmentFromPending(send.attachment) else null,
+                isDeletedForEveryone = acceptedState == "deleted",
                 replyToMessageId = send.replyToMessageId,
                 replyToPreviewText = send.replyToPreviewText,
                 replyToSenderName = send.replyToSenderName,
                 linkedTaskId = send.linkedTaskId,
-                metadata = send.metadata,
+                metadata = if (acceptedState == "sent") send.metadata else if (acceptedState == "edited") mapOf("decryption_failed" to true) else emptyMap(),
+                authenticatedMlsSender = mls()?.currentDeviceId?.takeIf { acceptedState == "sent" }?.let { com.example.chat.domain.models.AuthenticatedMlsSender(me.orEmpty(), it) },
                 createdAt = send.createdAt,
                 deliveryState = DeliveryState.sent,
             )
         check(withScope(expectedScope) { onMessageCreated(send.conversationId, result.id) }) { "Account changed." }
+        durableQueue.remove(admittedUser, send.clientMessageId, checkNotNull(admittedNamespace))
         return result
     }
 
@@ -1210,6 +1445,43 @@ class ConversationsRepository(
         }
     }
 
+    private fun sameOwnPayload(a: Any?, b: Any?): Boolean = when {
+        a is Number && b is Number -> runCatching { java.math.BigDecimal(a.toString()).compareTo(java.math.BigDecimal(b.toString())) == 0 }.getOrDefault(false)
+        a is Map<*, *> && b is Map<*, *> -> a.keys == b.keys && a.all { (key, value) -> sameOwnPayload(value, b[key]) }
+        a is List<*> && b is List<*> -> a.size == b.size && a.indices.all { sameOwnPayload(a[it], b[it]) }
+        else -> a == b
+    }
+
+    private val secureControlGate = kotlinx.coroutines.sync.Mutex()
+
+    suspend fun sendEncryptedReaction(conversationId: String, messageId: String, emoji: String, expectedScope: Any? = scopeSnapshot()) {
+        require(emoji.isNotBlank() && emoji.length <= 64)
+        secureControlGate.withLock {
+            requireOwner(expectedScope)
+            val actor = checkNotNull(currentUserId())
+            val list = messagesByChatId[conversationId].orEmpty()
+            val target = SecureControlEnvelope.project(list).firstOrNull { it.id == messageId } ?: error("Reaction target is unavailable.")
+            check(!target.isDeletedForMe && !target.isDeletedForEveryone &&
+                !com.example.chat.data.local.AttachmentCachePolicy.viewOnceRestricted(target.metadata)) { "Reaction is not allowed." }
+            var ns: String? = null
+            check(withScope(expectedScope) { ns = storageNamespace() }) { "Account changed." }
+            val cache = snapshotCache ?: error("Encrypted control persistence is unavailable.")
+            val old = cache.readJsonStrict(checkNotNull(ns), "secure_control_revision")
+            check(old == null || old is Number) { "Encrypted control revision is corrupt." }
+            val current = maxOf((old as? Number)?.toLong() ?: 0L, SecureControlEnvelope.latestRevision(list, actor, messageId))
+            check(current in 0 until Long.MAX_VALUE) { "Encrypted control revision cannot advance." }
+            val revision = current + 1
+            cache.writeJsonStrict(checkNotNull(ns), "secure_control_revision", revision)
+            requireOwner(expectedScope)
+            val remove = target.reactions.any { it.emoji == emoji && actor in it.userIds }
+            sendMessage(conversationId, "", MessageType.system, extraMetadata = mapOf(SecureControlEnvelope.KEY to mapOf(
+                "version" to 1, "kind" to "reaction", "target_id" to messageId,
+                "operation" to if (remove) "remove" else "set", "emoji" to if (remove) null else emoji,
+                "revision" to revision, "event_id" to java.util.UUID.randomUUID().toString(),
+            )), expectedScope = expectedScope)
+        }
+    }
+
     /** Exact port of toggleReaction's optimistic half: applies the local
      *  reaction change immediately; call [toggleReactionAsync] after it. */
     fun optimisticToggleReaction(conversationId: String, messageId: String, emoji: String) {
@@ -1271,6 +1543,44 @@ class ConversationsRepository(
     /** Exact port of editMessage: guards, optimistic edit, MLS re-encrypt at
      *  the current epoch (never plaintext through the legacy path for MLS
      *  messages), rollback on failure. */
+    suspend fun sweepRevisionRetention(expectedScope: Any? = scopeSnapshot()) {
+        requireOwner(expectedScope)
+        var namespace: String? = null
+        check(withScope(expectedScope) { namespace = storageNamespace() }) { "Account changed." }
+        val cache = snapshotCache ?: return
+        val erased = ImmutableMlsRevisions.sweepRetention(cache, checkNotNull(namespace), (secureRpc ?: rpc).forScope(expectedScope), { requireOwner(expectedScope) })
+        check(withScope(expectedScope) {
+            for (messages in messagesByChatId.values) {
+                for (index in messages.indices) if (messages[index].id in erased) {
+                    messages[index] = messages[index].copy(text = "Unable to decrypt this message", attachment = null,
+                        metadata = mapOf("decryption_failed" to true), authenticatedMlsSender = null, authenticatedMlsRevision = null)
+                }
+            }
+            if (erased.isNotEmpty()) notifyChanged()
+        }) { "Account changed during retention cleanup." }
+    }
+
+    private fun revisionClient(expectedScope: Any?): ImmutableMlsRevisions {
+        requireOwner(expectedScope)
+        var namespace: String? = null
+        check(withScope(expectedScope) { namespace = storageNamespace() }) { "Account changed." }
+        return ImmutableMlsRevisions((secureRpc ?: rpc).forScope(expectedScope), snapshotCache ?: error("Own revision storage unavailable."),
+            checkNotNull(namespace), checkNotNull(currentUserId()), MlsServiceEncryptorAdapter(mls() ?: error("Secure messaging unavailable.")), { requireOwner(expectedScope) })
+    }
+
+    private data class OwnAccepted(val id: String, val state: String)
+    private suspend fun lookupOwnAccepted(room: String, client: String, device: String, expectedScope: Any?): OwnAccepted? {
+        requireOwner(expectedScope)
+        val raw = (secureRpc ?: rpc).forScope(expectedScope).rpc("lookup_own_mls_message", mapOf(
+            "p_conversation_id" to room, "p_client_message_id" to client, "p_sender_device_id" to device)) ?: return null
+        requireOwner(expectedScope)
+        val found = raw as? Map<*, *> ?: error("Invalid own-message lookup.")
+        check(found["room_id"] == room && found["client_id"] == client && found["state"] in setOf("sent", "edited", "deleted")) { "Own-message lookup binding mismatch." }
+        val id = found["message_id"] as? String ?: error("Lookup has no canonical message ID.")
+        check(id.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))) { "Invalid canonical message ID." }
+        return OwnAccepted(id, found["state"] as String)
+    }
+
     suspend fun editMessage(
         conversationId: String,
         messageId: String,
@@ -1314,56 +1624,37 @@ class ConversationsRepository(
         if (original.type != MessageType.text) {
             throw IllegalArgumentException("Only text messages can be edited.")
         }
+        val isEncrypted = original.authenticatedMlsSender != null || original.metadata["mls_group_id"] != null ||
+            original.metadata["encryption_protocol"] == MlsE2eeService.protocolSuite
+        if (isEncrypted) {
+            check(original.senderId == currentUserId() && original.authenticatedMlsSender != null) { "Only authenticated own text can be edited." }
+            sweepRevisionRetention(expectedScope)
+            val roomTimer = conversationsById[conversationId]?.disappearingDuration
+            check(roomTimer == null || roomTimer.isZero) { "Messages in disappearing rooms cannot be edited." }
+            // A missing local timer is not authoritative OFF. The revision
+            // writer requires an explicit OFF timer from the v4 chain read.
+            check(!ImmutableMlsRevisions.restricted(original.metadata)) { "Expiring/view-once messages cannot be edited." }
+            withDispatchLock(conversationId) {
+                requireOwner(expectedScope)
+                var namespace: String? = null
+                check(withScope(expectedScope) { namespace = storageNamespace() }) { "Account changed." }
+                val uid = checkNotNull(currentUserId())
+                val store = pendingStore ?: error("Owner retirement gate unavailable.")
+                store.withActiveNamespace(uid, checkNotNull(namespace)) {
+                    val metadata = original.metadata.filterKeys { it !in setOf("encrypted", "mls_group_id", "mls_epoch", "encryption_protocol", "decryption_failed") &&
+                        !it.startsWith("_mls") && !it.startsWith("_authenticated") }
+                    revisionClient(expectedScope).edit(conversationId, messageId, text, metadata)
+                }
+            }
+            requireOwner(expectedScope)
+            loadMessages(conversationId, expectedScope)
+            return
+        }
         list[index] = original.copy(text = text, editedAt = Instant.now())
         notifyChanged()
         try {
-            // MLS messages must be re-encrypted at the current group epoch.
-            // Never write their plaintext through the legacy RPC or table API.
-            val isMlsMessage =
-                original.metadata["mls_group_id"] != null ||
-                    original.metadata["encryption_protocol"] == MlsE2eeService.protocolSuite
-            if (isMlsMessage) {
-                val service = mls()
-                    ?: throw IllegalStateException("Secure messaging is not available on this device.")
-                val deviceId = service.currentDeviceId
-                if (!service.isReady || deviceId == null) {
-                    throw IllegalStateException("Secure messaging is still initializing.")
-                }
-                val appMetadata = original.metadata.toMutableMap()
-                appMetadata.remove("encrypted")
-                appMetadata.remove("mls_group_id")
-                appMetadata.remove("mls_epoch")
-                appMetadata.remove("encryption_protocol")
-                appMetadata.remove("decryption_failed")
-                val encrypted = service.encryptEditedPayload(
-                    conversationId = conversationId,
-                    payload = mapOf(
-                        "type" to messageTypeToDatabase(original.type),
-                        "text" to text,
-                        "metadata" to appMetadata,
-                    ),
-                )
-                requireOwner(expectedScope)
-                requestRpc.rpc(
-                    "edit_mls_message_v1",
-                    mapOf(
-                        "p_message_id" to messageId,
-                        "p_sender_device_id" to deviceId,
-                        "p_group_id" to encrypted.groupId,
-                        "p_epoch" to encrypted.epoch,
-                        "p_ciphertext" to encrypted.ciphertext,
-                    ),
-                )
-            } else {
-                requireOwner(expectedScope)
-                requestRpc.rpc(
-                    "edit_chat_message",
-                    mapOf(
-                        "p_message_id" to messageId,
-                        "p_text" to text,
-                    ),
-                )
-            }
+            requireOwner(expectedScope)
+            requestRpc.rpc("edit_chat_message", mapOf("p_message_id" to messageId, "p_text" to text))
         } catch (error: Throwable) {
             // Restore the exact prior message; no unencrypted fallback write.
             withScope(expectedScope) {
@@ -1388,13 +1679,25 @@ class ConversationsRepository(
         requireOwner(expectedScope)
         val requestRpc = rpc.forScope(expectedScope)
         val target = messagesByChatId[conversationId]?.firstOrNull { it.id == messageId }
-        requestRpc.rpc(
-            "delete_chat_message",
-            mapOf(
-                "p_message_id" to messageId,
-                "p_for_everyone" to forEveryone,
-            ),
-        )
+        withDispatchLock(conversationId) {
+            requireOwner(expectedScope)
+            var namespace: String? = null
+            check(withScope(expectedScope) { namespace = storageNamespace() }) { "Account changed." }
+            val performDelete: suspend () -> Unit = {
+                val encryptedTarget = target?.authenticatedMlsSender != null || target?.metadata?.get("mls_group_id") != null ||
+                    target?.metadata?.get("encryption_protocol") == MlsE2eeService.protocolSuite
+                val deletionRpc = if (encryptedTarget) (secureRpc ?: rpc).forScope(expectedScope) else requestRpc
+                deletionRpc.rpc(
+                    "delete_chat_message",
+                    mapOf("p_message_id" to messageId, "p_for_everyone" to forEveryone),
+                )
+                requireOwner(expectedScope)
+                snapshotCache?.let { ImmutableMlsRevisions.forget(it, checkNotNull(namespace), messageId) }
+            }
+            val store = pendingStore
+            if (store != null) store.withActiveNamespace(checkNotNull(currentUserId()), checkNotNull(namespace)) { performDelete() }
+            else performDelete()
+        }
         // RPC succeeded (it throws otherwise): the message is gone for this user, drop its local media now.
         check(withScope(expectedScope) {
             if (target != null) notifyGone(listOfNotNull(com.example.chat.data.media.AttachmentRefs.refOf(conversationId, target)))
@@ -1628,6 +1931,7 @@ class ConversationsRepository(
                 url = attachment["url"]?.toString(),
                 durationSeconds = (attachment["duration_seconds"] as? Number)?.toInt()
                     ?: attachment["duration_seconds"]?.toString()?.toIntOrNull() ?: 0,
+                encryptedFile = attachment["encrypted_file"] as? Map<String, Any?>,
             )
         }
 
@@ -1642,6 +1946,9 @@ class MlsServiceEncryptorAdapter(
 ) : com.example.chat.core.crypto.MlsEncryptor {
     override val currentDeviceId: String? get() = service.currentDeviceId
     override val isReady: Boolean get() = service.isReady
+
+    override suspend fun assertStoredCipherReady(conversationId: String, cipher: com.example.chat.core.crypto.MlsEncryptedPayload) =
+        service.assertStoredCipherReady(conversationId, cipher)
 
     override suspend fun encryptPayload(
         conversationId: String,
@@ -1698,3 +2005,134 @@ class MlsServiceEncryptorAdapter(
 //         if (target != null) notifyGone(listOfNotNull(com.example.chat.data.media.AttachmentRefs.refOf(conversationId, target)))
 
 // Prior hydration call retained: hydratedRows.add(hydrateEncryptedMessageRow(conversationId, row, expectedScope))
+
+// Previous E2EE media wiring retained inactive:
+//                 synchronized(stateLock) { result = secureChannelIds.contains(conversationId) }
+//         return synchronized(stateLock) { secureChannelIds.contains(conversationId) }
+
+// Previous source retained inactive (v2):
+//                 synchronized(stateLock) { wasSecure = secureChannelIds.contains(conversationId) }
+
+// Previous implementation retained inactive (unified v4):
+//             transport.deliverEncryptedMessage(send, expectedScope) { requireOwner(expectedScope) }
+
+// Previous implementation retained inactive (v5 review):
+//             if (existing != null && existing.text.isNotEmpty()) {
+//             // If we don't have it in memory, body may already be populated
+//             // from a cached snapshot.
+//             if (row["body"] != null && row["body"].toString().isNotEmpty()) {
+//                 return row
+//             row["metadata"] = decryptedMetadata + serverMetadata
+//             extraMetadata = extraMetadata,
+
+// Row51 v10 originals retained byte-for-byte after the comment prefix.
+// Original segment 1:
+//         val conversationId = data["room_id"]?.toString() ?: return
+//         val id = data["id"]?.toString() ?: return
+//         val row = mutableMapOf<String, Any?>(
+//             "id" to id,
+//             "conversation_id" to conversationId,
+//             "sender_id" to data["sender_id"],
+//             "created_at" to data["created_at"],
+//             "edited_at" to data["edited_at"],
+//             "msg_type" to (data["msg_type"] ?: "text"),
+//             "encryption_version" to 2,
+//             "encryption_protocol" to MlsE2eeService.protocolSuite,
+//             "sender_device_id" to data["sender_device_id"],
+//             "encrypted_payload" to data["encrypted_payload"],
+//         )
+//         val hydrated = hydrateEncryptedMessageRow(conversationId, row, expectedScope)
+// Original segment 2:
+//         withScope(expectedScope) {
+//             val list = messagesByChatId[conversationId] ?: return@withScope
+// Original segment 3:
+//                 list[index] = message.copy(
+//                     createdAt = list[index].createdAt,
+//                     editedAt = message.editedAt ?: java.time.Instant.now(),
+//                 )
+//                 val capturedUser = currentUserId()
+//                 val snapshotCopy = list.toList()
+//                 snapshotScope?.launch { persistMessageSnapshot(conversationId, snapshotCopy, expectedScope, capturedUser) }
+// Original segment 4:
+//         }
+//         notifyChanged()
+// Original segment 5:
+//         if (row["deleted_at"] != null) return row
+// Original segment 6:
+//                 binding["canonical_id"] != row["id"] || binding["ciphertext"] != row["encrypted_payload"] ||
+// Original segment 7:
+//                     check(it["held"] != true && it["discarded"] != true) { "Encrypted send is held after membership changed. Start a fresh send after reviewing the conversation." }
+// Original segment 8:
+//                         // Inactive until backend provides an owner-bound lookup by
+//                         // client_message_id. Current list rows omit that ID and a
+//                         // bounded scan could never prove non-acceptance.
+//                         null
+// Original segment 9:
+//                         cache.writeJsonStrict(checkNotNull(namespace), bindingKey, activeBinding + ("canonical_id" to id))
+// Original segment 10:
+//                 type = fallbackType,
+//                 text = send.text,
+//                 attachment = attachmentFromPending(send.attachment),
+// Original segment 11:
+//                 metadata = send.metadata,
+//                 authenticatedMlsSender = mls()?.currentDeviceId?.let { com.example.chat.domain.models.AuthenticatedMlsSender(me.orEmpty(), it) },
+// Original segment 12:
+//         check(original.authenticatedMlsSender == null && original.metadata["mls_group_id"] == null &&
+//             original.metadata["encryption_protocol"] != MlsE2eeService.protocolSuite) {
+//             "Encrypted edits need revision-bound own-message recovery and are currently blocked."
+// Original segment 13:
+//             // MLS messages must be re-encrypted at the current group epoch.
+//             // Never write their plaintext through the legacy RPC or table API.
+//             val isMlsMessage =
+//                 original.metadata["mls_group_id"] != null ||
+//                     original.metadata["encryption_protocol"] == MlsE2eeService.protocolSuite
+//             if (isMlsMessage) {
+//                 val service = mls()
+//                     ?: throw IllegalStateException("Secure messaging is not available on this device.")
+//                 val deviceId = service.currentDeviceId
+//                 if (!service.isReady || deviceId == null) {
+//                     throw IllegalStateException("Secure messaging is still initializing.")
+//                 }
+//                 val appMetadata = original.metadata.toMutableMap()
+//                 appMetadata.remove("encrypted")
+//                 appMetadata.remove("mls_group_id")
+//                 appMetadata.remove("mls_epoch")
+//                 appMetadata.remove("encryption_protocol")
+//                 appMetadata.remove("decryption_failed")
+//                 val encrypted = service.encryptEditedPayload(
+//                     conversationId = conversationId,
+//                     payload = mapOf(
+//                         "type" to messageTypeToDatabase(original.type),
+//                         "text" to text,
+//                         "metadata" to appMetadata,
+//                     ),
+//                 )
+//                 requireOwner(expectedScope)
+//                 requestRpc.rpc(
+//                     "edit_mls_message_v1",
+//                     mapOf(
+//                         "p_message_id" to messageId,
+//                         "p_sender_device_id" to deviceId,
+//                         "p_group_id" to encrypted.groupId,
+//                         "p_epoch" to encrypted.epoch,
+//                         "p_ciphertext" to encrypted.ciphertext,
+//                     ),
+//                 )
+//             } else {
+//                 requireOwner(expectedScope)
+//                 requestRpc.rpc(
+//                     "edit_chat_message",
+//                     mapOf(
+//                         "p_message_id" to messageId,
+//                         "p_text" to text,
+//                     ),
+//                 )
+//             }
+// Original segment 14:
+//         requestRpc.rpc(
+//             "delete_chat_message",
+//             mapOf(
+//                 "p_message_id" to messageId,
+//                 "p_for_everyone" to forEveryone,
+//             ),
+//         )

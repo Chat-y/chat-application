@@ -5,6 +5,7 @@ import kotlinx.coroutines.ensureActive
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.example.chat.ui.effects.iosItemEntrance
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -104,8 +105,9 @@ fun CallsScreen(
     // Account changes dispose pending Undo jobs and owner-specific confirmation state.
     androidx.compose.runtime.key(currentUserId) {
     var showClearConfirm by rememberSaveable { mutableStateOf(false) }
-    // CALLS-R1-39: visible delete path in addition to swipe/custom accessibility actions.
-    var openEntryMenu by rememberSaveable { mutableStateOf<String?>(null) }
+    // Swipe delete and the custom accessibility action remain the deletion paths.
+    // Duplicate delete-only overflow state retained inactive:
+    // var openEntryMenu by rememberSaveable { mutableStateOf<String?>(null) }
     val theme = LocalThemeConfig.current
     val titlePresentedByShell = LocalDestinationTitlePresentation.current ==
         com.example.chat.core.templates.ChatyNavigationDestinationIds.calls
@@ -202,6 +204,13 @@ fun CallsScreen(
     val scope = rememberCoroutineScope()
     val pendingDeletes = remember { mutableStateMapOf<String, CallRecord>() }
     val visibleRecords = records.filter { it.id !in pendingDeletes }
+    // Row 9 (iOS-style content motion): flattened row ordinal across day groups for the stagger.
+    val callRowOrdinals = remember(visibleRecords, zone) {
+        val map = HashMap<String, Int>()
+        var i = 0
+        for ((_, recs) in callLogDayGroups(visibleRecords, zone)) for ((ri, c) in recs.withIndex()) map[callLogRenderKey(c, ri)] = i++
+        map
+    }
     fun softDelete(call: CallRecord) {
         if (call.id in pendingDeletes) return
         pendingDeletes[call.id] = call
@@ -266,7 +275,9 @@ fun CallsScreen(
                     shape = androidx.compose.foundation.shape.CircleShape,
                     containerColor = Color(theme.accentColor),
                     contentColor = Color(theme.onAccentColor),
-                ) { Icon(Icons.Rounded.Dialpad, contentDescription = null) }
+                ) {
+//Icon(Icons.Rounded.Dialpad, contentDescription = null)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.dialpad, Icons.Rounded.Dialpad, contentDescription = null) }
             }
         },
     ) { padding ->
@@ -318,8 +329,14 @@ fun CallsScreen(
                 historyUnavailable && visibleRecords.isEmpty() -> item {
                     CallEmptyState(
                         icon = {
-                            Icon(
-                                Icons.Rounded.CloudOff,
+
+//Icon(
+//                                Icons.Rounded.CloudOff,
+//                                contentDescription = null,
+//                                tint = Color(theme.dangerColor),
+//                                modifier = Modifier.size(42.dp),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.cloudOff, Icons.Rounded.CloudOff,
                                 contentDescription = null,
                                 tint = Color(theme.dangerColor),
                                 modifier = Modifier.size(42.dp),
@@ -339,8 +356,14 @@ fun CallsScreen(
                 visibleRecords.isEmpty() -> item {
                     CallEmptyState(
                         icon = {
-                            Icon(
-                                Icons.Rounded.PhoneCallback,
+
+//Icon(
+//                                Icons.Rounded.PhoneCallback,
+//                                contentDescription = null,
+//                                tint = Color(theme.accentColor),
+//                                modifier = Modifier.size(42.dp),
+//                            )
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.callIncoming, Icons.Rounded.PhoneCallback,
                                 contentDescription = null,
                                 tint = Color(theme.accentColor),
                                 modifier = Modifier.size(42.dp),
@@ -430,7 +453,9 @@ fun CallsScreen(
                     ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
+// Previous implementation retained:                         modifier = Modifier
                         modifier = Modifier
+                            .iosItemEntrance(callRowOrdinals[callLogRenderKey(call, rowIndex)] ?: rowIndex, call.id)
                             .padding(horizontal = 16.dp, vertical = 4.dp)
                             .semantics(mergeDescendants = true) {
                                 contentDescription = when (call.direction) {
@@ -507,19 +532,21 @@ fun CallsScreen(
                                 modifier = Modifier.size(20.dp),
                             )
                         }
-                        Box {
-                            IconButton(onClick = { openEntryMenu = call.id }) {
-// Previous implementation retained:                                 Icon(Icons.Rounded.MoreVert, contentDescription = "More actions for $name", tint = Color(theme.secondaryTextColor))
-                                Icon(Icons.Rounded.MoreVert, contentDescription = context.getString(com.example.chat.R.string.call_log_more_actions, name), tint = Color(theme.secondaryTextColor))
-                            }
-                            DropdownMenu(expanded = openEntryMenu == call.id, onDismissRequest = { openEntryMenu = null }) {
-                                DropdownMenuItem(
-// Previous implementation retained:                                     text = { Text("Delete call entry") },
-                                    text = { Text(context.getString(com.example.chat.R.string.calls_ui_18)) },
-                                    onClick = { openEntryMenu = null; softDelete(call) },
-                                )
-                            }
-                        }
+                        // The only overflow item was Delete call entry. Hide the dots along
+                        // with that duplicate item; swipe and accessibility delete stay intact.
+//                         Box {
+//                             IconButton(onClick = { openEntryMenu = call.id }) {
+// // Previous implementation retained:                                 Icon(Icons.Rounded.MoreVert, contentDescription = "More actions for $name", tint = Color(theme.secondaryTextColor))
+//                                 Icon(Icons.Rounded.MoreVert, contentDescription = context.getString(com.example.chat.R.string.call_log_more_actions, name), tint = Color(theme.secondaryTextColor))
+//                             }
+//                             DropdownMenu(expanded = openEntryMenu == call.id, onDismissRequest = { openEntryMenu = null }) {
+//                                 DropdownMenuItem(
+// // Previous implementation retained:                                     text = { Text("Delete call entry") },
+//                                     text = { Text(context.getString(com.example.chat.R.string.calls_ui_18)) },
+//                                     onClick = { openEntryMenu = null; softDelete(call) },
+//                                 )
+//                             }
+//                         }
                     }
                     }
                 }

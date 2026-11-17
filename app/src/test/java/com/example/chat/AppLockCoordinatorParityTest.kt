@@ -2,6 +2,7 @@ package com.example.chat
 
 import com.example.chat.data.services.AppLockCoordinator
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -74,4 +75,46 @@ class AppLockCoordinatorParityTest {
         c.onUnlocked()
         assertFalse(c.lockRequired.value)
     }
+    @Test
+    fun restoredRouteWaitsForConcurrentResumeReadiness() = runBlocking {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val c = AppLockCoordinator(
+            isAuthenticated = { true }, isLockEnabled = { true },
+            autoLockTimeout = { "Immediately" },
+            isMethodReady = { entered.complete(Unit); release.await(); true },
+        )
+        c.onBackgrounded()
+        val resume = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { c.onResumed() }
+        entered.await()
+        var checked = false
+        val route = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            org.junit.Assert.assertEquals(AppLockCoordinator.InitialRouteAccess.Locked, c.checkInitialRouteAccess())
+            checked = true
+        }
+        assertFalse(checked)
+        release.complete(Unit)
+        resume.join(); route.join()
+        assertTrue(checked)
+        assertTrue(c.lockRequired.value)
+    }
+
+    @Test
+    fun unavailableMethodNeverPermitsRestoredRoute() = runBlocking {
+        ready = false
+        val c = make()
+        org.junit.Assert.assertEquals(AppLockCoordinator.InitialRouteAccess.Unavailable, c.checkInitialRouteAccess())
+        ready = true
+        org.junit.Assert.assertEquals(AppLockCoordinator.InitialRouteAccess.Locked, c.checkInitialRouteAccess())
+        c.onUnlocked()
+        org.junit.Assert.assertEquals(AppLockCoordinator.InitialRouteAccess.Allowed, c.checkInitialRouteAccess())
+    }
+
+    @Test
+    fun explicitLoginDoesNotRequireColdStartChallenge() = runBlocking {
+        val c = make()
+        c.onSignedIn()
+        org.junit.Assert.assertEquals(AppLockCoordinator.InitialRouteAccess.Allowed, c.checkInitialRouteAccess())
+    }
+
 }

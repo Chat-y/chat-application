@@ -1,0 +1,1315 @@
+{
+  "scope": "Camera owner handoff. Proposed IDs only, not production entries. Current row65 squash has no new camera-effect/lens bridge IDs or artwork. Duplicate stock names must be split by definition ID at icon rendering, not global name bridge alone.",
+  "definitions": [
+    {
+      "definition_id": "none",
+      "stock_vector": "Icons.Rounded.FilterNone",
+      "proposed_purpose_id": "cameraNone",
+      "source": "EffectRegistry.kt",
+      "line": 148,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameranone"
+    },
+    {
+      "definition_id": "face_dog_filter",
+      "stock_vector": "Icons.Rounded.Pets",
+      "proposed_purpose_id": "cameraFaceDogFilter",
+      "source": "EffectRegistry.kt",
+      "line": 155,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafacedogfilter"
+    },
+    {
+      "definition_id": "beauty_soft_smooth",
+      "stock_vector": "Icons.Rounded.AutoAwesome",
+      "proposed_purpose_id": "cameraBeautySoftSmooth",
+      "source": "EffectRegistry.kt",
+      "line": 169,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautysoftsmooth"
+    },
+    {
+      "definition_id": "beauty_porcelain",
+      "stock_vector": "Icons.Rounded.FaceRetouchingNatural",
+      "proposed_purpose_id": "cameraBeautyPorcelain",
+      "source": "EffectRegistry.kt",
+      "line": 182,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautyporcelain"
+    },
+    {
+      "definition_id": "beauty_warm_blush",
+      "stock_vector": "Icons.Rounded.FavoriteBorder",
+      "proposed_purpose_id": "cameraBeautyWarmBlush",
+      "source": "EffectRegistry.kt",
+      "line": 195,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautywarmblush"
+    },
+    {
+      "definition_id": "beauty_radiant",
+      "stock_vector": "Icons.Rounded.WbSunny",
+      "proposed_purpose_id": "cameraBeautyRadiant",
+      "source": "EffectRegistry.kt",
+      "line": 208,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautyradiant"
+    },
+    {
+      "definition_id": "beauty_golden_hour",
+      "stock_vector": "Icons.Rounded.WbTwilight",
+      "proposed_purpose_id": "cameraBeautyGoldenHour",
+      "source": "EffectRegistry.kt",
+      "line": 221,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautygoldenhour"
+    },
+    {
+      "definition_id": "beauty_ivory",
+      "stock_vector": "Icons.Rounded.Spa",
+      "proposed_purpose_id": "cameraBeautyIvory",
+      "source": "EffectRegistry.kt",
+      "line": 234,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautyivory"
+    },
+    {
+      "definition_id": "beauty_dewy",
+      "stock_vector": "Icons.Rounded.WaterDrop",
+      "proposed_purpose_id": "cameraBeautyDewy",
+      "source": "EffectRegistry.kt",
+      "line": 247,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautydewy"
+    },
+    {
+      "definition_id": "beauty_sunset_glow",
+      "stock_vector": "Icons.Rounded.Flare",
+      "proposed_purpose_id": "cameraBeautySunsetGlow",
+      "source": "EffectRegistry.kt",
+      "line": 260,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautysunsetglow"
+    },
+    {
+      "definition_id": "beauty_clean_look",
+      "stock_vector": "Icons.Rounded.LensBlur",
+      "proposed_purpose_id": "cameraBeautyCleanLook",
+      "source": "EffectRegistry.kt",
+      "line": 273,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautycleanlook"
+    },
+    {
+      "definition_id": "beauty_peachy",
+      "stock_vector": "Icons.Rounded.NaturePeople",
+      "proposed_purpose_id": "cameraBeautyPeachy",
+      "source": "EffectRegistry.kt",
+      "line": 286,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautypeachy"
+    },
+    {
+      "definition_id": "cine_teal_orange",
+      "stock_vector": "Icons.Rounded.MovieFilter",
+      "proposed_purpose_id": "cameraCineTealOrange",
+      "source": "EffectRegistry.kt",
+      "line": 299,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinetealorange"
+    },
+    {
+      "definition_id": "cine_noir",
+      "stock_vector": "Icons.Rounded.Contrast",
+      "proposed_purpose_id": "cameraCineNoir",
+      "source": "EffectRegistry.kt",
+      "line": 312,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinenoir"
+    },
+    {
+      "definition_id": "cine_hollywood",
+      "stock_vector": "Icons.Rounded.Theaters",
+      "proposed_purpose_id": "cameraCineHollywood",
+      "source": "EffectRegistry.kt",
+      "line": 325,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinehollywood"
+    },
+    {
+      "definition_id": "cine_dystopia",
+      "stock_vector": "Icons.Rounded.BlurLinear",
+      "proposed_purpose_id": "cameraCineDystopia",
+      "source": "EffectRegistry.kt",
+      "line": 338,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinedystopia"
+    },
+    {
+      "definition_id": "cine_moody_blue",
+      "stock_vector": "Icons.Rounded.Nightlight",
+      "proposed_purpose_id": "cameraCineMoodyBlue",
+      "source": "EffectRegistry.kt",
+      "line": 351,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinemoodyblue"
+    },
+    {
+      "definition_id": "cine_matrix_green",
+      "stock_vector": "Icons.Rounded.Terminal",
+      "proposed_purpose_id": "cameraCineMatrixGreen",
+      "source": "EffectRegistry.kt",
+      "line": 364,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinematrixgreen"
+    },
+    {
+      "definition_id": "cine_warm_vintage",
+      "stock_vector": "Icons.Rounded.CameraRoll",
+      "proposed_purpose_id": "cameraCineWarmVintage",
+      "source": "EffectRegistry.kt",
+      "line": 377,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinewarmvintage"
+    },
+    {
+      "definition_id": "cine_cold_thriller",
+      "stock_vector": "Icons.Rounded.AcUnit",
+      "proposed_purpose_id": "cameraCineColdThriller",
+      "source": "EffectRegistry.kt",
+      "line": 390,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinecoldthriller"
+    },
+    {
+      "definition_id": "cine_sepia_drama",
+      "stock_vector": "Icons.Rounded.FilterVintage",
+      "proposed_purpose_id": "cameraCineSepiaDrama",
+      "source": "EffectRegistry.kt",
+      "line": 403,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinesepiadrama"
+    },
+    {
+      "definition_id": "cine_blockbuster",
+      "stock_vector": "Icons.Rounded.LocalMovies",
+      "proposed_purpose_id": "cameraCineBlockbuster",
+      "source": "EffectRegistry.kt",
+      "line": 416,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracineblockbuster"
+    },
+    {
+      "definition_id": "cine_indie_pastel",
+      "stock_vector": "Icons.Rounded.Palette",
+      "proposed_purpose_id": "cameraCineIndiePastel",
+      "source": "EffectRegistry.kt",
+      "line": 429,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracineindiepastel"
+    },
+    {
+      "definition_id": "cine_desert_dune",
+      "stock_vector": "Icons.Rounded.Landscape",
+      "proposed_purpose_id": "cameraCineDesertDune",
+      "source": "EffectRegistry.kt",
+      "line": 442,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinedesertdune"
+    },
+    {
+      "definition_id": "retro_vhs_tape",
+      "stock_vector": "Icons.Outlined.Videocam",
+      "proposed_purpose_id": "cameraRetroVhsTape",
+      "source": "EffectRegistry.kt",
+      "line": 455,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrovhstape"
+    },
+    {
+      "definition_id": "retro_polaroid_600",
+      "stock_vector": "Icons.Rounded.CropOriginal",
+      "proposed_purpose_id": "cameraRetroPolaroid600",
+      "source": "EffectRegistry.kt",
+      "line": 468,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretropolaroid600"
+    },
+    {
+      "definition_id": "retro_kodak_portra",
+      "stock_vector": "Icons.Rounded.CameraAlt",
+      "proposed_purpose_id": "cameraRetroKodakPortra",
+      "source": "EffectRegistry.kt",
+      "line": 481,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrokodakportra"
+    },
+    {
+      "definition_id": "retro_fuji_velvia",
+      "stock_vector": "Icons.Rounded.PhotoFilter",
+      "proposed_purpose_id": "cameraRetroFujiVelvia",
+      "source": "EffectRegistry.kt",
+      "line": 494,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrofujivelvia"
+    },
+    {
+      "definition_id": "retro_super8",
+      "stock_vector": "Icons.Rounded.MovieCreation",
+      "proposed_purpose_id": "cameraRetroSuper8",
+      "source": "EffectRegistry.kt",
+      "line": 507,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrosuper8"
+    },
+    {
+      "definition_id": "retro_monochrome_high_contrast",
+      "stock_vector": "Icons.Rounded.MonochromePhotos",
+      "proposed_purpose_id": "cameraRetroMonochromeHighContrast",
+      "source": "EffectRegistry.kt",
+      "line": 520,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretromonochromehighcontrast"
+    },
+    {
+      "definition_id": "retro_cyanotype",
+      "stock_vector": "Icons.Rounded.Water",
+      "proposed_purpose_id": "cameraRetroCyanotype",
+      "source": "EffectRegistry.kt",
+      "line": 533,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrocyanotype"
+    },
+    {
+      "definition_id": "retro_vaporwave_80s",
+      "stock_vector": "Icons.Rounded.Waves",
+      "proposed_purpose_id": "cameraRetroVaporwave80s",
+      "source": "EffectRegistry.kt",
+      "line": 546,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrovaporwave80s"
+    },
+    {
+      "definition_id": "retro_duotone_magenta",
+      "stock_vector": "Icons.Rounded.Style",
+      "proposed_purpose_id": "cameraRetroDuotoneMagenta",
+      "source": "EffectRegistry.kt",
+      "line": 559,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretroduotonemagenta"
+    },
+    {
+      "definition_id": "retro_kodachrome",
+      "stock_vector": "Icons.Rounded.Camera",
+      "proposed_purpose_id": "cameraRetroKodachrome",
+      "source": "EffectRegistry.kt",
+      "line": 572,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrokodachrome"
+    },
+    {
+      "definition_id": "retro_lomo_vignette",
+      "stock_vector": "Icons.Rounded.CameraEnhance",
+      "proposed_purpose_id": "cameraRetroLomoVignette",
+      "source": "EffectRegistry.kt",
+      "line": 585,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrolomovignette"
+    },
+    {
+      "definition_id": "retro_bleach_bypass",
+      "stock_vector": "Icons.Rounded.Grain",
+      "proposed_purpose_id": "cameraRetroBleachBypass",
+      "source": "EffectRegistry.kt",
+      "line": 598,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrobleachbypass"
+    },
+    {
+      "definition_id": "retro_cross_process",
+      "stock_vector": "Icons.Rounded.Tune",
+      "proposed_purpose_id": "cameraRetroCrossProcess",
+      "source": "EffectRegistry.kt",
+      "line": 611,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrocrossprocess"
+    },
+    {
+      "definition_id": "retro_silver_gelatin",
+      "stock_vector": "Icons.Rounded.FilterBAndW",
+      "proposed_purpose_id": "cameraRetroSilverGelatin",
+      "source": "EffectRegistry.kt",
+      "line": 624,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrosilvergelatin"
+    },
+    {
+      "definition_id": "retro_warm_amber",
+      "stock_vector": "Icons.Rounded.LocalFireDepartment",
+      "proposed_purpose_id": "cameraRetroWarmAmber",
+      "source": "EffectRegistry.kt",
+      "line": 637,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrowarmamber"
+    },
+    {
+      "definition_id": "cyber_neon_glow",
+      "stock_vector": "Icons.Outlined.Lightbulb",
+      "proposed_purpose_id": "cameraCyberNeonGlow",
+      "source": "EffectRegistry.kt",
+      "line": 650,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberneonglow"
+    },
+    {
+      "definition_id": "cyber_laser_cyan",
+      "stock_vector": "Icons.Rounded.ElectricBolt",
+      "proposed_purpose_id": "cameraCyberLaserCyan",
+      "source": "EffectRegistry.kt",
+      "line": 663,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberlasercyan"
+    },
+    {
+      "definition_id": "cyber_glitch_flux",
+      "stock_vector": "Icons.Rounded.BrokenImage",
+      "proposed_purpose_id": "cameraCyberGlitchFlux",
+      "source": "EffectRegistry.kt",
+      "line": 676,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberglitchflux"
+    },
+    {
+      "definition_id": "cyber_holo_grid",
+      "stock_vector": "Icons.Rounded.Grid4x4",
+      "proposed_purpose_id": "cameraCyberHoloGrid",
+      "source": "EffectRegistry.kt",
+      "line": 689,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberhologrid"
+    },
+    {
+      "definition_id": "cyber_synthwave",
+      "stock_vector": "Icons.Outlined.WbSunny",
+      "proposed_purpose_id": "cameraCyberSynthwave",
+      "source": "EffectRegistry.kt",
+      "line": 702,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracybersynthwave"
+    },
+    {
+      "definition_id": "cyber_emerald_core",
+      "stock_vector": "Icons.Rounded.Diamond",
+      "proposed_purpose_id": "cameraCyberEmeraldCore",
+      "source": "EffectRegistry.kt",
+      "line": 715,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberemeraldcore"
+    },
+    {
+      "definition_id": "cyber_solar_flare",
+      "stock_vector": "Icons.Rounded.SolarPower",
+      "proposed_purpose_id": "cameraCyberSolarFlare",
+      "source": "EffectRegistry.kt",
+      "line": 728,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracybersolarflare"
+    },
+    {
+      "definition_id": "cyber_aurora_borealis",
+      "stock_vector": "Icons.Rounded.Stream",
+      "proposed_purpose_id": "cameraCyberAuroraBorealis",
+      "source": "EffectRegistry.kt",
+      "line": 741,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberauroraborealis"
+    },
+    {
+      "definition_id": "cyber_plasma_pink",
+      "stock_vector": "Icons.Rounded.CircleNotifications",
+      "proposed_purpose_id": "cameraCyberPlasmaPink",
+      "source": "EffectRegistry.kt",
+      "line": 754,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberplasmapink"
+    },
+    {
+      "definition_id": "cyber_deep_void",
+      "stock_vector": "Icons.Rounded.StarBorder",
+      "proposed_purpose_id": "cameraCyberDeepVoid",
+      "source": "EffectRegistry.kt",
+      "line": 767,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberdeepvoid"
+    },
+    {
+      "definition_id": "face_sparkles",
+      "stock_vector": "Icons.Rounded.Stars",
+      "proposed_purpose_id": "cameraFaceSparkles",
+      "source": "EffectRegistry.kt",
+      "line": 780,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafacesparkles"
+    },
+    {
+      "definition_id": "face_hearts_float",
+      "stock_vector": "Icons.Rounded.Favorite",
+      "proposed_purpose_id": "cameraFaceHeartsFloat",
+      "source": "EffectRegistry.kt",
+      "line": 794,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafaceheartsfloat"
+    },
+    {
+      "definition_id": "face_party_confetti",
+      "stock_vector": "Icons.Rounded.Celebration",
+      "proposed_purpose_id": "cameraFacePartyConfetti",
+      "source": "EffectRegistry.kt",
+      "line": 808,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafacepartyconfetti"
+    },
+    {
+      "definition_id": "face_neon_crown",
+      "stock_vector": "Icons.Rounded.MilitaryTech",
+      "proposed_purpose_id": "cameraFaceNeonCrown",
+      "source": "EffectRegistry.kt",
+      "line": 821,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafaceneoncrown"
+    },
+    {
+      "definition_id": "face_comic_sketch",
+      "stock_vector": "Icons.Rounded.AutoStories",
+      "proposed_purpose_id": "cameraFaceComicSketch",
+      "source": "EffectRegistry.kt",
+      "line": 829,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafacecomicsketch"
+    },
+    {
+      "definition_id": "face_pixel_retro",
+      "stock_vector": "Icons.Rounded.VideogameAsset",
+      "proposed_purpose_id": "cameraFacePixelRetro",
+      "source": "EffectRegistry.kt",
+      "line": 842,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafacepixelretro"
+    },
+    {
+      "definition_id": "face_angel_halo",
+      "stock_vector": "Icons.Outlined.Circle",
+      "proposed_purpose_id": "cameraFaceAngelHalo",
+      "source": "EffectRegistry.kt",
+      "line": 852,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafaceangelhalo"
+    },
+    {
+      "definition_id": "face_sunglasses_aviator",
+      "stock_vector": "Icons.Rounded.Visibility",
+      "proposed_purpose_id": "cameraFaceSunglassesAviator",
+      "source": "EffectRegistry.kt",
+      "line": 860,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafacesunglassesaviator"
+    },
+    {
+      "definition_id": "bg_portrait_blur",
+      "stock_vector": "Icons.Rounded.BlurOn",
+      "proposed_purpose_id": "cameraBgPortraitBlur",
+      "source": "EffectRegistry.kt",
+      "line": 868,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabgportraitblur"
+    },
+    {
+      "definition_id": "bg_virtual_office",
+      "stock_vector": "Icons.Rounded.Business",
+      "proposed_purpose_id": "cameraBgVirtualOffice",
+      "source": "EffectRegistry.kt",
+      "line": 879,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabgvirtualoffice"
+    },
+    {
+      "definition_id": "bg_gradient_studio",
+      "stock_vector": "Icons.Rounded.Gradient",
+      "proposed_purpose_id": "cameraBgGradientStudio",
+      "source": "EffectRegistry.kt",
+      "line": 890,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabggradientstudio"
+    },
+    {
+      "definition_id": "beauty_rose_glow",
+      "stock_vector": "Icons.Rounded.LocalFlorist",
+      "proposed_purpose_id": "cameraBeautyRoseGlow",
+      "source": "EffectRegistry.kt",
+      "line": 901,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautyroseglow"
+    },
+    {
+      "definition_id": "beauty_silk",
+      "stock_vector": "Icons.Rounded.AutoFixHigh",
+      "proposed_purpose_id": "cameraBeautySilk",
+      "source": "EffectRegistry.kt",
+      "line": 914,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautysilk"
+    },
+    {
+      "definition_id": "beauty_bronze",
+      "stock_vector": "Icons.Rounded.Brightness7",
+      "proposed_purpose_id": "cameraBeautyBronze",
+      "source": "EffectRegistry.kt",
+      "line": 927,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautybronze"
+    },
+    {
+      "definition_id": "beauty_pearl",
+      "stock_vector": "Icons.Rounded.Diamond",
+      "proposed_purpose_id": "cameraBeautyPearl",
+      "source": "EffectRegistry.kt",
+      "line": 940,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautypearl"
+    },
+    {
+      "definition_id": "beauty_velvet",
+      "stock_vector": "Icons.Rounded.Texture",
+      "proposed_purpose_id": "cameraBeautyVelvet",
+      "source": "EffectRegistry.kt",
+      "line": 953,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautyvelvet"
+    },
+    {
+      "definition_id": "beauty_honey",
+      "stock_vector": "Icons.Rounded.LightMode",
+      "proposed_purpose_id": "cameraBeautyHoney",
+      "source": "EffectRegistry.kt",
+      "line": 966,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautyhoney"
+    },
+    {
+      "definition_id": "cine_emerald_city",
+      "stock_vector": "Icons.Rounded.Park",
+      "proposed_purpose_id": "cameraCineEmeraldCity",
+      "source": "EffectRegistry.kt",
+      "line": 979,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracineemeraldcity"
+    },
+    {
+      "definition_id": "cine_royal_purple",
+      "stock_vector": "Icons.Rounded.AutoAwesome",
+      "proposed_purpose_id": "cameraCineRoyalPurple",
+      "source": "EffectRegistry.kt",
+      "line": 992,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracineroyalpurple"
+    },
+    {
+      "definition_id": "cine_steel_blue",
+      "stock_vector": "Icons.Rounded.Tonality",
+      "proposed_purpose_id": "cameraCineSteelBlue",
+      "source": "EffectRegistry.kt",
+      "line": 1005,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinesteelblue"
+    },
+    {
+      "definition_id": "cine_midnight_sun",
+      "stock_vector": "Icons.Rounded.DarkMode",
+      "proposed_purpose_id": "cameraCineMidnightSun",
+      "source": "EffectRegistry.kt",
+      "line": 1018,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracinemidnightsun"
+    },
+    {
+      "definition_id": "retro_seventies",
+      "stock_vector": "Icons.Rounded.Nightlife",
+      "proposed_purpose_id": "cameraRetroSeventies",
+      "source": "EffectRegistry.kt",
+      "line": 1031,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretroseventies"
+    },
+    {
+      "definition_id": "retro_newspaper",
+      "stock_vector": "Icons.Rounded.AutoStories",
+      "proposed_purpose_id": "cameraRetroNewspaper",
+      "source": "EffectRegistry.kt",
+      "line": 1044,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretronewspaper"
+    },
+    {
+      "definition_id": "retro_seaside",
+      "stock_vector": "Icons.Rounded.BeachAccess",
+      "proposed_purpose_id": "cameraRetroSeaside",
+      "source": "EffectRegistry.kt",
+      "line": 1057,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretroseaside"
+    },
+    {
+      "definition_id": "retro_faded_denim",
+      "stock_vector": "Icons.Rounded.Brush",
+      "proposed_purpose_id": "cameraRetroFadedDenim",
+      "source": "EffectRegistry.kt",
+      "line": 1070,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraretrofadeddenim"
+    },
+    {
+      "definition_id": "film_ektar",
+      "stock_vector": "Icons.Rounded.PhotoFilter",
+      "proposed_purpose_id": "cameraFilmEktar",
+      "source": "EffectRegistry.kt",
+      "line": 1083,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafilmektar"
+    },
+    {
+      "definition_id": "film_cinestill",
+      "stock_vector": "Icons.Rounded.Nightlight",
+      "proposed_purpose_id": "cameraFilmCinestill",
+      "source": "EffectRegistry.kt",
+      "line": 1096,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafilmcinestill"
+    },
+    {
+      "definition_id": "film_delta_mono",
+      "stock_vector": "Icons.Rounded.FilterBAndW",
+      "proposed_purpose_id": "cameraFilmDeltaMono",
+      "source": "EffectRegistry.kt",
+      "line": 1109,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafilmdeltamono"
+    },
+    {
+      "definition_id": "film_slide_chrome",
+      "stock_vector": "Icons.Rounded.FilterHdr",
+      "proposed_purpose_id": "cameraFilmSlideChrome",
+      "source": "EffectRegistry.kt",
+      "line": 1122,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerafilmslidechrome"
+    },
+    {
+      "definition_id": "glow_cherry",
+      "stock_vector": "Icons.Rounded.Favorite",
+      "proposed_purpose_id": "cameraGlowCherry",
+      "source": "EffectRegistry.kt",
+      "line": 1135,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraglowcherry"
+    },
+    {
+      "definition_id": "glow_lime",
+      "stock_vector": "Icons.Rounded.Eco",
+      "proposed_purpose_id": "cameraGlowLime",
+      "source": "EffectRegistry.kt",
+      "line": 1148,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraglowlime"
+    },
+    {
+      "definition_id": "glow_ice",
+      "stock_vector": "Icons.Rounded.AcUnit",
+      "proposed_purpose_id": "cameraGlowIce",
+      "source": "EffectRegistry.kt",
+      "line": 1161,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraglowice"
+    },
+    {
+      "definition_id": "glow_ember",
+      "stock_vector": "Icons.Rounded.LocalFireDepartment",
+      "proposed_purpose_id": "cameraGlowEmber",
+      "source": "EffectRegistry.kt",
+      "line": 1174,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraglowember"
+    },
+    {
+      "definition_id": "cyber_purple_rain",
+      "stock_vector": "Icons.Rounded.FilterDrama",
+      "proposed_purpose_id": "cameraCyberPurpleRain",
+      "source": "EffectRegistry.kt",
+      "line": 1187,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberpurplerain"
+    },
+    {
+      "definition_id": "cyber_infrared",
+      "stock_vector": "Icons.Rounded.WbIridescent",
+      "proposed_purpose_id": "cameraCyberInfrared",
+      "source": "EffectRegistry.kt",
+      "line": 1200,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberinfrared"
+    },
+    {
+      "definition_id": "cyber_arcade",
+      "stock_vector": "Icons.Rounded.VideogameAsset",
+      "proposed_purpose_id": "cameraCyberArcade",
+      "source": "EffectRegistry.kt",
+      "line": 1213,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracyberarcade"
+    },
+    {
+      "definition_id": "glow_rainbow_sheen",
+      "stock_vector": "Icons.Rounded.WbIridescent",
+      "proposed_purpose_id": "cameraGlowRainbowSheen",
+      "source": "EffectRegistry.kt",
+      "line": 1226,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraglowrainbowsheen"
+    },
+    {
+      "definition_id": "beauty_golden_veil",
+      "stock_vector": "Icons.Rounded.Diamond",
+      "proposed_purpose_id": "cameraBeautyGoldenVeil",
+      "source": "EffectRegistry.kt",
+      "line": 1239,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautygoldenveil"
+    },
+    {
+      "definition_id": "beauty_sunkissed",
+      "stock_vector": "Icons.Rounded.WbSunny",
+      "proposed_purpose_id": "cameraBeautySunkissed",
+      "source": "EffectRegistry.kt",
+      "line": 1252,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_camerabeautysunkissed"
+    },
+    {
+      "definition_id": "celebration_fireworks",
+      "stock_vector": "Icons.Rounded.EmojiEvents",
+      "proposed_purpose_id": "cameraCelebrationFireworks",
+      "source": "EffectRegistry.kt",
+      "line": 1265,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracelebrationfireworks"
+    },
+    {
+      "definition_id": "celebration_balloons",
+      "stock_vector": "Icons.Rounded.Cake",
+      "proposed_purpose_id": "cameraCelebrationBalloons",
+      "source": "EffectRegistry.kt",
+      "line": 1278,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracelebrationballoons"
+    },
+    {
+      "definition_id": "celebration_gold_confetti",
+      "stock_vector": "Icons.Rounded.Stars",
+      "proposed_purpose_id": "cameraCelebrationGoldConfetti",
+      "source": "EffectRegistry.kt",
+      "line": 1291,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracelebrationgoldconfetti"
+    },
+    {
+      "definition_id": "color_boost",
+      "stock_vector": "Icons.Rounded.ColorLens",
+      "proposed_purpose_id": "cameraColorBoost",
+      "source": "EffectRegistry.kt",
+      "line": 1304,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracolorboost"
+    },
+    {
+      "definition_id": "color_muted",
+      "stock_vector": "Icons.Rounded.InvertColors",
+      "proposed_purpose_id": "cameraColorMuted",
+      "source": "EffectRegistry.kt",
+      "line": 1317,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracolormuted"
+    },
+    {
+      "definition_id": "color_vivid_pop",
+      "stock_vector": "Icons.Rounded.Star",
+      "proposed_purpose_id": "cameraColorVividPop",
+      "source": "EffectRegistry.kt",
+      "line": 1330,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracolorvividpop"
+    },
+    {
+      "definition_id": "color_mono_cool",
+      "stock_vector": "Icons.Rounded.Contrast",
+      "proposed_purpose_id": "cameraColorMonoCool",
+      "source": "EffectRegistry.kt",
+      "line": 1343,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracolormonocool"
+    },
+    {
+      "definition_id": "color_warm_soft",
+      "stock_vector": "Icons.Rounded.WbSunny",
+      "proposed_purpose_id": "cameraColorWarmSoft",
+      "source": "EffectRegistry.kt",
+      "line": 1356,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameracolorwarmsoft"
+    },
+    {
+      "definition_id": "portrait_soft_focus",
+      "stock_vector": "Icons.Rounded.EmojiEmotions",
+      "proposed_purpose_id": "cameraPortraitSoftFocus",
+      "source": "EffectRegistry.kt",
+      "line": 1369,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraportraitsoftfocus"
+    },
+    {
+      "definition_id": "portrait_contour",
+      "stock_vector": "Icons.Rounded.SentimentVerySatisfied",
+      "proposed_purpose_id": "cameraPortraitContour",
+      "source": "EffectRegistry.kt",
+      "line": 1382,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraportraitcontour"
+    },
+    {
+      "definition_id": "glow_sunset_haze",
+      "stock_vector": "Icons.Rounded.Flare",
+      "proposed_purpose_id": "cameraGlowSunsetHaze",
+      "source": "EffectRegistry.kt",
+      "line": 1395,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraglowsunsethaze"
+    },
+    {
+      "definition_id": "glow_forest_mist",
+      "stock_vector": "Icons.Rounded.Eco",
+      "proposed_purpose_id": "cameraGlowForestMist",
+      "source": "EffectRegistry.kt",
+      "line": 1408,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameraglowforestmist"
+    },
+    {
+      "definition_id": "none",
+      "stock_vector": "Icons.Outlined.Circle",
+      "proposed_purpose_id": "cameraNone",
+      "source": "LensManager.kt",
+      "line": 50,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameranone"
+    },
+    {
+      "definition_id": "lens_glasses_classic",
+      "stock_vector": "Icons.Rounded.Visibility",
+      "proposed_purpose_id": "cameraLensGlassesClassic",
+      "source": "LensManager.kt",
+      "line": 59,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensglassesclassic"
+    },
+    {
+      "definition_id": "lens_crown_gold",
+      "stock_vector": "Icons.Rounded.WorkspacePremium",
+      "proposed_purpose_id": "cameraLensCrownGold",
+      "source": "LensManager.kt",
+      "line": 67,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenscrowngold"
+    },
+    {
+      "definition_id": "lens_dog_ears",
+      "stock_vector": "Icons.Rounded.Pets",
+      "proposed_purpose_id": "cameraLensDogEars",
+      "source": "LensManager.kt",
+      "line": 75,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensdogears"
+    },
+    {
+      "definition_id": "lens_blush_glow",
+      "stock_vector": "Icons.Rounded.FaceRetouchingNatural",
+      "proposed_purpose_id": "cameraLensBlushGlow",
+      "source": "LensManager.kt",
+      "line": 83,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensblushglow"
+    },
+    {
+      "definition_id": "lens_sunglasses_aviator",
+      "stock_vector": "Icons.Rounded.RemoveRedEye",
+      "proposed_purpose_id": "cameraLensSunglassesAviator",
+      "source": "LensManager.kt",
+      "line": 92,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenssunglassesaviator"
+    },
+    {
+      "definition_id": "lens_sparkles",
+      "stock_vector": "Icons.Rounded.AutoAwesome",
+      "proposed_purpose_id": "cameraLensSparkles",
+      "source": "LensManager.kt",
+      "line": 100,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenssparkles"
+    },
+    {
+      "definition_id": "lens_hearts_float",
+      "stock_vector": "Icons.Rounded.Favorite",
+      "proposed_purpose_id": "cameraLensHeartsFloat",
+      "source": "LensManager.kt",
+      "line": 108,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensheartsfloat"
+    },
+    {
+      "definition_id": "lens_angel_halo",
+      "stock_vector": "Icons.Rounded.WbTwilight",
+      "proposed_purpose_id": "cameraLensAngelHalo",
+      "source": "LensManager.kt",
+      "line": 116,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensangelhalo"
+    },
+    {
+      "definition_id": "lens_neon_crown",
+      "stock_vector": "Icons.Rounded.WorkspacePremium",
+      "proposed_purpose_id": "cameraLensNeonCrown",
+      "source": "LensManager.kt",
+      "line": 124,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensneoncrown"
+    },
+    {
+      "definition_id": "lens_cat_ears",
+      "stock_vector": "Icons.Rounded.Pets",
+      "proposed_purpose_id": "cameraLensCatEars",
+      "source": "LensManager.kt",
+      "line": 132,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenscatears"
+    },
+    {
+      "definition_id": "lens_bunny_ears",
+      "stock_vector": "Icons.Rounded.EmojiNature",
+      "proposed_purpose_id": "cameraLensBunnyEars",
+      "source": "LensManager.kt",
+      "line": 141,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensbunnyears"
+    },
+    {
+      "definition_id": "lens_round_shades",
+      "stock_vector": "Icons.Rounded.Face",
+      "proposed_purpose_id": "cameraLensRoundShades",
+      "source": "LensManager.kt",
+      "line": 149,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensroundshades"
+    },
+    {
+      "definition_id": "lens_heart_shades",
+      "stock_vector": "Icons.Rounded.Favorite",
+      "proposed_purpose_id": "cameraLensHeartShades",
+      "source": "LensManager.kt",
+      "line": 157,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensheartshades"
+    },
+    {
+      "definition_id": "lens_star_eyes",
+      "stock_vector": "Icons.Rounded.StarRate",
+      "proposed_purpose_id": "cameraLensStarEyes",
+      "source": "LensManager.kt",
+      "line": 166,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensstareyes"
+    },
+    {
+      "definition_id": "lens_monocle",
+      "stock_vector": "Icons.Rounded.Loupe",
+      "proposed_purpose_id": "cameraLensMonocle",
+      "source": "LensManager.kt",
+      "line": 174,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensmonocle"
+    },
+    {
+      "definition_id": "lens_flower_crown",
+      "stock_vector": "Icons.Rounded.LocalFlorist",
+      "proposed_purpose_id": "cameraLensFlowerCrown",
+      "source": "LensManager.kt",
+      "line": 182,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensflowercrown"
+    },
+    {
+      "definition_id": "lens_tiara",
+      "stock_vector": "Icons.Rounded.Diamond",
+      "proposed_purpose_id": "cameraLensTiara",
+      "source": "LensManager.kt",
+      "line": 190,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenstiara"
+    },
+    {
+      "definition_id": "lens_wizard_hat",
+      "stock_vector": "Icons.Rounded.AutoFixHigh",
+      "proposed_purpose_id": "cameraLensWizardHat",
+      "source": "LensManager.kt",
+      "line": 198,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenswizardhat"
+    },
+    {
+      "definition_id": "lens_headphones",
+      "stock_vector": "Icons.Rounded.Headset",
+      "proposed_purpose_id": "cameraLensHeadphones",
+      "source": "LensManager.kt",
+      "line": 206,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensheadphones"
+    },
+    {
+      "definition_id": "lens_devil_horns",
+      "stock_vector": "Icons.Rounded.LocalFireDepartment",
+      "proposed_purpose_id": "cameraLensDevilHorns",
+      "source": "LensManager.kt",
+      "line": 214,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensdevilhorns"
+    },
+    {
+      "definition_id": "lens_rainbow_arc",
+      "stock_vector": "Icons.Rounded.WbIridescent",
+      "proposed_purpose_id": "cameraLensRainbowArc",
+      "source": "LensManager.kt",
+      "line": 222,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensrainbowarc"
+    },
+    {
+      "definition_id": "lens_butterflies",
+      "stock_vector": "Icons.Rounded.Eco",
+      "proposed_purpose_id": "cameraLensButterflies",
+      "source": "LensManager.kt",
+      "line": 230,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensbutterflies"
+    },
+    {
+      "definition_id": "lens_freckles",
+      "stock_vector": "Icons.Rounded.Mood",
+      "proposed_purpose_id": "cameraLensFreckles",
+      "source": "LensManager.kt",
+      "line": 238,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensfreckles"
+    },
+    {
+      "definition_id": "lens_mustache",
+      "stock_vector": "Icons.Rounded.SentimentVerySatisfied",
+      "proposed_purpose_id": "cameraLensMustache",
+      "source": "LensManager.kt",
+      "line": 246,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensmustache"
+    },
+    {
+      "definition_id": "lens_lip_gloss",
+      "stock_vector": "Icons.Rounded.FavoriteBorder",
+      "proposed_purpose_id": "cameraLensLipGloss",
+      "source": "LensManager.kt",
+      "line": 254,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenslipgloss"
+    },
+    {
+      "definition_id": "lens_clown_nose",
+      "stock_vector": "Icons.Rounded.EmojiEmotions",
+      "proposed_purpose_id": "cameraLensClownNose",
+      "source": "LensManager.kt",
+      "line": 262,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensclownnose"
+    },
+    {
+      "definition_id": "lens_pirate_patch",
+      "stock_vector": "Icons.Rounded.VisibilityOff",
+      "proposed_purpose_id": "cameraLensPiratePatch",
+      "source": "LensManager.kt",
+      "line": 270,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenspiratepatch"
+    },
+    {
+      "definition_id": "lens_snow_drift",
+      "stock_vector": "Icons.Rounded.AcUnit",
+      "proposed_purpose_id": "cameraLensSnowDrift",
+      "source": "LensManager.kt",
+      "line": 278,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralenssnowdrift"
+    },
+    {
+      "definition_id": "lens_music_notes",
+      "stock_vector": "Icons.Rounded.MusicNote",
+      "proposed_purpose_id": "cameraLensMusicNotes",
+      "source": "LensManager.kt",
+      "line": 286,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensmusicnotes"
+    },
+    {
+      "definition_id": "lens_star_crown",
+      "stock_vector": "Icons.Rounded.Stars",
+      "proposed_purpose_id": "cameraLensStarCrown",
+      "source": "LensManager.kt",
+      "line": 294,
+      "artwork_status": "installed: original caller-tinted purpose art; shared supplement in every icon family",
+      "in_current_squash": true,
+      "resource": "ic_chaty_purpose_cameralensstarcrown"
+    }
+  ]
+}

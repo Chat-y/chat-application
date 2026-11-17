@@ -41,7 +41,12 @@ internal fun ConversationApplyColorTo(options: List<ConversationColorOption>, pr
     val strings = androidx.compose.ui.platform.LocalContext.current.resources
     var openSheet by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
-    TextButton(onClick = { selectedIds = arrayListOf(); openSheet = true }) { Text(strings.getString(com.example.chat.R.string.conv_helper_apply_colour_many)) }
+    // Previous stock text action:
+    // TextButton(onClick = { selectedIds = arrayListOf(); openSheet = true }) { Text(strings.getString(com.example.chat.R.string.conv_helper_apply_colour_many)) }
+    com.example.chat.ui.kit.ChatyTextButton(
+        label = strings.getString(com.example.chat.R.string.conv_helper_apply_colour_many),
+        onClick = { selectedIds = arrayListOf(); openSheet = true },
+    )
     if (openSheet) ChatySelectionModal(title = strings.getString(com.example.chat.R.string.conv_helper_choose_colour_targets), onDismiss = { openSheet = false },
         applyLabel = strings.getString(com.example.chat.R.string.conv_helper_choose_colour), applyEnabled = selectedIds.isNotEmpty(), onApply = {
             val selected = options.filter { it.id in selectedIds }
@@ -74,18 +79,35 @@ internal fun ConversationEmojiPresets(preferences: ChatyPreferencesController, o
     val current = com.example.chat.ui.theme.LocalThemeConfig.current
     androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()) {
         ConversationEmojiPreset.entries.forEach { preset ->
-            TextButton(modifier = Modifier.weight(1f), onClick = {
+            // Previous stock text action:
+            // TextButton(modifier = Modifier.weight(1f), onClick = {
+            //                 val colors = conversationEmojiPresetColors(preset, current)
+            //                 if (onPreset != null) onPreset(colors.header, colors.icons, colors.background)
+            //                 else preferences.editConversation { state -> state.copy(
+            //                     emojiHeaderColor = colors.header, emojiHeaderIconsColor = colors.icons,
+            //                     emojiPickerBgColor = colors.background,
+            //                 ) }
+            //             }) { Text(strings.getString(when (preset) {
+            //                 ConversationEmojiPreset.Light -> com.example.chat.R.string.conv_helper_emoji_light
+            //                 ConversationEmojiPreset.Dark -> com.example.chat.R.string.conv_helper_emoji_dark
+            //                 ConversationEmojiPreset.Accent -> com.example.chat.R.string.conv_helper_emoji_accent
+            //             })) }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = strings.getString(when (preset) {
+                ConversationEmojiPreset.Light -> com.example.chat.R.string.conv_helper_emoji_light
+                ConversationEmojiPreset.Dark -> com.example.chat.R.string.conv_helper_emoji_dark
+                ConversationEmojiPreset.Accent -> com.example.chat.R.string.conv_helper_emoji_accent
+            }),
+                modifier = Modifier.weight(1f),
+                onClick = {
                 val colors = conversationEmojiPresetColors(preset, current)
                 if (onPreset != null) onPreset(colors.header, colors.icons, colors.background)
                 else preferences.editConversation { state -> state.copy(
                     emojiHeaderColor = colors.header, emojiHeaderIconsColor = colors.icons,
                     emojiPickerBgColor = colors.background,
                 ) }
-            }) { Text(strings.getString(when (preset) {
-                ConversationEmojiPreset.Light -> com.example.chat.R.string.conv_helper_emoji_light
-                ConversationEmojiPreset.Dark -> com.example.chat.R.string.conv_helper_emoji_dark
-                ConversationEmojiPreset.Accent -> com.example.chat.R.string.conv_helper_emoji_accent
-            })) }
+            },
+            )
         }
     }
     /* Previous equivalent inline preset projection retained.

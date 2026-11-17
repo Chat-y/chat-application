@@ -1,5 +1,6 @@
 package com.example.chat.ui.core.theme
 
+import com.example.chat.ui.kit.chatyDepth
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -116,9 +117,11 @@ private fun ColorDot(color: Color, tooltip: String, t: ThemeConfig) {
         positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = {
             androidx.compose.material3.Surface(
+                modifier = Modifier.chatyDepth(2.dp, RoundedCornerShape(4.dp)),
                 shape = RoundedCornerShape(4.dp),
                 color = tc(t.surfaceColor),
-                shadowElevation = 2.dp,
+                // Previous (default black shadow): shadowElevation = 2.dp,
+                shadowElevation = 0.dp,
             ) {
                 Text(
                     tooltip,

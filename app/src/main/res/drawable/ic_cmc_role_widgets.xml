@@ -1,1 +1,7 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+<path android:pathData="M3 3 H11 V11 H3 Z M15 3 H21 V8 H15 Z M3 15 H8 V21 H3 Z" android:fillColor="#00000000" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+<path android:pathData="M12 15 H21 V21 H12 Z M15 11 H21 M18 9 V13" android:fillColor="#00000000" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+</vector>
+<!-- Previous duplicated vector retained. Original distinct-purpose replacement above.
 <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:pathData="M11.300,11.300 L11.300,1.700 L1.700,1.700 L1.700,11.300 L11.300,11.300 Z M8.700,8.700 L4.300,8.700 L4.300,4.300 L8.700,4.300 L8.700,8.700 Z M22.300,11.300 L22.300,1.700 L12.700,1.700 L12.700,11.300 L22.300,11.300 Z M19.700,8.700 L15.300,8.700 L15.300,4.300 L19.700,4.300 L19.700,8.700 Z M11.300,22.300 L11.300,12.700 L1.700,12.700 L1.700,22.300 L11.300,22.300 Z M8.700,19.700 L4.300,19.700 L4.300,15.300 L8.700,15.300 L8.700,19.700 Z M22.300,22.300 L22.300,12.700 L12.700,12.700 L12.700,22.300 L22.300,22.300 Z M19.700,19.700 L15.300,19.700 L15.300,15.300 L19.700,15.300 L19.700,19.700 Z" android:fillColor="#FF000000" android:fillType="evenOdd" /></vector>
+-->

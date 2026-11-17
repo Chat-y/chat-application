@@ -3,6 +3,9 @@ package com.example.chat.ui.icons
 /** Exact semantic bridge for legacy ImageVector-backed UI models. Unknown roles remain explicit audit gaps. */
 object ChatyMaterialIconRoles {
     val byName: Map<String, ChatyIconId> = mapOf(
+        "DocumentScanner" to ChatyIconId.documentScan,
+        "Error" to ChatyIconId.errorOutline,
+        "IosShare" to ChatyIconId.share,
         "AddReaction" to ChatyIconId.reactionAdd,
         "ArrowDownward" to ChatyIconId.moveDown,
         "AutoFixHigh" to ChatyIconId.autoAwesome,
@@ -388,5 +391,11 @@ object ChatyMaterialIconRoles {
         "VolumeUp" to ChatyIconId.unmute,
         "Wallpaper" to ChatyIconId.wallpaper,
     )
-    fun resolve(vectorName: String): ChatyIconId? = byName[vectorName.substringAfterLast('.')]
+    // Previous name-only resolver retained: byName[vectorName.substringAfterLast('.')]
+    fun resolve(vectorName: String): ChatyIconId? {
+        val name = vectorName.substringAfterLast('.')
+        // Materialized Chaty vectors preserve their semantic identity through legacy ImageVector APIs.
+        if (name.startsWith("Chaty")) ChatyIconId.entries.firstOrNull { it.name == name.removePrefix("Chaty") }?.let { return it }
+        return byName[name]
+    }
 }

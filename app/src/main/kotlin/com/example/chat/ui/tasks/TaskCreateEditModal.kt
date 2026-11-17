@@ -134,16 +134,19 @@ fun TaskCreateEditModal(
     var showDatePicker by remember { mutableStateOf(false) }
 
     val conversation = conversations.firstOrNull { it.id == sourceConversationId }
+    // P2 (Bandi 2026-11-17): the Tasks tab hosts this sheet with no source conversation;
+    // "shared in chat" was never true there.
+    val sharesToChat = conversation != null
     val candidateAssignees = (conversation?.participantIds ?: emptyList())
         .filter { it != currentUser.id }
         .mapNotNull(getUser)
 
+    // P1 (Bandi 2026-11-17): the backend stores exactly one assignee
+    // (ApiTasksClient.singleAssignee rejects 2+), so selection is single-select;
+    // multi-tick previously guaranteed a save error.
+    // Prior: toggling ADDED candidates (selectedAssigneeIds + userId).
     fun setAssignee(userId: String, selected: Boolean) {
-        selectedAssigneeIds = if (selected) {
-            if (userId in selectedAssigneeIds) selectedAssigneeIds else selectedAssigneeIds + userId
-        } else {
-            selectedAssigneeIds - userId
-        }
+        selectedAssigneeIds = if (selected) listOf(userId) else selectedAssigneeIds - userId
     }
 
     fun save() {
@@ -183,8 +186,11 @@ fun TaskCreateEditModal(
                 }
                 onDismiss()
                 onSaved(
-                    if (existingTask == null) "Task \"$trimmedTitle\" created and shared in chat."
-                    else "Task \"$trimmedTitle\" updated.",
+                    // Prior: if (existingTask == null) "Task \"$trimmedTitle\" created and shared in chat."
+                    if (existingTask == null) {
+                        if (sharesToChat) "Task \"$trimmedTitle\" created and shared in chat."
+                        else "Task \"$trimmedTitle\" created."
+                    } else "Task \"$trimmedTitle\" updated.",
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 // AUDIT-TAS-1: rethrow cancellation; the broad catch below used to swallow it and
@@ -272,7 +278,9 @@ fun TaskCreateEditModal(
             com.example.chat.ui.kit.ChatyTaskField(
                 value = description, onValueChange = { description = it },
                 placeholder = "Description & instructions (optional)", enabled = !isSaving, singleLine = false,
-                leadingIcon = { Icon(Icons.Rounded.Notes, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                leadingIcon = {
+//Icon(Icons.Rounded.Notes, contentDescription = null, modifier = Modifier.size(20.dp))
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.document, Icons.Rounded.Notes, contentDescription = null, modifier = Modifier.size(20.dp)) },
             )
             Spacer(Modifier.height(16.dp))
             Text("Assign To", color = colors.foreground, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -286,14 +294,16 @@ fun TaskCreateEditModal(
                     val selected = candidate.id in selectedAssigneeIds
                     com.example.chat.ui.kit.ChatyChoiceTile(
                         label = candidate.displayName.split(" ").first(), selected = selected, enabled = !isSaving,
-                        onClick = { setAssignee(candidate.id, !selected) }, role = androidx.compose.ui.semantics.Role.Checkbox,
+                        // Prior: role = androidx.compose.ui.semantics.Role.Checkbox,
+                        onClick = { setAssignee(candidate.id, !selected) }, role = androidx.compose.ui.semantics.Role.RadioButton,
                     )
                 }
                 com.example.chat.ui.kit.ChatyChoiceTile(
                     label = "Me (${currentUser.displayName.split(" ").first()})",
                     selected = currentUser.id in selectedAssigneeIds, enabled = !isSaving,
                     onClick = { setAssignee(currentUser.id, currentUser.id !in selectedAssigneeIds) },
-                    role = androidx.compose.ui.semantics.Role.Checkbox,
+                    // Prior: role = androidx.compose.ui.semantics.Role.Checkbox,
+                    role = androidx.compose.ui.semantics.Role.RadioButton,
                 )
             }
             Spacer(Modifier.height(16.dp))
@@ -317,7 +327,11 @@ fun TaskCreateEditModal(
                 com.example.chat.ui.kit.ChatyChoiceTile(
                     label = "Today 6 PM", enabled = !isSaving,
                     onClick = {
-                        val now = java.time.ZonedDateTime.now()
+                        // P3 (Bandi 2026-11-17): after 18:00 "Today 6 PM" would be in the past
+                        // (instantly overdue); roll to tomorrow like Todoist/TickTick.
+                        // Prior: val now = java.time.ZonedDateTime.now()
+                        val now0 = java.time.ZonedDateTime.now()
+                        val now = if (now0.hour >= 18) now0.plusDays(1) else now0
                         dueDate = now.withHour(18).withMinute(0).withSecond(0).withNano(0).toInstant()
                     },
                 )
@@ -360,7 +374,10 @@ fun TaskCreateEditModal(
             }
             Spacer(Modifier.height(20.dp))
             com.example.chat.ui.kit.ChatyChoiceTile(
-                label = if (isSaving) "Saving..." else if (existingTask == null) "Create & Share in Chat" else "Save Changes",
+                // Prior: if (existingTask == null) "Create & Share in Chat"
+                label = if (isSaving) "Saving..." else if (existingTask == null) {
+                    if (sharesToChat) "Create & Share in Chat" else "Create Task"
+                } else "Save Changes",
                 onClick = ::save, enabled = !isSaving, prominent = true, modifier = Modifier.fillMaxWidth(),
             )
         }

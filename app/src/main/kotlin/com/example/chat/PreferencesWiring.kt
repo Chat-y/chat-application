@@ -202,8 +202,11 @@ class ControllerRealtimePreferences(
 ) : RealtimePreferences {
     override val enableGlobalNotifications: Boolean get() = controller.notification.enableGlobalNotifications
     override val showMessagePreview: Boolean get() = controller.notification.showMessagePreview
-    override val notifyContactOnline: Boolean get() = controller.notification.notifyContactOnline
-    override val notifyTypingStarted: Boolean get() = controller.notification.notifyTypingStarted
+    // Canonical typed master; saved legacy values are normalized by the controller on load/write.
+    override val notifyContactOnline: Boolean get() = com.example.chat.domain.notifications.PresenceToastEnablement.allows(
+        controller.toasts.onlineToastEnabled, controller.notification.enableGlobalNotifications, controller.universal.disableHeadsUpNotification)
+    override val notifyTypingStarted: Boolean get() = com.example.chat.domain.notifications.PresenceToastEnablement.allows(
+        controller.toasts.typingToastEnabled, controller.notification.enableGlobalNotifications, controller.universal.disableHeadsUpNotification)
     override val notifyMessageDeleted: Boolean get() = controller.notification.notifyMessageDeleted
     override val messageRevokeAlert: Boolean get() = controller.privacy.messageRevokeAlert
     override val freezeLastSeen: Boolean get() = controller.privacy.freezeLastSeen

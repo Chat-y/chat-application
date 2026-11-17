@@ -261,6 +261,22 @@ fun GbCardContainer(
     headerText: String? = null,
     content: @Composable () -> Unit,
 ) {
+    GbCardContainer(
+        containerColor = LocalAppColors.current.surface,
+        modifier = modifier, padding = padding, margin = margin, headerText = headerText, content = content,
+    )
+}
+
+/** Explicit tone overload; the original positional/trailing-content signature remains available. */
+@Composable
+fun GbCardContainer(
+    containerColor: Color,
+    modifier: Modifier = Modifier,
+    padding: PaddingValues = PaddingValues(vertical = 4.dp),
+    margin: PaddingValues = PaddingValues(vertical = 6.dp),
+    headerText: String? = null,
+    content: @Composable () -> Unit,
+) {
     val config = LocalThemeConfig.current
     val colors = LocalAppColors.current
     val shape = RoundedCornerShape(config.cornerRadius.toFloat().dp)
@@ -268,7 +284,8 @@ fun GbCardContainer(
         Column(
             modifier.fillMaxWidth().padding(margin)
                 .shadow(8.dp, shape, ambientColor = colors.shadow, spotColor = colors.shadow)
-                .background(colors.surface, shape)
+                .clip(shape)
+                .background(containerColor, shape)
                 .border(0.9.dp, colors.borderSubtle, shape)
                 .padding(padding),
         ) { content() }

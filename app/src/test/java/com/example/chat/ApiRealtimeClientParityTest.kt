@@ -141,6 +141,62 @@ class ApiRealtimeClientParityTest {
         val socket: FakeSocket get() = factory.sockets.last()
     }
 
+    /** Source fixtures only. Not executed as part of this local change. */
+    @Test fun rejectedCallSendEvictsMatchingSocketAndDoesNotReplaySignal() {
+        val rig = Rig().connect()
+        val rejected = rig.socket
+        rejected.failSends = true
+        assertFalse(rig.client.sendCallSignal("u2", mapOf("call_id" to "old-call", "signal_type" to "offer")))
+        rig.scheduler.drain()
+        assertTrue(rejected.closed)
+        assertFalse(rig.client.isConnected)
+        rig.scheduler.advanceBy(4_000)
+        assertEquals(2, rig.factory.sockets.size)
+        assertTrue(rig.client.isConnected)
+        assertTrue(rig.socket.sent.isEmpty()) // Never replay SDP/ICE after reconnect.
+    }
+
+    @Test fun rejectedMessageFallbackEvictsMatchingSocketWithoutReplayingContent() {
+        val rig = Rig().connect()
+        val rejected = rig.socket
+        rejected.failSends = true
+        assertFalse(rig.client.sendMessageFallback("r1", "not-replayed"))
+        rig.scheduler.drain()
+        assertTrue(rejected.closed)
+        rig.scheduler.advanceBy(4_000)
+        assertEquals(2, rig.factory.sockets.size)
+        assertTrue(rig.socket.sent.isEmpty())
+    }
+
+    @Test fun repeatedRejectedFramesShareOneEvictionAndReconnect() {
+        val rig = Rig().connect()
+        rig.socket.failSends = true
+        repeat(3) { assertFalse(rig.client.sendTyping("r1", true)) }
+        rig.scheduler.drain()
+        rig.scheduler.advanceBy(4_000)
+        assertEquals(2, rig.factory.sockets.size)
+    }
+
+    @Test fun queuedRecoveryCannotCloseReplacementAccountSocket() {
+        val scheduler = FakeScheduler()
+        val factory = FakeFactory()
+        var current: Any = Any()
+        val client = ApiRealtimeClient({ "wss://example.invalid/same" }, { "same-token" }, factory, scheduler,
+            connectionScopeIdentity = { current },
+            connectionScopeGuard = { expected, action -> if (expected === current) { action(); true } else false })
+        client.connect(); scheduler.drain()
+        val old = factory.sockets.single()
+        old.failSends = true
+        // Queue recovery for this owner, then switch account before it can execute.
+        assertFalse(client.sendMessageFallback("r1", "not-replayed"))
+        current = Any()
+        client.connect()
+        scheduler.drain()
+        assertEquals(2, factory.sockets.size)
+        assertFalse(factory.sockets.last().closed)
+        assertTrue(factory.sockets.last().sent.isEmpty())
+    }
+
     @Test fun scopeReplacementRejectsOldSocketAndConnectsNewSocket() {
         val scheduler = FakeScheduler()
         val factory = FakeFactory()
@@ -695,5 +751,17 @@ class ApiRealtimeClientParityTest {
         }
         rig.client.disconnect(); rig.scheduler.drain()
         assertFalse(closeWait.await())
+    }
+
+    @Test fun readContinuationRechecksPrivacyButDeliveredIsUnchanged() {
+        val rig = Rig().connect()
+        var allowed = true
+        assertTrue(rig.client.sendRoomReceipt("room-one", "read", mayContinue = { allowed }))
+        val count = rig.socket.sent.size
+        rig.socket.incoming("""{"type":"receipt_updated","data":{"room_id":"room-one","kind":"read","updated":500,"has_more":true}}""")
+        rig.scheduler.drain(); allowed = false; rig.scheduler.advanceBy(25)
+        assertEquals(count, rig.socket.sent.size)
+        assertFalse(rig.client.sendRoomReceipt("room-one", "read", mayContinue = { false }))
+        assertTrue(rig.client.sendRoomReceipt("room-one", "delivered"))
     }
 }

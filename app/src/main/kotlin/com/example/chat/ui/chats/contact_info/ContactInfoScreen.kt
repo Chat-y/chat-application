@@ -1,5 +1,8 @@
 package com.example.chat.ui.chats.contact_info
 
+import androidx.compose.ui.layout.onSizeChanged
+import com.example.chat.ui.navigation.ReferenceLayoutMetrics as IdentityMetrics
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -130,6 +133,7 @@ fun ContactInfoScreen(
     /** R1-05/R2-41: optional result-bearing conversation delete. Returns true only after the delete
      *  is acknowledged. When null, the old fire-and-forget [onDeleteConversation] path is used. */
     onDeleteConversationAwaited: (suspend () -> Boolean)? = null,
+    bannerPlaybackSelected: Boolean = false,
 ) {
     var showAllMedia by remember(conversation.id, contact.id) { mutableStateOf(false) }
     val colors = LocalAppColors.current
@@ -147,6 +151,11 @@ fun ContactInfoScreen(
     // R1-04: the dialog reuses the same hydrated snapshot as the summary (was messages.map(hydrateMessage) again).
     if (showAllMedia) ConversationMediaDialog(hydrated, onOpenMedia, onClose = { showAllMedia = false })
     val contactName = ContactInfoLogic.safeDisplayName(contact.displayName)
+    val infoScroll = rememberScrollState()
+    // Previous fixed collapse distances: 132.dp / 276.dp.
+    var measuredIdentityPx by remember(conversation.id, contact.id) { mutableStateOf(0f) }
+    val collapseFraction = infoHeaderFraction(infoScroll, measuredIdentityPx)
+
     // R1-07/R5-45: one contact action at a time, independent of the parent's busy flag.
     var actionInFlight by remember(conversation.id, contact.id) { mutableStateOf(false) }
     // R1-06: remember a finished first step so a retry does not repeat it.
@@ -168,6 +177,9 @@ fun ContactInfoScreen(
             androidx.compose.material3.IconButton(onClick = onBack) {
                 com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = colors.foreground)
             }
+            InfoToolbarIdentity(contactName, ContactInfoLogic.usernameLine(contact.username), contact.avatarUrl,
+                contact.avatarInitials, Color(parseAvatarColorArgbKit(contact.avatarColorHex, com.example.chat.ui.theme.LocalThemeConfig.current.accentColor)), collapseFraction,
+                Modifier.weight(1f))
         }
         Scaffold(
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -186,13 +198,17 @@ fun ContactInfoScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
+                // Previous scrolling state retained: .verticalScroll(rememberScrollState())
+                .verticalScroll(infoScroll)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
+            Column(Modifier.fillMaxWidth().onSizeChanged { measuredIdentityPx = it.height.toFloat() }) {
             // Use the same image loader and fallback as profile/home.
             if (!contact.bannerUrl.isNullOrBlank()) {
-                com.example.chat.ui.theme.ChatyAsyncImage(
+                // Previous banner renderer retained: com.example.chat.ui.theme.ChatyAsyncImage
+                com.example.chat.ui.profile.ProfileBannerMedia(
                     url = contact.bannerUrl,
+                    selected = bannerPlaybackSelected && !showAllMedia && confirmAction == null,
                     contentDescription = "Contact banner",
                     modifier = Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(18.dp)),
                     placeholder = { Box(Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(18.dp)).background(colors.surface)) },
@@ -200,26 +216,35 @@ fun ContactInfoScreen(
                 )
                 Spacer(Modifier.height(12.dp))
             }
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Box {
-                    com.example.chat.ui.chats.home.HomeAvatar(
-                        initials = contact.avatarInitials,
-                        color = Color(parseAvatarColorArgbKit(contact.avatarColorHex)),
-                        size = 92f, shape = "circle", url = contact.avatarUrl,
-                    )
-                    if (online) {
-                        Box(Modifier.align(Alignment.TopEnd).padding(2.dp).size(16.dp)
-                            .background(colors.background, CircleShape).padding(2.5.dp)
-                            .background(colors.success, CircleShape))
-                    }
-                }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
+                InfoAvatarHero(conversation.id to contact.id, contact.avatarUrl, contact.avatarInitials,
+                    Color(parseAvatarColorArgbKit(contact.avatarColorHex, com.example.chat.ui.theme.LocalThemeConfig.current.accentColor)), contactName, IdentityMetrics.profileAvatarOuterDp.dp, collapseFraction,
+                    badge = if (online) ({
+                        Box(Modifier.padding(2.dp).size(16.dp).background(colors.background, CircleShape)
+                            .padding(2.5.dp).background(colors.success, CircleShape))
+                    }) else null)
             }
+// Previous fixed avatar presentation retained inactive:
+//             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+//                 Box {
+//                     com.example.chat.ui.chats.home.HomeAvatar(
+//                         initials = contact.avatarInitials,
+//                         color = Color(parseAvatarColorArgbKit(contact.avatarColorHex, com.example.chat.ui.theme.LocalThemeConfig.current.accentColor)),
+//                         size = 92f, shape = "circle", url = contact.avatarUrl,
+//                     )
+//                     if (online) {
+//                         Box(Modifier.align(Alignment.TopEnd).padding(2.dp).size(16.dp)
+//                             .background(colors.background, CircleShape).padding(2.5.dp)
+//                             .background(colors.success, CircleShape))
+//                     }
+//                 }
+//             }
             Spacer(Modifier.height(12.dp))
             Text(
                 // R3-20/R3-21/R3-22/R4-29: untrusted name, cleaned and bounded.
                 contactName,
                 color = colors.foreground,
-                fontSize = 20.sp,
+                style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().semantics { heading() },
@@ -230,7 +255,7 @@ fun ContactInfoScreen(
                 Text(
                     handle,
                     color = colors.foregroundSecondary,
-                    fontSize = 12.sp,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -244,11 +269,12 @@ fun ContactInfoScreen(
                     lastSeen = lastSeenFor(contact.id),
                 ),
                 color = if (online) colors.success else colors.foregroundSecondary,
-                fontSize = 12.5.sp,
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
+            } // Measured identity header includes banner, hero, name, handle and presence.
             Spacer(Modifier.height(12.dp))
 
             // Quick action row: Call / Video / Search / Share.
@@ -386,7 +412,9 @@ fun ContactInfoScreen(
                 }
                 links.take(5).forEach { link ->
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Link, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+
+//Icon(Icons.Rounded.Link, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.link, Icons.Rounded.Link, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
                         Text(
                             link,
@@ -407,7 +435,9 @@ fun ContactInfoScreen(
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Outlined.Description, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
+
+//Icon(Icons.Outlined.Description, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.document, Icons.Outlined.Description, contentDescription = null, tint = colors.primary, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
@@ -470,7 +500,12 @@ fun ContactInfoScreen(
                             }
                         }
                     },
-                    confirmButton = { androidx.compose.material3.TextButton(onClick = { dlPicker = false }) { Text("Close") } },
+                    confirmButton = { // Previous stock text action:
+                    // androidx.compose.material3.TextButton(onClick = { dlPicker = false }) { Text("Close") }
+                    com.example.chat.ui.kit.ChatyTextButton(
+                        label = "Close",
+                        onClick = { dlPicker = false },
+                    ) },
                 )
             }
             Spacer(Modifier.height(12.dp))
@@ -519,7 +554,9 @@ fun ContactInfoScreen(
                     onClick = { if (!busy && !actionInFlight) confirmAction = "deleteConversation" },
                 )
                 InfoTile(
-                    icon = { Icon(Icons.Rounded.PersonRemove, contentDescription = null, tint = colors.error) },
+                    icon = {
+//Icon(Icons.Rounded.PersonRemove, contentDescription = null, tint = colors.error)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.personRemove, Icons.Rounded.PersonRemove, contentDescription = null, tint = colors.error) },
                     title = "Delete Contact & Chat",
                     titleColor = colors.error,
                     subtitle = "Remove $contactName and all conversations.",
@@ -711,14 +748,30 @@ internal fun ConfirmDialog(
         title = { Text(title, color = colors.foreground) },
         text = { Text(message, color = colors.foregroundSecondary) },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(confirmLabel, color = colors.error, fontWeight = FontWeight.Bold)
-            }
+            // Previous stock text action:
+            // TextButton(onClick = onConfirm) {
+            //                 Text(confirmLabel, color = colors.error, fontWeight = FontWeight.Bold)
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = confirmLabel,
+                onClick = onConfirm,
+                color = colors.error,
+                fontWeight = FontWeight.Bold,
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = colors.foregroundSecondary)
-            }
+            // Previous stock text action:
+            // TextButton(onClick = onDismiss) {
+            //                 Text("Cancel", color = colors.foregroundSecondary)
+            //             }
+            com.example.chat.ui.kit.ChatyTextButton(
+                label = "Cancel",
+                onClick = onDismiss,
+                color = colors.foregroundSecondary,
+            )
         },
     )
 }
+
+// Complete original-line retention for review (inactive).
+                    //                     confirmButton = { androidx.compose.material3.TextButton(onClick = { dlPicker = false }) { Text("Close") } },

@@ -99,4 +99,25 @@ class MessageInteractionAnchorPolicyTest {
         assertEquals(0.dp, p.menuMaxWidthDp)
         assertEquals(0.dp, p.menuMaxHeightDp)
     }
+
+    @Test fun lastBubbleKeepsUsefulScrollableActionViewport() {
+        val p = MessageInteractionAnchorPolicy.computePlacement(
+            Rect(150f, 650f, 390f, 760f), 400.dp, 800.dp, 1f, true, railHeightDp = 56.dp)
+        assertTrue(p.menuMaxHeightDp >= 416.dp)
+        assertTrue(p.menuTopDp + p.menuMaxHeightDp < p.reactionRailTopDp)
+        assertTrue(p.menuTopDp + p.menuMaxHeightDp <= 800.dp)
+    }
+
+    @Test fun shortImeAndLandscapeNeverOverlapReactionRail() {
+        for (height in listOf(60f, 160f, 240f, 400f, 800f)) {
+            for (top in listOf(0f, 20f, 150f, 650f)) {
+                val p = MessageInteractionAnchorPolicy.computePlacement(
+                    Rect(100f, top, 300f, top + 50f), 400.dp, height.dp, 1f, true, railHeightDp = 56.dp)
+                val menuEnd = p.menuTopDp + p.menuMaxHeightDp
+                val railEnd = p.reactionRailTopDp + p.reactionRailMaxHeightDp
+                assertTrue(p.menuMaxHeightDp.value == 0f || menuEnd <= p.reactionRailTopDp || p.menuTopDp >= railEnd)
+                assertTrue(menuEnd.value <= height)
+            }
+        }
+    }
 }

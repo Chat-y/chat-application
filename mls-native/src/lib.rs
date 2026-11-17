@@ -133,6 +133,8 @@ pub enum ProcessedMessageType {
 pub struct ProcessedMessageResult {
     pub message_type: ProcessedMessageType,
     pub application_message: Option<Vec<u8>>,
+    pub sender_index: Option<u32>,
+    pub authenticated_sender_identity: Vec<u8>,
 }
 
 #[derive(uniffi::Record)]
@@ -144,6 +146,7 @@ pub struct KeyPackageResult {
 pub struct MlsMember {
     pub credential: Vec<u8>,
     pub index: u32,
+    pub signature_key: Vec<u8>,
 }
 
 #[derive(uniffi::Record)]
@@ -249,6 +252,17 @@ impl ChatyMlsEngine {
             .map_err(map_err)
     }
 
+    pub async fn join_group_from_welcome_pinned(&self, config: MlsGroupConfig, welcome_bytes: Vec<u8>, signer_bytes: Vec<u8>,
+        pin_identities: Vec<Vec<u8>>, pin_keys: Vec<Vec<u8>>, expected_group_id: Vec<u8>, expected_epoch: u64) -> Result<JoinGroupResult, MlsNativeError> {
+        self.inner.join_group_from_welcome_pinned(config.into(), welcome_bytes, None, signer_bytes, pin_identities, pin_keys, expected_group_id, expected_epoch)
+            .await.map(|r| JoinGroupResult { group_id: r.group_id }).map_err(map_err)
+    }
+    pub async fn process_membership_commit_pinned(&self, group_id_bytes: Vec<u8>, message_bytes: Vec<u8>,
+        pin_identities: Vec<Vec<u8>>, pin_keys: Vec<Vec<u8>>, expected_epoch: u64) -> Result<(), MlsNativeError> {
+        self.inner.process_membership_commit_pinned(group_id_bytes, message_bytes, pin_identities, pin_keys, expected_epoch)
+            .await.map(|_| ()).map_err(map_err)
+    }
+
     pub async fn group_epoch(&self, group_id_bytes: Vec<u8>) -> Result<u64, MlsNativeError> {
         self.inner.group_epoch(group_id_bytes).await.map_err(map_err)
     }
@@ -270,9 +284,16 @@ impl ChatyMlsEngine {
                     .map(|m| MlsMember {
                         credential: m.credential,
                         index: m.index,
+                        signature_key: m.signature_key,
                     })
                     .collect()
             })
+            .map_err(map_err)
+    }
+
+    pub async fn inspect_key_package_pin(&self, bytes: Vec<u8>) -> Result<MlsMember, MlsNativeError> {
+        self.inner.inspect_key_package_pin(bytes).await
+            .map(|(credential, signature_key)| MlsMember { credential, signature_key, index: 0 })
             .map_err(map_err)
     }
 
@@ -338,15 +359,17 @@ impl ChatyMlsEngine {
         message_bytes: Vec<u8>,
     ) -> Result<ProcessedMessageResult, MlsNativeError> {
         self.inner
-            .process_message(group_id_bytes, message_bytes)
+            .process_message_with_identity(group_id_bytes, message_bytes)
             .await
-            .map(|r| ProcessedMessageResult {
+            .map(|(r, authenticated_sender_identity)| ProcessedMessageResult {
+                authenticated_sender_identity,
                 message_type: match r.message_type {
                     FrbProcessedMessageType::Application => ProcessedMessageType::Application,
                     FrbProcessedMessageType::Proposal => ProcessedMessageType::Proposal,
                     FrbProcessedMessageType::StagedCommit => ProcessedMessageType::StagedCommit,
                 },
                 application_message: r.application_message,
+                sender_index: r.sender_index,
             })
             .map_err(map_err)
     }

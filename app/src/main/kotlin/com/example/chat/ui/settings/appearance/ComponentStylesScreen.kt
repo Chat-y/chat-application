@@ -200,7 +200,9 @@ fun ComponentStylesScreen(
                                 overlayController.showToast("Reverted previous customization")
                             }
                         }) {
-                            Icon(Icons.Rounded.Undo, contentDescription = "Undo last change", tint = colors.foreground)
+
+//Icon(Icons.Rounded.Undo, contentDescription = "Undo last change", tint = colors.foreground)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.undo, Icons.Rounded.Undo, contentDescription = "Undo last change", tint = colors.foreground)
                         }
                     }
                     Box {

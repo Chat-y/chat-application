@@ -24,7 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import com.example.chat.ui.kit.chatyDepth
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,7 +54,8 @@ fun BundleCompactCallCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .shadow(12.dp, RoundedCornerShape(tokens.cardCornerRadiusDp.dp))
+            // .shadow(12.dp, RoundedCornerShape(tokens.cardCornerRadiusDp.dp))
+            .chatyDepth(12.dp, RoundedCornerShape(tokens.cardCornerRadiusDp.dp))
             .clickable { onToggleExpand() },
         shape = RoundedCornerShape(tokens.cardCornerRadiusDp.dp),
         color = tokens.cardBackground,

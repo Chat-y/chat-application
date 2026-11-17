@@ -61,12 +61,15 @@ data class CreateMessageResult(
 
 data class ProcessedMessage(
     val messageType: ProcessedMessageType,
-    val applicationMessage: ByteArray?
+    val applicationMessage: ByteArray?,
+    val senderIndex: UInt? = null,
+    val authenticatedSenderIdentity: ByteArray = byteArrayOf(),
 )
 
 data class Member(
     val credential: ByteArray,
-    val index: UInt
+    val index: UInt,
+    val signatureKey: ByteArray = byteArrayOf(),
 )
 
 class ChatyMlsEngine {
@@ -82,8 +85,13 @@ class ChatyMlsEngine {
         throw MlsNativeException("MLS native binding not installed in this build")
     fun joinGroupFromWelcome(config: MlsGroupConfig, welcomeBytes: ByteArray, signerBytes: ByteArray): JoinGroupResult =
         throw MlsNativeException("MLS native binding not installed in this build")
+    fun joinGroupFromWelcomePinned(config: MlsGroupConfig, welcomeBytes: ByteArray, signerBytes: ByteArray,
+        pinIdentities: List<ByteArray>, pinKeys: List<ByteArray>, expectedGroupId: ByteArray, expectedEpoch: ULong): JoinGroupResult = throw UnsupportedOperationException("stub")
+    fun processMembershipCommitPinned(groupIdBytes: ByteArray, messageBytes: ByteArray,
+        pinIdentities: List<ByteArray>, pinKeys: List<ByteArray>, expectedEpoch: ULong) { throw UnsupportedOperationException("stub") }
     fun groupEpoch(groupIdBytes: ByteArray): UInt = 0u
     fun groupIsActive(groupIdBytes: ByteArray): Boolean = false
+    fun inspectKeyPackagePin(bytes: ByteArray): Member = throw UnsupportedOperationException("stub")
     fun groupMembers(groupIdBytes: ByteArray): List<Member> = emptyList()
     fun addMembers(groupId: ByteArray, signerBytes: ByteArray, keyPackages: List<ByteArray>): AddMembersResult =
         throw MlsNativeException("MLS native binding not installed in this build")

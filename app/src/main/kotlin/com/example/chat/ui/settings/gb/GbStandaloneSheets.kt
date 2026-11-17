@@ -69,7 +69,9 @@ fun GbWasteCleaningSheetContent(onDismissSheet: () -> Unit, toast: (String) -> U
                         Modifier.fillMaxWidth().background(colors.primary.copy(alpha = 0.08f), RoundedCornerShape(14.dp)).padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Rounded.CleaningServices, null, tint = accent, modifier = Modifier.size(28.dp))
+
+//Icon(Icons.Rounded.CleaningServices, null, tint = accent, modifier = Modifier.size(28.dp))
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.clean, Icons.Rounded.CleaningServices, null, tint = accent, modifier = Modifier.size(28.dp))
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Expired image cache", fontWeight = FontWeight.Bold, color = Color(theme.primaryTextColor))
@@ -89,7 +91,9 @@ fun GbWasteCleaningSheetContent(onDismissSheet: () -> Unit, toast: (String) -> U
                             }
                         },
                     ) {
-                        Icon(Icons.Rounded.DeleteSweep, null)
+
+//Icon(Icons.Rounded.DeleteSweep, null)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.deleteSweep, Icons.Rounded.DeleteSweep, null)
                         Spacer(Modifier.width(8.dp))
                         Text(if (st.count == 0) "No expired cache to clean" else "Clean ${st.count} expired file(s)")
                     }
@@ -106,7 +110,9 @@ fun GbHomeShortcutsSheetContent(onDismissSheet: () -> Unit, onOpenHome: () -> Un
             Text("Chaty applies home layout and shortcut settings inside the app. Native Android/iOS launcher widgets are not registered in this build, so this screen does not show switches that cannot take effect.", color = Color(theme.secondaryTextColor), fontSize = 13.sp)
             Spacer(Modifier.height(18.dp))
             Button(modifier = Modifier.fillMaxWidth(), onClick = { onDismissSheet(); onOpenHome() }) {
-                Icon(Icons.Rounded.DashboardCustomize, null)
+
+//Icon(Icons.Rounded.DashboardCustomize, null)
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.layout, Icons.Rounded.DashboardCustomize, null)
                 Spacer(Modifier.width(8.dp))
                 Text("Customize in-app home")
             }

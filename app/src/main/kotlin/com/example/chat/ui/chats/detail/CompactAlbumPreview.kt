@@ -34,18 +34,28 @@ internal fun CompactAlbumPreview(
     // the viewer and show a +N scrim on the last visible tile.
     val visible = AlbumNavigationPolicy.preview(messages)
     val hiddenCount = AlbumNavigationPolicy.remainingCount(messages)
+    // Session and attachment identity reset geometry; never retain another account's preview measurements.
+    val aspectRatios = remember(binding?.session, visible.map { Triple(it.id, it.attachment?.id, it.attachment?.url) }) {
+        mutableStateMapOf<String, Float>()
+    }
     Column(Modifier.widthIn(max = 300.dp).fillMaxWidth().clip(RoundedCornerShape(9.dp)),
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
         var start = 0
         for (columns in mediaAlbumColumns(visible.size)) {
             val members = visible.subList(start, start + columns)
             start += columns
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            // Reserve the previous row height before decoding, so lazy-list scroll anchors never jump.
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+              val rowHeight = AlbumAspectPolicy.reservedRowHeight(maxWidth.value, 2f).dp
+              val ready = members.all { aspectRatios.containsKey(it.id) }
+              Row(Modifier.height(rowHeight), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 for (message in members) key(message.id) {
                     var bounds by remember { mutableStateOf<Rect?>(null) }
                     val currentMessage by rememberUpdatedState(message)
                     val isCappedTail = hiddenCount > 0 && message.id == visible.last().id
-                    Box(Modifier.weight(1f).aspectRatio(if (columns == 1) 2f else 1f)
+                    // Previous fixed geometry: weight(1f).aspectRatio(if (columns == 1) 2f else 1f)
+                    val tileRatio = AlbumAspectPolicy.tileRatio(if (ready) aspectRatios[message.id] else null, columns)
+                    Box(Modifier.weight(tileRatio).fillMaxHeight()
                         .onGloballyPositioned { bounds = it.boundsInWindow() }
                         .semantics(mergeDescendants = true) {
                             contentDescription = "Album photo ${messages.indexOf(message) + 1} of ${messages.size}"
@@ -63,7 +73,12 @@ internal fun CompactAlbumPreview(
                         }) {
                         message.attachment?.let { attachment ->
                             MediaAttachmentPreview(attachment, remoteImage, resolveUrl, null, false,
-                                message, binding, fixedRatio = if (columns == 1) 2f else 1f)
+                                // Previous fixedRatio = if (columns == 1) 2f else 1f
+                                message, binding, fixedRatio = tileRatio, fillAllocatedBounds = true,
+                                onImageAspectRatio = { measured ->
+                                    if (binding == null || binding.currentSession() == binding.session)
+                                        aspectRatios[message.id] = measured
+                                })
                         }
                         if (isCappedTail) {
                             Box(Modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f)),
@@ -82,6 +97,7 @@ internal fun CompactAlbumPreview(
                 }
             }
         }
+      } // Reserved-height row constraints.
     }
 }
 

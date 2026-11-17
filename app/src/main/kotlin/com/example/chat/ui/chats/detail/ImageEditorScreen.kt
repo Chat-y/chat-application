@@ -2,6 +2,8 @@ package com.example.chat.ui.chats.detail
 
 // Single-line policy now used inside the shared multiline renderer.
 // import com.example.chat.core.media.ImageTextOverlayPolicy
+import com.example.chat.ui.kit.chatyPredictiveBack
+
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.ColorMatrix as AndroidColorMatrix
@@ -138,7 +140,9 @@ fun ImageEditorScreen(source: String, onCancel: () -> Unit, onApply: (File) -> U
             error = "Could not load this image. Close the editor and choose it again."
         }
     }
-    androidx.activity.compose.BackHandler(onBack = ::cancelEditor)
+    val predictiveBack = com.example.chat.ui.kit.rememberChatyBackPresentation(source)
+    // Previous registration retained inactive: androidx.activity.compose.BackHandler(onBack = ::cancelEditor)
+    com.example.chat.ui.kit.ChatyPredictiveBackHandler(presentation = predictiveBack, onBack = ::cancelEditor)
     val detailLabels = mapOf(
         "Content" to stringResource(com.example.chat.R.string.media_released_editor_section_content),
         "Alignment" to stringResource(com.example.chat.R.string.media_released_editor_section_alignment),
@@ -177,7 +181,7 @@ fun ImageEditorScreen(source: String, onCancel: () -> Unit, onApply: (File) -> U
         "%+.0f".format(brightness * 100), "%.0f".format(contrast * 100), summaryAlignment, summaryStrip, textOverlay.ifBlank { summaryNoText })
     val accessibility = androidx.compose.ui.platform.LocalView.current
     // MR-R3-049 debug overlay host; release composes no diagnostic content.
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.chatyPredictiveBack(predictiveBack).fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).safeDrawingPadding().imePadding()
     // MR-R4-043 prior: .semantics { customActions = listOf(CustomAccessibilityAction("Edits summary") { accessibility.announceForAccessibility(editsSummary); true }) }) {
         .semantics { customActions = listOf(CustomAccessibilityAction(summaryActionLabel) { accessibility.announceForAccessibility(editsSummary); true }) }) {

@@ -29,6 +29,7 @@ import kotlinx.coroutines.withContext
  * Animated WebP requires API 28. Drive MOV source is a separate pack with all 132 supplied folder animations.
  */
 object ChatyEmojiPack {
+    const val SYSTEM = "Android system"
     const val CHATY = "Chaty"
     const val IOS = "iOS"
     const val MICROSOFT = "Microsoft"
@@ -38,7 +39,9 @@ object ChatyEmojiPack {
     const val DRIVE_MOV = "Drive MOV animations"
 
     /** Picker order: Chaty, iOS, Microsoft, OpenMoji, Telegram. */
-    val ORDER = listOf(CHATY, IOS, MICROSOFT, OPENMOJI, TELEGRAM, TELEGRAM_LOTTIE, DRIVE_MOV)
+    // Previous default order: Chaty first. Keep custom pack IDs as explicit choices.
+    // Removed custom choices retained: listOf(SYSTEM, CHATY, IOS, MICROSOFT, OPENMOJI, TELEGRAM, TELEGRAM_LOTTIE, DRIVE_MOV)
+    val ORDER = listOf(SYSTEM)
 
     /**
      * Code-point named asset packs. Files are <hex>.<ext> under [dir] (lowercase
@@ -244,8 +247,10 @@ object ChatyEmojiPack {
     const val IOS_PACK_PROVENANCE =
         "User-supplied ios_animated_webp.zip, 50 animated WebP files. Overlaps the first 50 entries of a third-party shared Drive MOV folder. User states licensed; no independent license file supplied."
 
-    fun normalize(style: String?): String =
-        ORDER.firstOrNull { it != CHATY && it.equals(style, ignoreCase = true) } ?: CHATY
+    // Previous absent/legacy default resolved to bundled custom artwork:
+    // ORDER.firstOrNull { it != CHATY && it.equals(style, ignoreCase = true) } ?: CHATY
+    // Previous saved-ID lookup: ORDER.firstOrNull { it.equals(style, ignoreCase = true) } ?: SYSTEM
+    fun normalize(@Suppress("UNUSED_PARAMETER") style: String?): String = SYSTEM
 
     /** Animated WebP decoding needs android.graphics.ImageDecoder (API 28+). */
     fun iosSupported(sdk: Int = Build.VERSION.SDK_INT): Boolean = sdk >= 28
@@ -306,17 +311,20 @@ object ChatyEmojiPack {
     /** Pack to use for [explicit] when it names a pack, else the style of the enclosing [LocalEmojiPack] scope. No hooks, no globals. */
     @Composable
     fun rememberStyle(explicit: String?): String {
-        if (explicit != null && ORDER.any { it.equals(explicit, ignoreCase = true) }) return normalize(explicit)
-        return LocalEmojiPack.current
+        // Previous selected/local custom style lookup retained:
+        // if (explicit != null && ORDER.any { it.equals(explicit, ignoreCase = true) }) return normalize(explicit)
+        // return LocalEmojiPack.current
+        return normalize(explicit)
     }
 }
 
 /**
  * Pack for views that are not handed one (reaction badge, picker). Scoped, not
  * global: the chat screen provides it for its own subtree only; anywhere
- * else (fixtures, other chats, settings previews) the default is Chaty.
+ * else (fixtures, other chats, settings previews) the default is Android system.
  */
-val LocalEmojiPack = androidx.compose.runtime.compositionLocalOf { ChatyEmojiPack.CHATY }
+// Previous implicit custom default: compositionLocalOf { ChatyEmojiPack.CHATY }
+val LocalEmojiPack = androidx.compose.runtime.compositionLocalOf { ChatyEmojiPack.SYSTEM }
 
 /**
  * Plays one iOS-pack animated WebP forever while composed (stops on leaving

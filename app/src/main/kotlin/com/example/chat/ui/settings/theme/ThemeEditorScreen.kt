@@ -267,9 +267,15 @@ fun ThemeEditorScreen(
         onBack = onBack,
         trailingHeaderWidget = {
             IconButton(onClick = { generateFromImage() }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.palette, semanticLabel = "Extract from photo", color = colors.foreground) }
-            IconButton(onClick = { guideOpen = true }) { Icon(Icons.Outlined.CloudDownload, "Theme Packs & Download Guide", tint = colors.foreground) }
-            IconButton(onClick = { importTheme() }) { Icon(Icons.Outlined.FileDownload, "Import Theme JSON", tint = colors.foreground) }
-            IconButton(onClick = { exportTheme() }) { Icon(Icons.Outlined.FileUpload, "Export Theme JSON", tint = colors.foreground) }
+            IconButton(onClick = { guideOpen = true }) {
+//Icon(Icons.Outlined.CloudDownload, "Theme Packs & Download Guide", tint = colors.foreground)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.cloudDownload, Icons.Outlined.CloudDownload, "Theme Packs & Download Guide", tint = colors.foreground) }
+            IconButton(onClick = { importTheme() }) {
+//Icon(Icons.Outlined.FileDownload, "Import Theme JSON", tint = colors.foreground)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.download, Icons.Outlined.FileDownload, "Import Theme JSON", tint = colors.foreground) }
+            IconButton(onClick = { exportTheme() }) {
+//Icon(Icons.Outlined.FileUpload, "Export Theme JSON", tint = colors.foreground)
+            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.upload, Icons.Outlined.FileUpload, "Export Theme JSON", tint = colors.foreground) }
             Box {
                 IconButton(onClick = { menuOpen = true }) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.moreOptions, semanticLabel = "More options", color = colors.foreground) }
                 DropdownMenu(shape = com.example.chat.ui.kit.ChatyModalShape, expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -282,7 +288,9 @@ fun ThemeEditorScreen(
                         HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("Reset to Defaults", color = colors.error) },
-                            leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(20.dp), tint = colors.error) },
+                            leadingIcon = {
+//Icon(Icons.Rounded.RestartAlt, null, Modifier.size(20.dp), tint = colors.error)
+                            com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.reset, Icons.Rounded.RestartAlt, null, Modifier.size(20.dp), tint = colors.error) },
                             onClick = { menuOpen = false; confirmReset() },
                         )
                     }
@@ -394,7 +402,9 @@ fun ThemeEditorScreen(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         contentPadding = PaddingValues(vertical = 14.dp),
                     ) {
-                        Icon(Icons.Rounded.Check, null)
+
+//Icon(Icons.Rounded.Check, null)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.check, Icons.Rounded.Check, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Apply to this chat", fontWeight = FontWeight.SemiBold)
                     }
@@ -404,7 +414,9 @@ fun ThemeEditorScreen(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         contentPadding = PaddingValues(vertical = 14.dp),
                     ) {
-                        Icon(Icons.Rounded.RestartAlt, null)
+
+//Icon(Icons.Rounded.RestartAlt, null)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.reset, Icons.Rounded.RestartAlt, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Use app default for this chat", fontWeight = FontWeight.SemiBold)
                     }
@@ -462,7 +474,9 @@ fun ThemeEditorScreen(
                         border = BorderStroke(1.2.dp, colors.error),
                         contentPadding = PaddingValues(vertical = 14.dp),
                     ) {
-                        Icon(Icons.Rounded.RestartAlt, null, tint = colors.error)
+
+//Icon(Icons.Rounded.RestartAlt, null, tint = colors.error)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.reset, Icons.Rounded.RestartAlt, null, tint = colors.error)
                         Spacer(Modifier.width(8.dp))
                         Text("Reset to Default System Theme", color = colors.error, fontWeight = FontWeight.SemiBold)
                     }
@@ -481,7 +495,8 @@ fun ThemeEditorScreen(
                     "This will restore the factory default theme and clear custom studio settings, including saved per-chat themes.",
                 )
             },
-            dismissButton = { TextButton(onClick = { resetOpen = false }) { Text("Cancel") } },
+            // Previous: dismissButton = { TextButton(onClick = { resetOpen = false }) { Text("Cancel") } },
+            dismissButton = { com.example.chat.ui.kit.ChatyTextButton(onClick = { resetOpen = false }, label = "Cancel") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -503,7 +518,9 @@ fun ThemeEditorScreen(
             // Previous non-scrolling sheet body: Column(Modifier.padding(24.dp)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.CloudDownload, null, Modifier.size(28.dp), tint = colors.primary)
+
+//Icon(Icons.Rounded.CloudDownload, null, Modifier.size(28.dp), tint = colors.primary)
+                    com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.cloudDownload, Icons.Rounded.CloudDownload, null, Modifier.size(28.dp), tint = colors.primary)
                     Spacer(Modifier.width(12.dp))
                     Text("Theme Packs & Offline Store", color = colors.foreground, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
@@ -516,7 +533,9 @@ fun ThemeEditorScreen(
                 Spacer(Modifier.height(20.dp))
                 Row {
                     OutlinedButton(onClick = { guideOpen = false; importTheme() }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Outlined.FileDownload, null); Spacer(Modifier.width(8.dp)); Text("Import JSON")
+
+//Icon(Icons.Outlined.FileDownload, null)
+                        com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.download, Icons.Outlined.FileDownload, null); Spacer(Modifier.width(8.dp)); Text("Import JSON")
                     }
                     Spacer(Modifier.width(12.dp))
                     Button(onClick = { guideOpen = false; generateFromImage() }, modifier = Modifier.weight(1f)) {

@@ -91,7 +91,7 @@ fun ConversationSettingsPage(
 
     GbScreenScaffold(title = "Conversation Screen", onBack = onBack) {
         GbPanelCard {
-            GbSubpageRow(Icons.Outlined.TableChart, "Action Bar") { openSub(onOpenActionBar) }
+            GbSubpageRow(/* Previous stock: Icons.Outlined.TableChart */ com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.conversationActionBar), "Action Bar") { openSub(onOpenActionBar) }
             GbRowDivider()
             GbSubpageRow(Icons.Rounded.ChatBubbleOutline, "Bubble And Ticks") { openSub(onOpenBubbleAndTicks) }
             GbRowDivider()
@@ -109,7 +109,7 @@ fun ConversationSettingsPage(
             val options = listOf("Small" to 0.85f, "Default" to 1.0f, "Large" to 1.15f)
             for ((label, value) in options) {
                 GbChevronRow(
-                    Icons.Rounded.FormatSize, label,
+                    /* Previous stock: Icons.Rounded.FormatSize */ com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.conversationFontSize), label,
                     if (kotlin.math.abs(scale - value) < 0.01f) "Selected" else "",
                 ) {
                     com.example.chat.ServiceLocator.setChatFontScale(value)
@@ -210,11 +210,11 @@ fun ConversationSettingsPage(
             GbSwitchRow(Icons.Rounded.Wallpaper, "Custom Wallpaper per contact", "Allows you to set custom wallpaper for each person/conversation", c.customWallpaperPerContact) {
                 preferences.updateConversation(c.copy(customWallpaperPerContact = it), logTitle = "Custom wallpaper per contact")
             }
-            GbSwitchRow(Icons.Rounded.Portrait, "Profile Pic Wallpaper", "Set profile pic as wallpaper if exists", c.profilePicWallpaper) {
+            GbSwitchRow(/* Previous stock: Icons.Rounded.Portrait */ com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.profileWallpaper), "Profile Pic Wallpaper", "Set profile pic as wallpaper if exists", c.profilePicWallpaper) {
                 preferences.updateConversation(c.copy(profilePicWallpaper = it), logTitle = "Profile Pic Wallpaper")
             }
             GbSectionLabel("Voice Notes/Audio Mods")
-            GbSwitchRow(Icons.Rounded.Sensors, "Enable Proximity Sensor", "Enabled by default. Disable to turn it off.", c.enableProximitySensor) {
+            GbSwitchRow(/* Previous stock: Icons.Rounded.Sensors */ com.example.chat.ui.icons.ChatyGlyphVectors.of(com.example.chat.ui.icons.ChatyIconId.proximitySensor), "Enable Proximity Sensor", "Enabled by default. Disable to turn it off.", c.enableProximitySensor) {
                 preferences.updateConversation(c.copy(enableProximitySensor = it), logTitle = "Enable Proximity Sensor")
             }
             GbSwitchRow(Icons.Outlined.VolumeUp, "Disable Output Switching", "Prevents speaker/earpiece switching while playing", c.disableOutputSwitching) {

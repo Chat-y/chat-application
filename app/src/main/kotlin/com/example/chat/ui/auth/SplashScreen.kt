@@ -90,8 +90,14 @@ fun SplashScreen(routeToHome: suspend () -> Boolean, onRoute: (Boolean) -> Unit)
             ) {
                 // ChatyBrandIcon placeholder: the brand-asset slice swaps in the
                 // real icon; shape/scale/radius already match the Dart layout.
-                Icon(
-                    Icons.Rounded.Forum,
+
+//Icon(
+//                    Icons.Rounded.Forum,
+//                    contentDescription = "Chaty",
+//                    tint = Color(theme.accentColor),
+//                    modifier = Modifier.size(64.dp),
+//                )
+                com.example.chat.ui.icons.ChatyPurposeIcon(com.example.chat.ui.icons.ChatyIconId.chats, Icons.Rounded.Forum,
                     contentDescription = "Chaty",
                     tint = Color(theme.accentColor),
                     modifier = Modifier.size(64.dp),

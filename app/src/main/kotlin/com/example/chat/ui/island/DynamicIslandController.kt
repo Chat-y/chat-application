@@ -161,7 +161,10 @@ class DynamicIslandController(
 
         // Determine state transition
         if (_queue.size >= 2 && _queue[0].isOngoingActivity) {
-            _mode = IslandMode.split
+            // Previous behavior retained: _mode = IslandMode.split
+            // Single island (Bandi 2026-11-14 "only the one share all"): one capsule carries
+            // the top payload; the rest of the queue cycles via carousel and the count badge.
+            _mode = IslandMode.compact
         } else if (autoExpand) {
             _mode = IslandMode.expanded
             scheduleAutoCollapse()
@@ -218,12 +221,15 @@ class DynamicIslandController(
         notifyListeners()
     }
 
-    /** Collapses to compact or split mode. */
+    /** Collapses to compact (single island; split mode retired). */
+    // Previous implementation retained:
+    // /** Collapses to compact or split mode. */
     fun collapse() {
         if (_queue.isEmpty()) {
             _mode = IslandMode.idle
         } else if (_queue.size >= 2 && _queue[0].isOngoingActivity) {
-            _mode = IslandMode.split
+            // Previous behavior retained: _mode = IslandMode.split
+            _mode = IslandMode.compact
         } else {
             _mode = IslandMode.compact
         }
@@ -371,8 +377,10 @@ class DynamicIslandController(
         cancelTimers()
         if (_queue.isEmpty()) {
             _mode = IslandMode.idle
-        } else if (_queue.size >= 2 && _queue[0].isOngoingActivity) {
-            _mode = IslandMode.split
+        // Previous implementation retained:
+        // } else if (_queue.size >= 2 && _queue[0].isOngoingActivity) {
+        //     _mode = IslandMode.split
+        // } else if (_queue.first().isOngoingActivity) {
         } else if (_queue.first().isOngoingActivity) {
             _mode = IslandMode.compact
         } else {

@@ -113,7 +113,8 @@ private fun SettingsSaveFailedRow() {
             "Couldn't save your latest settings on this device.",
             color = colors.foregroundSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f),
         )
-        androidx.compose.material3.TextButton(onClick = provided.retry) { Text("Try again") }
+        // Previous: androidx.compose.material3.TextButton(onClick = provided.retry) { Text("Try again") }
+        com.example.chat.ui.kit.ChatyTextButton(onClick = provided.retry, label = "Try again")
     }
 }
 
@@ -319,7 +320,8 @@ fun SettingsRadioDialog(
         },
         confirmButton = {},
         dismissButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel", color = colors.primary) }
+            // Previous: androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel", color = colors.primary) }
+            com.example.chat.ui.kit.ChatyTextButton(onClick = onDismiss, label = "Cancel", color = colors.primary)
         },
     )
 }
