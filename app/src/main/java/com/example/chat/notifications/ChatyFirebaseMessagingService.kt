@@ -42,20 +42,15 @@ class ChatyFirebaseMessagingService : FirebaseMessagingService() {
         // Persist continuation before any network work; OS may kill this process after the callback.
         AccountPushRecoveryWorker.enqueue(applicationContext, binding, callId,
             urgent = message.priority == RemoteMessage.PRIORITY_HIGH)
-        // Sync is worker-owned: avoid a second concurrent network sweep in the short FCM callback.
-        if (type == "sync") return
         ServiceLocator.ensurePushReady(applicationContext)
         val handler = PushWakeHolder.handler ?: return
         when (type) {
-            // Previous callback-only sync retained: "sync" -> runBlocking {
-            // Previous callback-only sync retained: withTimeoutOrNull(PUSH_WAKE_TIMEOUT_MS) {
-            // Previous callback-only sync retained: // Cold process: restore the backend session before the handler
-            // Previous callback-only sync retained: // reads apiBackend state, else the sync nudge is dropped. Off-main
-            // Previous callback-only sync retained: // (Dispatchers.IO); @Synchronized no-op if the bootstrap landed.
-            // Previous callback-only sync retained: runCatching { withContext(kotlinx.coroutines.Dispatchers.IO) { ServiceLocator.apiBackend.initialize() } }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
-            // Previous callback-only sync retained: handler.onAccountSyncNudgeAndWait(binding)
-            // Previous callback-only sync retained: }
-            // Previous callback-only sync retained: }
+            "sync" -> runBlocking {
+                withTimeoutOrNull(PUSH_WAKE_TIMEOUT_MS) {
+                    runCatching { withContext(kotlinx.coroutines.Dispatchers.IO) { ServiceLocator.apiBackend.initialize() } }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                    handler.onAccountSyncNudgeAndWait(binding)
+                }
+            }
             "incoming_call" -> message.data["call_id"]?.takeIf { it.isNotBlank() }?.let { callId ->
                 runBlocking {
                     withTimeoutOrNull(PUSH_WAKE_TIMEOUT_MS) {
