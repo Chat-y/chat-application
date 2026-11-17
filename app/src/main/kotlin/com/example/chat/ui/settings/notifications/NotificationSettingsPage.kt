@@ -369,7 +369,7 @@ fun NotificationSettingsPage(
                             fontSize = 11.sp,
                             lineHeight = 15.sp,
                             maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
                     }
                     Spacer(Modifier.height(10.dp))

@@ -98,7 +98,7 @@ class LocalSnapshotCacheService(context: Context) : SnapshotCacheStore {
                     }
                     android.system.Os.rename(tmp.absolutePath, file.absolutePath)
                     val parentFd = android.system.Os.open(file.parentFile!!.absolutePath,
-                        android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_DIRECTORY, 0)
+                        android.system.OsConstants.O_RDONLY, 0)
                     try { android.system.Os.fsync(parentFd) } finally { android.system.Os.close(parentFd) }
                 } finally {
                     if (tmp.exists()) runCatching { tmp.delete() }

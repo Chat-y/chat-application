@@ -35,7 +35,7 @@ class ApiEncryptedAttachmentClient(
             client = client.newBuilder().followRedirects(false).followSslRedirects(false)
                 .retryOnConnectionFailure(false).callTimeout(120, java.util.concurrent.TimeUnit.SECONDS).build(),
         )
-        return ScopedFiles(frozen) { check(isCurrent(owner)) { "Account changed; encrypted media operation stopped." } }
+        return ScopedFiles(frozen, requireOwner = { check(isCurrent(owner)) { "Account changed; encrypted media operation stopped." } })
     }
 
     /** Only ciphertext files belong here. Filename/MIME/caption/key stay inside the MLS descriptor.

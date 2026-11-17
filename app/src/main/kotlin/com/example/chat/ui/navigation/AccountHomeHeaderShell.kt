@@ -143,7 +143,7 @@ internal fun AccountHomeHeaderShell(
                     }
                 }
                 }
-                AnimatedVisibility(visible = isHome && headerReady && headerActionSearch && entry.searchOpen,
+                androidx.compose.animation.AnimatedVisibility(visible = isHome && headerReady && headerActionSearch && entry.searchOpen,
                     enter = fadeIn(tween(motionMs)) + scaleIn(tween(motionMs), initialScale = 0f,
                         transformOrigin = TransformOrigin(originX, 0.5f)),
                     exit = fadeOut(tween(motionMs)) + scaleOut(tween(motionMs), targetScale = 0f,

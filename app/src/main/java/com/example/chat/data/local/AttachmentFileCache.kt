@@ -164,7 +164,7 @@ class AttachmentFileCache(
                 if (!epoch.stillCurrent(ep) || !file.exists()) throw IOException("revoked")
                 java.io.RandomAccessFile(file, "rw").use { it.fd.sync() }
                 check(marker.delete()) { "Encrypted media publish marker could not be removed." }
-                val directoryFd = android.system.Os.open(dir.absolutePath, android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_DIRECTORY, 0)
+                val directoryFd = android.system.Os.open(dir.absolutePath, android.system.OsConstants.O_RDONLY, 0)
                 try { android.system.Os.fsync(directoryFd) } finally { android.system.Os.close(directoryFd) }
                 val publishedLength = file.length()
                 check(publishedLength > 0 && publishedLength <= maxBytes().coerceAtLeast(0)) { "Encrypted cache cannot retain this attachment." }

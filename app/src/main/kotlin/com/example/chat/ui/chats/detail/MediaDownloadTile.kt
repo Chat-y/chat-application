@@ -99,7 +99,9 @@ internal fun MediaDownloadTile(
     }
     val terminalFail = state is S.Failed && (state.reason == S.FailReason.NOT_ALLOWED || state.reason == S.FailReason.SERVER_GONE || state.reason == S.FailReason.TOO_LARGE)
     BoxWithConstraints(modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.18f))) {
-        val compact = maxHeight < 120.dp                       // album cells: icon + ring only, no text
+        val boxMaxHeight = maxHeight
+        val boxMaxWidth = maxWidth
+        val compact = boxMaxHeight < 120.dp                       // album cells: icon + ring only, no text
         Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 Modifier.size(if (compact) 48.dp else 56.dp).clip(CircleShape).background(scrim)
@@ -119,8 +121,8 @@ internal fun MediaDownloadTile(
                     modifier = if (state == S.Done) Modifier.graphicsLayer { scaleX = 0.6f + 0.4f * tick; scaleY = 0.6f + 0.4f * tick; alpha = tick } else Modifier)
             }
             // Optional text only. Original primary/Cancel placement and gestures are unchanged.
-            val compactLabelFits = maxHeight >= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMinHeightDp.dp &&
-                maxWidth >= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMinWidthDp.dp &&
+            val compactLabelFits = boxMaxHeight >= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMinHeightDp.dp &&
+                boxMaxWidth >= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMinWidthDp.dp &&
                 density.fontScale <= com.example.chat.ui.navigation.ReferenceLayoutMetrics.compactMediaProgressLabelMaxFontScale
             if (compact && compactLabelFits) compactDownloadLabel(state)?.let { compactLabel ->
                 Text(compactLabel, color = scheme.onSurface, style = MaterialTheme.typography.labelSmall,

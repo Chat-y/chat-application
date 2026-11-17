@@ -26,7 +26,7 @@ class SecureAttachmentFileService(
     private val localCipherLimit: () -> Long = { 1024L * 1024 * 1024 },
 ) {
     private fun syncDirectory(dir: File) {
-        val fd = android.system.Os.open(dir.absolutePath, android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_DIRECTORY, 0)
+        val fd = android.system.Os.open(dir.absolutePath, android.system.OsConstants.O_RDONLY, 0)
         try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }
     }
 
