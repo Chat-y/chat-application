@@ -845,56 +845,58 @@ private fun ComposerActionButton(
     }
 }
 
-/** Dart _buildSendMicMorph: AnimatedSwitcher (fade, 180ms, easeOutCubic /
- *  easeInCubic) between the send and voice actions keyed on hasText; zero
- *  duration when the template disables the morph. */
-@Composable
-private fun SendMicMorph(
-    theme: ThemeConfig,
-    template: ComposerTemplate,
-    sendFill: Color,
-    micFill: Color,
-    hasText: Boolean,
-    onSend: () -> Unit,
-    onVoice: () -> Unit,
-    onVoiceHoldStart: () -> Unit,
-    onVoiceMove: (Offset) -> Unit,
-    onVoiceHoldEnd: () -> Unit,
-) {
-    val duration = if (template.enableSendMorph) 180 else 0
-    AnimatedContent(
-        targetState = hasText,
-        transitionSpec = {
-            fadeIn(tween(duration, easing = EaseOutCubic)) togetherWith
-                fadeOut(tween(duration, easing = EaseInCubic))
-        },
-        label = "send-mic-morph",
-    ) { textPresent ->
-        if (textPresent) {
-            ComposerActionButton(
-                semanticsLabel = "Send message",
-                icon = Icons.AutoMirrored.Rounded.Send,
-                // Previous glyph: Color(theme.onAccentColor)
-                iconColor = com.example.chat.ui.kit.themeGlyphColor(sendFill, theme),
-                fillColor = sendFill,
-                emphasized = true,
-                onTap = onSend,
-            )
-        } else {
-            ComposerActionButton(
-                semanticsLabel = "Voice note. Tap to start locked recording, or hold to record and slide.",
-                icon = Icons.Rounded.Mic,
-                // Previous glyph: Color(theme.onAccentColor)
-                iconColor = com.example.chat.ui.kit.themeGlyphColor(micFill, theme),
-                fillColor = micFill,
-                onTap = onVoice,
-                onLongPressStart = onVoiceHoldStart,
-                onLongPressMove = onVoiceMove,
-                onLongPressEnd = onVoiceHoldEnd,
-            )
-        }
-    }
-}
+// Dormant send/mic renderer retired: no call sites exist; ChatEntryBar.sendMic owns this interaction.
+// /** Dart _buildSendMicMorph: AnimatedSwitcher (fade, 180ms, easeOutCubic /
+//  *  easeInCubic) between the send and voice actions keyed on hasText; zero
+//  *  duration when the template disables the morph. */
+// @Composable
+// private fun SendMicMorph(
+//     theme: ThemeConfig,
+//     template: ComposerTemplate,
+//     sendFill: Color,
+//     micFill: Color,
+//     hasText: Boolean,
+//     onSend: () -> Unit,
+//     onVoice: () -> Unit,
+//     onVoiceHoldStart: () -> Unit,
+//     onVoiceMove: (Offset) -> Unit,
+//     onVoiceHoldEnd: () -> Unit,
+// ) {
+//     val duration = if (template.enableSendMorph) 180 else 0
+//     AnimatedContent(
+//         targetState = hasText,
+//         transitionSpec = {
+//             fadeIn(tween(duration, easing = EaseOutCubic)) togetherWith
+//                 fadeOut(tween(duration, easing = EaseInCubic))
+//         },
+//         label = "send-mic-morph",
+//     ) { textPresent ->
+//         if (textPresent) {
+//             ComposerActionButton(
+//                 semanticsLabel = "Send message",
+//                 icon = Icons.AutoMirrored.Rounded.Send,
+//                 // Previous glyph: Color(theme.onAccentColor)
+//                 iconColor = com.example.chat.ui.kit.themeGlyphColor(sendFill, theme),
+//                 fillColor = sendFill,
+//                 emphasized = true,
+//                 onTap = onSend,
+//             )
+//         } else {
+//             ComposerActionButton(
+//                 semanticsLabel = "Voice note. Tap to start locked recording, or hold to record and slide.",
+//                 icon = Icons.Rounded.Mic,
+//                 // Previous glyph: Color(theme.onAccentColor)
+//                 iconColor = com.example.chat.ui.kit.themeGlyphColor(micFill, theme),
+//                 fillColor = micFill,
+//                 onTap = onVoice,
+//                 onLongPressStart = onVoiceHoldStart,
+//                 onLongPressMove = onVoiceMove,
+//                 onLongPressEnd = onVoiceHoldEnd,
+//             )
+//         }
+//     }
+// }
+//
 
 /** Dart composer TextField port: hint 'Message\u2026  /task or #reply', dense
  *  padding (default h12/v11), 16sp * fontScale, min 1 / max 5 lines. */

@@ -663,8 +663,13 @@ fun CameraCaptureBottomControls(
             // Unsupported modes are hidden entirely (user direction 2026-10-30):
             // never a truncated "unavailable" label consuming a slot. The active
             // mode is always supported, so the centered underline never moves.
-            val stripModes = listOf(CaptureViewMode.photo,CaptureViewMode.portrait,CaptureViewMode.night,CaptureViewMode.lenses,CaptureViewMode.video,CaptureViewMode.document)
-                .filter { when(it){CaptureViewMode.portrait->portraitSupported;CaptureViewMode.night->nightSupported;CaptureViewMode.video->videoSupported;else->true} }
+            // Previous per-recomposition allocation: listOf(...).filter { ... } on every
+            // composition. Pure function of the three support flags, so remember it; the
+            // produced list is identical (behavior-preserving, looks-only).
+            val stripModes = remember(portraitSupported, nightSupported, videoSupported) {
+                listOf(CaptureViewMode.photo,CaptureViewMode.portrait,CaptureViewMode.night,CaptureViewMode.lenses,CaptureViewMode.video,CaptureViewMode.document)
+                    .filter { when(it){CaptureViewMode.portrait->portraitSupported;CaptureViewMode.night->nightSupported;CaptureViewMode.video->videoSupported;else->true} }
+            }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 // CAM-R1-046 prior fixed slot: val slotWidth = (if (tight) 76 else 88).dp
                 val slotWidth = cameraModeSlotWidthDp(tight, androidx.compose.ui.platform.LocalDensity.current.fontScale).dp

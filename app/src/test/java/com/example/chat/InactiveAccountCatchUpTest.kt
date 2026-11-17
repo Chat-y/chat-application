@@ -28,7 +28,8 @@ class InactiveAccountCatchUpTest {
         val f=Fixture(listOf(target())); f.valid=false; f.runner.run(); assertTrue(f.fetched.isEmpty())
     }
     @Test fun removedOrSwitchedAccountDuringFetchCannotAlert() {
-        val f=Fixture(listOf(target())); f.fetchHook={ f.valid=false }; f.runner.run(); assertTrue(f.alerted.isEmpty())
+        // Previous unchecked completion: f.runner.run(); assertTrue(f.alerted.isEmpty())
+        val f=Fixture(listOf(target())); f.fetchHook={ f.valid=false }; assertFalse(f.runner.run()); assertTrue(f.alerted.isEmpty())
     }
     @Test fun expiredCredentialsAreNotUsed() {
         val f=Fixture(listOf(target(expires=14_000))); f.runner.run(); assertTrue(f.fetched.isEmpty())
@@ -83,4 +84,18 @@ class InactiveAccountCatchUpTest {
         assertEquals(listOf("b"), f.alerted)
     }
 
+    @Test fun badgesPublishEvenWhenOsAlertsAreDeniedOrAlreadySeen() {
+        for (previous in listOf(null, "3:10:x")) {
+            val published = mutableListOf<Int>()
+            val t = target()
+            val runner = InactiveAccountCatchUp({listOf(t)}, {true}, {InactiveAccountCatchUp.Summary(3,10,"x")},
+                {previous}, {_,_->}, {false}, {}, now={10_000}, publish={_,summary->published+=summary.unread})
+            assertTrue(runner.run())
+            assertEquals(listOf(3), published)
+        }
+    }
+    @Test fun failedFetchReturnsRetryableOutcome() {
+        val runner = InactiveAccountCatchUp({listOf(target())}, {true}, {null}, {null}, {_,_->}, {true}, {}, now={10_000})
+        assertFalse(runner.run())
+    }
 }

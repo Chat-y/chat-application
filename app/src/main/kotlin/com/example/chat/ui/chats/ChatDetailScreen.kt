@@ -752,12 +752,14 @@ fun ChatDetailScreen(
     }
     val dayHeaderLocale = LocalConfiguration.current.locales[0] ?: java.util.Locale.getDefault()
     val dayHeaderFormatter = remember(dayHeaderLocale) { DateTimeFormatter.ofPattern("d MMM yyyy", dayHeaderLocale) }
+    val viewerAnchorReduceMotion = rememberChatyReduceMotion()
     var pendingScrollTarget by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableStateOf<String?>(null) }
     LaunchedEffect(pendingScrollTarget, timelineRows, loadingMessages) {
         val target = pendingScrollTarget ?: return@LaunchedEffect
         val rowIndex = com.example.chat.ui.chats.detail.ChatTimelinePositionPolicy.rowIndex(timelineRows, target)
         if (rowIndex >= 0) {
-            listState.animateScrollToItem(rowIndex)
+            // Previous unconditional movement: listState.animateScrollToItem(rowIndex)
+            if (viewerAnchorReduceMotion) listState.scrollToItem(rowIndex) else listState.animateScrollToItem(rowIndex)
             pendingScrollTarget = null
         } else if (!loadingMessages) {
             snackbarHostState.showSnackbar("That message is not in the loaded history.")
@@ -768,7 +770,8 @@ fun ChatDetailScreen(
     // (instant under reduced motion, animated otherwise) and request INPUT focus on it.
     // Input focus only: whether an accessibility service moves AT focus afterwards is
     // platform/service behavior and is NOT claimed here.
-    val viewerAnchorReduceMotion = rememberChatyReduceMotion()
+    // Reduced-motion value now shared above with search and scroll-to-latest.
+    // Previous declaration here: val viewerAnchorReduceMotion = rememberChatyReduceMotion()
     val viewerAnchorFocusRequesters = remember(conversation.id, currentUserId, messageSessionIdentity) { mutableMapOf<String, FocusRequester>() }
     var viewerAnchorConsumed by remember(conversation.id, currentUserId, messageSessionIdentity) { mutableIntStateOf(0) }
     LaunchedEffect(viewerAnchorId, viewerAnchorRequest, timelineRows, loadingMessages) {
@@ -836,10 +839,17 @@ fun ChatDetailScreen(
         }
     }
 
+    // Reading to the existing near-bottom threshold acknowledges pending arrivals too.
+    // Previously only the FAB tap or another arrival cleared the badge, leaving stale counts.
+    LaunchedEffect(isNearBottom) {
+        if (isNearBottom) pendingBelowCount = 0
+    }
+
     fun scrollToBottom(animate: Boolean = true) {
         if (messages.isEmpty()) return
         scope.launch {
-            if (animate) {
+            // Previous: if (animate). Keep the same destination without movement when reduced motion is enabled.
+            if (animate && !viewerAnchorReduceMotion) {
                 listState.animateScrollToItem(timelineRows.lastIndex)
             } else {
                 listState.scrollToItem(timelineRows.lastIndex)
@@ -851,7 +861,8 @@ fun ChatDetailScreen(
     var previousMessageIds by remember(conversation.id, currentUserId, messageSessionIdentity) {
         mutableStateOf(messages.map { it.id }.toSet())
     }
-    val orderedMessageIds = messages.map { it.id }
+    // Previous per-recomposition allocation: val orderedMessageIds = messages.map { it.id }
+    val orderedMessageIds = remember(messages) { messages.map { it.id } }
     LaunchedEffect(orderedMessageIds) {
         val appended = com.example.chat.core.messages.ConversationArrivalPolicy.appendedIds(previousMessageIds, orderedMessageIds)
         previousMessageIds = orderedMessageIds.toSet()
@@ -1078,10 +1089,22 @@ fun ChatDetailScreen(
                 scope.launch { snackbarHostState.showSnackbar("Message copied") }
             }
             MessageActionType.edit -> {
+                // Do not overwrite an unsent message or an in-progress edit just to enter another mode.
+                if (composerText.isNotEmpty() && (editingMessage?.id != message.id || composerText != message.text)) {
+                    scope.launch { snackbarHostState.showSnackbar("Your draft is kept. Send or clear it before editing this message.") }
+                } else {
+                    editingMessage = message
+                    recoveredViewOnceNeedsChoice = false
+                    handleComposerChanged(message.text)
+                }
+                /* Previous unconditional draft replacement retained.
+            MessageActionType.edit -> {
                 // Dart sets the editing id + text and keeps the reply target.
                 editingMessage = message
                 recoveredViewOnceNeedsChoice = false
                 handleComposerChanged(message.text)
+            }
+                */
             }
             MessageActionType.star -> onToggleStar(message.id)
             MessageActionType.pin -> onTogglePin(message.id)
@@ -1194,7 +1217,9 @@ fun ChatDetailScreen(
             try {
                 if (currentDraftOwner != submittedOwner || !isMessageSessionCurrent()) return@launch
                 if (submittedReply != null) {
-                    val target = messages.singleOrNull { it.id == submittedReply.id && it.conversationId == conversation.id }
+                    // Re-read the live target when the queued coroutine runs, not its launch-time list.
+                    // Previous: val target = messages.singleOrNull { it.id == submittedReply.id && it.conversationId == conversation.id }
+                    val target = currentActionMessages.singleOrNull { it.id == submittedReply.id && it.conversationId == conversation.id }
                     check(target != null && !target.isDeletedForMe && !target.isDeletedForEveryone &&
                         !target.isRevokedBySender && target.metadata["view_once"].let { it == null || it == false }) {
                         "The reply target is no longer available. Your draft is kept."
@@ -1360,6 +1385,17 @@ fun ChatDetailScreen(
                         clearConfirmOpen = true
                     },
                 )
+            }
+
+            if (clearBusy) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                    .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                    verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp), color = Color(theme.accentColor), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Clearing conversation...", color = Color(theme.secondaryTextColor))
+                }
             }
 
             val localPinned = remember(messages) { com.example.chat.core.messages.LocalPinnedMessagePolicy.latest(
@@ -3174,19 +3210,21 @@ private fun SearchHeader(
                     stateDescription = "Match ${matchIndex.coerceIn(1, matchCount)} of $matchCount in loaded history"
                 },
             )
-            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
+            // Previous enabled-at-boundary action: IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp))
+            IconButton(onClick = onPrevious, enabled = matchIndex > 1, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.Rounded.KeyboardArrowUp,
                     contentDescription = "Previous match",
-                    tint = Color(theme.primaryTextColor),
+                    tint = Color(if (matchIndex > 1) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex > 1) 1f else 0.5f),
                     modifier = Modifier.size(22.dp),
                 )
             }
-            IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) {
+            // Previous enabled-at-boundary action: IconButton(onClick = onNext, modifier = Modifier.size(48.dp))
+            IconButton(onClick = onNext, enabled = matchIndex in 1 until matchCount, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.Rounded.KeyboardArrowDown,
                     contentDescription = "Next match",
-                    tint = Color(theme.primaryTextColor),
+                    tint = Color(if (matchIndex in 1 until matchCount) theme.primaryTextColor else theme.secondaryTextColor).copy(alpha = if (matchIndex in 1 until matchCount) 1f else 0.5f),
                     modifier = Modifier.size(22.dp),
                 )
             }
@@ -3278,6 +3316,7 @@ private fun QuickReplyOverlay(
     replies: List<QuickReplyTemplate>,
     onPick: (QuickReplyTemplate) -> Unit,
 ) {
+    val currentOnPick by rememberUpdatedState(onPick)
     Column(
         Modifier
             .fillMaxWidth()
@@ -3289,11 +3328,13 @@ private fun QuickReplyOverlay(
         LazyColumn {
             items(replies.size) { index ->
                 val reply = replies[index]
+                val currentReply by rememberUpdatedState(reply)
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .pointerInput(reply.shortcut) {
-                            detectTapGestures(onTap = { onPick(reply) })
+                            // Previous captured callback/content: detectTapGestures(onTap = { onPick(reply) })
+                            detectTapGestures(onTap = { currentOnPick(currentReply) })
                         }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 ) {

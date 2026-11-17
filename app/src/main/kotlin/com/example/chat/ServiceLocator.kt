@@ -520,6 +520,15 @@ object ServiceLocator {
         try { inactiveAccountPush.run() } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { /* Inactive catch-up cannot fail the active wake. */ }
     }
 
+    /** Durable content-free push recovery. The router re-verifies the binding and retained owner on every attempt. */
+    suspend fun recoverAccountPush(bindingId: String, callId: String?): Boolean = accountPushBindings.handle(bindingId, callId)
+
+    fun recoverDeletedPushes(context: Context) {
+        accountPushBindings.retainedBindingHints().forEach { binding ->
+            com.example.chat.notifications.AccountPushRecoveryWorker.enqueue(context, binding, null, urgent = false)
+        }
+    }
+
     private fun installPushWakeHandler() {
         com.example.chat.notifications.PushWakeHolder.handler =
             object : com.example.chat.notifications.PushWakeHandler {

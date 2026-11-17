@@ -95,6 +95,14 @@ fun NavigationDestinationsSettingsScreen(
 
     var saving by remember { mutableStateOf(false) }
 
+    fun requestBack() {
+        if (saving) return
+        if (dirty) confirm = "discard" else onBack()
+    }
+    // Match toolbar Back and system/predictive Back. Previously only the toolbar
+    // checked dirty state, so a gesture could discard unsaved destination edits.
+    androidx.activity.compose.BackHandler { requestBack() }
+
     // SET-R1-023: canned copy, no raw backend text in the UI
     fun errorText(error: Throwable): String = "Could not save. Try again."
 
@@ -153,7 +161,8 @@ fun NavigationDestinationsSettingsScreen(
                     .padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (dirty) confirm = "discard" else onBack() }) {
+                // Previous toolbar-only guard: if (dirty) confirm = "discard" else onBack()
+                IconButton(onClick = { requestBack() }, enabled = !saving) {
                     com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.back, semanticLabel = "Back", color = colors.foreground)
                 }
                 Text(

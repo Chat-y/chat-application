@@ -166,10 +166,11 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
                     ImageRequest.Builder(context).data(item.uri).size(256, 256).crossfade(false).build()
                 }
                 val choose: () -> Unit = {
-                    selected = if (index >= 0) selected - item.uri else if (selected.size < maxSelection.coerceIn(1, 100)) selected + item.uri else selected
+                    val currentIndex = selected.indexOf(item.uri)
+                    selected = if (currentIndex >= 0) selected - item.uri else if (selected.size < maxSelection.coerceIn(1, 100)) selected + item.uri else selected
                 }
                 Box(Modifier.fillMaxWidth().aspectRatio(1f).background(Color(theme.cardColor))
-                    .clickable(onClick = choose).semantics {
+                    .clickable(enabled = index >= 0 || selected.size < maxSelection.coerceIn(1, 100), onClick = choose).semantics {
                         contentDescription = "Photo ${item.name}"; this.selected = index >= 0
                         stateDescription = if (index >= 0) "Selected ${index + 1}" else "Not selected"
                     }) {
@@ -234,3 +235,7 @@ internal fun AttachmentGallerySheet(theme: ThemeConfig, onAction: (AttachmentAct
 //                 Triple("Voice note", Icons.Rounded.Mic, null))
 //                     when (label) { "Camera" -> onCamera(); "Voice note" -> onVoiceNote(); "Gallery" -> reload++; else -> action?.let(onAction) }
 //         if (!secondReference) TextButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = onVoiceNote) { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.microphone, semanticLabel = null); Text("Record voice note") }
+
+// Previous click-state source retained for review:
+//                     selected = if (index >= 0) selected - item.uri else if (selected.size < maxSelection.coerceIn(1, 100)) selected + item.uri else selected
+//                     .clickable(onClick = choose).semantics {

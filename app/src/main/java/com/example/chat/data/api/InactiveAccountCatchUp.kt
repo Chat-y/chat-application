@@ -12,6 +12,9 @@ class InactiveAccountCatchUp(
     private val clear: (Target) -> Unit,
     private val now: () -> Long = System::currentTimeMillis,
     private val elapsed: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val publish: (Target, Summary) -> Unit = { _, _ -> },
+    private val budgetMillis: Long = 3_000,
+
 ) {
     // Not a data class: never generate a toString containing bearer credentials.
     class Target(val key: String, val hash: String, val base: String, val tenant: String,
@@ -28,16 +31,26 @@ class InactiveAccountCatchUp(
     }
     private val running = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    fun run() {
-        if (!running.compareAndSet(false, true)) return
+    // Previous implementation retained: fun run() { if (!running.compareAndSet(false, true)) return
+    fun run(): Boolean {
+        if (!running.compareAndSet(false, true)) return false
+        var complete = true
         val started = elapsed()
         try {
             targets().distinctBy { it.key }.take(3).forEach { target ->
-                if (elapsed() - started >= 3_000) return@forEach
-                if (target.token.isBlank() || target.expiresAt?.let { it <= now() + 5_000 } == true || !isCurrent(target)) return@forEach
+                if (elapsed() - started >= budgetMillis) { complete = false; return@forEach }
+                // Previous stale-target skip: if (!isCurrent(target)) return@forEach
+                // A concurrent switch/rotation is not proof that this hint was handled.
+                if (!isCurrent(target)) { complete = false; return@forEach }
+                if (target.token.isBlank() || target.expiresAt?.let { it <= now() + 5_000 } == true) { complete = false; return@forEach }
                 try {
-                    val summary = fetch(target) ?: return@forEach
-                    if (!isCurrent(target)) return@forEach
+                    val summary = fetch(target) ?: run { complete = false; return@forEach }
+                    // A concurrent switch/rotation is not proof that this hint was handled.
+                    if (!isCurrent(target)) { complete = false; return@forEach }
+                    // Badge publication does not depend on OS notification permission or alert dedupe.
+                    publish(target, summary)
+                    // A concurrent switch/rotation is not proof that this hint was handled.
+                    if (!isCurrent(target)) { complete = false; return@forEach }
                     val old = Summary.decode(previous(target.hash))
                     val changed = old == null || (old.fingerprint != summary.fingerprint &&
                         (summary.unread > old.unread || summary.latest > old.latest))
@@ -47,9 +60,19 @@ class InactiveAccountCatchUp(
                     } else if (!changed || alert(target)) {
                         if (isCurrent(target)) remember(target.hash, summary.encoded())
                     }
+                    if (!isCurrent(target)) complete = false
                 } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
-                catch (_: Exception) { /* No credentials, room content or account details in logs. */ }
+                catch (_: Exception) { complete = false /* No credentials, room content or account details in logs. */ }
             }
         } finally { running.set(false) }
+        return complete
     }
 }
+
+// Replaced source retained for review (inactive; do not restore without its surrounding implementation).
+// Prior source:     fun run() {
+// Prior source:         if (!running.compareAndSet(false, true)) return
+// Prior source:                 if (elapsed() - started >= 3_000) return@forEach
+// Prior source:                 if (target.token.isBlank() || target.expiresAt?.let { it <= now() + 5_000 } == true || !isCurrent(target)) return@forEach
+// Prior source:                     val summary = fetch(target) ?: return@forEach
+// Prior source:                 catch (_: Exception) { /* No credentials, room content or account details in logs. */ }

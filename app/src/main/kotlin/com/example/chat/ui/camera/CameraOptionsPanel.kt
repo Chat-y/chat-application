@@ -9,6 +9,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -23,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.chat.ui.theme.LocalAppColors
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.disabled
@@ -48,7 +50,13 @@ fun CameraOptionsPanel(
     frontCamera: Boolean = false,
 ) {
     val panelLabel = stringResource(R.string.camera_options_panel)
+    // Depth-model consistency (looks-only): the lane's other floating surfaces
+    // (LensBrowserSheet tiles, EffectPickerSheet container) separate from the
+    // live preview with a 1.dp borderSubtle outline instead of shadow/elevation.
+    // The panel had neither, so over a bright viewfinder it read as unseparated.
+    // Border draws inside the existing bounds: no layout, spacing or content change.
     Column(modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surface, RoundedCornerShape(10.dp))
+        .border(1.dp, LocalAppColors.current.borderSubtle, RoundedCornerShape(10.dp))
         .heightIn(max = 350.dp).verticalScroll(rememberScrollState())
         // CAM-R4-030 previous spacing: .semantics { contentDescription="Camera options panel" }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // CAM-R4-004 prior semantics label: "Camera options panel"

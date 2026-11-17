@@ -39,6 +39,10 @@ fun effectiveZoomMax(reportedMax: Float, workingMax: Float): Float = minOf(repor
 @Composable
 fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSlider:Boolean=false,onZoom:(Float)->Unit) {
     var proposed by remember(current,min,max) { mutableStateOf(clampCameraZoom(current,min,max)) }
+    // The drag anchor must follow the latest applied zoom. pointerInput's keys
+    // intentionally exclude `current` (relaunching mid-gesture would cancel the
+    // drag), so read it through rememberUpdatedState, not the launch-time capture.
+    val latestCurrent by rememberUpdatedState(current)
     var expanded by remember { mutableStateOf(false) }
     val presets = remember(min,max) { zoomPresetsFor(min,max) }
     val showSlider = (expanded || forceSlider) && max > min
@@ -120,9 +124,12 @@ fun CameraZoomControls(current:Float,min:Float,max:Float,enabled:Boolean,forceSl
                     }
                     .pointerInput(min,max,enabled) {
                         if(!enabled) return@pointerInput
-                        var value = current
+                        // Previous stale anchor: var value = current / onDragStart = { value = current }
+                        // - `current` here is the launch-time capture, so a second drag
+                        // after the camera applied a request snapped back to the old zoom.
+                        var value = latestCurrent
                         detectHorizontalDragGestures(
-                            onDragStart = { value = current },
+                            onDragStart = { value = latestCurrent },
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
                                 val widthPx = size.width.coerceAtLeast(1)

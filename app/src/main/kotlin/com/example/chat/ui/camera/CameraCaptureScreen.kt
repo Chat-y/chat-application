@@ -1543,7 +1543,11 @@ fun ChatyCameraCaptureScreen(
                                 val lensMode = captureViewMode == CaptureViewMode.lenses
                                 if (lensMode && kotlin.math.abs(dx) > swipeThreshold &&
                                     kotlin.math.abs(dx) > 1.6f * kotlin.math.abs(dy)) {
-                                    val catalog = kBuiltInLenses
+                                    // Previous unfiltered catalog: kBuiltInLenses - a swipe
+                                    // could select a lens the carousel hides as unsupported on
+                                    // this device (LensCarousel requirement 71), which the
+                                    // carousel then cannot highlight or center on.
+                                    val catalog = kBuiltInLenses.filter { it.isNoLens || it.supportedForDevice(deviceTier.asLensRequirement) }
                                     if (catalog.isNotEmpty()) {
                                         val current = catalog.indexOfFirst { it.id == lensManager.selected.id }
                                             .let { if (it >= 0) it else 0 }

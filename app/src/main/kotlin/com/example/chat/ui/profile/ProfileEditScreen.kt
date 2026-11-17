@@ -183,6 +183,7 @@ fun ProfileEditScreen(
 
     fun attemptBack() {
         // Saving owns the draft reader and scoped upload. Do not offer Discard until it settles.
+        if (justSaved) { onBack(); return }
         if (isSaving) return
         if (!isDirty && !isSaving) onBack() else showDiscardDialog = true
     }
@@ -194,7 +195,8 @@ fun ProfileEditScreen(
     val bannerHeight = (screenWidth - 32) * 9 / 16
 
     fun pick(source: ProfileMediaSource) {
-        if (isSaving) return
+        // Previous guard: if (isSaving) return
+        if (isSaving || justSaved) return
         val target = sourceSheetFor ?: return
         sourceSheetFor = null
         val picker = if (target == "avatar") onPickAvatar else onPickBanner
@@ -228,7 +230,8 @@ fun ProfileEditScreen(
     com.example.chat.ui.kit.ProtectSensitiveWindow()
     // P5-42: event handlers use the context captured above.
     fun save() {
-        if (isSaving || !isCurrentPreview()) return
+        // Previous guard: if (isSaving || !isCurrentPreview()) return
+        if (isSaving || justSaved || !isCurrentPreview()) return
         saveError = null
         // Inline validators from profile_edit_screen.dart.
         // NFC-normalised, bidi controls stripped (P2-11, P3-20).
@@ -392,8 +395,10 @@ fun ProfileEditScreen(
                     )
                     if (onPickBanner != null) {
                         IconButton(
-                            onClick = { if (!isSaving) sourceSheetFor = "banner" },
-                            enabled = !isSaving,
+                            // Previous action: onClick = { if (!isSaving) sourceSheetFor = "banner" },
+                            onClick = { if (!isSaving && !justSaved) sourceSheetFor = "banner" },
+                            // Previous enabled state: enabled = !isSaving,
+                            enabled = !isSaving && !justSaved,
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(10.dp)
@@ -447,8 +452,10 @@ fun ProfileEditScreen(
                     }
                     // 48dp touch target (P1-34); the 34dp visual circle is drawn inside it.
                     IconButton(
-                        onClick = { if (!isSaving) sourceSheetFor = "avatar" },
-                        enabled = !isSaving,
+                        // Previous action: onClick = { if (!isSaving) sourceSheetFor = "avatar" },
+                        onClick = { if (!isSaving && !justSaved) sourceSheetFor = "avatar" },
+                        // Previous enabled state: enabled = !isSaving,
+                        enabled = !isSaving && !justSaved,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .semantics { contentDescription = appContext.getString(com.example.chat.R.string.profile_edit_photo) }
@@ -500,8 +507,10 @@ fun ProfileEditScreen(
                 )
                 OutlinedTextField(
                     value = displayName,
-                    onValueChange = { if (it.length <= 50) displayName = it },
-                    enabled = !isSaving,
+                    // Previous input handler: onValueChange = { if (it.length <= 50) displayName = it },
+                    onValueChange = { if (!isSaving && !justSaved && it.length <= 50) displayName = it },
+                    // Previous enabled state: enabled = !isSaving,
+                    enabled = !isSaving && !justSaved,
                     label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_display_name)) },  // was: "Display Name"
                     placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_display_name_hint)) },  // was: "Enter your full name"
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.profile, semanticLabel = null) },
@@ -517,12 +526,14 @@ fun ProfileEditScreen(
                 OutlinedTextField(
                     value = username,
                     onValueChange = {
-                        if (it.length <= 30) {
+                        // Previous input guard: if (it.length <= 30) {
+                        if (!isSaving && !justSaved && it.length <= 30) {
                             username = it
                             usernameTaken = false
                         }
                     },
-                    enabled = !isSaving,
+                    // Previous enabled state: enabled = !isSaving,
+                    enabled = !isSaving && !justSaved,
                     label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_username)) },  // was: "Username"
                     placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_username_hint)) },  // was: "Choose a unique username"
                     prefix = { Text("@") },
@@ -542,8 +553,10 @@ fun ProfileEditScreen(
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
                     value = about,
-                    onValueChange = { if (it.length <= 140) about = it },
-                    enabled = !isSaving,
+                    // Previous input handler: onValueChange = { if (it.length <= 140) about = it },
+                    onValueChange = { if (!isSaving && !justSaved && it.length <= 140) about = it },
+                    // Previous enabled state: enabled = !isSaving,
+                    enabled = !isSaving && !justSaved,
                     label = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_about)) },  // was: "About / Status"
                     placeholder = { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.profile_edit_about_hint)) },  // was: "Say something about yourself or current mood"
                     leadingIcon = { com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.info, semanticLabel = null) },

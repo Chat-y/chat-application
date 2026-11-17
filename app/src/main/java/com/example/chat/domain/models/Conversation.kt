@@ -114,9 +114,23 @@ data class Conversation(
                 lastMessageText = lastText,
                 lastMessageTime = lastTime,
                 lastMessageSenderId = lastSender,
+                // REST catch-up must preserve server unread totals even without a live socket.
+                unreadCount = parseApiUnreadCount(json["unread_count"]),
                 roomType = rType,
                 taskId = tId,
             )
         }
     }
+}
+
+/** Reject fractional/malformed counts; saturate valid positive integer values instead of overflowing. */
+internal fun parseApiUnreadCount(value: Any?): Int {
+    val count = when (value) {
+        is Byte, is Short, is Int, is Long -> (value as Number).toLong()
+        is String -> value.trim().toLongOrNull()
+        is Number -> value.toDouble().takeIf { it.isFinite() && it % 1.0 == 0.0 }
+            ?.coerceIn(0.0, Int.MAX_VALUE.toDouble())?.toLong()
+        else -> null
+    } ?: return 0
+    return count.coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
 }

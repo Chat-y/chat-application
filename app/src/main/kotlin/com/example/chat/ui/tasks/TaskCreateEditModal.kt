@@ -186,6 +186,10 @@ fun TaskCreateEditModal(
                     if (existingTask == null) "Task \"$trimmedTitle\" created and shared in chat."
                     else "Task \"$trimmedTitle\" updated.",
                 )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                // AUDIT-TAS-1: rethrow cancellation; the broad catch below used to swallow it and
+                // report a spurious save failure after the sheet was dismissed.
+                throw cancelled
             } catch (error: Exception) {
                 isSaving = false
                 val message = (error.message ?: error.toString()).removePrefix("Exception: ")
@@ -194,6 +198,9 @@ fun TaskCreateEditModal(
                 } else {
                     message
                 }
+            } finally {
+                // Clear the gate on cancellation as well if this modal remains composed.
+                isSaving = false
             }
         }
     }

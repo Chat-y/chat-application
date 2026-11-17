@@ -10,6 +10,7 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.UploadFile
 import com.example.chat.ui.icons.ChatyPackAwareIcon as Icon
 import com.example.chat.ui.settings.state.collectSettingsState
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -21,6 +22,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -61,7 +67,7 @@ private fun storageSizeLabel(bytes: Long): String {
 fun StorageMediaScreen(
     preferences: ChatyPreferencesController,
     onBack: () -> Unit,
-    onClearCache: () -> Unit,
+    onClearCache: suspend () -> Unit, // awaited completion, not a launch-and-return callback
     cacheLimitMb: Int,
     onCacheLimitChange: (Int) -> Unit,
     cacheUsedBytes: Long = 0L,
@@ -80,6 +86,24 @@ fun StorageMediaScreen(
     var confirmClear by remember { mutableStateOf(false) }
     // ST1-30: spoken/visible result after clearing the cache.
     var clearedNotice by remember { mutableStateOf(false) }
+    var clearingCache by remember { mutableStateOf(false) }
+    var cacheClearError by remember { mutableStateOf(false) }
+    fun clearCache() {
+        if (clearingCache) return
+        clearingCache = true
+        clearedNotice = false
+        cacheClearError = false
+        scope.launch {
+            try {
+                onClearCache()
+                clearedNotice = true
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                cacheClearError = true
+            } finally { clearingCache = false }
+        }
+    }
     var pendingLimitMb by remember { mutableStateOf<Int?>(null) }
     // Superseded broad listener retained inactive:
     // DisposableEffect(preferences) {
@@ -184,6 +208,7 @@ fun StorageMediaScreen(
                     Box(
                         Modifier.selectable(
                             selected = isSelected,
+                            enabled = !clearingCache,
                             role = Role.RadioButton,
                             onClick = {
                                 if (mb != cacheLimitMb) {
@@ -218,9 +243,18 @@ fun StorageMediaScreen(
                 // ST1-36: destructive icon uses the same error token as its action.
                 iconColor = colors.error,
                 subtitle = "Free local disk space without deleting server messages",
-                trailing = { Text("Clear", color = colors.error) },
+                trailing = { Text(if (clearingCache) "Clearing..." else "Clear", color = colors.error) },
+                enabled = !clearingCache,
                 onTap = { confirmClear = true },
             )
+            if (clearingCache || cacheClearError) {
+                Text(
+                    if (clearingCache) "Clearing local media cache..." else "Could not clear all local media. Try again.",
+                    color = if (cacheClearError) colors.error else colors.foregroundSecondary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                )
+            }
             if (clearedNotice) {
                 Text(
                     "Local media cache cleared.",
@@ -245,7 +279,8 @@ fun StorageMediaScreen(
             },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel", color = colors.primary) } },
             confirmButton = {
-                TextButton(onClick = { confirmClear = false; onClearCache(); clearedNotice = true }) { Text("Clear", color = colors.error) }
+                // Previous optimistic result: confirmClear = false; onClearCache(); clearedNotice = true
+                TextButton(onClick = { confirmClear = false; clearCache() }, enabled = !clearingCache) { Text("Clear", color = colors.error) }
             },
         )
     }

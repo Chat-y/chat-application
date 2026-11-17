@@ -14,7 +14,11 @@ object SettingsSearchLogic {
         description: (T) -> String,
         keywords: (T) -> List<String>,
     ): List<T> {
-        val clean = query.trim().lowercase()
+        // Every comparison below already uses ignoreCase. Lowercasing first both
+        // allocates another string and can expand characters such as U+0130,
+        // breaking a match that ignoreCase alone accepts.
+        // Previous redundant normalization: val clean = query.trim().lowercase()
+        val clean = query.trim()
         if (clean.isEmpty()) return all
         return all.filter { item ->
             // SET-R1-031: ignoreCase avoids allocating a lowercase copy of every field per keystroke

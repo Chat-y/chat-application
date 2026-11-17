@@ -221,7 +221,10 @@ fun TaskDetailScreen(
                                 .clip(RoundedCornerShape(999.dp))
                                 .background(colors.primary.copy(alpha = 0.08f))
                             .border(1.dp, colors.primary.copy(alpha = 0.25f), RoundedCornerShape(999.dp))
-                                .clickable { statusMenuOpen = true }
+                                // AUDIT-TAS-2: disabled while an action is in flight; selections made
+                                // during one were silently dropped by the actionBusy guard in updateStatus.
+                                // Prior: .clickable { statusMenuOpen = true }
+                                .clickable(enabled = !actionBusy) { statusMenuOpen = true }
                                 .padding(horizontal = 10.dp, vertical = 4.dp),
                         ) {
                             TaskStatusBadge(currentTask.status, colors)
@@ -273,6 +276,8 @@ fun TaskDetailScreen(
                                 else TaskStatus.completed,
                             )
                         },
+                        // AUDIT-TAS-2: a tap during an in-flight action was a silent no-op.
+                        enabled = !actionBusy,
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(

@@ -45,6 +45,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -101,7 +102,9 @@ fun FriendMapScreen(
 ) {
     val isLandscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val systemDark = (LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-    val mapColors = if (systemDark) darkColorScheme() else lightColorScheme()
+    // AUDIT-MAP-2: a fresh ColorScheme every recomposition made MaterialTheme invalidate the whole
+    // subtree on any status change. Prior: val mapColors = if (systemDark) darkColorScheme() else lightColorScheme()
+    val mapColors = remember(systemDark) { if (systemDark) darkColorScheme() else lightColorScheme() }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var mapActive by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
@@ -266,7 +269,11 @@ fun FriendMapScreen(
                             if (rendererStatus == "Loading map...") rendererStatus = ""
                             onMapReady()
                         }, nativeLayers = true,
-                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true; stylePending = null }, onViewChanged = { enabled ->
+                        // AUDIT-MAP-1: match MapViewerScreen (MAP-R5-233): stylePending clears when the style
+                        // load reaches idle (onStyleLoading), not on the immediate page ack.
+                        // Prior: onStyleChanged = { selectedStyle = it; styleChosenByUser = true; stylePending = null }
+                        systemDark = systemDark, onStyleChanged = { selectedStyle = it; styleChosenByUser = true },
+                        onStyleLoading = { loading -> if (!loading) stylePending = null }, onViewChanged = { enabled ->
                             buildingsEnabled = enabled
                             // MAP-R1-047: say what 3D means here; missing building data is not an error.
                             rendererStatus = if (enabled) "3D buildings show where height data exists. Not satellite imagery." else ""
@@ -282,7 +289,9 @@ fun FriendMapScreen(
                 color = mapColors.surfaceContainerHigh,
                 contentColor = mapColors.onSurface,
                 shape = CircleShape,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp), // MAP-R1-038: redundant contentDescription removed (Text is read once)
+                // AUDIT-MAP-3: the chip floats over the map with no depth cue; every other floating
+                // element in this lane (mini window, pill) carries a shadow. Looks-only.
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).shadow(6.dp, CircleShape), // MAP-R1-038: redundant contentDescription removed (Text is read once)
                 // .semantics { contentDescription = FriendMapCopy.MAP_STATUS_CHIP },
             ) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -318,7 +327,9 @@ fun FriendMapScreen(
                 color = mapColors.surfaceContainerHigh,
                 contentColor = mapColors.onSurface,
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = panelMaxHeight),
+                // AUDIT-MAP-3: the tray floats over the map like the mini window floats over chats;
+                // a small top-rounded shadow matches the lane's floating-element depth. Looks-only.
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().shadow(8.dp, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).heightIn(max = panelMaxHeight),
             ) {
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
                     // MAP-R4-197: drag-handle look removed (tray is not draggable); commented out, not deleted.

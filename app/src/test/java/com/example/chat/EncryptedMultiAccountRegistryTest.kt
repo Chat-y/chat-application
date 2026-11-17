@@ -288,4 +288,24 @@ class EncryptedMultiAccountRegistryTest {
         assertEquals("new", multi.loadCredentials(meta.accountHash)?.accessToken)
     }
 
+    @Test fun inactiveUnreadPublicationChecksCredentialsAndPreservesLastActive() {
+        val store = FakeMultiAccountStore()
+        var clock = 100L
+        val coordinator = MultiAccountRegistryCoordinator(store, nowMs = { clock })
+        val meta = coordinator.registerAuthenticatedAccount(
+            ApiAuthResult("token-a", ApiUserProfile("inactive", "user", "User", "U")),
+            ApiRoutingSnapshot("tenant", "https://example.invalid", "", 0L), false,
+        )!!
+        val original = coordinator.accountByKey(meta.accountKey)!!.lastActiveEpochMs
+        clock = 999L
+        assertFalse(coordinator.publishInactiveUnreadIfCurrent(meta.accountKey, "stale", 2, 4))
+        assertTrue(coordinator.publishInactiveUnreadIfCurrent(meta.accountKey, "token-a", 2, 4))
+        val updated = coordinator.accountByKey(meta.accountKey)!!
+        assertEquals(4, updated.unreadMessagesCount)
+        assertEquals(original, updated.lastActiveEpochMs)
+        coordinator.markSessionExpired(meta.accountKey, true)
+        assertFalse(coordinator.publishInactiveUnreadIfCurrent(meta.accountKey, "token-a", 3, 8))
+        assertEquals(4, coordinator.accountByKey(meta.accountKey)!!.unreadMessagesCount)
+    }
+
 }

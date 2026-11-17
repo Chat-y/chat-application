@@ -365,14 +365,27 @@ class AttachmentFileCache(
     }
 
     /** User-facing "Clear Local Media Cache" for the signed-in account (entries, decrypted temps, exports, edits). */
-    fun clearCurrentAccount() {
+    // Prior signature: fun clearCurrentAccount()
+    fun clearCurrentAccount(expectedSession: String? = null) {
         val s0 = snap()
+        if (expectedSession != null && (s0.uid == null || s0.stamp != expectedSession))
+            throw java.io.IOException("Media cache session changed before clear")
         if (s0.uid == null) return
         epoch.bump()                                    // every earlier read/lease/token/edit of this account is now stale
         val dir = dirFor(s0); val out = outDirFor(s0); val tmp = tmpDirFor(s0)
         revokeHandedOut { it.path.startsWith(out.path) || it.path.startsWith(tmp.path) }
-        synchronized(lock) { dir.deleteRecursively() }
-        tmp.deleteRecursively(); out.deleteRecursively()
+        // The UI must not claim a completed clear if disk deletion failed. Attempt
+        // every directory even after one fails, then surface a generic IO failure.
+        // Previous unchecked deletes retained inactive:
+        // synchronized(lock) { dir.deleteRecursively() }
+        // tmp.deleteRecursively(); out.deleteRecursively()
+        // A SecurityException on one root must not skip the remaining roots.
+        val entriesDeleted = runCatching { synchronized(lock) { dir.deleteRecursively() } }.getOrDefault(false)
+        val tempsDeleted = runCatching { tmp.deleteRecursively() }.getOrDefault(false)
+        val exportsDeleted = runCatching { out.deleteRecursively() }.getOrDefault(false)
+        if (!entriesDeleted || !tempsDeleted || !exportsDeleted) {
+            throw java.io.IOException("Could not clear all local media cache files")
+        }
     }
 
     /** Applies a lowered limit now (call after the user changes the setting). */

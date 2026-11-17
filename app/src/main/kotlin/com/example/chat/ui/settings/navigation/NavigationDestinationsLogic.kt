@@ -29,21 +29,49 @@ object NavigationDestinationsLogic {
         overflow: List<String>,
         onCorrection: ((String) -> Unit)? = null, // SET-R2-002: report silent drops (default: no-op)
     ): Pair<MutableList<String>, MutableList<String>> {
-        val nextPrimary = primary.toMutableList()
-        val nextOverflow = overflow.toMutableList()
-        val assigned = nextPrimary.toSet() + nextOverflow.toSet()
-        for (destination in ChatyNavigationDestinationIds.all) {
-            if (!assigned.contains(destination)) nextOverflow.add(destination)
-        }
-        (nextPrimary + nextOverflow).filter { !labels.containsKey(it) }.forEach { onCorrection?.invoke("dropped unknown destination id: $it") }
-        nextPrimary.removeAll { !labels.containsKey(it) }
-        nextOverflow.removeAll { !labels.containsKey(it) }
-        for (destination in ChatyNavigationDestinationIds.all) {
-            if (!nextPrimary.contains(destination) && !nextOverflow.contains(destination)) {
-                nextOverflow.add(destination)
+        // Repair to the same invariants enforced by TemplateController at Save:
+        // known, unique, disjoint, 1..4 primary, and every destination present.
+        val nextPrimary = mutableListOf<String>()
+        val nextOverflow = mutableListOf<String>()
+        val seen = mutableSetOf<String>()
+        fun accept(id: String, preferPrimary: Boolean) {
+            if (id !in ChatyNavigationDestinationIds.known) {
+                onCorrection?.invoke("dropped unknown destination id: $id")
+                return
             }
+            if (!seen.add(id)) {
+                onCorrection?.invoke("dropped duplicate navigation destination")
+                return
+            }
+            if (preferPrimary && nextPrimary.size < MAX_PRIMARY) nextPrimary.add(id)
+            else nextOverflow.add(id)
+        }
+        primary.forEach { accept(it, true) }
+        overflow.forEach { accept(it, false) }
+        ChatyNavigationDestinationIds.all.forEach { if (it !in seen) accept(it, false) }
+        if (nextPrimary.isEmpty()) {
+            // Promote the first surviving entry, preserving the user's relative order.
+            nextPrimary.add(nextOverflow.removeAt(0))
+            onCorrection?.invoke("restored required primary destination")
         }
         return nextPrimary to nextOverflow
+        // Previous reconciliation retained inactive (did not repair duplicates/cardinality):
+        // val nextPrimary = primary.toMutableList()
+        // val nextOverflow = overflow.toMutableList()
+        // val assigned = nextPrimary.toSet() + nextOverflow.toSet()
+        // for (destination in ChatyNavigationDestinationIds.all) {
+        // if (!assigned.contains(destination)) nextOverflow.add(destination)
+        // }
+        // (nextPrimary + nextOverflow).filter { !labels.containsKey(it) }.forEach { onCorrection?.invoke("dropped unknown destination id: $it") }
+        // nextPrimary.removeAll { !labels.containsKey(it) }
+        // nextOverflow.removeAll { !labels.containsKey(it) }
+        // for (destination in ChatyNavigationDestinationIds.all) {
+        // if (!nextPrimary.contains(destination) && !nextOverflow.contains(destination)) {
+        // nextOverflow.add(destination)
+        // }
+        // }
+        // return nextPrimary to nextOverflow
+
     }
 
     /** _moveToOverflow guard: blocked at one remaining primary or when the id

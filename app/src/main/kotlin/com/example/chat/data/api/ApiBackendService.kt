@@ -1098,9 +1098,14 @@ class ApiBackendService(
         chatScope.launch(Dispatchers.IO) { syncFromPushNudge() }
     }
 
-    suspend fun syncFromPushNudge(expected: ApiAccountScope = authSnapshot()) {
-        if (session.token == null || DemoMode.active || authSnapshot() !== expected) return
+    suspend fun syncFromPushNudge(expected: ApiAccountScope = authSnapshot()): Boolean {
+        // Prior source: if (session.token == null || DemoMode.active || authSnapshot() !== expected) return true
+        if (session.token == null || DemoMode.active) return true
+        // Credential rotation of this account is retryable, not proof that the push was handled.
+        if (authSnapshot() !== expected) return false
         var completedOwner: ApiAccountScope? = null
+        var complete = false
+        var messageFetchFailed = false
         pushSyncMutex.withLock {
             if (expected.token == null || DemoMode.active || authSnapshot() !== expected) return@withLock
             // Follow only the owner snapshot returned by our own guarded token refresh.
@@ -1120,9 +1125,10 @@ class ApiBackendService(
                 baseUrl = { owner.baseUrl }, tenantId = { owner.tenantId }, token = { owner.token },
                 transport = ScopedCallHttpTransport(owner, ::withAuthScope, sendRequests),
             )
-            conversationsSyncMutex.withLock {
-                if (authSnapshot() === owner) loadConversationsForScope(owner, incoming)
+            val loaded = conversationsSyncMutex.withLock {
+                authSnapshot() === owner && loadConversationsForScope(owner, incoming)
             }
+            if (!loaded) return@withLock
             if (authSnapshot() !== owner) return@withLock
             val (conversationsAfter, dirtySnapshot, syncedSnapshot) = synchronized(chatLock) {
                 Triple(_conversations.toList(), dirtyRooms.toSet(), syncedRooms.keys.toSet())
@@ -1141,7 +1147,10 @@ class ApiBackendService(
                 val msgsBefore = cachedBeforeByRoom[conv.id].orEmpty()
                 val fetched = withContext(Dispatchers.IO) { incoming.listMessages(conv.id) }
                 if (authSnapshot() !== owner) return@withLock
-                if (fetched == null || !applyLoadedMessages(conv.id, fetched, owner)) continue
+                if (fetched == null || !applyLoadedMessages(conv.id, fetched, owner)) {
+                    messageFetchFailed = true
+                    continue
+                }
                 if (com.example.chat.ReleaseFeatures.SCOPED_DELIVERY_RECEIPTS && conv.isDirect) {
                     val incomingIds = fetched.filter {
                         it.senderId != myUserId && !it.isDeletedForEveryone && !it.isDeletedForMe && !it.isRevokedBySender
@@ -1164,10 +1173,17 @@ class ApiBackendService(
                 }
             }
             completedOwner = owner
+            complete = !messageFetchFailed
         }
         completedOwner?.let { owner ->
             if (authSnapshot() === owner) chatScope.launch { flushOutbox() }
         }
+        // Retry routing after any owner transition, including this account becoming inactive.
+        // Previous result:
+        // val current = authSnapshot()
+        // val sameAccount = current.userId == expected.userId && current.tenantId == expected.tenantId && current.baseUrl == expected.baseUrl
+        // return complete || !sameAccount
+        return complete && completedOwner?.let { authSnapshot() === it } == true
     }
 
     /** Network regained after loss: reconnect the socket now instead of waiting out the backoff.
@@ -1707,15 +1723,18 @@ class ApiBackendService(
         if (applied && changed) notifyChatListeners()
     }
 
-    suspend fun loadConversations() = loadConversationsForScope(authSnapshot(), chat)
+    // Keep public Unit contract; only push recovery consumes the checked private result.
+    suspend fun loadConversations() { loadConversationsForScope(authSnapshot(), chat) }
 
-    private suspend fun loadConversationsForScope(expected: ApiAccountScope, reader: ApiChatClient) {
+    private suspend fun loadConversationsForScope(expected: ApiAccountScope, reader: ApiChatClient): Boolean {
         var changed = false
+        var loaded = false
         val applied = com.example.chat.data.api.publishScopedApiResult(expected, ::withAuthScope,
             fetch = { withContext(Dispatchers.IO) { reader.listRooms() } },
             publish = { result ->
                 when (result) {
                     is ApiChatClient.RoomsResult.Ok -> {
+                        loaded = true
                         val filtered = result.conversations.filter { !it.isTask }
                         synchronized(chatLock) {
                             if (filtered.isNotEmpty()) {
@@ -1756,6 +1775,7 @@ class ApiBackendService(
                 }
             })
         if (applied && changed) notifyChatListeners()
+        return applied && loaded
     }
 
     /** loadMessages with Dart merge semantics: pending (sending/temp) messages
@@ -3898,6 +3918,16 @@ class ApiBackendService(
         data class Failed(val message: String) : AccountSwitchResult
     }
 
+    /** Content-free inactive unread summary. Revalidate retained credentials, never adopt/switch sessions. */
+    fun publishInactiveUnread(accountKey: String, expectedToken: String, unreadChats: Int, unreadMessages: Int): Boolean {
+        val published = synchronized(authScopeLock) {
+            if (accountKey == currentAccountKey()) return@synchronized false
+            multiAccount.publishInactiveUnreadIfCurrent(accountKey, expectedToken, unreadChats, unreadMessages)
+        }
+        if (published) notifyChatListeners()
+        return published
+    }
+
     fun persistAccountConversationSnapshot() {
         val key = currentAccountKey() ?: return
         val list = conversations
@@ -4364,3 +4394,12 @@ class ApiBackendService(
         const val ADOPT_KEYSTORE_TIMEOUT_MS = 20_000L
     }
 }
+
+// Replaced source retained for review (inactive; do not restore without its surrounding implementation).
+// Prior source:     suspend fun syncFromPushNudge(expected: ApiAccountScope = authSnapshot()) {
+// Prior source:         if (session.token == null || DemoMode.active || authSnapshot() !== expected) return
+// Prior source:             conversationsSyncMutex.withLock {
+// Prior source:                 if (authSnapshot() === owner) loadConversationsForScope(owner, incoming)
+// Prior source:                 if (fetched == null || !applyLoadedMessages(conv.id, fetched, owner)) continue
+// Prior source:     suspend fun loadConversations() = loadConversationsForScope(authSnapshot(), chat)
+// Prior source:     private suspend fun loadConversationsForScope(expected: ApiAccountScope, reader: ApiChatClient) {

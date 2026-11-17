@@ -344,12 +344,25 @@ fun SettingsSubHost(
                 preferences = prefs,
                 onBack = onBack,
                 onClearCache = {
-                    // ST1-22: delete off the main thread.
-                    storageScope.launch {
-                        withContext(Dispatchers.IO) { ServiceLocator.mediaCache.clearCurrentAccount() }
-                        cacheUsedBytes = withContext(Dispatchers.IO) { runCatching { ServiceLocator.mediaCache.totalBytes() }.getOrDefault(0L) }
-                        toast("Local media cache cleared. Server copies are untouched.")
+                    // Await IO so the screen reports the actual result once, not at launch.
+                    // Previous callback launched storageScope and returned before deletion.
+                    val remaining = withContext(Dispatchers.IO) {
+                        check(ServiceLocator.apiBackend.authSnapshot() === screenAccountScope) { "Account changed." }
+                        val cache = ServiceLocator.mediaCache
+                        val cacheSession = checkNotNull(cache.session()) { "Media cache session is unavailable." }
+                        check(ServiceLocator.apiBackend.authSnapshot() === screenAccountScope) { "Account changed." }
+                        cache.clearCurrentAccount(expectedSession = cacheSession)
+                        check(ServiceLocator.apiBackend.authSnapshot() === screenAccountScope) { "Account changed." }
+                        cache.totalBytes()
                     }
+                    check(ServiceLocator.apiBackend.authSnapshot() === screenAccountScope) { "Account changed." }
+                    cacheUsedBytes = remaining
+                    // // ST1-22: delete off the main thread.
+                    // storageScope.launch {
+                    // withContext(Dispatchers.IO) { ServiceLocator.mediaCache.clearCurrentAccount() }
+                    // cacheUsedBytes = withContext(Dispatchers.IO) { runCatching { ServiceLocator.mediaCache.totalBytes() }.getOrDefault(0L) }
+                    // toast("Local media cache cleared. Server copies are untouched.")
+                    // }
                 },
                 cacheLimitMb = cacheLimitMb,
                 cacheUsedBytes = cacheUsedBytes,

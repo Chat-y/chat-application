@@ -83,7 +83,9 @@ fun MapViewerScreen(
     // Landscape: keep the Locate button left of the 56dp-wide map controls column so they never overlap.
     val isLandscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val systemDark = (LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-    val mapColors = if (systemDark) darkColorScheme() else lightColorScheme()
+    // AUDIT-MAP-2: a fresh ColorScheme every recomposition made MaterialTheme invalidate the whole
+    // subtree on any status change. Prior: val mapColors = if (systemDark) darkColorScheme() else lightColorScheme()
+    val mapColors = remember(systemDark) { if (systemDark) darkColorScheme() else lightColorScheme() }
     val controlColors = IconButtonDefaults.filledIconButtonColors(containerColor = mapColors.secondaryContainer, contentColor = mapColors.onSecondaryContainer, disabledContainerColor = mapColors.surfaceVariant, disabledContentColor = mapColors.onSurfaceVariant)
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle

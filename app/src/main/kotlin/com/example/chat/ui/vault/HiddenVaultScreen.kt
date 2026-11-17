@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -64,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import com.example.chat.ui.kit.ChatyHapticsPort
 import androidx.compose.ui.text.font.FontWeight
@@ -135,12 +137,14 @@ fun HiddenVaultScreen(
     var errorMessage by remember(controller, owner) { mutableStateOf<String?>(null) }
     var isAuthenticating by remember(controller, owner) { mutableStateOf(false) }
     val shake = remember { Animatable(0f) }
+    val shakeDistancePx = with(LocalDensity.current) { 12.dp.toPx() }
 
     fun triggerBiometricAuth() {
-        if (isAuthenticating) return
+        if (controller.sessionOwner != owner || isAuthenticating) return
         isAuthenticating = true
         scope.launch {
             try {
+                if (controller.sessionOwner != owner) return@launch
                 val verified = controller.unlockVault()
                 if (controller.sessionOwner != owner) return@launch
                 if (verified) { errorMessage = null; ChatyHapticsPort.light(view) }
@@ -152,11 +156,12 @@ fun HiddenVaultScreen(
     }
 
     fun verifyPinAttempt() {
-        if (isAuthenticating || !credentialReady || enteredPin.length != pinLength) return
+        if (controller.sessionOwner != owner || isAuthenticating || !credentialReady || enteredPin.length != pinLength) return
         val pin = enteredPin
         isAuthenticating = true
         scope.launch {
             try {
+                if (controller.sessionOwner != owner) return@launch
                 val verified = controller.verifyPin(pin)
                 if (controller.sessionOwner != owner) return@launch
                 enteredPin = ""
@@ -176,14 +181,14 @@ fun HiddenVaultScreen(
     }
 
     fun onDigitPressed(digit: String) {
-        if (digit.length != 1 || digit[0] !in '0'..'9' || isAuthenticating || !credentialReady || enteredPin.length >= pinLength) return
+        if (controller.sessionOwner != owner || digit.length != 1 || digit[0] !in '0'..'9' || isAuthenticating || !credentialReady || enteredPin.length >= pinLength) return
         enteredPin += digit
         errorMessage = null
         if (enteredPin.length == pinLength) verifyPinAttempt()
     }
 
     fun onBackspacePressed() {
-        if (isAuthenticating || enteredPin.isEmpty()) return
+        if (controller.sessionOwner != owner || isAuthenticating || enteredPin.isEmpty()) return
         enteredPin = enteredPin.dropLast(1)
         errorMessage = null
     }
@@ -239,7 +244,7 @@ fun HiddenVaultScreen(
             pinLength = pinLength,
             authenticating = isAuthenticating || !credentialReady,
             errorMessage = errorMessage,
-            shakeOffsetPx = { sin(shake.value * Math.PI * 6) * 12 * 3 }, // 12 logical px shake
+            shakeOffsetPx = { sin(shake.value * Math.PI * 6) * shakeDistancePx }, // 12 logical px shake
             onDigit = ::onDigitPressed,
             onBackspace = ::onBackspacePressed,
             onBiometric = ::triggerBiometricAuth,
@@ -247,7 +252,7 @@ fun HiddenVaultScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun LockScreenView(
     isDark: Boolean,
@@ -317,8 +322,8 @@ private fun LockScreenView(
             )
             Spacer(Modifier.height(24.dp))
 
-            // PIN Indicator dots with shake animation
-            Row(
+            // Same PIN indicator order and dots, wrapping only when the row cannot fit.
+            androidx.compose.foundation.layout.FlowRow(
                 horizontalArrangement = Arrangement.Center,
                 modifier = Modifier.semantics { stateDescription = "$enteredPinLength of $pinLength digits entered" }
                     .offset { IntOffset(shakeOffsetPx().roundToInt(), 0) },
@@ -382,7 +387,9 @@ private fun NumericPad(
         listOf("bio", "0", "back"),
     )
 
-    Column(Modifier.widthIn(max = 360.dp)) {
+    BoxWithConstraints(Modifier.widthIn(max = 360.dp).fillMaxWidth()) {
+    val keySize = (maxWidth / 3).coerceIn(48.dp, 72.dp)
+    Column(Modifier.fillMaxWidth()) {
         rows.forEach { row ->
             Row(
                 modifier = Modifier
@@ -399,7 +406,7 @@ private fun NumericPad(
                     when (cell) {
                         "bio" -> Box(
                             modifier = Modifier
-                                .size(72.dp)
+                                .size(keySize)
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
                                 // .background(primary.copy(alpha = 0.12f))
@@ -424,7 +431,7 @@ private fun NumericPad(
                         }
                         "back" -> Box(
                             modifier = Modifier
-                                .size(72.dp)
+                                .size(keySize)
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
                                 .background(
@@ -451,7 +458,7 @@ private fun NumericPad(
                         }
                         else -> Box(
                             modifier = Modifier
-                                .size(72.dp)
+                                .size(keySize)
                                 .testTag("vault-key-" + cell)
                                 .clip(CircleShape)
                                 .background(
@@ -486,6 +493,7 @@ private fun NumericPad(
             }
         }
     }
+    } // Measured keypad, same row order and callbacks.
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -499,9 +507,10 @@ private fun UnlockedVaultView(
     onLock: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var removalCandidate by remember(controller) { mutableStateOf<String?>(null) }
-    var removalBusy by remember(controller) { mutableStateOf(false) }
-    var removalError by remember(controller) { mutableStateOf<String?>(null) }
+    val owner = controller.sessionOwner
+    var removalCandidate by remember(controller, owner) { mutableStateOf<String?>(null) }
+    var removalBusy by remember(controller, owner) { mutableStateOf(false) }
+    var removalError by remember(controller, owner) { mutableStateOf<String?>(null) }
     removalCandidate?.let { id ->
         AlertDialog(
             onDismissRequest = { if (!removalBusy) removalCandidate = null },
@@ -509,11 +518,16 @@ private fun UnlockedVaultView(
             text = { Text(removalError ?: "This chat will return to the inbox without vault protection.") },
             dismissButton = { TextButton(enabled = !removalBusy, onClick = { removalCandidate = null }) { Text("Cancel") } },
             confirmButton = { TextButton(enabled = !removalBusy, onClick = {
+                if (removalBusy || controller.sessionOwner != owner || !controller.isUnlocked || controller.isDecoyMode) return@TextButton
                 removalBusy = true
                 scope.launch {
-                    try { controller.removeConversationLock(id); removalCandidate = null }
+                    try {
+                        if (controller.sessionOwner != owner || !controller.isUnlocked || controller.isDecoyMode) return@launch
+                        controller.removeConversationLock(id)
+                        if (controller.sessionOwner == owner) removalCandidate = null
+                    }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { removalError = "Could not remove protection. Try again." }
+                    catch (_: Exception) { if (controller.sessionOwner == owner) removalError = "Could not remove protection. Try again." }
                     finally { removalBusy = false }
                 }
             }) { Text(if (removalBusy) "Saving..." else "Remove protection") } },
@@ -589,7 +603,9 @@ private fun UnlockedVaultView(
             ) {
                 items(lockedConversations, key = { it.id }, contentType = { "vault-conversation" }) { conversation ->
                     Card(
-                        onClick = { if (controller.isUnlocked && !controller.isDecoyMode) { controller.recordActivity(); onOpenConversation(conversation.id) } },
+                        onClick = { if (!removalBusy && controller.sessionOwner == owner && controller.isUnlocked && !controller.isDecoyMode &&
+                            conversation.id in controller.lockedConversationIds) { controller.recordActivity(); onOpenConversation(conversation.id) } },
+                        enabled = !removalBusy && controller.isUnlocked && !controller.isDecoyMode,
                         shape = RoundedCornerShape(16.dp),
                     ) {
                         Row(
@@ -631,7 +647,10 @@ private fun UnlockedVaultView(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            IconButton(onClick = {
+                            IconButton(enabled = !removalBusy && controller.isUnlocked && !controller.isDecoyMode, onClick = {
+                                if (removalBusy || controller.sessionOwner != owner || !controller.isUnlocked || controller.isDecoyMode ||
+                                    conversation.id !in controller.lockedConversationIds) return@IconButton
+                                controller.recordActivity()
                                 removalError = null
                                 removalCandidate = conversation.id
                             }) {
@@ -647,3 +666,27 @@ private fun UnlockedVaultView(
         }
     }
 }
+
+// Previous click-state source retained for review:
+//     var removalCandidate by remember(controller) { mutableStateOf<String?>(null) }
+//     var removalBusy by remember(controller) { mutableStateOf(false) }
+//     var removalError by remember(controller) { mutableStateOf<String?>(null) }
+//                     try { controller.removeConversationLock(id); removalCandidate = null }
+//                         onClick = { if (controller.isUnlocked && !controller.isDecoyMode) { controller.recordActivity(); onOpenConversation(conversation.id) } },
+//                             IconButton(onClick = {
+
+// Previous click-state source retained for review:
+//         if (isAuthenticating) return
+//         if (isAuthenticating || !credentialReady || enteredPin.length != pinLength) return
+//         if (digit.length != 1 || digit[0] !in '0'..'9' || isAuthenticating || !credentialReady || enteredPin.length >= pinLength) return
+//         if (isAuthenticating || enteredPin.isEmpty()) return
+
+// Previous visual source retained:
+//             shakeOffsetPx = { sin(shake.value * Math.PI * 6) * 12 * 3 }, // 12 logical px shake
+// @OptIn(ExperimentalMaterial3Api::class)
+//             // PIN Indicator dots with shake animation
+//             Row(
+//     Column(Modifier.widthIn(max = 360.dp)) {
+//                                 .size(72.dp)
+//                                 .size(72.dp)
+//                                 .size(72.dp)

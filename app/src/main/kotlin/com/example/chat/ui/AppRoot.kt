@@ -896,7 +896,10 @@ fun AppRoot() {
                     ServiceLocator.apiBackend.addListener(listener)
                     onDispose { delivery.close(); ServiceLocator.apiBackend.removeListener(listener) }
                 }
-                @Suppress("UNUSED_EXPRESSION") chatRevision
+                // Capture in the listener-invalidated scope. Nested destination lambdas must
+                // capture this model instead of re-reading a non-observable service getter.
+                val homeProfile = chatRevision.let { ServiceLocator.apiBackend.currentUser?.let(::toDomainUser) }
+                // Previous invalidation-only read: @Suppress("UNUSED_EXPRESSION") chatRevision
                 // Auth invalidation: recompose Home synchronously on ANY account
                 // transition (listener fires under the transition lock), so the
                 // per-account quarantine keys re-read immediately instead of
@@ -1357,16 +1360,19 @@ fun AppRoot() {
                             onNotify = shellToast,
                         )
                     },
-                    currentUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) },
+                    // Previous non-observable read: currentUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) },
+                    currentUser = homeProfile,
                     screenContent = { destinationId ->
                         when (destinationId) {
                             com.example.chat.core.templates.ChatyNavigationDestinationIds.settings -> {
-                                val apiUser = ServiceLocator.apiBackend.currentUser
-                                if (apiUser != null) {
+                                // Previous read inside skippable content: val apiUser = ServiceLocator.apiBackend.currentUser
+                                val destinationUser = homeProfile
+                                if (destinationUser != null) {
                                     com.example.chat.ui.settings.SettingsRootScreen(
                                         preferences = ServiceLocator.preferencesController,
                                         themeController = themeController,
-                                        user = toDomainUser(apiUser),
+                                        // Previous conversion: user = toDomainUser(apiUser),
+                                        user = destinationUser,
                                         canGoBack = false,
                                         onBack = { },
                                         onNavigate = settingsNavigate,
@@ -1648,7 +1654,8 @@ fun AppRoot() {
                 }
                 ChatyPushedPage(pushedProfile) {
                     androidx.activity.compose.BackHandler(enabled = settingsSub == null && !pushedSettings) { pushedProfile = false }
-                    val profUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
+                    // Previous non-observable read: val profUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
+                    val profUser = homeProfile
                     if (profUser != null) {
                         val convs = ServiceLocator.apiBackend.conversations
                         val profTemplate = ServiceLocator.templateController.profile
@@ -1680,7 +1687,8 @@ fun AppRoot() {
                 }
                 ChatyPushedPage(pushedSettings) {
                     androidx.activity.compose.BackHandler(enabled = settingsSub == null) { pushedSettings = false }
-                    val pushedUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
+                    // Previous non-observable read: val pushedUser = ServiceLocator.apiBackend.currentUser?.let { toDomainUser(it) }
+                    val pushedUser = homeProfile
                     if (pushedUser != null) {
                         Box(Modifier.fillMaxSize()) {
                             com.example.chat.ui.settings.SettingsRootScreen(
@@ -1971,7 +1979,8 @@ fun AppRoot() {
                     val editOwner = editApi.authSnapshot()
                     fun editIsCurrent() = editApi.authSnapshot() === editOwner
                     fun requireEditOwner() { check(editIsCurrent()) { "Account changed. Reopen profile settings." } }
-                    val editUser = editApi.currentUser?.let { toDomainUser(it) }
+                    // Previous non-observable read: val editUser = editApi.currentUser?.let { toDomainUser(it) }
+                    val editUser = homeProfile?.takeIf { it.id == editOwner.userId }
                     if (editUser != null) androidx.compose.runtime.key(editOwner) {
                         // Dart ProfileMediaService._pickCompressUpload: bounded pick -> crop dialog -> compress -> upload.
                         val editFlow = com.example.chat.ui.profile.rememberProfileMediaFlow(
@@ -1983,7 +1992,11 @@ fun AppRoot() {
                                     currentUserId = { requireEditOwner(); editOwner.userId },
                                     imageCompressor = { b, sq, q ->
                                         requireEditOwner()
-                                        com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q).also { requireEditOwner() }
+                                        // Previous synchronous Main-thread compression:
+                                        // com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q).also { requireEditOwner() }
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                            com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q)
+                                        }.also { requireEditOwner() }
                                     },
                                 )
                             },
@@ -2784,7 +2797,14 @@ private fun rememberRootProfilePhoto(): RootProfilePhoto {
             com.example.chat.data.services.ProfileMediaService(
                 storage = storage,
                 currentUserId = { requireOwner(); owner.userId },
-                imageCompressor = { b, sq, q -> com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q) },
+                // Previous synchronous Main-thread compression:
+                // imageCompressor = { b, sq, q -> com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q) },
+                imageCompressor = { b, sq, q ->
+                    requireOwner()
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        com.example.chat.ui.profile.ProfileImageCompressor.compress(b, sq, q)
+                    }.also { requireOwner() }
+                },
             )
         },
         // Previously relied only on keyed disposal and guarded storage/upload callbacks.

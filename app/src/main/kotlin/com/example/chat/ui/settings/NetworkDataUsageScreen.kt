@@ -63,7 +63,14 @@ fun NetworkStatusScreen(onBack: () -> Unit) {
 
     ChatySettingsPage("Network", "Live connection status", onBack = onBack) {
     Column(Modifier.widthIn(max = 600.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        // Settings content is a flat surface, not a floating control layer.
+        // Previous implicit Card shape/elevation and surfaceContainer retained here as reference.
+        Card(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, LocalAppColors.current.borderSubtle),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surface),
+        ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ND1-46: icon plus text for the connection state.
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -137,7 +144,14 @@ fun DataUsageScreen(onBack: () -> Unit) {
 
     ChatySettingsPage("Data Usage", "Usage totals and transfer monitor", onBack = onBack) {
     Column(Modifier.widthIn(max = 600.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        // Settings content is a flat surface, not a floating control layer.
+        // Previous implicit Card shape/elevation and surfaceContainer retained here as reference.
+        Card(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, LocalAppColors.current.borderSubtle),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surface),
+        ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Data used", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
                 // ND1-61: plain-text summary first, for screen readers.
@@ -189,7 +203,14 @@ fun DataUsageScreen(onBack: () -> Unit) {
         }
 
 
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        // Settings content is a flat surface, not a floating control layer.
+        // Previous implicit Card shape/elevation and surfaceContainer retained here as reference.
+        Card(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, LocalAppColors.current.borderSubtle),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surface),
+        ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Total Chaty network traffic", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
                 if (!appTraffic.supported) {
@@ -273,7 +294,15 @@ private fun UsageRow(label: String, bytes: Long) {
 @Composable
 private fun TransferCard(item: TransferItem) {
     val context = LocalContext.current
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+    // Flat repeated list cards avoid per-row shadow layers. Theme surface/border
+    // preserve separation in both light and dark without blur or translucent text beds.
+    // Previous: Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
+    Card(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, LocalAppColors.current.borderSubtle),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surface),
+    ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(

@@ -15,7 +15,9 @@ class FakeLock(var has: Boolean = false, var secret: String = "") : LockSetupSer
     override suspend fun authenticateDeviceCredential(reason: String) = bio
 }
 
-fun main() = runBlocking {
+// Previous entry point body: fun main() = runBlocking { ... }
+// Keep the standalone harness and let JUnit discover the same unchanged assertions.
+fun runLockCredentialSetupAssertions() = runBlocking {
     // PIN: new flow
     val l = FakeLock(); val f = LockCredentialSetupFlow("PIN", 4, l); f.init()
     check(f.step == SetupStep.enterNew && f.stepTitle() == "Create PIN" && f.stepSubtitle() == "Choose a 4-digit PIN code.")
@@ -63,4 +65,12 @@ fun main() = runBlocking {
     val d = LockCredentialSetupFlow("Device Credential", 4, FakeLock().apply { bio = false }); d.init(); d.verifyNativeMethod()
     check(d.error == "Device credential verification was cancelled or unavailable.")
     println("OK")
+}
+
+fun main() = runLockCredentialSetupAssertions()
+
+class LockCredentialSetupFlowJUnitTest {
+    @org.junit.Test fun retainedCredentialFlowAssertions() {
+        runLockCredentialSetupAssertions()
+    }
 }

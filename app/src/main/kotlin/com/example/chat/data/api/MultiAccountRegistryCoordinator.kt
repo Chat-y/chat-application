@@ -154,6 +154,7 @@ class MultiAccountRegistryCoordinator(
         user: ApiUserProfile? = null,
         unreadChatsCount: Int? = null,
         unreadMessagesCount: Int? = null,
+        touchLastActive: Boolean = true,
     ) = synchronized(lock) {
         val list = store.loadRegistry().toMutableList()
         val idx = list.indexOfFirst { it.accountKey == accountKey }
@@ -165,7 +166,8 @@ class MultiAccountRegistryCoordinator(
             avatarUrl = user?.avatarUrl ?: prev.avatarUrl,
             avatarInitials = user?.avatarInitials ?: prev.avatarInitials,
             avatarColorHex = user?.avatarColorHex ?: prev.avatarColorHex,
-            lastActiveEpochMs = nowMs(),
+            // Previous implementation retained: lastActiveEpochMs = nowMs(),
+            lastActiveEpochMs = if (touchLastActive) nowMs() else prev.lastActiveEpochMs,
             unreadChatsCount = unreadChatsCount ?: prev.unreadChatsCount,
             unreadMessagesCount = unreadMessagesCount ?: prev.unreadMessagesCount,
         )
@@ -192,6 +194,15 @@ class MultiAccountRegistryCoordinator(
         if (idx < 0) return@synchronized
         list[idx] = list[idx].copy(sessionExpired = expired)
         store.saveRegistry(list)
+    }
+
+    /** Prevent a stale directory result from publishing after credential rotation/removal. */
+    fun publishInactiveUnreadIfCurrent(accountKey: String, expectedToken: String, chats: Int, messages: Int): Boolean = synchronized(lock) {
+        val meta = store.loadRegistry().firstOrNull { it.accountKey == accountKey } ?: return@synchronized false
+        if (meta.sessionExpired || store.loadCredentials(meta.accountHash)?.accessToken != expectedToken) return@synchronized false
+        updateAccountProfileAndUnread(accountKey, unreadChatsCount = chats.coerceAtLeast(0),
+            unreadMessagesCount = messages.coerceAtLeast(0), touchLastActive = false)
+        true
     }
 
     /** Refreshes a specific account using [refreshCall] outside any global lock; marks ONLY that
@@ -382,3 +393,6 @@ class MultiAccountRegistryCoordinator(
             .toList()
     }
 }
+
+// Replaced source retained for review (inactive; do not restore without its surrounding implementation).
+// Prior source:             lastActiveEpochMs = nowMs(),

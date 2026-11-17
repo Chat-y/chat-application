@@ -493,7 +493,11 @@ fun MediaViewerScreen(
         return refreshed
     }
 
+    val shareAvailable = !ownedActions || onOwnedShare != null
+    val openAvailable = !ownedActions || onOwnedOpen != null
+    val editAvailable = !ownedActions || onOwnedEdit != null
     fun launchExternal(share: Boolean) {
+        if (if (share) !shareAvailable else !openAvailable) return
         if (restrictedViewOnce || error != null || externalActionBusy || savingToGallery || ownedActionBusy || !viewerActive.get()) return
         if (ownedActions) { if (share) onOwnedShare?.invoke() else onOwnedOpen?.invoke(); return }
         val source = editedCopy?.toURI()?.toString()
@@ -535,7 +539,7 @@ fun MediaViewerScreen(
     var externalOpenConfirmation by remember(storagePath) { mutableStateOf(false) }
     // Previous direct handoff: fun openExternally() = launchExternal(false)
     fun openExternally() {
-        if (!restrictedViewOnce && error == null && !externalActionBusy && !savingToGallery && !ownedActionBusy &&
+        if (openAvailable && !restrictedViewOnce && error == null && !externalActionBusy && !savingToGallery && !ownedActionBusy &&
             (signedUrl != null || renderProvidedModel != null)) externalOpenConfirmation = true
     }
     fun share() = launchExternal(true)
@@ -798,7 +802,7 @@ fun MediaViewerScreen(
                         }
                     }
                     com.example.chat.ui.media.AudioPlayerTooltip("Share attachment") {
-                        IconButton(onClick = ::share, enabled = actionsReady) {
+                        IconButton(onClick = ::share, enabled = actionsReady && shareAvailable) {
                             com.example.chat.ui.icons.ChatyIcon(com.example.chat.ui.icons.ChatyIconId.share,
                                 semanticLabel = "Share attachment", color = foreground)
                         }
@@ -829,7 +833,7 @@ fun MediaViewerScreen(
                     }
                     DropdownMenu(expanded = actionsExpanded, onDismissRequest = { actionsExpanded = false }) {
                         if (type in setOf("video", "audio")) DropdownMenuItem(
-                            text = { Text("Trim a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady,
+                            text = { Text("Trim a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady && editAvailable,
                             onClick = { actionsExpanded = false; if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) trimming = true },
                         )
                         if (type == "video") DropdownMenuItem(
@@ -841,18 +845,18 @@ fun MediaViewerScreen(
                             onClick = { actionsExpanded = false; toggleLoopVideo() },
                         )
                         if (type == "image" && !title.endsWith(".gif", ignoreCase = true)) DropdownMenuItem(
-                            text = { Text("Edit a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady,
+                            text = { Text("Edit a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady && editAvailable,
                             onClick = { actionsExpanded = false; if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) editing = true },
                         )
                         DropdownMenuItem(text = { Text("Open with app") }, modifier = Modifier.heightIn(min = 48.dp),
-                            enabled = actionsReady, onClick = { actionsExpanded = false; openExternally() })
+                            enabled = actionsReady && openAvailable, onClick = { actionsExpanded = false; openExternally() })
                         if (compactToolbar) {
                             if (type in setOf("image", "video")) DropdownMenuItem(
                                 text = { Text("Save to gallery") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady && gallerySaveAvailable,
                                 onClick = { actionsExpanded = false; saveToGallery() },
                             )
                             DropdownMenuItem(text = { Text("Share attachment") }, modifier = Modifier.heightIn(min = 48.dp),
-                                enabled = actionsReady, onClick = { actionsExpanded = false; share() })
+                                enabled = actionsReady && shareAvailable, onClick = { actionsExpanded = false; share() })
                         }
                     }
                 }
@@ -1081,7 +1085,8 @@ fun MediaViewerScreen(
                                         text = "Unable to initialize this video.",
                                         foregroundSecondary = foregroundSecondary,
                                         theme = theme,
-                                        actionLabel = if (restrictedViewOnce || error != null) null else "Open Securely",
+                                        actionLabel = if (restrictedViewOnce || error != null || !openAvailable) null else "Open Securely",
+                                        actionEnabled = !externalActionBusy && !savingToGallery && !ownedActionBusy,
                                         onAction = ::openExternally,
                                     )
                                 } else if (!videoReady) {
@@ -1208,7 +1213,8 @@ fun MediaViewerScreen(
                         text = if (restrictedViewOnce) "This restricted attachment cannot be opened in another app." else "This private $type is ready to open securely.",
                         foregroundSecondary = foregroundSecondary,
                         theme = theme,
-                        actionLabel = if (restrictedViewOnce || error != null) null else "Open Securely",
+                        actionLabel = if (restrictedViewOnce || error != null || !openAvailable) null else "Open Securely",
+                        actionEnabled = !externalActionBusy && !savingToGallery && !ownedActionBusy,
                         onAction = ::openExternally,
                         visualModifier = if (!restrictedViewOnce) Modifier.viewerImageDismissGesture(
                             identity = "fallback:$storagePath:$reloadAttempt:$type",
@@ -1230,9 +1236,9 @@ fun MediaViewerScreen(
                     // Same handlers and capability gates as the compact top-bar actions.
                     if (type in setOf("image", "video")) TextButton(onClick = ::saveToGallery, enabled = actionsReady && gallerySaveAvailable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Save to gallery") }
-                    TextButton(onClick = ::share, enabled = actionsReady,
+                    TextButton(onClick = ::share, enabled = actionsReady && shareAvailable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Share attachment") }
-                    if (type in setOf("video", "audio")) TextButton(enabled = actionsReady,
+                    if (type in setOf("video", "audio")) TextButton(enabled = actionsReady && editAvailable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) trimming = true }) { Text("Trim a copy") }
                     if (type == "video") TextButton(enabled = actionsReady && videoReady && !videoFailed,
@@ -1240,10 +1246,10 @@ fun MediaViewerScreen(
                             stateDescription = if (loopVideo) loopVideoStateOn else loopVideoStateOff
                         },
                         onClick = { toggleLoopVideo() }) { Text(androidx.compose.ui.res.stringResource(com.example.chat.R.string.media_viewer_loop_video)) }
-                    if (type == "image" && !title.endsWith(".gif", ignoreCase = true)) TextButton(enabled = actionsReady,
+                    if (type == "image" && !title.endsWith(".gif", ignoreCase = true)) TextButton(enabled = actionsReady && editAvailable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         onClick = { if (ownedActions) onOwnedEdit?.invoke() else if (stopVideoReader()) editing = true }) { Text("Edit a copy") }
-                    TextButton(onClick = ::openExternally, enabled = actionsReady,
+                    TextButton(onClick = ::openExternally, enabled = actionsReady && openAvailable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Open with app") }
                 }
             }
@@ -1318,9 +1324,16 @@ private fun ImageViewerContent(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewportW = constraints.maxWidth.toFloat()
         val viewportH = constraints.maxHeight.toFloat()
-        // Capture decode bounds before entering the nested BoxScope.
         val decodeWidth = viewerDecodeExtent(constraints.maxWidth)
         val decodeHeight = viewerDecodeExtent(constraints.maxHeight)
+        val imageContext = LocalContext.current
+        val imageRequest = remember(imageContext, model, decodeWidth, decodeHeight) {
+            coil.request.ImageRequest.Builder(imageContext).data(model)
+                .size(decodeWidth, decodeHeight)
+                .memoryCachePolicy(coil.request.CachePolicy.DISABLED)
+                .diskCachePolicy(coil.request.CachePolicy.DISABLED).build()
+        }
+        // Decode bounds are captured above, outside the nested BoxScope.
         LaunchedEffect(model, viewportW, viewportH) {
             zoomAnimation?.cancel()
             val clamped = viewerZoomTransform(scale, offset.x, offset.y,
@@ -1438,12 +1451,7 @@ private fun ImageViewerContent(
             contentAlignment = Alignment.Center,
         ) {
         coil.compose.SubcomposeAsyncImage(
-            model = coil.request.ImageRequest.Builder(LocalContext.current).data(model)
-                // MV-R2-025 previous unbounded request:
-                // .memoryCachePolicy(coil.request.CachePolicy.DISABLED).diskCachePolicy(coil.request.CachePolicy.DISABLED).build(),
-                // Previous implicit receiver: .size(viewerDecodeExtent(constraints.maxWidth), viewerDecodeExtent(constraints.maxHeight))
-                .size(decodeWidth, decodeHeight)
-                .memoryCachePolicy(coil.request.CachePolicy.DISABLED).diskCachePolicy(coil.request.CachePolicy.DISABLED).build(),
+            model = imageRequest,
             contentDescription = title,
             onSuccess = { onReady() },
             contentScale = ContentScale.Fit,
@@ -1522,6 +1530,7 @@ private fun MediaViewerFallbackCard(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     visualModifier: Modifier = Modifier,
+    actionEnabled: Boolean = true,
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1548,6 +1557,7 @@ private fun MediaViewerFallbackCard(
             Spacer(Modifier.height(20.dp))
             Button(
                 onClick = onAction,
+                enabled = actionEnabled,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(theme.accentColor),
                     contentColor = Color(theme.onAccentColor),
@@ -1712,7 +1722,7 @@ private suspend fun saveMediaToGallery(context: android.content.Context, source:
 //         if (type == "image" && providedModel is ByteArray) return@LaunchedEffect
 //         if (!source.startsWith("https:", ignoreCase = true)) return source
 //         if (restrictedViewOnce || error != null || externalActionBusy) return
-//         if (!restrictedViewOnce && error == null && !externalActionBusy &&
+//         if (openAvailable && !restrictedViewOnce && error == null && !externalActionBusy &&
 //     var savingToGallery by remember(storagePath) { mutableStateOf(false) }
 //         if (restrictedViewOnce || savingToGallery || !gallerySaveAvailable) return
 //                         saveMediaToGallery(context, refreshed, title, type == "video")
@@ -1748,3 +1758,26 @@ private suspend fun saveMediaToGallery(context: android.content.Context, source:
 //         // Do not claim a visible gallery copy when the provider published no row.
 //         // Previous unchecked call: resolver.update(uri, values, null, null)
 //         check(isOwnerCurrent()) { "Attachment session changed during gallery publication." }
+
+// Previous click-state source retained for review:
+//         if (!restrictedViewOnce && error == null && !externalActionBusy && !savingToGallery && !ownedActionBusy &&
+//                         IconButton(onClick = ::share, enabled = actionsReady) {
+//                             text = { Text("Trim a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady,
+//                             text = { Text("Edit a copy") }, modifier = Modifier.heightIn(min = 48.dp), enabled = actionsReady,
+//                             enabled = actionsReady, onClick = { actionsExpanded = false; openExternally() })
+//                                 enabled = actionsReady, onClick = { actionsExpanded = false; share() })
+//                                         actionLabel = if (restrictedViewOnce || error != null) null else "Open Securely",
+//                         actionLabel = if (restrictedViewOnce || error != null) null else "Open Securely",
+//                     TextButton(onClick = ::share, enabled = actionsReady,
+//                     if (type in setOf("video", "audio")) TextButton(enabled = actionsReady,
+//                     if (type == "image" && !title.endsWith(".gif", ignoreCase = true)) TextButton(enabled = actionsReady,
+//                     TextButton(onClick = ::openExternally, enabled = actionsReady,
+// //         if (!restrictedViewOnce && error == null && !externalActionBusy &&
+
+// Previous click-state source retained for review:
+//             model = coil.request.ImageRequest.Builder(LocalContext.current).data(model)
+//                 // MV-R2-025 previous unbounded request:
+//                 // .memoryCachePolicy(coil.request.CachePolicy.DISABLED).diskCachePolicy(coil.request.CachePolicy.DISABLED).build(),
+//                 // Previous implicit receiver: .size(viewerDecodeExtent(constraints.maxWidth), viewerDecodeExtent(constraints.maxHeight))
+//                 .size(decodeWidth, decodeHeight)
+//                 .memoryCachePolicy(coil.request.CachePolicy.DISABLED).diskCachePolicy(coil.request.CachePolicy.DISABLED).build(),

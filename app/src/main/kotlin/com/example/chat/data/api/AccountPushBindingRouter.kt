@@ -11,7 +11,7 @@ import kotlinx.coroutines.sync.withLock
 
 /** Bindings are opaque routing hints, never auth. Only own-token responses can create a mapping. */
 class AccountPushBindingRouter(context: Context, private val api: ApiBackendService,
-    private val inactive: suspend (String) -> Unit,
+    private val inactive: suspend (String) -> Boolean,
     private val durableCalls: suspend (ApiRegisteredAccountMeta, String) -> Boolean = { _, _ -> false }) {
     private val prefs = context.applicationContext.getSharedPreferences("account_push_bindings_v1", Context.MODE_PRIVATE)
     private val registerLock = Mutex()
@@ -54,31 +54,69 @@ class AccountPushBindingRouter(context: Context, private val api: ApiBackendServ
         }
     } }
 
+    /** Stored hints only. Every worker still validates its binding using that retained account's own token. */
+    fun retainedBindingHints(): List<String> = prefs.all.keys.filter { uuid(it) }.filter { binding ->
+        prefs.getString(binding, null)?.let { key -> api.multiAccount.accountByKey(key)?.sessionExpired == false } == true
+    }
+
     /** Unknown/foreign/stale hint => no-op. No active-account fallback and no inactive destructive queue drain. */
-    suspend fun handle(bindingId: String, callId: String? = null) = withContext(Dispatchers.IO) {
-        if (DemoMode.active || !uuid(bindingId)) return@withContext
-        val key = prefs.getString(bindingId, null) ?: return@withContext
-        val meta = api.multiAccount.accountByKey(key) ?: return@withContext
-        val credentials = api.multiAccount.credentialsFor(key) ?: return@withContext
+    // true = handled or permanently invalid; false = bounded recovery may retry.
+    suspend fun handle(bindingId: String, callId: String? = null): Boolean = withContext(Dispatchers.IO) {
+        if (DemoMode.active || !uuid(bindingId)) return@withContext true
+        val key = prefs.getString(bindingId, null) ?: return@withContext false
+        val meta = api.multiAccount.accountByKey(key) ?: return@withContext true
+        val credentials = api.multiAccount.credentialsFor(key) ?: return@withContext true
+        if (meta.sessionExpired) return@withContext true
         val bearer = credentials.accessToken
-        val base = safeBase(meta.baseUrl) ?: return@withContext
-        if (!current(meta, bearer)) return@withContext
+        val base = safeBase(meta.baseUrl) ?: return@withContext true
+        // Prior source: if (!current(meta, bearer)) return@withContext true
+        if (!current(meta, bearer)) return@withContext false
         try {
             var response = transport.execute("GET", "$base/auth/device-bindings/$bindingId", headers(meta, bearer), null)
-            if (!current(meta, bearer)) return@withContext
+            // Prior source: if (!current(meta, bearer)) return@withContext true
+            if (!current(meta, bearer)) return@withContext false
             if (response.first == 404) response = transport.execute("GET", "$base/api/v1/auth/device-bindings/$bindingId", headers(meta, bearer), null)
-            if (!current(meta, bearer) || response.first != 200) return@withContext
-            val data = JSONObject(response.second).optJSONObject("data") ?: return@withContext
-            if (data.optString("bindingId") != bindingId || data.optString("accountId") != meta.userId || data.optString("tenantId") != meta.tenantId) return@withContext
-            if (callId != null && durableCalls(meta, bearer)) return@withContext
+            // Prior source: if (!current(meta, bearer)) return@withContext true
+            if (!current(meta, bearer)) return@withContext false
+            if (response.first != 200) return@withContext response.first in setOf(403, 404)
+            val data = JSONObject(response.second).optJSONObject("data") ?: return@withContext true
+            if (data.optString("bindingId") != bindingId || data.optString("accountId") != meta.userId || data.optString("tenantId") != meta.tenantId) return@withContext true
+            if (callId != null && durableCalls(meta, bearer)) return@withContext true
             if (api.currentAccountKey() == key) {
                 val owner = api.authSnapshot()
-                if (owner.userId != meta.userId || owner.tenantId != meta.tenantId || owner.baseUrl != meta.baseUrl || owner.token != bearer) return@withContext
-                if (callId == null) api.syncFromPushNudge(owner)
+                // Prior source: mismatched active snapshot returned true (silent drop on a concurrent switch/rotation).
+                if (owner.userId != meta.userId || owner.tenantId != meta.tenantId || owner.baseUrl != meta.baseUrl || owner.token != bearer) return@withContext false
+                if (callId == null) return@withContext api.syncFromPushNudge(owner)
                 else if (callId.isNotBlank()) api.pollCallSignalsAndAwait(owner)
-            } else if (callId == null) inactive(key)
-            // Inactive calls intentionally wait for durable peek+ACK protocol. No queue consumption here.
+            // Previous unchecked completion: } else if (callId == null) return@withContext inactive(key)
+            } else if (callId == null) {
+                val complete = inactive(key)
+                return@withContext complete && current(meta, bearer) && api.currentAccountKey() != key
+            }
+            // Call inbox consumer validates event lifetime; retry the bounded pending inbox, never auto-answer.
+            if (callId != null) return@withContext false
+            true
         } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-        catch (_: Exception) { /* Unverified or unavailable: do not render notification or select another account. */ }
+        catch (_: Exception) { false /* Unverified/unavailable: retry without rendering or selecting an account. */ }
     }
 }
+
+// Replaced source retained for review (inactive; do not restore without its surrounding implementation).
+// Prior source:     private val inactive: suspend (String) -> Unit,
+// Prior source:     suspend fun handle(bindingId: String, callId: String? = null) = withContext(Dispatchers.IO) {
+// Prior source:         if (DemoMode.active || !uuid(bindingId)) return@withContext
+// Prior source:         val key = prefs.getString(bindingId, null) ?: return@withContext
+// Prior source:         val meta = api.multiAccount.accountByKey(key) ?: return@withContext
+// Prior source:         val credentials = api.multiAccount.credentialsFor(key) ?: return@withContext
+// Prior source:         val base = safeBase(meta.baseUrl) ?: return@withContext
+// Prior source:         if (!current(meta, bearer)) return@withContext
+// Prior source:             if (!current(meta, bearer)) return@withContext
+// Prior source:             if (!current(meta, bearer) || response.first != 200) return@withContext
+// Prior source:             val data = JSONObject(response.second).optJSONObject("data") ?: return@withContext
+// Prior source:             if (data.optString("bindingId") != bindingId || data.optString("accountId") != meta.userId || data.optString("tenantId") != meta.tenantId) return@withContext
+// Prior source:             if (callId != null && durableCalls(meta, bearer)) return@withContext
+// Prior source:                 if (owner.userId != meta.userId || owner.tenantId != meta.tenantId || owner.baseUrl != meta.baseUrl || owner.token != bearer) return@withContext
+// Prior source:                 if (callId == null) api.syncFromPushNudge(owner)
+// Prior source:             } else if (callId == null) inactive(key)
+// Prior source:             // Inactive calls intentionally wait for durable peek+ACK protocol. No queue consumption here.
+// Prior source:         catch (_: Exception) { /* Unverified or unavailable: do not render notification or select another account. */ }
