@@ -32,6 +32,30 @@ class FcmTokenRegistrar(
     @Volatile
     private var fcmToken: String? = null
 
+    val currentToken: String?
+        get() = fcmToken
+
+    fun getOrFetchToken(onResult: (String?) -> Unit) {
+        val token = fcmToken
+        if (!token.isNullOrEmpty()) {
+            onResult(token)
+            return
+        }
+        val fetch = tokenFetcher
+        if (fetch != null) {
+            try {
+                fetch({ t ->
+                    if (!t.isNullOrEmpty()) fcmToken = t
+                    onResult(t)
+                }, { onResult(null) })
+            } catch (_: Throwable) {
+                onResult(null)
+            }
+        } else {
+            onResult(null)
+        }
+    }
+
     /** FirebaseMessagingService.onNewToken and the initial getToken() both
      *  funnel here: remember the token and register it with every backend
      *  that is currently available (Dart _registerWithBackends). */

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.MotionPhotosOn
 import androidx.compose.material.icons.rounded.NotificationsActive
@@ -169,6 +170,19 @@ fun NotificationSettingsPage(
     var dialogFor by remember { mutableStateOf<Pair<Boolean, CompletableDeferred<Boolean>>?>(null) }
     val recordingAlert = preferences.gbBool("notify_recording_started", false)
     val isIslandEnabled = preferences.gbBool("dynamic_island_notifications", false)
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    var currentFcmToken by remember { mutableStateOf<String?>(com.example.chat.ServiceLocator.fcmRegistrar.currentToken) }
+    var isFetchingToken by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (currentFcmToken.isNullOrEmpty()) {
+            isFetchingToken = true
+            com.example.chat.ServiceLocator.fcmRegistrar.getOrFetchToken { token ->
+                currentFcmToken = token
+                isFetchingToken = false
+            }
+        }
+    }
 
     fun pickColor(title: String, current: Long?, apply: (Long) -> Unit) =
         pickers.showColor(title, current ?: config.accentColor) { apply(it) }
@@ -320,6 +334,85 @@ fun NotificationSettingsPage(
                     icon = Icons.Rounded.Subtitles, title = "Show event detail", subtitle = "Include the online, typing or recording detail text", value = notif.showMessagePreview,
                     onChanged = { preferences.updateNotification(preferences.notification.copy(showMessagePreview = it), "Show Message Preview") },
                 )
+                }
+            }
+            ChatySettingsSection(
+                title = "Push notifications & FCM token",
+                description = "Your device Firebase Cloud Messaging (FCM) registration token. Use this to manually test push delivery with curl or API calls.",
+            ) {
+                Column(
+                    Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth()
+                        .background(colors.surface, RoundedCornerShape(14.dp))
+                        .border(1.dp, colors.borderSubtle, RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Text(
+                        "Device FCM Token",
+                        color = colors.foreground,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .background(colors.surfaceElevated, RoundedCornerShape(8.dp))
+                            .border(1.dp, colors.borderSubtle, RoundedCornerShape(8.dp))
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            text = when {
+                                !currentFcmToken.isNullOrEmpty() -> currentFcmToken!!
+                                isFetchingToken -> "Fetching token from Firebase..."
+                                else -> "FCM token not available yet"
+                            },
+                            color = if (!currentFcmToken.isNullOrEmpty()) colors.foreground else colors.foregroundSecondary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = {
+                                val token = currentFcmToken
+                                if (!token.isNullOrEmpty()) {
+                                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(token))
+                                    scope.launch { snackbar.showSnackbar("FCM token copied to clipboard!") }
+                                } else {
+                                    scope.launch { snackbar.showSnackbar("No FCM token available to copy") }
+                                }
+                            },
+                            enabled = !currentFcmToken.isNullOrEmpty(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Copy Token", fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                isFetchingToken = true
+                                com.example.chat.ServiceLocator.fcmRegistrar.fetchAndRegisterToken()
+                                com.example.chat.ServiceLocator.fcmRegistrar.getOrFetchToken { token ->
+                                    currentFcmToken = token
+                                    isFetchingToken = false
+                                    scope.launch {
+                                        snackbar.showSnackbar(if (token != null) "FCM token refreshed & registered!" else "Failed to get FCM token")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Refresh", fontSize = 12.sp)
+                        }
+                    }
                 }
             }
             ChatySettingsSection(
