@@ -30,18 +30,22 @@ class ChatyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        // Previous order retained: ServiceLocator.ensurePushReady(applicationContext)
-        // Durable enqueue does not depend on credentials, Firebase restore, or handler installation.
-        // Handler lookup is deferred until after durable scheduling.
-        if (message.notification != null) return
-        val binding = message.data["account_binding"]?.takeIf { it.isNotBlank() } ?: return
-        // An opaque binding is only a hint. The router validates it with the mapped account's token.
+        val binding = message.data["account_binding"]?.takeIf { it.isNotBlank() }
         val type = message.data["type"]
-        val callId = if (type == "incoming_call") message.data["call_id"]?.takeIf { it.isNotBlank() } ?: return else null
-        if (type != "sync" && type != "incoming_call") return
+        val callId = if (type == "incoming_call") message.data["call_id"]?.takeIf { it.isNotBlank() } else null
+
         // Persist continuation before any network work; OS may kill this process after the callback.
-        AccountPushRecoveryWorker.enqueue(applicationContext, binding, callId,
-            urgent = message.priority == RemoteMessage.PRIORITY_HIGH)
+        if (binding != null && (type == "sync" || type == "incoming_call")) {
+            AccountPushRecoveryWorker.enqueue(applicationContext, binding, callId,
+                urgent = message.priority == RemoteMessage.PRIORITY_HIGH)
+        }
+
+        // When a visual notification payload is present, Google Play Services already
+        // displayed the system notification banner directly.
+        if (message.notification != null) return
+        if (binding == null) return
+        if (type != "sync" && type != "incoming_call") return
+
         ServiceLocator.ensurePushReady(applicationContext)
         val handler = PushWakeHolder.handler ?: return
         when (type) {
@@ -51,13 +55,13 @@ class ChatyFirebaseMessagingService : FirebaseMessagingService() {
                     handler.onAccountSyncNudgeAndWait(binding)
                 }
             }
-            "incoming_call" -> message.data["call_id"]?.takeIf { it.isNotBlank() }?.let { callId ->
+            "incoming_call" -> callId?.let { cid ->
                 runBlocking {
                     withTimeoutOrNull(PUSH_WAKE_TIMEOUT_MS) {
                         // Same cold-process ensure-init as the sync branch; without it
                         // an incoming-call push is dropped on an uninitialized backend.
                         runCatching { withContext(kotlinx.coroutines.Dispatchers.IO) { ServiceLocator.apiBackend.initialize() } }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
-                        handler.onAccountIncomingCallNudgeAndWait(binding, callId)
+                        handler.onAccountIncomingCallNudgeAndWait(binding, cid)
                     }
                 }
             }
