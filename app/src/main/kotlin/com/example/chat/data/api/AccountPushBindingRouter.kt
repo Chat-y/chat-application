@@ -80,7 +80,10 @@ class AccountPushBindingRouter(context: Context, private val api: ApiBackendServ
     // true = handled or permanently invalid; false = bounded recovery may retry.
     suspend fun handle(bindingId: String, callId: String? = null): Boolean = withContext(Dispatchers.IO) {
         if (DemoMode.active || !uuid(bindingId)) return@withContext true
-        val key = prefs.getString(bindingId, null) ?: return@withContext false
+        val key = prefs.getString(bindingId, null)
+            ?: api.currentAccountKey()
+            ?: api.multiAccount.accounts().firstOrNull { !it.sessionExpired }?.accountKey
+            ?: return@withContext false
         val meta = api.multiAccount.accountByKey(key) ?: return@withContext true
         val credentials = api.multiAccount.credentialsFor(key) ?: return@withContext true
         if (meta.sessionExpired) return@withContext true
@@ -97,7 +100,12 @@ class AccountPushBindingRouter(context: Context, private val api: ApiBackendServ
             if (!current(meta, bearer)) return@withContext false
             if (response.first != 200) return@withContext response.first in setOf(403, 404)
             val data = JSONObject(response.second).optJSONObject("data") ?: return@withContext true
-            if (data.optString("bindingId") != bindingId || data.optString("accountId") != meta.userId || data.optString("tenantId") != meta.tenantId) return@withContext true
+            val respBinding = data.optString("bindingId")
+            val respAccount = data.optString("accountId")
+            val respTenant = data.optString("tenantId")
+            if (respBinding != bindingId || respAccount != meta.userId) return@withContext true
+            if (meta.tenantId.isNotBlank() && respTenant.isNotBlank() && respTenant != meta.tenantId) return@withContext true
+            prefs.edit().putString(bindingId, key).apply()
             if (callId != null && durableCalls(meta, bearer)) return@withContext true
             if (api.currentAccountKey() == key) {
                 val owner = api.authSnapshot()
