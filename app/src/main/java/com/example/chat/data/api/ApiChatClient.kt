@@ -64,7 +64,7 @@ class ApiChatClient(
             val response = getWithFallback("chat/rooms?include_tasks=false")
             when (response.first) {
                 200 -> {
-                    val data = JSONObject(response.second).getJSONArray("data")
+                    val data = extractJsonArray(response.second, "rooms")
                     val conversations = mutableListOf<Conversation>()
                     for (i in 0 until data.length()) {
                         conversations.add(Conversation.fromApi(deepMap(data.getJSONObject(i))))
@@ -108,7 +108,7 @@ class ApiChatClient(
                 401 -> MessagesReadResult.AuthenticationRequired
                 403 -> MessagesReadResult.Forbidden
                 200 -> {
-                    val data = JSONObject(response.second).getJSONArray("data")
+                    val data = extractJsonArray(response.second, "messages")
                     val messages = ArrayList<ChatMessage>(data.length())
                     for (i in 0 until data.length()) messages.add(ChatMessage.fromApi(deepMap(data.getJSONObject(i))))
                     MessagesReadResult.Success(messages)
@@ -127,7 +127,7 @@ class ApiChatClient(
         return try {
             val response = getWithFallback("chat/rooms/$roomPath/messages")
             if (response.first != 200) return null
-            val data = JSONObject(response.second).getJSONArray("data")
+            val data = extractJsonArray(response.second, "messages")
             val messages = mutableListOf<ChatMessage>()
             for (i in 0 until data.length()) {
                 messages.add(ChatMessage.fromApi(deepMap(data.getJSONObject(i))))
@@ -450,7 +450,7 @@ class ApiChatClient(
             JSONObject().put("recipient_id", targetUserId).toString(),
         )
         return when (response.first) {
-            200 -> {
+            200, 201 -> {
                 val body = JSONObject(response.second)
                 Conversation.fromApi(
                     deep(body.optJSONObject("data") ?: body) as Map<String, Any?>
@@ -481,7 +481,7 @@ class ApiChatClient(
             throw Exception("Failed to connect to chat server: $e")
         }
         return when (response.first) {
-            200 -> {
+            200, 201 -> {
                 val parsed = JSONObject(response.second)
                 Conversation.fromApi(
                     deep(parsed.optJSONObject("data") ?: parsed) as Map<String, Any?>
@@ -573,6 +573,23 @@ class ApiChatClient(
     }
 
     companion object {
+        /** Safe JSON array extraction from either a direct array or wrapping object. */
+        fun extractJsonArray(rawJson: String, preferredKey: String): JSONArray {
+            val trimmed = rawJson.trim()
+            if (trimmed.startsWith("[")) {
+                return try { JSONArray(trimmed) } catch (_: Exception) { JSONArray() }
+            }
+            return try {
+                val obj = JSONObject(trimmed)
+                obj.optJSONArray("data")
+                    ?: obj.optJSONArray(preferredKey)
+                    ?: obj.optJSONArray("items")
+                    ?: obj.optJSONArray("results")
+                    ?: JSONArray()
+            } catch (_: Exception) {
+                JSONArray()
+            }
+        }
         /** Deep org.json -> Kotlin collections (JSONObject/JSONArray unwrapped). */
         fun deepMap(obj: JSONObject): Map<String, Any?> {
             val out = LinkedHashMap<String, Any?>()
@@ -589,7 +606,7 @@ class ApiChatClient(
 
         /** Exact port of the loadUsers per-user mapping (api_backend_service.dart). */
         fun userFromApi(json: Map<String, Any?>): UserProfile {
-            val uid = (json["uid"] ?: json["id"] ?: "").toString()
+            val uid = (json["uid"] ?: json["id"] ?: json["user_id"] ?: "").toString()
             val fullName = (
                 json["full_name"]
                     ?: json["displayName"]
@@ -598,9 +615,10 @@ class ApiChatClient(
                 ).toString()
             val username = (json["username"] ?: "").toString()
             val displayName = if (fullName.isNotEmpty()) fullName else username.ifEmpty { "User" }
-            val initials = if (displayName.isNotEmpty()) {
-                displayName.split(Regex("\\s+")).filter { it.isNotEmpty() }
+            val initials = if (displayName.isNotBlank()) {
+                val parts = displayName.split(Regex("\\s+")).filter { it.isNotEmpty() }
                     .map { it[0] }.take(2).joinToString("").uppercase()
+                parts.ifEmpty { "U" }
             } else "U"
             val publicProfileCamel = json["publicProfile"] as? Map<*, *>
             val publicProfileSnake = json["public_profile"] as? Map<*, *>

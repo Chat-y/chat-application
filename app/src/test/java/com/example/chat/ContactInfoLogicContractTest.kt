@@ -55,7 +55,9 @@ class ContactInfoLogicContractTest {
         assertEquals(2, links.size)
     }
     @Test fun trailingPunctuationIsPartOfCurrentMatch() { // R2-19 documents current behaviour
-        assertEquals(listOf("https://a.example/x)."), ContactInfoLogic.extractLinks(listOf(msg(text = "see (https://a.example/x).".removePrefix("see ("))))
+        val sampleText = "see (https://a.example/x).".removePrefix("see (")
+        val links = ContactInfoLogic.extractLinks(listOf(msg(text = sampleText)))
+        assertEquals(listOf("https://a.example/x)."), links)
     }
     @Test fun repeatedUrlKeptOnceInOrder() { // R2-20
         val links = ContactInfoLogic.extractLinks(listOf(msg("1", text = "https://b.example https://a.example"), msg("2", text = "https://b.example")))

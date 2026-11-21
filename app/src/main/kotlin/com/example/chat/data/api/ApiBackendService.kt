@@ -1953,7 +1953,13 @@ class ApiBackendService(
             transport = ScopedCallHttpTransport(expected, ::withAuthScope, sendRequests),
         )
         try {
-            val conversation = withContext(Dispatchers.IO) { scopedChat.createDirectRoom(targetUserId) }
+            val rawConversation = withContext(Dispatchers.IO) { scopedChat.createDirectRoom(targetUserId) }
+            val required = listOfNotNull(targetUserId.takeIf { it.isNotBlank() }, expected.userId?.takeIf { it.isNotBlank() })
+            val conversation = if (rawConversation.participantIds.containsAll(required)) {
+                rawConversation
+            } else {
+                rawConversation.copy(participantIds = (rawConversation.participantIds + required).distinct())
+            }
             if (!withAuthScope(expected) {
                 synchronized(chatLock) {
                     val idx = _conversations.indexOfFirst { it.id == conversation.id }

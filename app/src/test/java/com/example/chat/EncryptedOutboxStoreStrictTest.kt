@@ -101,8 +101,8 @@ class EncryptedOutboxStoreStrictTest {
         }
 
         override fun edit(): SharedPreferences.Editor = FakeEditor(this)
-        override fun registerOnSharedPreferenceChangeListener(listener: OnSharedPreferenceChangeListener?) {}
-        override fun unregisterOnSharedPreferenceChangeListener(listener: OnSharedPreferenceChangeListener?) {}
+        override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
+        override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
     }
 
     // ----- Strict core (OutboxStoreStrict) -----------------------------------

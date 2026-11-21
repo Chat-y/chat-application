@@ -190,10 +190,10 @@ internal fun PresetNavigationShell(
                     .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Start) {
                     if (isOneUi) {
-                        NavDestinationIcon(activeId!!, size = ReferenceLayoutMetrics.identityIconSizeDp, tint = foreground)
+                        NavDestinationIcon(activeId ?: "chats", size = ReferenceLayoutMetrics.identityIconSizeDp, tint = foreground)
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text(NavigationCatalog.labelFor(activeId!!), color = foreground,
+                    Text(NavigationCatalog.labelFor(activeId ?: "chats"), color = foreground,
                         fontSize = if (isOneUi) ReferenceLayoutMetrics.compactIdentityTextSizeSp.sp else 20.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = if (isOneUi) Modifier else Modifier.weight(1f))
@@ -205,7 +205,7 @@ internal fun PresetNavigationShell(
                 Modifier.fillMaxWidth().height(ReferenceLayoutMetrics.actionBarHeightDp.dp).padding(end = 4.dp),
                 horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(NavigationCatalog.labelFor(activeId!!), color = foreground,
+                Text(NavigationCatalog.labelFor(activeId ?: "chats"), color = foreground,
                     fontSize = 20.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f).padding(start = 16.dp).alpha(headerCollapse),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)

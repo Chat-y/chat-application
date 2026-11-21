@@ -125,8 +125,8 @@ fun ContactInfoScreen(
     onOpenPrivacy: () -> Unit,
     onOpenMedia: (ChatMessage) -> Unit,
     onSearch: () -> Unit,
-    onStartCall: (Boolean) -> Unit,
-    onShareContact: () -> Unit,
+    onStartCall: (Boolean) -> Unit = {},
+    onShareContact: () -> Unit = {},
     onDeletedPopToRoot: () -> Unit,
     onBack: () -> Unit,
     presenceLabelOverride: String? = null,
@@ -379,7 +379,7 @@ fun ContactInfoScreen(
                         // R1-25: lazy row so a long history is not composed eagerly (was Row + horizontalScroll over every item).
                         LazyRow(Modifier.height(80.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
                             items(media, key = { it.id }) { message ->
-                                val attachment = message.attachment!!
+                                val attachment = message.attachment ?: return@items
                                 val kindLabel = if (attachment.type == "video") "Video" else "Photo"
                                 Column(
                                     Modifier
@@ -427,7 +427,7 @@ fun ContactInfoScreen(
                     }
                 }
                 documents.take(5).forEach { message ->
-                    val attachment = message.attachment!!
+                    val attachment = message.attachment ?: return@forEach
                     Row(
                         Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
                             .clickable(onClickLabel = "Open document", role = Role.Button) { onOpenMedia(message) }

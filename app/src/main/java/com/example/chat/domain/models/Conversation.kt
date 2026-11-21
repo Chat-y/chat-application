@@ -69,25 +69,35 @@ data class Conversation(
             }
 
             val otherUser = json["other_user"] as? Map<*, *>
+                ?: json["otherUser"] as? Map<*, *>
+                ?: json["user"] as? Map<*, *>
+                ?: json["recipient"] as? Map<*, *>
+                ?: json["peer"] as? Map<*, *>
             val participantIds = mutableListOf<String>()
-            val rawParticipants = json["participant_ids"] as? List<*>
+            val rawParticipants = (json["participant_ids"] ?: json["participantIds"]
+                ?: json["member_ids"] ?: json["memberIds"]
+                ?: json["members"] ?: json["participants"]) as? List<*>
             if (rawParticipants != null) {
                 for (p in rawParticipants) {
-                    val pid = p?.toString()?.trim()
+                    val pid = when (p) {
+                        is Map<*, *> -> (p["id"] ?: p["uid"] ?: p["user_id"])?.toString()?.trim()
+                        else -> p?.toString()?.trim()
+                    }
                     if (!pid.isNullOrEmpty() && !participantIds.contains(pid)) {
                         participantIds.add(pid)
                     }
                 }
             }
-            json["created_by_id"]?.let {
+            listOfNotNull(
+                json["created_by_id"], json["created_by"], json["creator_id"],
+                json["recipient_id"], json["other_user_id"], json["target_user_id"], json["user_id"]
+            ).forEach {
                 val cid = it.toString().trim()
                 if (cid.isNotEmpty() && !participantIds.contains(cid)) participantIds.add(cid)
             }
-            otherUser?.get("id")?.let {
-                val otherId = it.toString().trim()
-                if (otherId.isNotEmpty() && !participantIds.contains(otherId)) participantIds.add(otherId)
-            }
-            otherUser?.get("uid")?.let {
+            listOfNotNull(
+                otherUser?.get("id"), otherUser?.get("uid"), otherUser?.get("user_id")
+            ).forEach {
                 val otherId = it.toString().trim()
                 if (otherId.isNotEmpty() && !participantIds.contains(otherId)) participantIds.add(otherId)
             }

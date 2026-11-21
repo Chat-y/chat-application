@@ -385,17 +385,19 @@ private fun ChatDetailHostContent(
 
     val isDirect = live.type == ConversationType.direct
     val otherId = live.participantIds.firstOrNull { it != myId } ?: live.participantIds.firstOrNull()
-    val other = api.users.firstOrNull { it.id == otherId } ?: otherId?.let { id ->
-        com.example.chat.domain.models.UserProfile(
-            id = id,
-            displayName = live.title,
-            username = live.title,
-            avatarInitials = live.avatarInitials.takeIf { !it.isNullOrBlank() } ?: "C",
-            avatarColorHex = live.avatarColorHex ?: "0xFF6366F1",
-            about = "",
-            lastSeenAt = java.time.Instant.now(),
-        )
-    }
+    val other = if (isDirect) {
+        (if (otherId != null) api.users.firstOrNull { it.id == otherId } else null)
+            ?: com.example.chat.domain.models.UserProfile(
+                id = otherId ?: "user_${live.id}",
+                displayName = live.title.ifBlank { "User" },
+                username = live.title.ifBlank { "user" },
+                avatarInitials = live.avatarInitials.takeIf { !it.isNullOrBlank() }
+                    ?: live.title.firstOrNull()?.uppercase() ?: "U",
+                avatarColorHex = live.avatarColorHex ?: "0xFF6366F1",
+                about = "",
+                lastSeenAt = java.time.Instant.now(),
+            )
+    } else null
     val conv = prefs.conversation
     val privacy = prefs.privacy
     fun gbB(k: String, d: Boolean) = prefs.gbBool(k, d)
@@ -1127,31 +1129,40 @@ private fun ChatDetailHostContent(
         },
         externalSearchRequest = infoSearchRequest,
         onOpenInfo = {
-            if (!isDirect) infoRoute = 1
-            else if (other != null) {
+            if (!isDirect) {
+                infoRoute = 1
+            } else if (other != null) {
                 infoRoute = 1
                 infoLoading = true
                 infoError = null
                 infoConnection = ContactConnectionStatus()
                 scope.launch {
                     try {
-                        // Dart ContactInfoScreen._load commits both results only if both succeed.
-                        // Keep its fresh default separate from the chat call-gate cache on error.
-                        val nextConnection = ServiceLocator.contactRelationships.connectionStatus(other.id, api.contactsPlane(messageAccountScope))
-                        val nextBlocked = ServiceLocator.contactRelationships.isBlocked(other.id, api.contactsPlane(messageAccountScope))
-                        if (api.authSnapshot() !== messageAccountScope) return@launch
-                        infoConnection = nextConnection
-                        infoBlocked = nextBlocked
-                        try {
-                            val loaded = api.peerProfile(other.username, other.id, messageAccountScope)
-                            if (api.authSnapshot() === messageAccountScope) infoProfile = loaded
-                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                            throw cancelled
-                        } catch (caughtFailure: Exception) { if (caughtFailure is kotlinx.coroutines.CancellationException) throw caughtFailure;
-                            // Keep the cached profile and contact actions usable if refresh is unavailable.
+                        if (other.id.isNotBlank() && !other.id.startsWith("user_")) {
+                            val nextConnection = ServiceLocator.contactRelationships.connectionStatus(other.id, api.contactsPlane(messageAccountScope))
+                            val nextBlocked = ServiceLocator.contactRelationships.isBlocked(other.id, api.contactsPlane(messageAccountScope))
+                            if (api.authSnapshot() !== messageAccountScope) return@launch
+                            infoConnection = nextConnection
+                            infoBlocked = nextBlocked
+                            try {
+                                if (other.username.isNotBlank()) {
+                                    val loaded = api.peerProfile(other.username, other.id, messageAccountScope)
+                                    if (api.authSnapshot() === messageAccountScope) infoProfile = loaded
+                                }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (caughtFailure: Exception) {
+                                if (caughtFailure is kotlinx.coroutines.CancellationException) throw caughtFailure
+                            }
                         }
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; if (api.authSnapshot() === messageAccountScope) infoError = "Unable to load contact." }
-                    finally { if (api.authSnapshot() === messageAccountScope) infoLoading = false }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        if (api.authSnapshot() === messageAccountScope) infoError = "Unable to load contact."
+                    } finally {
+                        if (api.authSnapshot() === messageAccountScope) infoLoading = false
+                    }
                 }
             }
         },
@@ -1339,7 +1350,17 @@ private fun ChatDetailHostContent(
                     messages = messages,
                     // MV-R3-050 prior: onOpenMedia = { m -> viewerBounds = null; viewerMessage = m },
                     onOpenMedia = { m -> viewerBounds = null; viewerAnchorId = null; viewerOriginId = null; viewerMessage = m },
-                    participants = live.participantIds.mapNotNull { id -> api.users.firstOrNull { it.id == id } },
+                    participants = live.participantIds.map { id ->
+                        api.users.firstOrNull { it.id == id } ?: com.example.chat.domain.models.UserProfile(
+                            id = id,
+                            displayName = if (id == myId) "You" else "Member ${id.take(6)}",
+                            username = id,
+                            avatarInitials = if (id == myId) "ME" else id.take(2).uppercase(),
+                            avatarColorHex = "0xFF6366F1",
+                            about = "",
+                            lastSeenAt = java.time.Instant.now(),
+                        )
+                    },
                     currentUserId = myId,
                     onLeave = { infoRoute = 0; onBack() },
                     onBack = { infoRoute = 0 },

@@ -77,7 +77,7 @@ fun ConversationMediaIndex(messages: List<ChatMessage>, onOpen: (ChatMessage) ->
             LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 items(found, key = { it.id }) { message ->
-                    val a = message.attachment!!
+                    val a = message.attachment ?: return@items
                     val kindLabel = if (a.type == "video") "Video" else "Photo"
                     Box(Modifier.aspectRatio(1f).background(colors.surfaceSecondary)
                         // R1-38: spoken type + safe filename + action; decorative icon stays silent.
@@ -99,7 +99,7 @@ fun ConversationMediaIndex(messages: List<ChatMessage>, onOpen: (ChatMessage) ->
             val found = docs.filter { q.isBlank() || it.attachment?.name?.contains(q, ignoreCase = true) == true || it.text.contains(q, ignoreCase = true) }
             if (found.isEmpty()) Text(if (q.isNotBlank()) "No matching items" else "No documents found", modifier = Modifier.padding(16.dp))
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) { items(found, key = { it.id }) { message ->
-                val a = message.attachment!!
+                val a = message.attachment ?: return@items
                 Column(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp) // R1-47
                     .clickable(onClickLabel = "Open document", role = Role.Button) { onOpen(message) }
                     .semantics(mergeDescendants = true) {}.padding(16.dp)) {

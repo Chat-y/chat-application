@@ -9,8 +9,8 @@ import org.junit.Test
 
 /** NOT RUN. Existing source/pure-policy checks, not Android service/notification visibility proof. */
 class CallForegroundSourceContractGapTest {
-    private fun source(relative: String): String = Files.readString(
-        listOf(Path.of("src/main/$relative"), Path.of("app/src/main/$relative")).first { Files.isRegularFile(it) })
+    private fun source(relative: String): String =
+        listOf(java.io.File("src/main/$relative"), java.io.File("app/src/main/$relative")).first { it.isFile }.readText()
     private fun session(state: CallSessionState, outgoing: Boolean) = ChatyCallSession(
         "synthetic", "peer", "Fixture", isVideo = false, isOutgoing = outgoing,
         state = state, startedAt = Instant.EPOCH)

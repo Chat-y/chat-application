@@ -7,9 +7,9 @@ import org.junit.Test
 
 /** NOT RUN. Structural review pins only, not typecheck, native scheduling, sink or camera proof. */
 class CallNativeReviewSourceGapTest {
-    private fun source(file: String): String = listOf(Path.of("src/main/java/com/example/chat/data/services/$file.kt"),
-        Path.of("app/src/main/java/com/example/chat/data/services/$file.kt"))
-        .first { Files.isRegularFile(it) }.let { Files.readString(it) }
+    private fun source(file: String): String = listOf(java.io.File("src/main/java/com/example/chat/data/services/$file.kt"),
+        java.io.File("app/src/main/java/com/example/chat/data/services/$file.kt"))
+        .first { it.isFile }.readText()
         .lineSequence().filterNot { it.trimStart().startsWith("//") }.joinToString("\n")
     @Test fun nativeGenerationAndTerminalEglAreSeparateFromBlockingReleaseMonitor() {
         val body = source("WebRtcCallMediaController")

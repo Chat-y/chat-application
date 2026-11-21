@@ -7,8 +7,8 @@ import org.junit.Test
 
 /** NOT RUN. Structural regressions only, not TalkBack, Silent-mode or concurrent-call proof. */
 class CallsIntegratorSourceGapTest {
-    private fun source(relative: String): String = Files.readString(
-        listOf(Path.of("src/main/$relative"), Path.of("app/src/main/$relative")).first { Files.isRegularFile(it) })
+    private fun source(relative: String): String =
+        listOf(java.io.File("src/main/$relative"), java.io.File("app/src/main/$relative")).first { it.isFile }.readText()
         .lineSequence().filterNot { it.trimStart().startsWith("//") }.joinToString("\n")
     @Test fun iosDeclineAndNextcloudCopyMatchRealActions() {
         val body = source("kotlin/com/example/chat/ui/calls/bundles/BundleIncomingCallView.kt")

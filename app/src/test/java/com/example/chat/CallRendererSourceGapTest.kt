@@ -8,9 +8,9 @@ import org.junit.Test
 /** NOT RUN. Structural fixture, not EGL ownership, provider-swap or camera-mirror pixel proof. */
 class CallRendererSourceGapTest {
     @Test fun rendererKeysCaptureOwnerAndMirrorUpdatesOutsideFactory() {
-        val source = listOf(Path.of("src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt"),
-            Path.of("app/src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt"))
-            .first { Files.isRegularFile(it) }.let { Files.readString(it) }
+        val source = listOf(java.io.File("src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt"),
+            java.io.File("app/src/main/kotlin/com/example/chat/ui/calls/OngoingCallScreen.kt"))
+            .first { it.isFile }.readText()
             .lineSequence().filterNot { it.trimStart().startsWith("//") }.joinToString("\n")
 // Previous implementation retained:         assertTrue(source.contains("key(session.callId, RendererProviderIdentity(videoSurfaces))"))
 // Previous implementation retained:         assertTrue(source.contains("key(callId, RendererProviderIdentity(videoSurfaces))"))
@@ -25,9 +25,9 @@ class CallRendererSourceGapTest {
         assertFalse(source.contains("height(140.dp)"))
     }
     @Test fun nativeDetachUsesOriginalTrackAndStillAttemptsSurfaceRelease() {
-        val source = listOf(Path.of("src/main/java/com/example/chat/data/services/WebRtcCallMediaController.kt"),
-            Path.of("app/src/main/java/com/example/chat/data/services/WebRtcCallMediaController.kt"))
-            .first { Files.isRegularFile(it) }.let { Files.readString(it) }
+        val source = listOf(java.io.File("src/main/java/com/example/chat/data/services/WebRtcCallMediaController.kt"),
+            java.io.File("app/src/main/java/com/example/chat/data/services/WebRtcCallMediaController.kt"))
+            .first { it.isFile }.readText()
             .lineSequence().filterNot { it.trimStart().startsWith("//") }.joinToString("\n")
         val detach = source.substringAfter("override fun detachRenderer(").substringBefore("override suspend fun dispose()")
         assertTrue(detach.contains("rendererBindings.remove(renderer)"))

@@ -65,7 +65,13 @@ class ContactRelationshipService(
     }
 
     suspend fun isBlocked(targetUserId: String, scopedPlane: ApiContactsClient? = null): Boolean = withContext(Dispatchers.IO) {
-        (scopedPlane ?: contacts()).blocks().any { it.userId == targetUserId }
+        try {
+            (scopedPlane ?: contacts()).blocks().any { it.userId == targetUserId }
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** Silent both ways, exactly like the backend /block semantics. */
@@ -76,7 +82,7 @@ class ContactRelationshipService(
     /** Derive the connection state from the contacts plane. Errors
      *  propagate (callers keep their previous state); a pre-plane server
      *  (no outgoing route) reads as not-connected, never as accepted. */
-    suspend fun connectionStatus(otherUserId: String, scopedPlane: ApiContactsClient? = null): ContactConnectionStatus = withContext(Dispatchers.IO) {
+    suspend fun connectionStatus(otherUserId: String, scopedPlane: ApiContactsClient? = null): ContactConnectionStatus = withContext(Dispatchers.IO) { try {
         val plane = scopedPlane ?: contacts()
         if (plane.contacts().any { it.userId == otherUserId }) {
             return@withContext ContactConnectionStatus(myAccepted = true, otherAccepted = true)
@@ -92,7 +98,7 @@ class ContactRelationshipService(
         if (outgoing.any { it.from.userId == otherUserId }) {
             return@withContext ContactConnectionStatus(myAccepted = true, otherAccepted = false)
         }
-        ContactConnectionStatus()
+        ContactConnectionStatus() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { ContactConnectionStatus() }
     }
 
     /** Accept their pending incoming request. Throws when none exists -

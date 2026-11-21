@@ -8,8 +8,8 @@ import org.junit.Test
 /** NOT RUN. Source regression check only. Does not assert Android flag/pixels/device behavior. */
 class CallPrivacySourceContractGapTest {
     private fun source(relative: String): String {
-        val paths = listOf(Path.of("src/main/$relative"), Path.of("app/src/main/$relative"))
-        return Files.readString(paths.first { Files.isRegularFile(it) })
+        val paths = listOf(java.io.File("src/main/$relative"), java.io.File("app/src/main/$relative"))
+        return paths.first { it.isFile }.readText()
     }
     @Test fun callSurfacesRemainUnderRootOptInWindowProtection() {
         val root = source("kotlin/com/example/chat/ui/AppRoot.kt")
