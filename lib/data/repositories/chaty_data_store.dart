@@ -206,28 +206,28 @@ class ChatyDataStore extends ChangeNotifier {
   List<UserProfile> get contacts {
     if (locator.isRegistered<ApiBackendService>()) {
       final api = locator<ApiBackendService>();
-      if (api.isAuthenticated) {
+      if (api.isAuthenticated && api.users.isNotEmpty) {
         return api.users.where((user) => user.id != currentUser.id).toList();
       }
     }
-    return const [];
+    return _backend.contacts;
   }
   List<Conversation> get conversations {
     if (locator.isRegistered<ApiBackendService>()) {
       final api = locator<ApiBackendService>();
-      if (api.isAuthenticated) return api.conversations;
+      if (api.isAuthenticated && api.conversations.isNotEmpty) return api.conversations;
     }
-    return const [];
+    return _backend.conversations;
   }
   List<ChatTask> get tasks {
     if (locator.isRegistered<ApiBackendService>()) {
       final api = locator<ApiBackendService>();
-      if (api.isAuthenticated) return api.tasks;
+      if (api.isAuthenticated && api.tasks.isNotEmpty) return api.tasks;
     }
-    return const [];
+    return _backend.tasks;
   }
-  List<CallRecord> get calls => const [];
-  List<UpdateStory> get stories => const [];
+  List<CallRecord> get calls => _backend.calls;
+  List<UpdateStory> get stories => _backend.stories;
   List<LinkedDevice> get linkedDevices => _backend.currentUserDevices;
 
   UserProfile? getUser(String userId) {
@@ -240,7 +240,7 @@ class ChatyDataStore extends ChangeNotifier {
       }
     }
     if (_backend.currentUser?.id == userId) return _backend.currentUser;
-    return null;
+    return _backend.getUserById(userId);
   }
 
   UserProfile? getUserById(String userId) => getUser(userId);
@@ -250,10 +250,11 @@ class ChatyDataStore extends ChangeNotifier {
     if (locator.isRegistered<ApiBackendService>()) {
       final api = locator<ApiBackendService>();
       if (api.isAuthenticated) {
-        return api.getMessages(conversationId);
+        final messages = api.getMessages(conversationId);
+        if (messages.isNotEmpty) return messages;
       }
     }
-    return const [];
+    return _backend.getMessages(conversationId);
   }
 
   void setActiveConversation(String? conversationId) {
@@ -270,6 +271,7 @@ class ChatyDataStore extends ChangeNotifier {
         return;
       }
     }
+    await _backend.ensureConversationLoaded(conversationId);
   }
 
   Future<List<UserProfile>> searchUsersRemote(
@@ -289,7 +291,11 @@ class ChatyDataStore extends ChangeNotifier {
     if (locator.isRegistered<ApiBackendService>()) {
       final api = locator<ApiBackendService>();
       if (api.isAuthenticated) {
-        return api.createOrGetDirectConversation(user.id);
+        try {
+          return await api.createOrGetDirectConversation(user.id);
+        } catch (e) {
+          debugPrint('[ChatyDataStore] api.createOrGetDirectConversation error: $e, falling back to local');
+        }
       }
     }
     return _backend.getOrCreateDirectConversationAsync(user);

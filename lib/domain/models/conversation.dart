@@ -114,13 +114,44 @@ class Conversation {
 
     final otherUser = json['other_user'];
     final participantIds = <String>[];
-    if (json['created_by_id'] != null) {
-      participantIds.add(json['created_by_id'].toString());
+    final creatorId = (json['created_by_id'] ?? json['created_by_uid'] ?? json['created_by'])?.toString();
+    if (creatorId != null && creatorId.isNotEmpty) {
+      participantIds.add(creatorId);
     }
-    if (otherUser is Map && otherUser['id'] != null) {
-      final otherId = otherUser['id'].toString();
-      if (!participantIds.contains(otherId)) {
+    if (otherUser is Map) {
+      final otherId = (otherUser['uid'] ?? otherUser['id'])?.toString();
+      if (otherId != null && otherId.isNotEmpty && !participantIds.contains(otherId)) {
         participantIds.add(otherId);
+      }
+    }
+    final participantsList = json['participants'] ?? json['members'];
+    if (participantsList is List) {
+      for (final p in participantsList) {
+        if (p is Map) {
+          final pid = (p['uid'] ?? p['id'])?.toString();
+          if (pid != null && pid.isNotEmpty && !participantIds.contains(pid)) {
+            participantIds.add(pid);
+          }
+        } else if (p != null) {
+          final pid = p.toString();
+          if (pid.isNotEmpty && !participantIds.contains(pid)) {
+            participantIds.add(pid);
+          }
+        }
+      }
+    }
+
+    final adminIds = <String>[];
+    if (creatorId != null && creatorId.isNotEmpty) {
+      adminIds.add(creatorId);
+    }
+    final rawAdmins = json['admin_ids'] ?? json['admins'];
+    if (rawAdmins is List) {
+      for (final a in rawAdmins) {
+        final aid = (a is Map ? (a['uid'] ?? a['id']) : a)?.toString();
+        if (aid != null && aid.isNotEmpty && !adminIds.contains(aid)) {
+          adminIds.add(aid);
+        }
       }
     }
 
@@ -136,6 +167,7 @@ class Conversation {
       type: json['room_type'] == 'group' ? ConversationType.group : ConversationType.direct,
       title: effectiveTitle,
       participantIds: participantIds,
+      adminIds: adminIds,
       avatarInitials: initials,
       avatarColorHex: '0xFF6366F1',
       lastMessageText: lastText,

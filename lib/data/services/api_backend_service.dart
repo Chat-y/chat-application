@@ -79,6 +79,59 @@ class ApiBackendService extends ChangeNotifier {
 
   List<ChatMessage> getMessages(String chatId) => _messages[chatId] ?? [];
 
+  List<dynamic> _safeExtractList(dynamic decoded) {
+    if (decoded is List) return decoded;
+    if (decoded is Map) {
+      final candidate = decoded['data'] ?? decoded['items'] ?? decoded['results'];
+      if (candidate is List) return candidate;
+    }
+    return const [];
+  }
+
+  UserProfile _userFromJson(Map<String, dynamic> json) {
+    final uid = (json['uid'] ?? json['id'] ?? '').toString();
+    final fullName = (json['full_name'] ??
+            json['displayName'] ??
+            '${json['first_name'] ?? ''} ${json['last_name'] ?? ''}'.trim())
+        .toString();
+    final username = (json['username'] ?? '').toString();
+    final displayName = fullName.isNotEmpty ? fullName : (username.isNotEmpty ? username : 'User');
+    final initials = displayName.isNotEmpty
+        ? displayName.split(RegExp(r'\s+')).map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase()
+        : 'U';
+    final photo = (json['photo'] ??
+            json['avatar_url'] ??
+            json['avatarUrl'] ??
+            (json['publicProfile'] is Map ? json['publicProfile']['avatarUrl'] : null))
+        ?.toString();
+
+    return UserProfile(
+      id: uid,
+      displayName: displayName,
+      username: username,
+      avatarInitials: initials.isEmpty ? 'U' : initials,
+      avatarColorHex: '0xFF6366F1',
+      about: (json['about'] ?? json['designation'] ?? json['role'] ?? '').toString(),
+      presence: PresenceState.online,
+      lastSeenAt: DateTime.now(),
+      isVerified: false,
+      email: (json['email'] ?? '').toString(),
+      phone: (json['mobile'] ?? json['phone'] ?? '').toString(),
+      safetyNumber: '',
+      avatarUrl: photo,
+    );
+  }
+
+  void _rememberUser(UserProfile u) {
+    if (u.id.isEmpty) return;
+    final idx = _users.indexWhere((x) => x.id == u.id);
+    if (idx == -1) {
+      _users.add(u);
+    } else {
+      _users[idx] = u;
+    }
+  }
+
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
@@ -752,8 +805,9 @@ class ApiBackendService extends ChangeNotifier {
         );
       }
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body)['data'] as List;
-        final remote = data.map((json) => ChatMessage.fromApi(json)).toList();
+        final decoded = jsonDecode(response.body);
+        final data = _safeExtractList(decoded);
+        final remote = data.whereType<Map>().map((json) => ChatMessage.fromApi(Map<String, dynamic>.from(json))).toList();
         final currentList = _messages[chatId] ?? [];
         final pending = currentList
             .where((m) => m.deliveryState == DeliveryState.sending || m.id.startsWith('temp_'))
@@ -833,8 +887,23 @@ class ApiBackendService extends ChangeNotifier {
       if (response.statusCode == 200) {
         _requiresSubscription = false;
         _subscriptionErrorMessage = null;
-        final data = jsonDecode(response.body)['data'] as List;
-        _conversations = data.map((json) => Conversation.fromApi(json)).toList();
+        final decoded = jsonDecode(response.body);
+        final data = _safeExtractList(decoded);
+        _conversations = data.map((json) {
+          if (json is Map<String, dynamic>) {
+            if (json['other_user'] is Map<String, dynamic>) {
+              _rememberUser(_userFromJson(json['other_user'] as Map<String, dynamic>));
+            }
+            return Conversation.fromApi(json);
+          } else if (json is Map) {
+            final m = Map<String, dynamic>.from(json);
+            if (m['other_user'] is Map) {
+              _rememberUser(_userFromJson(Map<String, dynamic>.from(m['other_user'] as Map)));
+            }
+            return Conversation.fromApi(m);
+          }
+          return Conversation.fromApi(const {});
+        }).where((c) => c.id.isNotEmpty).toList();
         notifyListeners();
       } else if (response.statusCode == 402) {
         _requiresSubscription = true;
@@ -905,51 +974,16 @@ class ApiBackendService extends ChangeNotifier {
 
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
-        final list = (body['data'] as List?) ?? (body is List ? body : []);
-        final fetchedUsers = list.map((json) {
-          final uid = (json['uid'] ?? json['id'] ?? '').toString();
-          final fullName = (json['full_name'] ??
-                  json['displayName'] ??
-                  '${json['first_name'] ?? ''} ${json['last_name'] ?? ''}'.trim())
-              .toString();
-          final username = (json['username'] ?? '').toString();
-          final displayName = fullName.isNotEmpty ? fullName : (username.isNotEmpty ? username : 'User');
-          final initials = displayName.isNotEmpty
-              ? displayName.split(RegExp(r'\s+')).map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase()
-              : 'U';
-          final photo = (json['photo'] ??
-                  json['avatar_url'] ??
-                  json['avatarUrl'] ??
-                  (json['publicProfile'] is Map ? json['publicProfile']['avatarUrl'] : null))
-              ?.toString();
-
-          return UserProfile(
-            id: uid,
-            displayName: displayName,
-            username: username,
-            avatarInitials: initials,
-            avatarColorHex: '0xFF6366F1',
-            about: (json['about'] ?? json['designation'] ?? json['role'] ?? '').toString(),
-            presence: PresenceState.online,
-            lastSeenAt: DateTime.now(),
-            isVerified: false,
-            email: (json['email'] ?? '').toString(),
-            phone: (json['mobile'] ?? json['phone'] ?? '').toString(),
-            safetyNumber: '',
-            avatarUrl: photo,
-          );
+        final list = _safeExtractList(body);
+        final fetchedUsers = list.whereType<Map>().map((json) {
+          return _userFromJson(Map<String, dynamic>.from(json));
         }).toList();
 
         if (query == null || query.trim().isEmpty) {
           _users = fetchedUsers;
         } else {
           for (final u in fetchedUsers) {
-            final idx = _users.indexWhere((x) => x.id == u.id);
-            if (idx == -1) {
-              _users.add(u);
-            } else {
-              _users[idx] = u;
-            }
+            _rememberUser(u);
           }
         }
 
@@ -998,19 +1032,48 @@ class ApiBackendService extends ChangeNotifier {
 
   Future<Conversation> createOrGetDirectConversation(String targetUserId) async {
     if (_token == null) throw Exception('Not authenticated');
-    final response = await http.post(
-      Uri.parse('${ApiBackendConfig.restApiBaseUrl}/chat/rooms/direct'),
-      headers: {
-        'Authorization': 'Bearer $_token',
-        'Content-Type': 'application/json',
-        'x-tenant-id': ApiBackendConfig.tenantId,
-      },
-      body: jsonEncode({'target_user_id': targetUserId}),
-    );
-    if (response.statusCode == 200) {
+    http.Response response;
+    try {
+      response = await http.post(
+        Uri.parse('${ApiBackendConfig.restApiBaseUrl}/chat/rooms/direct'),
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'Content-Type': 'application/json',
+          'x-tenant-id': ApiBackendConfig.tenantId,
+        },
+        body: jsonEncode({'target_user_id': targetUserId}),
+      );
+      if (response.statusCode == 404) {
+        response = await http.post(
+          Uri.parse('${ApiBackendConfig.restApiBaseUrl}/api/v1/chat/rooms/direct'),
+          headers: {
+            'Authorization': 'Bearer $_token',
+            'Content-Type': 'application/json',
+            'x-tenant-id': ApiBackendConfig.tenantId,
+          },
+          body: jsonEncode({'target_user_id': targetUserId}),
+        );
+      }
+    } catch (_) {
+      response = await http.post(
+        Uri.parse('${ApiBackendConfig.restApiBaseUrl}/api/v1/chat/rooms/direct'),
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'Content-Type': 'application/json',
+          'x-tenant-id': ApiBackendConfig.tenantId,
+        },
+        body: jsonEncode({'target_user_id': targetUserId}),
+      );
+    }
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
       final body = jsonDecode(response.body);
-      final roomData = body['data'] ?? body;
-      final conv = Conversation.fromApi(roomData);
+      final roomData = (body is Map && body['data'] != null) ? body['data'] : body;
+      final roomMap = (roomData is Map) ? Map<String, dynamic>.from(roomData) : <String, dynamic>{};
+      if (roomMap['other_user'] is Map) {
+        _rememberUser(_userFromJson(Map<String, dynamic>.from(roomMap['other_user'] as Map)));
+      }
+      final conv = Conversation.fromApi(roomMap);
 
       final idx = _conversations.indexWhere((c) => c.id == conv.id);
       if (idx == -1) {
@@ -1103,8 +1166,9 @@ class ApiBackendService extends ChangeNotifier {
         );
       }
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body)['data'] as List;
-        final parsed = data.map((json) => ChatMessage.fromApi(json)).toList();
+        final decoded = jsonDecode(response.body);
+        final data = _safeExtractList(decoded);
+        final parsed = data.whereType<Map>().map((json) => ChatMessage.fromApi(Map<String, dynamic>.from(json))).toList();
         
         final currentList = _messages[chatId] ?? [];
         final pending = currentList
@@ -1481,8 +1545,9 @@ class ApiBackendService extends ChangeNotifier {
         },
       );
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body)['data'] as List;
-        _tasks = data.map((json) => ChatTask.fromApi(json)).toList();
+        final decoded = jsonDecode(response.body);
+        final data = _safeExtractList(decoded);
+        _tasks = data.whereType<Map>().map((json) => ChatTask.fromApi(Map<String, dynamic>.from(json))).toList();
         notifyListeners();
       }
     } catch (e) {

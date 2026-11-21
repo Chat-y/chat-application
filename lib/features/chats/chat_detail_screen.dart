@@ -1509,11 +1509,32 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
     }
 
+    final currentUserId = dataStore.currentUserOrNull?.id ?? '';
     final otherId = conversation.participantIds.firstWhere(
-      (id) => id != dataStore.currentUser.id,
+      (id) => id != currentUserId,
       orElse: () => '',
     );
-    final otherUser = otherId.isEmpty ? null : dataStore.getUser(otherId);
+    final cachedOtherUser = otherId.isEmpty ? null : dataStore.getUser(otherId);
+    final otherUser = cachedOtherUser ??
+        (conversation.type == ConversationType.direct
+            ? UserProfile(
+                id: otherId.isNotEmpty ? otherId : conversation.id,
+                displayName: conversation.title.isNotEmpty ? conversation.title : 'User',
+                username: conversation.title.toLowerCase().replaceAll(RegExp(r'\s+'), '_'),
+                avatarInitials: conversation.avatarInitials ??
+                    (conversation.title.isNotEmpty
+                        ? conversation.title.characters.take(2).toString().toUpperCase()
+                        : 'U'),
+                avatarColorHex: conversation.avatarColorHex ?? '0xFF6366F1',
+                about: '',
+                presence: PresenceState.offline,
+                lastSeenAt: DateTime.now(),
+                isVerified: false,
+                email: '',
+                phone: '',
+                safetyNumber: '',
+              )
+            : null);
     final activity = otherId.isEmpty
         ? ContactActivityState(
             updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
@@ -2536,8 +2557,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     UserProfile? otherUser,
   ) {
     HapticFeedback.lightImpact();
-    final isDirect =
-        conversation.type == ConversationType.direct && otherUser != null;
+    final isDirect = conversation.type == ConversationType.direct;
+    final effectiveUser = otherUser ??
+        (isDirect
+            ? UserProfile(
+                id: conversation.participantIds.firstWhere(
+                  (id) => id != (widget.dataStore.currentUserOrNull?.id ?? ''),
+                  orElse: () => conversation.id,
+                ),
+                displayName: conversation.title.isNotEmpty ? conversation.title : 'User',
+                username: conversation.title.toLowerCase().replaceAll(RegExp(r'\s+'), '_'),
+                avatarInitials: conversation.avatarInitials ?? 'U',
+                avatarColorHex: conversation.avatarColorHex ?? '0xFF6366F1',
+                about: '',
+                presence: PresenceState.offline,
+                lastSeenAt: DateTime.now(),
+                isVerified: false,
+                email: '',
+                phone: '',
+                safetyNumber: '',
+              )
+            : null);
     ChatyMenuSheet.show(
       anchorContext,
       title: conversation.title,
@@ -2549,8 +2589,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           glyph: isDirect ? ChatyGlyph.person : ChatyGlyph.groups,
           label: isDirect ? 'View contact info' : 'View group info',
           onTap: () {
-            if (isDirect) {
-              _openContactInfo(conversation, otherUser);
+            if (isDirect && effectiveUser != null) {
+              _openContactInfo(conversation, effectiveUser);
             } else {
               Navigator.of(context).push(
                 MaterialPageRoute(
@@ -2609,13 +2649,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           destructive: true,
           onTap: _clearConversation,
         ),
-        if (isDirect)
+        if (isDirect && effectiveUser != null)
           ChatyMenuItem(
             icon: Icons.block_rounded,
             glyph: ChatyGlyph.close,
-            label: 'Block ${otherUser.displayName.split(' ').first}',
+            label: 'Block ${effectiveUser.displayName.split(' ').first}',
             destructive: true,
-            onTap: () => _blockContact(otherUser),
+            onTap: () => _blockContact(effectiveUser),
           ),
       ],
     );

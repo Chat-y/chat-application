@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/repositories/chaty_data_store.dart';
+import '../../domain/models/conversation.dart';
+import '../../domain/models/user_profile.dart';
 import '../../ui/core/widgets/app_avatar.dart';
 import '../../ui/core/design_system/design_system.dart';
 import '../../ui/core/icons/chaty_icon_registry.dart';
@@ -18,15 +20,38 @@ class GroupInfoScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final conv = dataStore.conversations.firstWhere(
-      (c) => c.id == conversationId,
-      orElse: () => dataStore.conversations.first,
-    );
+    final conv = dataStore.conversations.where((c) => c.id == conversationId).firstOrNull ??
+        Conversation(
+          id: conversationId,
+          type: ConversationType.group,
+          title: 'Group Info',
+          participantIds: const [],
+          lastMessageText: '',
+          lastMessageTime: DateTime.now(),
+          lastMessageSenderId: '',
+        );
 
-    final participants = conv.participantIds
-        .map((id) => dataStore.getUserById(id))
-        .whereType<dynamic>()
-        .toList();
+    final participants = conv.participantIds.map((id) {
+      final user = dataStore.getUserById(id);
+      if (user != null) return user;
+      final cleanId = id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+      final initials = cleanId.isNotEmpty ? cleanId.substring(0, 1).toUpperCase() : 'U';
+      final shortName = id.length > 8 ? id.substring(0, 8) : id;
+      return UserProfile(
+        id: id,
+        displayName: 'User $shortName',
+        username: shortName,
+        avatarInitials: initials,
+        avatarColorHex: '0xFF6366F1',
+        about: '',
+        presence: PresenceState.offline,
+        lastSeenAt: DateTime.now(),
+        isVerified: false,
+        email: '',
+        phone: '',
+        safetyNumber: '',
+      );
+    }).toList();
 
     final colors = context.colors;
 
@@ -174,7 +199,7 @@ class GroupInfoScreen extends StatelessWidget {
                   Builder(
                     builder: (context) {
                       final isAdmin = conv.adminIds.contains(p.id);
-                      final isMe = p.id == dataStore.currentUser.id;
+                      final isMe = p.id == (dataStore.currentUserOrNull?.id ?? '');
 
                       return ChatyListTile(
                         leading: AppAvatar(
