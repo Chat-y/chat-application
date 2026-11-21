@@ -40,12 +40,6 @@ class ContactRelationshipService {
     return null;
   }
 
-  String get _userId {
-    final id = _currentUserId;
-    if (id == null || id.isEmpty) return 'anonymous';
-    return id;
-  }
-
   Future<ContactPrivacyOverride> privacyFor(String targetUserId) async {
     final currentId = _currentUserId;
     if (_client.auth.currentUser == null || currentId == null) {
@@ -168,8 +162,6 @@ class ContactRelationshipService {
       debugPrint('[ContactRelationshipService] acceptConnection error: $e');
       return otherUserId;
     }
-  }
-    return id;
   }
 
   Future<String> currentDeviceId() {

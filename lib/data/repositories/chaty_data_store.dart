@@ -210,7 +210,7 @@ class ChatyDataStore extends ChangeNotifier {
         return api.users.where((user) => user.id != currentUser.id).toList();
       }
     }
-    return _backend.contacts;
+    return _backend.allUsers.where((u) => u.id != currentUser.id).toList();
   }
   List<Conversation> get conversations {
     if (locator.isRegistered<ApiBackendService>()) {
