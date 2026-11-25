@@ -117,8 +117,16 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            // Share the stable Chaty identity so debug/release installs can update in place.
-            signingConfig = signingConfigs["chaty"]
+            // Share the stable Chaty identity so debug/release installs can update in place when available.
+            val chatyStore = rootProject.file(
+                providers.gradleProperty("CHATY_KEYSTORE_PATH")
+                    .orElse(providers.environmentVariable("CHATY_KEYSTORE_PATH"))
+                    .orElse("ci/keystore/chaty-release.jks")
+                    .get()
+            )
+            if (chatyStore.exists()) {
+                signingConfig = signingConfigs["chaty"]
+            }
         }
     }
 
